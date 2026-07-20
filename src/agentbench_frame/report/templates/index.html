@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<h1>{{ title }}</h1>
+
+<div>
+    <div class="stat-card">
+        <div class="value">{{ num_runs }}</div>
+        <div class="label">Runs</div>
+    </div>
+    <div class="stat-card">
+        <div class="value">{{ num_games }}</div>
+        <div class="label">Games</div>
+    </div>
+    <div class="stat-card">
+        <div class="value">{{ num_agents }}</div>
+        <div class="label">Agents</div>
+    </div>
+</div>
+
+<h2>Games</h2>
+{% if games %}
+<table>
+    <tr><th>Game</th><th>Runs</th><th>Agents</th></tr>
+    {% for name, game in games.items() %}
+    <tr>
+        <td><a href="game_{{ name }}.html">{{ name }}</a></td>
+        <td>{{ game.runs|length }}</td>
+        <td>{{ game.agents|length }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% else %}
+<p>No game data yet. Run some experiments first.</p>
+{% endif %}
+
+<h2>Recent Runs</h2>
+{% if runs %}
+<table>
+    <tr><th>Run</th><th>Game</th><th>Agent</th><th>Episodes</th><th>Win Rate</th><th>Avg Reward</th></tr>
+    {% for run in runs[:50] %}
+    <tr>
+        <td><code>{{ run._dir }}</code></td>
+        <td>{{ run.game }}</td>
+        <td><a href="agent_{{ run.agent|replace('/', '_')|replace(' ', '_') }}.html">{{ run.agent }}</a></td>
+        <td>{{ run.total_episodes }}</td>
+        <td>{{ "%.1f"|format(run.win_rate * 100) }}%</td>
+        <td>{{ "%.2f"|format(run.avg_reward_per_episode) }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% else %}
+<p>No runs found.</p>
+{% endif %}
+{% endblock %}

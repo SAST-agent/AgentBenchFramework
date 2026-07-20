@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Agent Comparison - AgentBench Report{% endblock %}
+{% block content %}
+<h1>Agent Comparison</h1>
+
+<p><a href="index.html">&larr; Back to index</a></p>
+
+{% if agents %}
+<h2>All Agents Overview</h2>
+<table>
+    <tr><th>Agent</th><th>Runs</th><th>Games</th><th>Best Win Rate</th><th>Total Episodes</th></tr>
+    {% for name, data in agents.items() %}
+    {% set best_wr = namespace(value=0.0) %}
+    {% for run in data.runs %}
+        {% if run.win_rate > best_wr.value %}
+            {% set best_wr.value = run.win_rate %}
+        {% endif %}
+    {% endfor %}
+    {% set total_eps = namespace(value=0) %}
+    {% for run in data.runs %}
+        {% set total_eps.value = total_eps.value + run.total_episodes %}
+    {% endfor %}
+    <tr>
+        <td><a href="agent_{{ name|replace('/', '_')|replace(' ', '_') }}.html">{{ name }}</a></td>
+        <td>{{ data.runs|length }}</td>
+        <td>{{ data.games|join(', ') }}</td>
+        <td>{{ "%.1f"|format(best_wr.value * 100) }}%</td>
+        <td>{{ total_eps.value }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% else %}
+<p>No agents to compare. Run some experiments first.</p>
+{% endif %}
+{% endblock %}

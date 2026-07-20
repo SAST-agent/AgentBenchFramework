@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}{{ agent_name }} - AgentBench Report{% endblock %}
+{% block content %}
+<h1>{{ agent_name }}</h1>
+
+<p><a href="index.html">&larr; Back to index</a></p>
+
+{% if agent %}
+<div>
+    <div class="stat-card">
+        <div class="value">{{ agent.runs|length }}</div>
+        <div class="label">Runs</div>
+    </div>
+    <div class="stat-card">
+        <div class="value">{{ agent.games|length }}</div>
+        <div class="label">Games</div>
+    </div>
+</div>
+
+<h2>Games Played</h2>
+<ul>
+    {% for game_name in agent.games %}
+    <li><a href="game_{{ game_name }}.html">{{ game_name }}</a></li>
+    {% endfor %}
+</ul>
+
+<h2>Performance History</h2>
+<table>
+    <tr><th>Run</th><th>Game</th><th>Episodes</th><th>Steps</th><th>Win Rate</th><th>Avg Reward</th><th>Duration</th></tr>
+    {% for run in agent.runs[:50] %}
+    <tr>
+        <td><code>{{ run._dir }}</code></td>
+        <td><a href="game_{{ run.game }}.html">{{ run.game }}</a></td>
+        <td>{{ run.total_episodes }}</td>
+        <td>{{ run.total_steps }}</td>
+        <td>
+            <span class="{% if run.win_rate > 0.5 %}win{% elif run.win_rate < 0.5 %}loss{% else %}draw{% endif %}">
+                {{ "%.1f"|format(run.win_rate * 100) }}%
+            </span>
+        </td>
+        <td>{{ "%.2f"|format(run.avg_reward_per_episode) }}</td>
+        <td>{{ "%.0f"|format(run.duration_s) }}s</td>
+    </tr>
+    {% endfor %}
+</table>
+{% else %}
+<p>No data available for this agent.</p>
+{% endif %}
+{% endblock %}
