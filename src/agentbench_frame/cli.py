@@ -11,7 +11,8 @@ Subcommands:
 """
 
 import argparse
-import sys
+import json, sys, tomllib
+from pathlib import Path
 from typing import List, Optional
 
 
@@ -112,6 +113,84 @@ def _cmd_mcp(args):
     server.run()
 
 
+def _cmd_data_check(args):
+    """Validate data directory against CI schema."""
+    import json, tomllib
+    from agentbench_frame.tracking.run import _data_root
+    data_dir = args.data_dir or _data_root()
+    runs_root = Path(data_dir) / "runs"
+    if not runs_root.is_dir():
+        print(f"ERROR: runs/ not found in {data_dir}")
+        print(f"Expected: {data_dir}/runs/{{game}}/{{agent}}/{{run_id}}/")
+        sys.exit(1)
+
+    errors, ok = [], 0
+    for run_toml_path in sorted(runs_root.rglob("run.toml")):
+        run_dir = run_toml_path.parent
+        rel = str(run_dir.relative_to(data_dir))
+        errs = []
+        # Check run.toml
+        try:
+            meta = tomllib.loads(run_toml_path.read_text())
+            for field in ["run_id", "game", "agent", "type", "created"]:
+                val = meta.get("run", {}).get(field, "")
+                if not val:
+                    errs.append(f"run.toml: [run] missing '{field}'")
+        except Exception as e:
+            errs.append(f"run.toml: parse error: {e}")
+
+        # Check summary.json
+        summary_path = run_dir / "summary.json"
+        if not summary_path.exists():
+            errs.append("missing summary.json")
+        else:
+            try:
+                s = json.loads(summary_path.read_text())
+                for field in ["run_id", "game", "agent", "wall_hours", "total_steps", "win_rate"]:
+                    if field not in s:
+                        errs.append(f"summary.json: missing '{field}'")
+            except Exception as e:
+                errs.append(f"summary.json: parse error: {e}")
+
+        if errs:
+            print(f"FAIL {rel}:")
+            for e in errs: print(f"  - {e}")
+            errors.append(rel)
+        else:
+            ok += 1
+
+    print(f"\n{ok} valid, {len(errors)} invalid" + (" (all good!)" if not errors else ""))
+    sys.exit(1 if errors else 0)
+
+
+def _cmd_data_list(args):
+    """List all runs in data directory."""
+    from agentbench_frame.tracking.run import _data_root
+    data_dir = args.data_dir or _data_root()
+    runs_root = Path(data_dir) / "runs"
+    if not runs_root.is_dir():
+        print("No runs yet.")
+        return
+
+    found = 0
+    for run_dir in sorted(runs_root.rglob("summary.json")):
+        rel = run_dir.parent.relative_to(data_dir)
+        try:
+            s = json.loads(run_dir.read_text())
+            print(f"  {s.get('game','?')}/{s.get('agent','?')}  "
+                  f"type={s.get('run_type','?')}  "
+                  f"Elo={s.get('best_elo','-')}  "
+                  f"win={s.get('win_rate',0):.0%}  "
+                  f"steps={s.get('total_steps','-')}  "
+                  f"hours={s.get('wall_hours','-')}h")
+            found += 1
+        except Exception:
+            print(f"  {rel}  (unreadable)")
+            found += 1
+    if found == 0:
+        print("No runs yet. Start one with: agentbench train --game 28_generals --agent my_agent")
+
+
 def main(argv: Optional[List[str]] = None):
     parser = argparse.ArgumentParser(
         prog="agentbench",
@@ -158,6 +237,14 @@ def main(argv: Optional[List[str]] = None):
     # --- mcp ---
     p_mcp = sub.add_parser("mcp", help="Start MCP server")
 
+    # --- data ---
+    p_data = sub.add_parser("data", help="Data management")
+    p_data_sub = p_data.add_subparsers(dest="data_command")
+    p_check = p_data_sub.add_parser("check", help="Validate data against CI schema")
+    p_check.add_argument("--data-dir", default=None, help="Data directory (default: $AGENTBENCH_DATA)")
+    p_list = p_data_sub.add_parser("list", help="List all runs in data directory")
+    p_list.add_argument("--data-dir", default=None, help="Data directory (default: $AGENTBENCH_DATA)")
+
     args = parser.parse_args(argv)
 
     if args.command == "train":
@@ -172,6 +259,13 @@ def main(argv: Optional[List[str]] = None):
         _cmd_report(args)
     elif args.command == "mcp":
         _cmd_mcp(args)
+    elif args.command == "data":
+        if args.data_command == "check":
+            _cmd_data_check(args)
+        elif args.data_command == "list":
+            _cmd_data_list(args)
+        else:
+            p_data.print_help()
     else:
         parser.print_help()
         sys.exit(1)

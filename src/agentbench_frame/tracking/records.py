@@ -79,6 +79,9 @@ class RunMeta:
     run_id: str = ""
     game: str = ""
     agent: str = ""
+    run_type: str = "eval"
+    created: str = ""
+    git_commit: str = ""
     agent_type: str = ""
     runner: str = ""
     started_at: float = 0.0
