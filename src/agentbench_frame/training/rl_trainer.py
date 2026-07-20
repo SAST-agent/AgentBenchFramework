@@ -192,7 +192,7 @@ class RLTrainer:
         for opponent in self.eval_opponents or []:
             match = Match(self.env, self.agent, opponent)
             result = match.run(n_games=self.config.eval_episodes)
-            scores.append(result["win_rate"])
+            scores.append(result.win_rate)
 
         if not scores:
             # Self-evaluation: check if agent can complete game

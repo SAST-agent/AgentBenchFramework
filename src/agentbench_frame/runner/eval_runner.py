@@ -31,7 +31,7 @@ class BaseEvalRunner(BaseRunner):
     def _create_agent(self):
         from agentbench_frame.agent.rl_agent import RLAgent
         from agentbench_frame.agent.registry import AgentRegistry
-        from agentbench_frame.agent.random import RandomAgent  # noqa
+        from agentbench_frame.agent.base import RandomAgent  # noqa
 
         try:
             return AgentRegistry.create(self.agent_name)

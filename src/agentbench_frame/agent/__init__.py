@@ -8,13 +8,14 @@ Provides:
 - AgentRegistry: Agent discovery and management
 """
 
-from agentbench_frame.agent.base import BaseAgent
+from agentbench_frame.agent.base import BaseAgent, RandomAgent
 from agentbench_frame.agent.rule_based import RuleBasedAgent
 from agentbench_frame.agent.rl_agent import RLAgent, PolicyNetwork
 from agentbench_frame.agent.registry import AgentRegistry, register_agent
 
 __all__ = [
     "BaseAgent",
+    "RandomAgent",
     "RuleBasedAgent",
     "RLAgent",
     "PolicyNetwork",

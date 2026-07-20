@@ -113,7 +113,7 @@ class RuleIterator:
         """Evaluate agent win rate against opponent."""
         match = Match(self.env, agent, self.opponent)
         result = match.run(n_games=self.config.n_eval_games)
-        return result["win_rate"]
+        return result.win_rate
 
     def _profile_rules(self, agent: RuleBasedAgent) -> Dict[str, Any]:
         """Profile which rules fire and their success rates."""
