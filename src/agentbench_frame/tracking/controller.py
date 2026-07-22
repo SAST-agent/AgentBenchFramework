@@ -1,5 +1,7 @@
 """Framework-owned coding-agent act orchestration."""
 
+import os
+from pathlib import Path
 from typing import Any, Mapping, Optional
 
 from agentbench_frame.tracking.iteration import ActRecord, VersionedActRecorder
@@ -18,6 +20,7 @@ class CodingAgentController:
         snapshotter: Optional[LocalWorkspaceSnapshotter] = None,
         budget: Optional[BudgetLedger] = None,
         budget_phase: str = "learning",
+        raw_output_dir: Optional[str] = None,
     ) -> None:
         if not isinstance(provider, ProviderAdapter):
             raise TypeError("provider must implement ProviderAdapter")
@@ -26,6 +29,7 @@ class CodingAgentController:
         self.snapshotter = snapshotter or LocalWorkspaceSnapshotter()
         self.budget = budget
         self.budget_phase = budget_phase
+        self.raw_output_dir = raw_output_dir
 
     def run_act(
         self,
@@ -44,6 +48,13 @@ class CodingAgentController:
         provider_context = dict(context)
         if workspace_root is not None:
             provider_context.setdefault("workspace_root", workspace_root)
+        if self.raw_output_dir is not None:
+            output_dir = Path(self.raw_output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            provider_context.setdefault(
+                "raw_output_path", str(output_dir / f"{act.act_id}.jsonl")
+            )
+        provider_context.setdefault("act_id", act.act_id)
 
         before = None
         snapshot_error = None
@@ -91,5 +102,6 @@ class CodingAgentController:
             token_accuracy=usage.token_accuracy,
             elapsed_time_s=invocation.elapsed_time_s,
             raw_output_ref=invocation.raw_output_ref,
+            provider_metadata=invocation.metadata,
             error=error,
         )

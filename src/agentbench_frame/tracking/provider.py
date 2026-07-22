@@ -1,4 +1,9 @@
-"""Provider-neutral coding-agent invocation contracts."""
+"""Provider-neutral coding-agent invocation contracts.
+
+The concrete process adapters live in :mod:`tracking.providers`.  This module
+only contains the stable data boundary consumed by the controller so callers
+can also provide their own in-process adapter.
+"""
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, Mapping, Optional, Protocol, runtime_checkable

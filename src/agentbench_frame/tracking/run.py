@@ -20,6 +20,8 @@ from agentbench_frame.tracking.sampler import ResourceSampler
 from agentbench_frame.tracking.wrappers import TrackedEnv, TimedAgent
 from agentbench_frame.tracking.budget import BudgetLedger
 from agentbench_frame.tracking.iteration import ActRecord, VersionedActRecorder
+from agentbench_frame.eval.information_gain import occupancy_shift as derive_occupancy_shift
+from agentbench_frame.tracking.quality import inspect_event_file
 
 
 SCHEMA_VERSION = "1.0"
@@ -197,7 +199,23 @@ class Run:
         return self._act_recorder.finish_act(act_id, status, **kwargs)
 
     def record_act_evaluation(self, act_id: str, evaluation: Dict[str, Any]) -> Dict[str, Any]:
-        return self._act_recorder.record_evaluation(act_id, evaluation)
+        """Record an evaluation and attach the current cumulative budget axes.
+
+        The coordinates are additive convenience fields derived from the same
+        ledger snapshot; raw act/evaluation data remains in the event stream.
+        """
+        payload = dict(evaluation)
+        phase = self.config.get(
+            "budget_phase", "evaluation" if self.meta.run_type == "eval" else "learning"
+        )
+        snapshot = self._budget.snapshot()
+        prefix = f"{phase}_"
+        payload.setdefault("coding_agent_act", snapshot.get(prefix + "coding_agent_acts"))
+        payload.setdefault("episode", snapshot.get(prefix + "episodes"))
+        payload.setdefault("env_step", snapshot.get(prefix + "env_steps"))
+        payload.setdefault("token", snapshot.get(prefix + "total_tokens"))
+        payload.setdefault("time_s", snapshot.get(prefix + "time_s"))
+        return self._act_recorder.record_evaluation(act_id, payload)
 
     def create_coding_agent_controller(self, provider, snapshotter=None,
                                        budget_phase: str = "learning"):
@@ -209,6 +227,7 @@ class Run:
             snapshotter=snapshotter,
             budget=self._budget,
             budget_phase=budget_phase,
+            raw_output_dir=os.path.join(self.run_dir, "provider_output"),
         )
 
     def log_policy_kl_trace(
@@ -244,10 +263,23 @@ class Run:
         version_after: str,
         state_ids: List[str],
         context: Optional[Dict[str, Any]] = None,
+        reference_state_ids: Optional[List[str]] = None,
+        smoothing: float = 1e-12,
     ) -> None:
-        """Persist raw canonical state IDs used to derive occupancy shift."""
+        """Persist raw samples and, when supplied, a separate occupancy shift.
+
+        ``state_ids`` and ``reference_state_ids`` are intentionally retained;
+        the derived KL is not combined with policy KL or called information
+        gain.  The reference is the measurement-domain sample chosen by the
+        caller for this episode/version comparison.
+        """
         if not state_ids:
             raise ValueError("occupancy state_ids cannot be empty")
+        shift = None
+        if reference_state_ids is not None:
+            if not reference_state_ids:
+                raise ValueError("reference_state_ids cannot be empty")
+            shift = derive_occupancy_shift(state_ids, reference_state_ids, smoothing=smoothing)
         self.write(
             "occupancy",
             episode=episode,
@@ -255,6 +287,12 @@ class Run:
             version_after=version_after,
             state_ids=list(state_ids),
             state_count=len(state_ids),
+            reference_state_ids=(list(reference_state_ids)
+                                 if reference_state_ids is not None else None),
+            reference_state_count=(len(reference_state_ids)
+                                   if reference_state_ids is not None else None),
+            occupancy_shift=shift,
+            smoothing=smoothing if reference_state_ids is not None else None,
             context=context or {},
         )
 
@@ -330,6 +368,9 @@ class Run:
             "elo_history": self._elo_history,
             "h2h": self._h2h,
             "resource_summary": self._resource_summary(),
+            "event_quality": inspect_event_file(
+                os.path.join(self.run_dir, "events.jsonl")
+            ).to_dict(),
             "config": self.config,
         }
 

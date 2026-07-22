@@ -27,6 +27,7 @@ class ActRecord:
     token_accuracy: str = "unknown"
     elapsed_time_s: Optional[float] = None
     raw_output_ref: Optional[str] = None
+    provider_metadata: Dict[str, Any] = field(default_factory=dict)
     snapshot_content_hash: Optional[str] = None
     error: Optional[str] = None
     started_at: str = field(default_factory=_now_iso)
@@ -73,6 +74,7 @@ class VersionedActRecorder:
         token_accuracy: str = "unknown",
         elapsed_time_s: Optional[float] = None,
         raw_output_ref: Optional[str] = None,
+        provider_metadata: Optional[Dict[str, Any]] = None,
         error: Optional[str] = None,
     ) -> ActRecord:
         if act_id not in self._active:
@@ -95,6 +97,7 @@ class VersionedActRecorder:
         record.token_accuracy = token_accuracy
         record.elapsed_time_s = elapsed_time_s
         record.raw_output_ref = raw_output_ref
+        record.provider_metadata = dict(provider_metadata or {})
         record.error = error
         record.finished_at = _now_iso()
         self._emit(record)
