@@ -24,6 +24,12 @@ from agentbench_frame.eval.information_gain import (
     policy_kl,
     trajectory_kl_from_trace,
 )
+from agentbench_frame.eval.measurement import (
+    PolicyDistributionProvider,
+    StateIdProvider,
+    canonical_state_id,
+    canonical_state_payload,
+)
 
 __all__ = [
     "TrajectoryRecorder",
@@ -40,4 +46,8 @@ __all__ = [
     "occupancy_shift",
     "policy_kl",
     "trajectory_kl_from_trace",
+    "PolicyDistributionProvider",
+    "StateIdProvider",
+    "canonical_state_id",
+    "canonical_state_payload",
 ]

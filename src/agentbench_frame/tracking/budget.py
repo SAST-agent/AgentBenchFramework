@@ -9,6 +9,7 @@ _MISSING = object()
 
 @dataclass
 class _PhaseBudget:
+    coding_agent_acts: int = 0
     episodes: int = 0
     env_steps: int = 0
     prompt_tokens: Optional[int] = None
@@ -17,11 +18,12 @@ class _PhaseBudget:
     usage_seen: bool = False
     time_seen: bool = False
 
-    def add(self, episodes: int, env_steps: int,
+    def add(self, episodes: int, env_steps: int, coding_agent_acts: int = 0,
             prompt_tokens=_MISSING, completion_tokens=_MISSING,
             time_s=_MISSING) -> None:
-        if episodes < 0 or env_steps < 0:
-            raise ValueError("episode and env_step increments must be non-negative")
+        if episodes < 0 or env_steps < 0 or coding_agent_acts < 0:
+            raise ValueError("budget increments must be non-negative")
+        self.coding_agent_acts += int(coding_agent_acts)
         self.episodes += int(episodes)
         self.env_steps += int(env_steps)
         if prompt_tokens is not _MISSING or completion_tokens is not _MISSING:
@@ -82,6 +84,7 @@ class BudgetLedger:
         phase: str,
         episodes: int = 0,
         env_steps: int = 0,
+        coding_agent_acts: int = 0,
         prompt_tokens=_MISSING,
         completion_tokens=_MISSING,
         time_s=_MISSING,
@@ -95,17 +98,21 @@ class BudgetLedger:
         if time_s is not _MISSING and time_s is not None and time_s < 0:
             raise ValueError("time_s must be non-negative")
         self._phases[phase].add(
-            episodes, env_steps, prompt_tokens, completion_tokens, time_s
+            episodes, env_steps, coding_agent_acts,
+            prompt_tokens, completion_tokens, time_s
         )
 
     def snapshot(self) -> Dict[str, Optional[float]]:
         learning = self._phases["learning"]
         evaluation = self._phases["evaluation"]
         return {
+            "learning_coding_agent_acts": learning.coding_agent_acts,
             "learning_episodes": learning.episodes,
             "learning_env_steps": learning.env_steps,
+            "evaluation_coding_agent_acts": evaluation.coding_agent_acts,
             "evaluation_episodes": evaluation.episodes,
             "evaluation_env_steps": evaluation.env_steps,
+            "total_coding_agent_acts": learning.coding_agent_acts + evaluation.coding_agent_acts,
             "total_episodes": learning.episodes + evaluation.episodes,
             "total_env_steps": learning.env_steps + evaluation.env_steps,
             "learning_prompt_tokens": learning.prompt_tokens,

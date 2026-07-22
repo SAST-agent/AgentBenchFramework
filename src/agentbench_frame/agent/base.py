@@ -57,6 +57,16 @@ class BaseAgent(ABC):
         """
         return {}
 
+    def get_action_distribution(self, observation: Any, legal_actions: List[Any]):
+        """Optional measurement hook on a shared legal action support.
+
+        Agents that cannot expose probabilities should leave this hook
+        unimplemented; the measurement layer must not infer them from actions.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not expose an action distribution"
+        )
+
     def save(self, path: str):
         """Save agent state to disk."""
         import pickle

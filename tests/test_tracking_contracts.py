@@ -85,6 +85,7 @@ class TrackingContractTests(unittest.TestCase):
         snapshot = ledger.snapshot()
 
         self.assertEqual(snapshot["learning_episodes"], 2)
+        self.assertEqual(snapshot["learning_coding_agent_acts"], 0)
         self.assertEqual(snapshot["evaluation_env_steps"], 3)
         self.assertEqual(snapshot["total_episodes"], 3)
         self.assertIsNone(snapshot["evaluation_total_tokens"])

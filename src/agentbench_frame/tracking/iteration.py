@@ -18,6 +18,7 @@ class ActRecord:
     status: str = "running"
     version_before: Optional[str] = None
     version_after: Optional[str] = None
+    version_status: str = "pending"
     changed_files: List[str] = field(default_factory=list)
     tool_call_count: int = 0
     prompt_tokens: Optional[int] = None
@@ -43,6 +44,11 @@ class VersionedActRecorder:
     def begin_act(
         self, provider: str, version_before: Optional[str] = None, act_id: Optional[str] = None
     ) -> ActRecord:
+        if version_before and version_before.startswith("v"):
+            try:
+                self._next_version = max(self._next_version, int(version_before[1:]) + 1)
+            except ValueError:
+                pass
         record = ActRecord(
             act_id=act_id or f"act_{uuid4().hex}",
             provider=provider,
@@ -79,6 +85,7 @@ class VersionedActRecorder:
         if version_after is None and snapshot_content_hash is not None:
             record.version_after = f"v{self._next_version}"
             self._next_version += 1
+        record.version_status = "available" if record.version_after is not None else "missing"
         record.snapshot_content_hash = snapshot_content_hash
         record.changed_files = list(changed_files or [])
         record.tool_call_count = int(tool_call_count)
