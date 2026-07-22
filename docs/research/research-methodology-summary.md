@@ -325,10 +325,13 @@ AUC_time
 同时保存 learning-only、evaluation 和 total 三类环境预算：
 
 ```text
+learning_coding_agent_acts
 learning_episodes
 learning_env_steps
+evaluation_coding_agent_acts
 evaluation_episodes
 evaluation_env_steps
+total_coding_agent_acts
 total_episodes
 total_env_steps
 ```
@@ -422,5 +425,7 @@ created_at
 - append-only 事件写入、公共 Schema 字段、act/version 生命周期记录；
 - `local_policy_kl_trace`、`occupancy` 原始数据写入口，以及局部 KL、occupancy shift、trajectory 汇总和 AUC 纯计算函数；
 - 固定 benchmark case 列表的 `BaseEvalRunner` 执行路径。
+- provider-neutral 的 `ProviderAdapter`、`CodingAgentController` 和本地 workspace manifest/hash/diff snapshotter；
+- canonical state ID 与可选 `get_action_distribution(observation, legal_actions)` hook。
 
-尚未由 framework 自己决定的部分：具体 Codex/CC provider 的进程启动和 IPC、workspace snapshot 的实现、完整 CI 图表页面，以及由具体环境提供的规范化完整动作支持集和 state ID 编码。
+尚未由 framework 自己决定的部分：具体 Codex/CC provider 的进程启动和 IPC、完整 CI 图表页面，以及具体环境是否能提供规范化完整动作支持集和更细粒度 state ID 编码。

@@ -199,6 +199,18 @@ class Run:
     def record_act_evaluation(self, act_id: str, evaluation: Dict[str, Any]) -> Dict[str, Any]:
         return self._act_recorder.record_evaluation(act_id, evaluation)
 
+    def create_coding_agent_controller(self, provider, snapshotter=None,
+                                       budget_phase: str = "learning"):
+        """Create a provider-neutral act controller bound to this run."""
+        from agentbench_frame.tracking.controller import CodingAgentController
+        return CodingAgentController(
+            provider,
+            recorder=self._act_recorder,
+            snapshotter=snapshotter,
+            budget=self._budget,
+            budget_phase=budget_phase,
+        )
+
     def log_policy_kl_trace(
         self,
         episode: int,

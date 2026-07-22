@@ -23,6 +23,9 @@ from agentbench_frame.tracking.sampler import ResourceSampler
 from agentbench_frame.tracking.wrappers import TrackedEnv, TimedAgent
 from agentbench_frame.tracking.budget import BudgetLedger
 from agentbench_frame.tracking.iteration import ActRecord, VersionedActRecorder
+from agentbench_frame.tracking.provider import ProviderAdapter, ProviderInvocation, ProviderUsage
+from agentbench_frame.tracking.snapshot import LocalWorkspaceSnapshotter, WorkspaceManifest
+from agentbench_frame.tracking.controller import CodingAgentController
 
 __all__ = [
     "Run",
@@ -39,4 +42,10 @@ __all__ = [
     "BudgetLedger",
     "ActRecord",
     "VersionedActRecorder",
+    "ProviderAdapter",
+    "ProviderInvocation",
+    "ProviderUsage",
+    "LocalWorkspaceSnapshotter",
+    "WorkspaceManifest",
+    "CodingAgentController",
 ]
