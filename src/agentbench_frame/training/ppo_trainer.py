@@ -91,6 +91,9 @@ class PPOTrainer:
         self._episodes = 0
         self._best_eval_score = -float("inf")
         self._metrics_history: List[Dict] = []
+        self._episode_results: List[Dict[str, Any]] = []
+        self._episode_reward = 0.0
+        self._episode_steps = 0
         self._current_obs = None
 
         os.makedirs(self.config.log_dir, exist_ok=True)
@@ -108,6 +111,9 @@ class PPOTrainer:
         """Run the full PPO training loop."""
         self._timesteps = 0
         self._episodes = 0
+        self._episode_results = []
+        self._episode_reward = 0.0
+        self._episode_steps = 0
         self._current_obs = self.env.reset()
         cfg = self.config
         start_time = time.time()
@@ -142,6 +148,10 @@ class PPOTrainer:
         print(f"Done. Best: {self._best_eval_score:.3f} in {elapsed:.0f}s")
         return summary
 
+    def get_episode_results(self) -> List[Dict[str, Any]]:
+        """Return completed episode summaries collected during training."""
+        return list(self._episode_results)
+
     def save(self, path: str):
         from agentbench_frame.agent.policy_network import save_policy
         save_policy(self.policy, path)
@@ -171,6 +181,8 @@ class PPOTrainer:
             ga = self._id_to_game_action(aid)
             obs, reward, done, info = self.env.step(ga)
             self._timesteps += 1
+            self._episode_reward += float(reward)
+            self._episode_steps += 1
 
             boards_l.append(board_t); globals_l.append(glob_t)
             actions_l.append(aid); logps_l.append(lp); values_l.append(val)
@@ -179,6 +191,13 @@ class PPOTrainer:
 
             if done:
                 self._episodes += 1
+                self._episode_results.append({
+                    "reward": self._episode_reward,
+                    "steps": self._episode_steps,
+                    "winner": obs.state.get("winner", -1),
+                })
+                self._episode_reward = 0.0
+                self._episode_steps = 0
                 self._current_obs = self.env.reset()
             else:
                 self._current_obs = obs

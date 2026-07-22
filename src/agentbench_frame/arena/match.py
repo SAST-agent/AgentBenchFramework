@@ -30,6 +30,7 @@ class MatchResult:
     game_results: List[Dict[str, Any]] = field(default_factory=list)
     elo_change: float = 0.0
     duration_seconds: float = 0.0
+    benchmark_score: float = 0.0
 
 
 class Match:
@@ -87,17 +88,20 @@ class Match:
             result = self._play_game(game_idx)
             game_results.append(result)
 
-            winner = result.get("winner", -1)
-            if winner == 0:
+            # `winner` is the environment's player id.  That id changes
+            # ownership when starts alternate, so aggregate by the mapped
+            # agent identity instead.
+            winner_agent = result.get("winner_agent")
+            if winner_agent == self.agent1.name:
                 agent1_wins += 1
-            elif winner == 1:
+            elif winner_agent == self.agent2.name:
                 agent2_wins += 1
             else:
                 draws += 1
 
             total_length += result.get("steps", 0)
-            total_reward1 += result.get("reward_0", 0)
-            total_reward2 += result.get("reward_1", 0)
+            total_reward1 += result.get("agent1_reward", result.get("reward_0", 0))
+            total_reward2 += result.get("agent2_reward", result.get("reward_1", 0))
 
         duration = time.time() - start_time
         n = max(1, n_games)
@@ -109,17 +113,20 @@ class Match:
             agent1_wins=agent1_wins,
             agent2_wins=agent2_wins,
             draws=draws,
-            win_rate=agent1_wins / n,
+            win_rate=(agent1_wins + 0.5 * draws) / n,
             avg_game_length=total_length / n,
             avg_agent1_reward=total_reward1 / n,
             avg_agent2_reward=total_reward2 / n,
             game_results=game_results,
             duration_seconds=duration,
+            benchmark_score=(agent1_wins + 0.5 * draws) / n,
         )
 
     def _play_game(self, game_idx: int) -> Dict[str, Any]:
         """Play a single game between the two agents."""
         seed = self.seed + game_idx
+        self.agent1.reset()
+        self.agent2.reset()
         obs = self.env.reset(seed=seed)
         done = False
 
@@ -130,13 +137,15 @@ class Match:
         else:
             player_agents = {0: self.agent1, 1: self.agent2}
 
-        current_player = 0
+        current_player = getattr(obs, "player_id", 0)
         total_rewards = {0: 0.0, 1: 0.0}
+        step_count = 0
 
         while not done:
             agent = player_agents[current_player]
             action = agent.act(obs.to_dict())
             obs, reward, done, info = self.env.step(action)
+            step_count += 1
 
             total_rewards[current_player] += reward
             # Relay observation to the other agent's perspective
@@ -151,13 +160,23 @@ class Match:
         else:
             winner_agent = "draw"
 
+        if player_agents[0] is self.agent1:
+            agent1_reward = total_rewards[0]
+            agent2_reward = total_rewards[1]
+        else:
+            agent1_reward = total_rewards[1]
+            agent2_reward = total_rewards[0]
+
         return {
             "game_idx": game_idx,
             "winner": raw_winner,
             "winner_agent": winner_agent,
-            "steps": obs.round_num,
+            "steps": step_count,
+            "env_steps": step_count,
             "reward_0": total_rewards[0],
             "reward_1": total_rewards[1],
+            "agent1_reward": agent1_reward,
+            "agent2_reward": agent2_reward,
             "trajectory": self.env.get_trajectory(),
         }
 

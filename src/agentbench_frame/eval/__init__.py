@@ -8,5 +8,36 @@ Provides:
 
 from agentbench_frame.eval.trajectory import TrajectoryRecorder
 from agentbench_frame.eval.metrics import MetricsCalculator
+from agentbench_frame.eval.benchmark import (
+    BenchmarkCase,
+    BenchmarkEvaluation,
+    BenchmarkSpec,
+    GameResult,
+    evaluate_benchmark,
+)
+from agentbench_frame.eval.curves import trapezoid_auc
+from agentbench_frame.eval.information_gain import (
+    epsilon_regularize,
+    episode_policy_kl_trace,
+    occupancy_histogram,
+    occupancy_shift,
+    policy_kl,
+    trajectory_kl_from_trace,
+)
 
-__all__ = ["TrajectoryRecorder", "MetricsCalculator"]
+__all__ = [
+    "TrajectoryRecorder",
+    "MetricsCalculator",
+    "BenchmarkCase",
+    "BenchmarkEvaluation",
+    "BenchmarkSpec",
+    "GameResult",
+    "evaluate_benchmark",
+    "trapezoid_auc",
+    "epsilon_regularize",
+    "episode_policy_kl_trace",
+    "occupancy_histogram",
+    "occupancy_shift",
+    "policy_kl",
+    "trajectory_kl_from_trace",
+]

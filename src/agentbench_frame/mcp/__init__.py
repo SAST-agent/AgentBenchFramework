@@ -14,7 +14,7 @@ Integration with skills:
 """
 
 from agentbench_frame.mcp.base import MCPTool, MCPToolRegistry
-from agentbench_frame.mcp.server import MCPServer
+from agentbench_frame.mcp.server import MCPServer, create_default_server
 from agentbench_frame.mcp.replay_tool import ReadReplayTool
 from agentbench_frame.mcp.analyzer_tool import AnalyzeGameTool
 from agentbench_frame.mcp.history_tool import QueryHistoryTool
@@ -23,6 +23,7 @@ __all__ = [
     "MCPTool",
     "MCPToolRegistry",
     "MCPServer",
+    "create_default_server",
     "ReadReplayTool",
     "AnalyzeGameTool",
     "QueryHistoryTool",
