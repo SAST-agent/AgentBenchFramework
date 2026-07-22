@@ -159,6 +159,24 @@ class TrackingContractTests(unittest.TestCase):
             self.assertEqual(trace["context_refs"], ["s0", "s1"])
             self.assertEqual(occupancy["state_ids"], ["s0", "s1", "s1"])
 
+    def test_run_attaches_budget_coordinates_to_act_evaluation(self):
+        from agentbench_frame.tracking.run import Run
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Run.start("game", "agent", run_type="rule_iter", data_dir=tmp)
+            run.log_budget("learning", episodes=2, env_steps=6, prompt_tokens=10,
+                           completion_tokens=4, time_s=1.5)
+            act = run.begin_act("synthetic", version_before="v0")
+            run.finish_act(act.act_id, "completed", snapshot_content_hash="hash")
+            event = run.record_act_evaluation(act.act_id, {"score": 0.5})
+            run.finish()
+
+        self.assertEqual(event["coding_agent_act"], 0)
+        self.assertEqual(event["episode"], 2)
+        self.assertEqual(event["env_step"], 6)
+        self.assertEqual(event["token"], 14)
+        self.assertAlmostEqual(event["time_s"], 1.5)
+
 
 if __name__ == "__main__":
     unittest.main()

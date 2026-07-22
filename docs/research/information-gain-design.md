@@ -467,4 +467,4 @@ created_at
 - provider-neutral 的 `ProviderAdapter`、`CodingAgentController` 和本地 workspace manifest/hash/diff snapshotter；
 - canonical state ID 与可选 `get_action_distribution(observation, legal_actions)` hook。
 
-尚未由 framework 自己决定的部分：具体 Codex/CC provider 的进程启动和 IPC、完整 CI 图表页面，以及具体环境是否能提供规范化完整动作支持集和更细粒度 state ID 编码。
+仍由接入方决定的部分：具体 benchmark 测试集内容，以及具体环境是否能提供规范化完整动作支持集和更细粒度 state ID 编码。Codex/Claude Code CLI JSONL adapter、provider artifact、统一 act 生命周期、数据质量诊断和本地/CI research report 已落地；真实运行仍需要调用方安装并认证对应 CLI。

@@ -2,7 +2,7 @@
 
 ## 目标
 
-为 RL/HL 和 coding-agent 迭代提供稳定、前向兼容、保留一手数据的 framework 基础层。第一阶段不接管具体 coding agent，也不猜测 provider 无法提供的 usage；framework 只提供 provider-neutral 的记录接口和确定性的派生计算。
+为 RL/HL 和 coding-agent 迭代提供稳定、前向兼容、保留一手数据的 framework 基础层。provider 进程边界由统一 adapter 接入；framework 不猜测 provider 无法提供的 usage，缺失值仍记录为 unknown。
 
 ## 已确定边界
 
@@ -28,7 +28,7 @@
 - 外部评测异常生成 incomplete 结果，不进入 W/L/D；规则定义的游戏超时仍是有效结果。
 - 对 action 支持集缺失、策略分布和动作空间不一致、occupancy 样本为空等情况显式抛出 `ValueError`，不静默产生指标。
 - 旧事件可被读取；新公共字段只在新 writer 生成。原有 `event` 字段保留为兼容别名，同时写入 `event_type`。
-- 不实现 provider 进程启动、通信和 workspace snapshot；只提供 `ActRecord` 与 adapter protocol，避免错误假设。
+- Codex/Claude Code 的 CLI JSONL 接入通过可替换 adapter 实现；进程输出按需原样写入 provider artifact，workspace snapshot 仍由 framework controller 负责。
 
 ## 验证标准
 
