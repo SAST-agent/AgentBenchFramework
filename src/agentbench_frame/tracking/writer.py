@@ -23,13 +23,13 @@ class JSONLWriter:
     """
 
     def __init__(self, path: str, buffer_size: int = 64,
-                 async_mode: bool = False):
+                 async_mode: bool = False, append: bool = True):
         self.path = path
         self.buffer_size = buffer_size
         self.async_mode = async_mode
 
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-        self._fh = open(path, "w")
+        self._fh = open(path, "a" if append else "w")
         self._buffer: list = []
         self._lock = threading.Lock()
 
