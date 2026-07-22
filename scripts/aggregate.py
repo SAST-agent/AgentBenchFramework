@@ -47,6 +47,15 @@ def find_runs(data_dir: Path) -> list[dict]:
                     except Exception:
                         pass
 
+                # The registry is a lightweight index, not the source of truth.
+                # Preserve every scalar summary field so new research metrics
+                # can reach the report without changing this aggregator again.
+                # Nested first-hand data remains in the run directory.
+                scalar_summary = {
+                    key: value for key, value in s.items()
+                    if isinstance(value, (str, int, float, bool))
+                }
+
                 # Merge: summary.json fields override, fallback to run.toml
                 runs.append({
                     "run_id": run_dir.name,
@@ -56,13 +65,7 @@ def find_runs(data_dir: Path) -> list[dict]:
                     "path": str(run_dir.relative_to(data_dir)),
                     "created": s.get("created") or _get_meta_field(raw, "created", ""),
                     "git_commit": s.get("git_commit") or _get_meta_field(raw, "git_commit", ""),
-                    "summary": {
-                        "best_elo": s.get("best_elo"),
-                        "final_elo": s.get("final_elo"),
-                        "wall_hours": s.get("wall_hours"),
-                        "total_steps": s.get("total_steps"),
-                        "win_rate": s.get("win_rate"),
-                    },
+                    "summary": scalar_summary,
                 })
     return runs
 

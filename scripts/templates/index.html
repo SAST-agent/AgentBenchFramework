@@ -1,24 +1,73 @@
-{% extends "base.html" %}{% block content %}
-<h1>AgentBench Dashboard</h1>
-<p class="text-muted mb-3">Overview of all tracked runs across games and agents.</p>
-{% set rc=runs|length %}{% set gc=games|length %}{% set ac=runs|map(attribute='agent')|unique|list|length %}{% set te=runs|selectattr('best_elo')|map(attribute='best_elo')|max|default(0) %}
-<div class="stat-strip">
-<div class="stat"><div class="stat-value">{{ rc }}</div><div class="stat-label">Total Runs</div></div>
-<div class="stat"><div class="stat-value">{{ gc }}</div><div class="stat-label">Games</div></div>
-<div class="stat"><div class="stat-value">{{ ac }}</div><div class="stat-label">Agents</div></div>
-<div class="stat"><div class="stat-value">{{ fmt_num(te) }}</div><div class="stat-label">Top Elo</div></div>
-</div>
-{% set lb=[] %}{% for gn,gd in games.items() %}{% for an in gd.agents %}{% set b=gd.runs|selectattr('agent','equalto',an)|selectattr('best_elo')|sort(attribute='best_elo',reverse=True)|first %}{% if b and b.best_elo %}{% set _=lb.append({'game':gn,'agent':an,'elo':b.best_elo,'type':b.type,'rid':b.run_id,'wh':b.wall_hours}) %}{% endif %}{% endfor %}{% endfor %}{% set lb=lb|sort(attribute='elo',reverse=True) %}
-<div class="card"><div class="card-header"><h2>Elo Leaderboard</h2></div>
-{% if lb %}<div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Game</th><th>Agent</th><th>Elo</th><th>Type</th><th>Hours</th><th>Run</th></tr></thead><tbody>
-{% for e in lb %}<tr class="link-row" onclick="window.location.href='{{ e.game }}/{{ e.agent }}/index.html'"><td class="text-dim">{{ loop.index }}</td><td>{{ e.game }}</td><td><strong>{{ e.agent }}</strong></td><td class="data" style="color:{{ elo_color(e.elo) }}">{{ fmt_num(e.elo) }}</td><td><span class="badge badge-{{ e.type }}">{{ e.type }}</span></td><td class="text-dim">{{ fmt_num(e.wh) if e.wh else '-' }}</td><td class="data text-dim">{{ e.rid[:16] }}&hellip;</td></tr>{% endfor %}
-</tbody></table></div>{% else %}<p class="empty-state">No Elo data yet.</p>{% endif %}</div>
-<h2>Games</h2><div class="game-grid">
-{% for gn,gd in games.items()|sort %}{% set rc2=gd.runs|length %}{% set gt=gd.runs|selectattr('best_elo')|map(attribute='best_elo')|max|default(0) %}
-<a href="{{ gn }}/index.html" class="game-tile"><h3>{{ gn }}</h3><div class="meta">{{ gd.agents|length }} agent{{ 's' if gd.agents|length!=1 else '' }} &middot; {{ rc2 }} run{{ 's' if rc2!=1 else '' }}{% if gt>0 %} &middot; Top {{ fmt_num(gt) }}{% endif %}</div></a>
-{% endfor %}</div>
-<div class="card"><div class="card-header"><h2>Recent Runs</h2></div>
-{% set rr=runs[:25] %}{% if rr %}<div style="overflow-x:auto"><table><thead><tr><th>Created</th><th>Game</th><th>Agent</th><th>Type</th><th>Elo</th><th>Hours</th><th>Commit</th></tr></thead><tbody>
-{% for r in rr %}<tr class="link-row" onclick="window.location.href='{{ r.game }}/{{ r.agent }}/index.html'"><td class="text-dim text-sm">{{ r.created[:16]|replace('T',' ') if r.created else '-' }}</td><td>{{ r.game }}</td><td><strong>{{ r.agent }}</strong></td><td><span class="badge badge-{{ r.type }}">{{ r.type }}</span></td><td class="data" style="color:{{ elo_color(r.best_elo) }}">{{ fmt_num(r.best_elo) }}</td><td class="text-dim">{{ fmt_num(r.wall_hours) if r.wall_hours else '-' }}</td><td class="data text-dim">{{ r.git_commit[:8] if r.git_commit else '-' }}</td></tr>{% endfor %}
-</tbody></table></div>{% else %}<p class="empty-state">No runs yet.</p>{% endif %}</div>
+{% extends "base.html" %}
+{% block content %}
+{% set latest = dashboard.latest %}
+{% set lr = dashboard.latest_research %}
+{% set budget = lr.get('budget', {}) %}
+<section class="hero">
+  <div>
+    <p class="eyebrow">Experiment observatory</p>
+    <h1>Research CI</h1>
+    <p>Performance and behavioral change for coding-agent iterations, rendered directly from the benchmark evidence stream.</p>
+  </div>
+  <div class="hero-aside">latest run{% if latest %}<strong>{{ latest.run_id[:16] }}{% if latest.run_id|length > 16 %}…{% endif %}</strong>{% else %}<strong>no runs</strong>{% endif %}</div>
+</section>
+
+<section class="metric-grid" aria-label="Latest research metrics">
+  <article class="metric"><div class="metric-head">{{ icon('trophy') }} Benchmark score</div><strong class="metric-value mint">{{ fmt_pct(lr.get('benchmark_score')) }}</strong><span class="metric-foot">direct win / draw / loss score</span></article>
+  <article class="metric"><div class="metric-head">{{ icon('spark') }} Gain over raw</div><strong class="metric-value{% if lr.get('gain') is none %} missing{% endif %} {% if lr.get('gain') is not none and lr.get('gain') >= 0 %}mint{% else %}amber{% endif %}">{{ fmt_pct(lr.get('gain')) }}</strong><span class="metric-foot">evo score − raw score</span></article>
+  <article class="metric"><div class="metric-head">{{ icon('budget') }} Learning acts</div><strong class="metric-value">{{ fmt_num(budget.get('learning_coding_agent_acts')) }}</strong><span class="metric-foot">primary efficiency budget</span></article>
+  <article class="metric"><div class="metric-head">{{ icon('check') }} Complete runs</div><strong class="metric-value">{{ dashboard.complete_runs }}<span class="text-quiet"> / {{ dashboard.run_count }}</span></strong><span class="metric-foot">fixed benchmark evidence</span></article>
+</section>
+
+{% if latest %}
+<div class="note" style="margin:0 0 25px">{{ latest.game }} · {{ latest.agent }} · <span class="status status-{{ status_class(latest.evaluation_status) }}">{{ latest.evaluation_status }}</span>{% if latest.git_commit %} · commit <code>{{ latest.git_commit[:8] }}</code>{% endif %}</div>
+{% endif %}
+
+<section class="chart-grid">
+  <article class="panel">
+    <div class="panel-header"><div><h2 class="panel-title">{{ icon('chart') }} Benchmark score over iteration</h2><p class="panel-subtitle">Primary x-axis: coding-agent act · gaps remain gaps</p></div><div class="panel-meta">score ∈ [0, 1]<br>AUC / act: {{ fmt_num(lr.get('auc_coding_agent_act')) }}</div></div>
+    {% if dashboard.score_series %}<div class="chart-wrap"><canvas id="scoreChart" aria-label="Benchmark score over coding-agent acts"></canvas></div>
+    <script>(function(){AgentBench.scatterChart('scoreChart', {{ tojson(dashboard.score_series) }})})();</script>
+    {% else %}<div class="chart-empty">{{ icon('alert', 'icon-lg') }}<div>No complete score history yet.<br><span class="note">CI will not interpolate incomplete evaluations.</span></div></div>{% endif %}
+  </article>
+  <article class="panel">
+    <div class="panel-header"><div><h2 class="panel-title">{{ icon('spark') }} Policy change</h2><p class="panel-subtitle">Episode-level mean of raw local KL trace</p></div><div class="panel-meta">nats / episode</div></div>
+    {% if dashboard.ig_series %}<div class="chart-wrap short"><canvas id="igChart" aria-label="Information gain per episode"></canvas></div>
+    <script>(function(){AgentBench.scatterChart('igChart', {{ tojson(dashboard.ig_series) }},{scales:{x:{title:{display:true,text:'episode',color:'#8b9aad'}},y:{beginAtZero:true,title:{display:true,text:'nats / episode',color:'#8b9aad'}}}})})();</script>
+    {% else %}<div class="chart-empty">{{ icon('database', 'icon-lg') }}<div>No policy trace events found.<br><span class="note">Raw <code>policy_kl_trace</code> remains optional per run.</span></div></div>{% endif %}
+  </article>
+</section>
+
+<section class="grid-2">
+  <article class="panel">
+    <div class="panel-header"><div><h2 class="panel-title">{{ icon('budget') }} Learning-only budget</h2><p class="panel-subtitle">The main efficiency denominator; evaluation cost is secondary.</p></div></div>
+    <div class="budget-grid">
+      <div class="budget-cell"><span class="budget-label">coding-agent acts</span><strong class="budget-value">{{ fmt_num(budget.get('learning_coding_agent_acts')) }}</strong></div>
+      <div class="budget-cell"><span class="budget-label">episodes</span><strong class="budget-value">{{ fmt_num(budget.get('learning_episodes')) }}</strong></div>
+      <div class="budget-cell"><span class="budget-label">environment steps</span><strong class="budget-value">{{ fmt_num(budget.get('learning_env_steps')) }}</strong></div>
+      <div class="budget-cell"><span class="budget-label">tokens</span><strong class="budget-value{% if budget.get('learning_total_tokens') is none %} missing{% endif %}">{{ fmt_num(budget.get('learning_total_tokens')) }}</strong></div>
+      <div class="budget-cell"><span class="budget-label">time</span><strong class="budget-value{% if budget.get('learning_time_s') is none %} missing{% endif %}">{% if budget.get('learning_time_s') is not none %}{{ fmt_num(budget.get('learning_time_s')) }}s{% else %}—{% endif %}</strong></div>
+      <div class="budget-cell"><span class="budget-label">total episodes <span class="text-quiet">(aux)</span></span><strong class="budget-value">{{ fmt_num(budget.get('total_episodes')) }}</strong></div>
+    </div>
+  </article>
+  <article class="panel">
+    <div class="panel-header"><div><h2 class="panel-title">{{ icon('database') }} Evidence contract</h2><p class="panel-subtitle">What this page can and cannot infer from the run.</p></div></div>
+    <div class="budget-grid">
+      <div class="budget-cell"><span class="budget-label">raw event records</span><strong class="budget-value">{{ latest.research.get('raw_event_count', 0) if latest else 0 }}</strong></div>
+      <div class="budget-cell"><span class="budget-label">score points</span><strong class="budget-value">{{ latest.research.get('score_history', [])|length if latest else 0 }}</strong></div>
+      <div class="budget-cell"><span class="budget-label">IG episodes</span><strong class="budget-value">{{ latest.research.get('ig_history', [])|length if latest else 0 }}</strong></div>
+      <div class="budget-cell"><span class="budget-label">occupancy observations</span><strong class="budget-value">{{ latest.research.get('occupancy_history', [])|length if latest else 0 }}</strong></div>
+      <div class="budget-cell"><span class="budget-label">missing values</span><strong class="budget-value{% if not latest or latest.evaluation_status != 'complete' %} amber{% endif %}">{% if latest and latest.evaluation_status == 'complete' %}none{% else %}shown{% endif %}</strong></div>
+    </div>
+    <p class="note" style="margin:15px 0 0">The first-hand <code>events.jsonl</code> is retained beside each run; this page only adds chart-ready summaries.</p>
+  </article>
+</section>
+
+<p class="section-label">Run ledger</p>
+<section class="panel">
+  <div class="panel-header"><div><h2 class="panel-title">{{ icon('flask') }} Benchmark runs</h2><p class="panel-subtitle">Raw, evolved, gain, and budget context for every registered run.</p></div><div class="panel-meta">{{ runs|length }} records</div></div>
+  {% if runs %}<div class="table-scroll"><table class="data-table"><thead><tr><th>Run</th><th>Agent / game</th><th>Status</th><th>Score</th><th>Raw</th><th>Gain</th><th>Learning acts</th><th>Created</th></tr></thead><tbody>
+  {% for r in runs %}{% set rb=r.research.get('budget', {}) %}<tr class="link-row" onclick="window.location.href='{{ r.game }}/{{ r.agent }}/index.html'"><td class="mono"><strong>{{ r.run_id[:12] }}{% if r.run_id|length > 12 %}…{% endif %}</strong></td><td><strong>{{ r.agent }}</strong><br><span class="text-quiet">{{ r.game }}</span></td><td><span class="status status-{{ status_class(r.evaluation_status) }}">{{ r.evaluation_status }}</span></td><td class="mono text-mint">{{ fmt_pct(r.benchmark_score) }}</td><td class="mono">{{ fmt_pct(r.raw_score) }}</td><td class="mono{% if r.gain is not none and r.gain >= 0 %} text-mint{% elif r.gain is not none %} text-rose{% endif %}">{{ fmt_pct(r.gain) }}</td><td class="mono">{{ fmt_num(rb.get('learning_coding_agent_acts')) }}</td><td>{{ r.created[:16]|replace('T',' ') if r.created else '—' }}</td></tr>{% endfor %}
+  </tbody></table></div>{% else %}<div class="empty-state">{{ icon('database', 'icon-lg') }}No registered runs yet. The dashboard will populate after CI aggregation.</div>{% endif %}
+</section>
 {% endblock %}

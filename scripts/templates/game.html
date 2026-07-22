@@ -1,22 +1,17 @@
-{% extends "base.html" %}{% block content %}
-<h1>{{ game.name }}</h1><p class="text-muted mb-3">{{ game.agents|length }} agents &middot; {{ game_runs|length }} runs</p>
-{% set te=game_runs|selectattr('best_elo')|map(attribute='best_elo')|max|default(0) %}{% set th=game_runs|selectattr('wall_hours')|map(attribute='wall_hours')|sum|default(0) %}
-<div class="stat-strip">
-<div class="stat"><div class="stat-value">{{ game_runs|length }}</div><div class="stat-label">Runs</div></div>
-<div class="stat"><div class="stat-value">{{ game.agents|length }}</div><div class="stat-label">Agents</div></div>
-<div class="stat"><div class="stat-value">{{ fmt_num(te) }}</div><div class="stat-label">Top Elo</div></div>
-<div class="stat"><div class="stat-value">{{ fmt_num(th) }}</div><div class="stat-label">Wall Hours</div></div>
-</div>
-<h2>Agents</h2><div class="agent-list">{% for an in game.agents|sort %}<a href="{{ an }}/index.html" class="agent-chip">{{ an }}</a>{% endfor %}</div>
-{% set ed={} %}{% for r in game_runs %}{% if r.elo_history %}{% set _=ed.update({r.agent+' ('+r.run_id[:8]+')':r.elo_history}) %}{% endif %}{% endfor %}
-{% if ed %}<div class="card"><div class="card-header"><h2>Elo Over Time</h2></div><div class="chart-wrap"><canvas id="eloChart"></canvas></div></div>
-<script>(function(){var d={{ tojson(ed) }};var lb=null,ds=[];for(var k in d){if(!d.hasOwnProperty(k))continue;var h=d[k];var xs=h.map(function(p){return String(p.step||p.x||p[0]||0)});var ys=h.map(function(p){return p.elo||p.y||p[1]||0});if(!lb||xs.length>lb.length)lb=xs;ds.push({label:k,data:ys})}if(lb&&ds.length>0)AgentBench.lineChart('eloChart',lb,ds)})();</script>{% endif %}
-{% set ha=[] %}{% for r in game_runs %}{% if r.h2h %}{% for a in r.h2h.keys() %}{% if a not in ha %}{% set _=ha.append(a) %}{% endif %}{% endfor %}{% endif %}{% endfor %}
-{% if ha|length>=2 %}{% set hs=ha|sort %}{% set n=hs|length %}{% set mx=[] %}{% for a in hs %}{% set row=[] %}{% for b in hs %}{% set v=0.5 %}{% for r in game_runs %}{% if r.h2h and a in r.h2h and b in r.h2h[a] %}{% set v=r.h2h[a][b] %}{% endif %}{% endfor %}{% set _=row.append(v) %}{% endfor %}{% set _=mx.append(row) %}{% endfor %}
-<div class="card"><div class="card-header"><h2>Head-to-Head</h2><span class="text-sm text-dim">Rows beat columns</span></div><div id="h2hContainer" style="overflow-x:auto;padding:.5rem 0"></div></div>
-<script>(function(){AgentBench.h2hHeatmap('h2hContainer',{{ tojson(hs) }},{{ tojson(mx) }})})();</script>{% endif %}
-<div class="card"><div class="card-header"><h2>All Runs</h2></div>
-{% if game_runs %}<div style="overflow-x:auto"><table><thead><tr><th>Created</th><th>Agent</th><th>Type</th><th>Best Elo</th><th>Steps</th><th>Hours</th><th>Commit</th></tr></thead><tbody>
-{% for r in game_runs|sort(attribute='created',reverse=True) %}<tr class="link-row" onclick="window.location.href='{{ r.agent }}/index.html'"><td class="text-dim text-sm">{{ r.created[:16]|replace('T',' ') if r.created else '-' }}</td><td><strong>{{ r.agent }}</strong></td><td><span class="badge badge-{{ r.type }}">{{ r.type }}</span></td><td class="data" style="color:{{ elo_color(r.best_elo) }}">{{ fmt_num(r.best_elo) }}</td><td class="text-dim">{{ r.total_steps if r.total_steps else '-' }}</td><td class="text-dim">{{ fmt_num(r.wall_hours) if r.wall_hours else '-' }}</td><td class="data text-dim">{{ r.git_commit[:8] if r.git_commit else '-' }}</td></tr>{% endfor %}
-</tbody></table></div>{% else %}<p class="empty-state">No runs for this game.</p>{% endif %}</div>
+{% extends "base.html" %}
+{% block content %}
+{% set latest = game_runs|sort(attribute='created', reverse=True)|first %}
+{% set lr = latest.research if latest else {} %}
+{% set lb = lr.get('budget', {}) %}
+<p class="eyebrow">Benchmark slice</p>
+<section class="hero"><div><h1>{{ game.name }}</h1><p>All registered agents and evaluation evidence for this game.</p></div><div class="hero-aside">runs<strong>{{ game_runs|length }}</strong></div></section>
+<section class="metric-grid">
+  <article class="metric"><div class="metric-head">{{ icon('flask') }} Agents</div><strong class="metric-value">{{ game.agents|length }}</strong><span class="metric-foot">registered implementations</span></article>
+  <article class="metric"><div class="metric-head">{{ icon('trophy') }} Latest score</div><strong class="metric-value mint">{{ fmt_pct(latest.benchmark_score) if latest else '—' }}</strong><span class="metric-foot">{{ latest.agent if latest else 'no latest run' }}</span></article>
+  <article class="metric"><div class="metric-head">{{ icon('spark') }} Latest gain</div><strong class="metric-value">{{ fmt_pct(latest.gain) if latest else '—' }}</strong><span class="metric-foot">evo − raw</span></article>
+  <article class="metric"><div class="metric-head">{{ icon('budget') }} Learning acts</div><strong class="metric-value">{{ fmt_num(lb.get('learning_coding_agent_acts')) }}</strong><span class="metric-foot">latest run</span></article>
+</section>
+<p class="section-label">Agents</p><section class="panel"><div class="chip-list">{% for name in game.agents|sort %}<a class="chip" href="{{ name }}/index.html">{{ name }} {{ icon('arrow') }}</a>{% else %}<span class="text-quiet">No agents yet.</span>{% endfor %}</div></section>
+<p class="section-label">Run ledger</p><section class="panel"><div class="panel-header"><div><h2 class="panel-title">{{ icon('database') }} Game runs</h2><p class="panel-subtitle">Click a row to open the agent detail.</p></div></div>
+{% if game_runs %}<div class="table-scroll"><table class="data-table"><thead><tr><th>Run</th><th>Agent</th><th>Status</th><th>Score</th><th>Raw</th><th>Gain</th><th>IG episodes</th><th>Commit</th></tr></thead><tbody>{% for r in game_runs|sort(attribute='created',reverse=True) %}<tr class="link-row" onclick="window.location.href='{{ r.agent }}/index.html'"><td class="mono"><strong>{{ r.run_id[:12] }}{% if r.run_id|length > 12 %}…{% endif %}</strong></td><td><strong>{{ r.agent }}</strong><br><span class="text-quiet">{{ r.type }}</span></td><td><span class="status status-{{ status_class(r.evaluation_status) }}">{{ r.evaluation_status }}</span></td><td class="mono text-mint">{{ fmt_pct(r.benchmark_score) }}</td><td class="mono">{{ fmt_pct(r.raw_score) }}</td><td class="mono">{{ fmt_pct(r.gain) }}</td><td class="mono">{{ r.research.get('ig_history', [])|length }}</td><td class="mono">{{ r.git_commit[:8] if r.git_commit else '—' }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state">{{ icon('database', 'icon-lg') }}No runs for this game.</div>{% endif %}</section>
 {% endblock %}

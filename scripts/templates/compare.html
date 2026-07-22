@@ -1,25 +1,6 @@
-{% extends "base.html" %}{% block content %}
-<h1>Paper Comparison</h1>
-<p class="text-muted mb-3">Configured from <code>reports/compare.toml</code>.</p>
+{% extends "base.html" %}
+{% block content %}
+<p class="eyebrow">Cross-run analysis</p><section class="hero"><div><h1>Compare</h1><p>Configured comparisons remain intentionally close to the source data. Use the dashboard for the canonical benchmark and budget views.</p></div></section>
 {% set comps=compare.get('comparisons',[]) %}
-{% if comps %}{% for comp in comps %}
-<div class="card mb-3"><div class="card-header"><h2>{{ comp.name }}</h2><span class="text-sm text-dim">X: {{ comp.x_axis }} &middot; Y: {{ comp.y_axis }}</span></div>
-{% set crl=[] %}{% for rp in comp.get('runs',[]) %}{% for r in runs %}{% if r.path==rp %}{% set _=crl.append(r) %}{% endif %}{% endfor %}{% endfor %}
-{% if crl %}<div class="chart-wrap"><canvas id="cmpChart{{ loop.index }}"></canvas></div>
-<div style="overflow-x:auto;margin-top:1rem"><table><thead><tr><th>Agent</th><th>Game</th><th>Type</th><th>{{ comp.x_axis|replace('_',' ')|title }}</th><th>{{ comp.y_axis|replace('_',' ')|title }}</th><th>Run</th></tr></thead><tbody>
-{% for cr in crl %}{% set xv=cr.metrics.get(comp.x_axis) %}{% set yv=cr.metrics.get(comp.y_axis) %}<tr><td><strong>{{ cr.agent }}</strong></td><td>{{ cr.game }}</td><td><span class="badge badge-{{ cr.type }}">{{ cr.type }}</span></td><td class="data">{{ fmt_num(xv) if xv is not none else '-' }}</td><td class="data">{{ fmt_num(yv) if yv is not none else '-' }}</td><td class="data text-dim">{{ cr.run_id[:16] }}&hellip;</td></tr>{% endfor %}</tbody></table></div>
-<script>(function(){var cm={{ tojson(crl|map(attribute='metrics')|list) }};var cf={{ tojson(crl) }};var xk={{ tojson(comp.x_axis) }};var yk={{ tojson(comp.y_axis) }};var ag={};cf.forEach(function(c,i){var a=c.agent;if(!ag[a])ag[a]=[];var x=cm[i][xk],y=cm[i][yk];if(x!==undefined&&y!==undefined&&x!==null&&y!==null)ag[a].push({x:x,y:y,run_id:c.run_id})});var sds=[];for(var a in ag){if(!ag.hasOwnProperty(a))continue;sds.push({label:a,data:ag[a],color:null})}if(sds.length>0)AgentBench.scatterChart('cmpChart{{ loop.index }}',sds,{scales:{x:{title:{display:true,text:{{ tojson(comp.x_axis|replace('_',' ')|title) }},color:'#9698A5'}},y:{title:{display:true,text:{{ tojson(comp.y_axis|replace('_',' ')|title) }},color:'#9698A5'}}}})})();</script>
-{% else %}<p class="empty-state">No matching runs found for this comparison.</p>{% endif %}</div>
-{% endfor %}{% else %}
-<div class="card"><p class="text-dim">No comparisons configured.</p><pre style="background:var(--bg);padding:1rem;border-radius:var(--radius-sm);overflow-x:auto;font-size:.8rem;color:var(--text-muted);margin-top:1rem">[paper]
-title = "Your Paper Title"
-
-[[comparisons]]
-name = "RL vs Rule on Generals"
-x_axis = "wall_hours"
-y_axis = "elo"
-runs = [
-    "runs/28_generals/ppo_v3/20260720_1423_a1b2c3d",
-    "runs/28_generals/rule_expansionist/20260720_1500_b2c3d4",
-]</pre></div>
-{% endif %}{% endblock %}
+{% if comps %}{% for comp in comps %}<section class="panel"><div class="panel-header"><div><h2 class="panel-title">{{ icon('chart') }} {{ comp.name }}</h2><p class="panel-subtitle">x: <code>{{ comp.x_axis }}</code> · y: <code>{{ comp.y_axis }}</code></p></div></div>{% set selected=[] %}{% for path in comp.get('runs',[]) %}{% for r in runs %}{% if r.path==path %}{% set _=selected.append(r) %}{% endif %}{% endfor %}{% endfor %}{% if selected %}<div class="table-scroll"><table class="data-table"><thead><tr><th>Agent</th><th>Game</th><th>Status</th><th>{{ comp.x_axis }}</th><th>{{ comp.y_axis }}</th><th>Score</th><th>Run</th></tr></thead><tbody>{% for r in selected %}<tr><td><strong>{{ r.agent }}</strong></td><td>{{ r.game }}</td><td><span class="status status-{{ status_class(r.evaluation_status) }}">{{ r.evaluation_status }}</span></td><td class="mono">{{ fmt_num(r.metrics.get(comp.x_axis)) }}</td><td class="mono">{{ fmt_num(r.metrics.get(comp.y_axis)) }}</td><td class="mono text-mint">{{ fmt_pct(r.benchmark_score) }}</td><td class="mono">{{ r.run_id[:12] }}…</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="empty-state">{{ icon('alert', 'icon-lg') }}No matching runs found for this comparison.</div>{% endif %}</section>{% endfor %}{% else %}<section class="panel"><div class="empty-state">{{ icon('chart', 'icon-lg') }}No comparisons configured.<p class="note">Add a <code>reports/compare.toml</code> file in the Results repository to define a comparison.</p></div></section>{% endif %}
+{% endblock %}
