@@ -1,0 +1,5 @@
+runs in web data.json: 2
+  miracle_ifelse: summary_wr=1.0 web_wr=1.0 events_recompute=1.0000 valid=2 attempted=2 -> CONSISTENT
+    seed fields OK (requested/effective=null, reproducible=false) for 2 games
+  sampleA: summary_wr=0.5 web_wr=0.5 events_recompute=0.5000 valid=2 attempted=2 -> CONSISTENT
+    seed fields OK (requested/effective=null, reproducible=false) for 2 games

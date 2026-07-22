@@ -1,0 +1,10 @@
+FAIL runs\24_miracle\miracle_ifelse\20260721_0923_8aa1fabd:
+  - run.toml: parse error: Invalid hex value (at line 15, column 27)
+FAIL runs\24_miracle\sampleA\20260721_0923_67bfb0f8:
+  - run.toml: parse error: Invalid hex value (at line 15, column 27)
+
+0 valid, 2 invalid
+Wrote 2 runs to C:\Users\gongh\Documents\AgentBenchFramework\.smoke\sessions\20260721-172308_e026da\data\registry.toml
+Built: 2 runs, 1 games -> C:\Users\gongh\Documents\AgentBenchFramework\.smoke\sessions\20260721-172308_e026da\site
+
+2 valid, 0 invalid (all good!)

@@ -1,0 +1,5 @@
+events: attempted=32 valid=20 wins=2 recompute_winrate=0.1
+summary win_rate=0.1 total_episodes=20
+web win_rate=0.1
+summary==events: True | web==events: True -> FOUR_WAY_CONSISTENT
+seed fields OK (requested/effective=null) for all 32 games

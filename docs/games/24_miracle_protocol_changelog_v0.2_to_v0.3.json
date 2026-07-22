@@ -1,0 +1,24 @@
+{
+  "change": "v0.2-pre-registered -> v0.3-pre-registered",
+  "status_unchanged": "PRE_REGISTERED_NOT_AUTHORIZED",
+  "hashes": {
+    "v0.2_json": "e484ca8f2b30519a8e1708e2d94086322c845620d0dc056ac5e06ce575e91424",
+    "v0.3_json": "866696fd9e094da85e3f2c04dc5ba20d0500faf8461531a242362323c4efe0b3",
+    "v0.2_md": "f552ae505974d984816bfec42745b3fd4d7731f548ed1badd8da8ea899a53a48",
+    "v0.3_md": "7658e310064eda5b41029d438ada34786358287dd0a0175ee46b69924c7ee282"
+  },
+  "allowed_changes_only": [
+    "用户正式选择 A 方案 32 局（matrix_meaning.total_attempts=32, games_per_opponent=2, camps=[0,1]）",
+    "main.exe 入口适配完成（entry.py 绝对路径，vendor run_match 委托）",
+    "rank16 隔离构建成功（副本内建空 build/，源码/Makefile 哈希编译前后一致）+ rank16 main.exe SHA256 ed92b36b… 补入 frozen_identities.build_artifacts_win64_mingw",
+    "已解决阻塞项转为完成状态（matrix 含义/main.exe/rank16 编译 从 blockers 移除）",
+    "rank03 崩溃风险与 rank16/general 编译警告 转入 known_runtime_risks（非基础设施阻塞）",
+    "blockers_before_matrix 最终仅保留 FORMAL_32_GAME_MATRIX_NOT_AUTHORIZED"
+  ],
+  "not_changed": "被评 Agent(ifelse 98199fae…)、Judge、16 对手 archive 哈希、seed 口径、计分/分类/换边/恢复/交叉验证规则均不变",
+  "rank16_evidence": {
+    "session": ".smoke/rank16build/20260721-195738_baff71",
+    "rank16_report_json_sha256": "4e7e80f7105338ddcfb38733b69f2cffdcef855a38a6bbd82b214251ce97effd",
+    "main_exe_sha256": "ed92b36ba411cd52c1408762bbb6cedfc54a7a62ecb16f7d2d98cb95458372db"
+  }
+}

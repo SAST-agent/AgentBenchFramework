@@ -1,1 +1,21 @@
+# Python
 __pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Local run artifacts (24_miracle adapter) — never commit
+#   matrix/smoke/precheck/rank16build sessions, Replays, compiled AI binaries,
+#   generated report sites, temp logs, asset copies
+.smoke/
+
+# Generated report sites / registry (produced by aggregate/report_builder)
+_site/
+registry.toml
+
+# Local uv cache (if placed inside the repo)
+.uv-cache/
+
+# Local virtualenvs
+.venv/
+venv/
