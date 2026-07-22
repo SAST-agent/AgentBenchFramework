@@ -164,6 +164,69 @@ benchmark_score = 0.75
                 {"x": 1, "score": None, "act_id": "a1"},
             ])
 
+    def test_report_keeps_per_case_results_and_separate_occupancy_shift(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "runs" / "arena" / "cc" / "run-4"
+            run_dir.mkdir(parents=True)
+            (run_dir / "summary.json").write_text(json.dumps({
+                "benchmark_score": 0.5,
+                "benchmark_results": [
+                    {"case_id": "case-weak", "outcome": "win", "valid": True},
+                    {"case_id": "case-strong", "outcome": "loss", "valid": True},
+                ],
+            }))
+            (run_dir / "events.jsonl").write_text("\n".join([
+                json.dumps({"event_type": "coding_agent_act", "act_id": "a1"}),
+                json.dumps({"event_type": "act_evaluation", "act_id": "a1", "score": 0.5,
+                            "coding_agent_act": 1, "episode": 2, "env_step": 5,
+                            "token": 100, "time_s": 1.5}),
+                json.dumps({"event_type": "occupancy", "episode": 1,
+                            "occupancy_shift": 0.25, "state_count": 3}),
+                "{bad-json",
+                json.dumps({"event_type": "future_v2", "event_id": "x", "run_id": "r"}),
+            ]) + "\n")
+            run = load_run(root, {
+                "run_id": "run-4", "game": "arena", "agent": "cc", "type": "eval",
+                "path": "runs/arena/cc/run-4", "summary": {},
+            })
+            output = root / "site"
+            build_site(root, output)
+            html = (output / "index.html").read_text()
+
+            self.assertEqual(run.research["benchmark_results"][1]["case_id"], "case-strong")
+            self.assertEqual(run.research["occupancy_history"][0]["shift"], 0.25)
+            self.assertEqual(run.research["quality"]["malformed_lines"], 1)
+            self.assertEqual(run.research["quality"]["unknown_event_types"], 1)
+            self.assertIn("case-strong", html)
+            self.assertIn("Quality diagnostics", html)
+
+    def test_report_derives_named_auc_axes_from_budget_coordinates(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "runs" / "arena" / "rl" / "run-5"
+            run_dir.mkdir(parents=True)
+            (run_dir / "summary.json").write_text(json.dumps({"benchmark_score": 1.0}))
+            events = [
+                {"event_type": "act_evaluation", "act_id": "a1", "score": 0.0,
+                 "coding_agent_act": 0, "episode": 0, "env_step": 0,
+                 "token": 0, "time_s": 0},
+                {"event_type": "act_evaluation", "act_id": "a2", "score": 1.0,
+                 "coding_agent_act": 2, "episode": 4, "env_step": 8,
+                 "token": 20, "time_s": 2},
+            ]
+            (run_dir / "events.jsonl").write_text("\n".join(json.dumps(e) for e in events) + "\n")
+            run = load_run(root, {
+                "run_id": "run-5", "game": "arena", "agent": "rl", "type": "eval",
+                "path": "runs/arena/rl/run-5", "summary": {},
+            })
+
+            self.assertEqual(run.research["auc"]["auc_coding_agent_act"], 1.0)
+            self.assertEqual(run.research["auc"]["auc_episode"], 2.0)
+            self.assertEqual(run.research["auc"]["auc_env_step"], 4.0)
+            self.assertEqual(run.research["auc"]["auc_token"], 10.0)
+            self.assertEqual(run.research["auc"]["auc_time_s"], 1.0)
+
 
 if __name__ == "__main__":
     unittest.main()

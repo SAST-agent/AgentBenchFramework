@@ -40,6 +40,17 @@
 
 <section class="grid-2">
   <article class="panel">
+    <div class="panel-header"><div><h2 class="panel-title">{{ icon('chart') }} AUC by budget axis</h2><p class="panel-subtitle">The same score curve, integrated against independently reported budgets.</p></div></div>
+    {% set auc = lr.get('auc', {}) %}<div class="budget-grid"><div class="budget-cell"><span class="budget-label">coding-agent act</span><strong class="budget-value">{{ fmt_num(auc.get('auc_coding_agent_act')) }}</strong></div><div class="budget-cell"><span class="budget-label">episode</span><strong class="budget-value">{{ fmt_num(auc.get('auc_episode')) }}</strong></div><div class="budget-cell"><span class="budget-label">environment step</span><strong class="budget-value">{{ fmt_num(auc.get('auc_env_step')) }}</strong></div><div class="budget-cell"><span class="budget-label">token</span><strong class="budget-value">{{ fmt_num(auc.get('auc_token')) }}</strong></div><div class="budget-cell"><span class="budget-label">time</span><strong class="budget-value">{{ fmt_num(auc.get('auc_time_s')) }}</strong></div></div>
+  </article>
+  <article class="panel">
+    <div class="panel-header"><div><h2 class="panel-title">{{ icon('database') }} Quality diagnostics</h2><p class="panel-subtitle">Warnings are visible; unknown future events remain readable.</p></div></div>
+    {% set quality = latest.research.get('quality', {}) if latest else {} %}<div class="budget-grid"><div class="budget-cell"><span class="budget-label">malformed lines</span><strong class="budget-value{% if quality.get('malformed_lines') %} amber{% endif %}">{{ quality.get('malformed_lines', 0) }}</strong></div><div class="budget-cell"><span class="budget-label">unknown event types</span><strong class="budget-value{% if quality.get('unknown_event_types') %} amber{% endif %}">{{ quality.get('unknown_event_types', 0) }}</strong></div><div class="budget-cell"><span class="budget-label">duplicate event IDs</span><strong class="budget-value{% if quality.get('duplicate_event_ids') %} amber{% endif %}">{{ quality.get('duplicate_event_ids', 0) }}</strong></div></div>
+  </article>
+</section>
+
+<section class="grid-2">
+  <article class="panel">
     <div class="panel-header"><div><h2 class="panel-title">{{ icon('budget') }} Learning-only budget</h2><p class="panel-subtitle">The main efficiency denominator; evaluation cost is secondary.</p></div></div>
     <div class="budget-grid">
       <div class="budget-cell"><span class="budget-label">coding-agent acts</span><strong class="budget-value">{{ fmt_num(budget.get('learning_coding_agent_acts')) }}</strong></div>
@@ -57,11 +68,14 @@
       <div class="budget-cell"><span class="budget-label">score points</span><strong class="budget-value">{{ latest.research.get('score_history', [])|length if latest else 0 }}</strong></div>
       <div class="budget-cell"><span class="budget-label">IG episodes</span><strong class="budget-value">{{ latest.research.get('ig_history', [])|length if latest else 0 }}</strong></div>
       <div class="budget-cell"><span class="budget-label">occupancy observations</span><strong class="budget-value">{{ latest.research.get('occupancy_history', [])|length if latest else 0 }}</strong></div>
+      <div class="budget-cell"><span class="budget-label">latest occupancy shift</span><strong class="budget-value">{% if latest and latest.research.get('occupancy_history') %}{{ fmt_num(latest.research.get('occupancy_history')[-1].get('shift')) }}{% else %}—{% endif %}</strong></div>
       <div class="budget-cell"><span class="budget-label">missing values</span><strong class="budget-value{% if not latest or latest.evaluation_status != 'complete' %} amber{% endif %}">{% if latest and latest.evaluation_status == 'complete' %}none{% else %}shown{% endif %}</strong></div>
     </div>
     <p class="note" style="margin:15px 0 0">The first-hand <code>events.jsonl</code> is retained beside each run; this page only adds chart-ready summaries.</p>
   </article>
 </section>
+
+{% if latest and latest.research.get('benchmark_results') %}<section class="panel"><div class="panel-header"><div><h2 class="panel-title">{{ icon('trophy') }} Per-case benchmark results</h2><p class="panel-subtitle">The aggregate score never replaces these first-hand case outcomes.</p></div></div><div class="table-scroll"><table class="data-table"><thead><tr><th>Case</th><th>Outcome</th><th>Valid</th><th>Error</th></tr></thead><tbody>{% for result in latest.research.get('benchmark_results') %}<tr><td class="mono">{{ result.get('case_id') }}</td><td>{{ result.get('outcome') }}</td><td>{{ result.get('valid') }}</td><td>{{ result.get('error') or '—' }}</td></tr>{% endfor %}</tbody></table></div></section>{% endif %}
 
 <p class="section-label">Run ledger</p>
 <section class="panel">

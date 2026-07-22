@@ -106,6 +106,68 @@ def _load_events(run_path: Path) -> list[dict]:
     return events
 
 
+KNOWN_EVENT_TYPES = {
+    "log", "episode", "step", "act", "coding_agent_act", "act_evaluation",
+    "benchmark_game_result", "benchmark_evaluation", "evaluation", "budget",
+    "policy_kl_trace", "occupancy", "elo", "h2h", "resource", "provider_event",
+    "provider_invocation",
+}
+
+
+def _event_quality(run_path: Path) -> dict:
+    """Count malformed/unknown records without hiding the usable records."""
+    path = run_path / "events.jsonl"
+    report = {
+        "total_lines": 0,
+        "valid_events": 0,
+        "malformed_lines": 0,
+        "invalid_events": 0,
+        "unknown_event_types": 0,
+        "duplicate_event_ids": 0,
+        "missing_event_ids": 0,
+        "missing_run_ids": 0,
+        "warnings": [],
+    }
+    if not path.exists():
+        return report
+    seen = set()
+    try:
+        lines = path.read_text().splitlines()
+    except OSError as exc:
+        report["warnings"].append(f"cannot read events: {exc}")
+        return report
+    for number, line in enumerate(lines, start=1):
+        report["total_lines"] += 1
+        try:
+            event = json.loads(line)
+        except (TypeError, json.JSONDecodeError):
+            report["malformed_lines"] += 1
+            report["warnings"].append(f"line {number}: malformed JSON")
+            continue
+        if not isinstance(event, dict):
+            report["invalid_events"] += 1
+            report["warnings"].append(f"line {number}: event is not an object")
+            continue
+        report["valid_events"] += 1
+        event_id = event.get("event_id")
+        if not event_id:
+            report["missing_event_ids"] += 1
+            report["warnings"].append(f"line {number}: missing event_id")
+        elif str(event_id) in seen:
+            report["duplicate_event_ids"] += 1
+            report["warnings"].append(f"line {number}: duplicate event_id {event_id}")
+        else:
+            seen.add(str(event_id))
+        if not event.get("run_id"):
+            report["missing_run_ids"] += 1
+            report["warnings"].append(f"line {number}: missing run_id")
+        event_type = event.get("event_type", event.get("event"))
+        if event_type not in KNOWN_EVENT_TYPES:
+            report["unknown_event_types"] += 1
+            report["warnings"].append(f"line {number}: unknown event_type {event_type!r}")
+    return report
+
+
 def _normalise_score_history(raw_history: Any) -> list[dict]:
     if not isinstance(raw_history, list):
         return []
@@ -145,6 +207,38 @@ def _trapezoid_auc(points: list[dict]) -> float | None:
     return total if complete_points else None
 
 
+def _multi_axis_auc(points: list[dict]) -> dict[str, float | None]:
+    axes = {
+        "coding_agent_act": "auc_coding_agent_act",
+        "episode": "auc_episode",
+        "env_step": "auc_env_step",
+        "token": "auc_token",
+        "time_s": "auc_time_s",
+    }
+    result = {}
+    for axis, name in axes.items():
+        total = 0.0
+        previous = None
+        complete = 0
+        for point in points:
+            x = point.get(axis)
+            score = point.get("score")
+            if x is None or score is None:
+                previous = None
+                continue
+            current = (float(x), float(score))
+            complete += 1
+            if previous is not None:
+                dx = current[0] - previous[0]
+                if dx < 0:
+                    raise ValueError(f"{axis} AUC x values must be non-decreasing")
+                total += dx * (current[1] + previous[1]) / 2.0
+            previous = current
+        result[name] = total if complete else None
+    result["auc_time"] = result["auc_time_s"]
+    return result
+
+
 def derive_research(summary: dict, metrics: dict, events: list[dict]) -> dict:
     """Derive chart-ready fields without replacing raw summary or events."""
     def metric(*keys):
@@ -166,6 +260,7 @@ def derive_research(summary: dict, metrics: dict, events: list[dict]) -> dict:
             act_order[act_id] = act_count
 
     score_history = []
+    auc_points = []
     fallback_x = 0
     for event in events:
         event_type = event.get("event_type", event.get("event"))
@@ -178,21 +273,48 @@ def derive_research(summary: dict, metrics: dict, events: list[dict]) -> dict:
         if score is None:
             if event.get("evaluation_status") in {"incomplete", "failed"}:
                 score_history.append({"x": x, "score": None, "act_id": act_id})
+                auc_points.append({"coding_agent_act": event.get("coding_agent_act", x),
+                                   "episode": event.get("episode"),
+                                   "env_step": event.get("env_step"),
+                                   "token": event.get("token"),
+                                   "time_s": event.get("time_s"), "score": None})
             continue
         score_history.append({
             "x": x,
             "score": score,
             "act_id": act_id,
         })
+        auc_points.append({
+            "coding_agent_act": event.get("coding_agent_act", x),
+            "episode": event.get("episode"),
+            "env_step": event.get("env_step"),
+            "token": event.get("token"),
+            "time_s": event.get("time_s"),
+            "score": score,
+        })
     if not score_history:
         score_history = _normalise_score_history(
             summary.get("score_history") or summary.get("benchmark_history")
         )
+        auc_points = [
+            {"coding_agent_act": point["x"], "episode": point["x"],
+             "env_step": point["x"], "token": point["x"],
+             "time_s": point["x"], "score": point["score"]}
+            for point in score_history
+        ]
     if not score_history and metric("benchmark_score", "evo_score") is not None:
         score_history = [{
             "x": budget.get("learning_coding_agent_acts", 0),
             "score": metric("benchmark_score", "evo_score"),
             "act_id": None,
+        }]
+        auc_points = [{
+            "coding_agent_act": budget.get("learning_coding_agent_acts", 0),
+            "episode": budget.get("learning_episodes"),
+            "env_step": budget.get("learning_env_steps"),
+            "token": budget.get("learning_total_tokens"),
+            "time_s": budget.get("learning_time_s"),
+            "score": metric("benchmark_score", "evo_score"),
         }]
     auc_coding_agent_act = metric("auc_coding_agent_act")
     if auc_coding_agent_act is None:
@@ -230,6 +352,7 @@ def derive_research(summary: dict, metrics: dict, events: list[dict]) -> dict:
             "episode": event.get("episode", index),
             "shift": shift,
             "state_count": event.get("state_count", len(state_ids) if isinstance(state_ids, list) else None),
+            "reference_state_count": event.get("reference_state_count"),
         })
 
     event_counts = Counter(event.get("event_type", event.get("event", "unknown")) for event in events)
@@ -248,13 +371,16 @@ def derive_research(summary: dict, metrics: dict, events: list[dict]) -> dict:
         "evo_score": evo_score,
         "gain": gain,
         "auc_coding_agent_act": auc_coding_agent_act,
+        "auc": _multi_axis_auc(auc_points),
         "evaluation_status": status,
         "budget": budget,
         "score_history": score_history,
         "ig_history": ig_history,
         "occupancy_history": occupancy_history,
+        "benchmark_results": summary.get("benchmark_results", []),
         "event_counts": dict(event_counts),
         "raw_event_count": len(events),
+        "quality": summary.get("event_quality", {}),
     }
 
 
@@ -266,6 +392,37 @@ def load_registry(data_dir: Path) -> list:
         return tomllib.loads(path.read_text()).get("runs", [])
     except (OSError, tomllib.TOMLDecodeError):
         return []
+
+
+def discover_entries(data_dir: Path) -> list[dict]:
+    """Use run files directly when aggregate.py has not produced a registry."""
+    entries = []
+    runs_root = data_dir / "runs"
+    if not runs_root.is_dir():
+        return entries
+    for summary_path in sorted(runs_root.rglob("summary.json")):
+        run_path = summary_path.parent
+        try:
+            summary = json.loads(summary_path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        try:
+            relative = str(run_path.relative_to(data_dir))
+            parts = run_path.relative_to(runs_root).parts
+            game, agent = parts[-3], parts[-2]
+        except (ValueError, IndexError):
+            continue
+        entries.append({
+            "run_id": summary.get("run_id", run_path.name),
+            "game": summary.get("game", game),
+            "agent": summary.get("agent", agent),
+            "type": summary.get("run_type", "eval"),
+            "path": relative,
+            "created": summary.get("created", ""),
+            "git_commit": summary.get("git_commit", ""),
+            "summary": summary,
+        })
+    return entries
 
 
 def load_run(data_dir: Path, entry: dict) -> RunData:
@@ -288,7 +445,9 @@ def load_run(data_dir: Path, entry: dict) -> RunData:
     for key, value in raw_summary.items():
         if key not in {"budget", "elo_history", "h2h"}:
             metrics[key] = value
-    return RunData(
+    research = derive_research(raw_summary, metrics, _load_events(run_path))
+    research["quality"] = _event_quality(run_path)
+    run = RunData(
         run_id=entry["run_id"],
         game=entry["game"],
         agent=entry["agent"],
@@ -301,6 +460,8 @@ def load_run(data_dir: Path, entry: dict) -> RunData:
         raw_metadata=raw_metadata,
         events=_load_events(run_path),
     )
+    run.research = research
+    return run
 
 
 def load_compare(data_dir: Path) -> dict:
@@ -411,7 +572,7 @@ def build_site(data_dir, output, template_dir=None):
     data_dir = Path(data_dir)
     output = Path(output)
     template_dir = Path(template_dir) if template_dir else Path(__file__).resolve().parent / "templates"
-    registry = load_registry(data_dir)
+    registry = load_registry(data_dir) or discover_entries(data_dir)
     runs = sorted([load_run(data_dir, entry) for entry in registry], key=lambda run: run.created, reverse=True)
     games = group_by_game(runs)
     compare = load_compare(data_dir)
