@@ -21,6 +21,7 @@ from agentbench_frame.tracking.records import (
 from agentbench_frame.tracking.writer import JSONLWriter
 from agentbench_frame.tracking.sampler import ResourceSampler
 from agentbench_frame.tracking.wrappers import TrackedEnv, TimedAgent
+from agentbench_frame.tracking.budget import BudgetRecorder
 
 __all__ = [
     "Run",
@@ -34,4 +35,5 @@ __all__ = [
     "ResourceSampler",
     "TrackedEnv",
     "TimedAgent",
+    "BudgetRecorder",
 ]

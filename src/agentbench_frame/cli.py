@@ -11,7 +11,7 @@ Subcommands:
 """
 
 import argparse
-import json, sys, tomllib
+import json, sys
 from pathlib import Path
 from typing import List, Optional
 
@@ -115,7 +115,13 @@ def _cmd_mcp(args):
 
 def _cmd_data_check(args):
     """Validate data directory against CI schema."""
-    import json, tomllib
+    try:
+        import tomllib as _toml_mod
+    except ImportError:
+        try:
+            import tomli as _toml_mod
+        except ImportError:
+            _toml_mod = None
     from agentbench_frame.tracking.run import _data_root
     data_dir = args.data_dir or _data_root()
     runs_root = Path(data_dir) / "runs"
@@ -131,11 +137,17 @@ def _cmd_data_check(args):
         errs = []
         # Check run.toml
         try:
-            meta = tomllib.loads(run_toml_path.read_text())
-            for field in ["run_id", "game", "agent", "type", "created"]:
-                val = meta.get("run", {}).get(field, "")
-                if not val:
-                    errs.append(f"run.toml: [run] missing '{field}'")
+            if _toml_mod is None:
+                content = run_toml_path.read_text()
+                for field in ["run_id", "game", "agent", "type", "created"]:
+                    if field + " =" not in content and field + "=" not in content:
+                        errs.append(f"run.toml: [run] missing '{field}'")
+            else:
+                meta = _toml_mod.loads(run_toml_path.read_text())
+                for field in ["run_id", "game", "agent", "type", "created"]:
+                    val = meta.get("run", {}).get(field, "")
+                    if not val:
+                        errs.append(f"run.toml: [run] missing '{field}'")
         except Exception as e:
             errs.append(f"run.toml: parse error: {e}")
 
@@ -189,6 +201,41 @@ def _cmd_data_list(args):
             found += 1
     if found == 0:
         print("No runs yet. Start one with: agentbench train --game 28_generals --agent my_agent")
+
+
+def _cmd_antwar2(args):
+    """Dispatch to AntWAR2 entry points."""
+    from agentbench_frame.entries import eval_entry, iter_entry, rl_entry
+
+    if args.antwar2_command == "eval":
+        if args.mode == "single":
+            summary = eval_entry.run_single(
+                target=args.target, n_games=args.n_games, seed=args.seed,
+                data_dir=args.data_dir, split_set=args.set,
+                population_root=args.population_root)
+        else:
+            summary = eval_entry.run_compare(
+                strategy_ids=args.strategies, n_games=args.n_games,
+                seed=args.seed, data_dir=args.data_dir, split_set=args.set,
+                population_root=args.population_root)
+        print("AntWAR2 eval complete:", summary.get("run_id"))
+
+    elif args.antwar2_command == "iterate":
+        summary = iter_entry.run_iteration(
+            base_id=args.base, iterations=args.iterations,
+            n_games=args.n_games, seed=args.seed, data_dir=args.data_dir,
+            population_root=args.population_root)
+        print("AntWAR2 iteration complete:", summary.get("run_id"))
+
+    elif args.antwar2_command == "train":
+        summary = rl_entry.run_rl(
+            episodes=args.episodes, lr=args.lr, ppo_epochs=args.ppo_epochs,
+            seed=args.seed, data_dir=args.data_dir, smoke=args.smoke,
+            population_root=args.population_root, agent_name=args.agent)
+        print("AntWAR2 RL complete:", summary.get("run_id"))
+
+    else:
+        print("Available: eval, iterate, train")
 
 
 def main(argv: Optional[List[str]] = None):
@@ -245,6 +292,38 @@ def main(argv: Optional[List[str]] = None):
     p_list = p_data_sub.add_parser("list", help="List all runs in data directory")
     p_list.add_argument("--data-dir", default=None, help="Data directory (default: $AGENTBENCH_DATA)")
 
+    # --- antwar2 ---
+    p_aw = sub.add_parser("antwar2", help="AntWAR2 full loop entry points")
+    p_aw_sub = p_aw.add_subparsers(dest="antwar2_command")
+
+    p_aw_eval = p_aw_sub.add_parser("eval", help="Evaluation")
+    p_aw_eval.add_argument("--mode", choices=["compare", "single"], default="compare")
+    p_aw_eval.add_argument("--target", default="greedy")
+    p_aw_eval.add_argument("--strategies", nargs="*", default=["hold", "greedy", "pragmatic"])
+    p_aw_eval.add_argument("--n-games", type=int, default=4)
+    p_aw_eval.add_argument("--seed", type=int, default=42)
+    p_aw_eval.add_argument("--data-dir", default=None)
+    p_aw_eval.add_argument("--set", choices=["visible", "train", "validation", "hidden"], default="visible")
+    p_aw_eval.add_argument("--population-root", default=None)
+
+    p_aw_iter = p_aw_sub.add_parser("iterate", help="Coding-agent iteration")
+    p_aw_iter.add_argument("--base", default="greedy")
+    p_aw_iter.add_argument("--iterations", type=int, default=3)
+    p_aw_iter.add_argument("--n-games", type=int, default=4)
+    p_aw_iter.add_argument("--seed", type=int, default=42)
+    p_aw_iter.add_argument("--data-dir", default=None)
+    p_aw_iter.add_argument("--population-root", default=None)
+
+    p_aw_rl = p_aw_sub.add_parser("train", help="RL training")
+    p_aw_rl.add_argument("--episodes", type=int, default=8)
+    p_aw_rl.add_argument("--lr", type=float, default=3e-4)
+    p_aw_rl.add_argument("--ppo-epochs", type=int, default=4)
+    p_aw_rl.add_argument("--seed", type=int, default=42)
+    p_aw_rl.add_argument("--data-dir", default=None)
+    p_aw_rl.add_argument("--smoke", action="store_true")
+    p_aw_rl.add_argument("--population-root", default=None)
+    p_aw_rl.add_argument("--agent", default="rl_antwar2")
+
     args = parser.parse_args(argv)
 
     if args.command == "train":
@@ -259,6 +338,9 @@ def main(argv: Optional[List[str]] = None):
         _cmd_report(args)
     elif args.command == "mcp":
         _cmd_mcp(args)
+    elif args.command == "antwar2":
+        _cmd_antwar2(args)
+
     elif args.command == "data":
         if args.data_command == "check":
             _cmd_data_check(args)

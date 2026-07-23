@@ -16,6 +16,7 @@ from agentbench_frame.tracking.records import RunMeta
 from agentbench_frame.tracking.writer import JSONLWriter
 from agentbench_frame.tracking.sampler import ResourceSampler
 from agentbench_frame.tracking.wrappers import TrackedEnv, TimedAgent
+from agentbench_frame.tracking.budget import BudgetRecorder
 
 
 def _data_root() -> str:
@@ -101,6 +102,8 @@ class Run:
         self._elo_history: List[Dict] = []
         self._h2h: Dict[str, Dict[str, float]] = {}
         self._resource_samples: List[Dict] = []
+        self.budget = BudgetRecorder()
+        self.budget.start_clock()
 
     # ---- wrappers ----
 
@@ -146,6 +149,14 @@ class Run:
             if a not in self._h2h: self._h2h[a] = {}
             self._h2h[a].update(opponents)
 
+    def log_cost(self, **kwargs):
+        """Record a cost entry (API tokens, GPU, interactions)."""
+        self.budget.log_cost(**kwargs)
+        self.write("cost", **kwargs)
+
+    def log_interactions(self, interactions: int, label: str = "env"):
+        self.budget.log_interactions(interactions, label=label)
+
     # ---- finish ----
 
     def finish(self) -> Dict[str, Any]:
@@ -180,6 +191,7 @@ class Run:
             "elo_history": self._elo_history,
             "h2h": self._h2h,
             "resource_summary": self._resource_summary(),
+            "cost_summary": self.budget.summary(),
             "config": self.config,
         }
 
