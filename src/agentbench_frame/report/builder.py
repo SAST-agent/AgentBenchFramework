@@ -130,7 +130,7 @@ class ReportBuilder:
                                 for line in event_file:
                                     try:
                                         value = json.loads(line)
-                                    except (TypeError, json.JSONDecodeError):
+                                    except (TypeError, ValueError):
                                         continue
                                     if isinstance(value, dict):
                                         events.append(value)

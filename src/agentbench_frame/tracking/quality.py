@@ -54,7 +54,7 @@ def inspect_event_lines(
         report.total_lines += 1
         try:
             event = json.loads(line)
-        except (TypeError, json.JSONDecodeError):
+        except (TypeError, ValueError):
             report.malformed_lines += 1
             report.warnings.append(f"line {line_number}: malformed JSON")
             continue

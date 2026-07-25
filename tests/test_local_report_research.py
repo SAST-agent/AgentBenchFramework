@@ -19,6 +19,7 @@ class LocalResearchReportTests(unittest.TestCase):
                 "budget": {"learning_coding_agent_acts": 2},
                 "benchmark_results": [{"case_id": "case-1", "outcome": "win", "valid": True}],
             }))
+            oversized_integer = "1" * 5001
             (run_dir / "events.jsonl").write_text("\n".join([
                 json.dumps({"event_type": "coding_agent_act", "act_id": "a1"}),
                 json.dumps({"event_type": "act_evaluation", "act_id": "a1", "score": 0.5}),
@@ -100,19 +101,26 @@ class LocalResearchReportTests(unittest.TestCase):
                     "episode": 11,
                     "trace": [10 ** 3999],
                 }),
-            ]) + "\n")
+            ]) + "\n" + (
+                '{"event_type":"policy_kl_trace","episode":12,"trace":['
+                + oversized_integer
+                + "]}\n"
+            ))
 
             output = root / "site"
             builder = ReportBuilder(data_dir=str(root), output_dir=str(output))
             builder.build()
             ig_history = builder.runs[0]["research"]["ig_history"]
             ig_chart = builder.runs[0]["research"]["ig_chart"]
+            quality = builder.runs[0]["research"]["quality"]
             html = (output / "index.html").read_text()
 
         self.assertAlmostEqual(ig_history[0]["trajectory_kl_episode"], 0.4)
         self.assertAlmostEqual(ig_history[0]["mean_local_policy_kl"], 0.2)
         self.assertEqual(ig_history[0]["status"], "complete")
         self.assertEqual(ig_history[0]["estimand"], "legacy_unspecified")
+        self.assertEqual(len(ig_history), 11)
+        self.assertEqual(quality["malformed_lines"], 1)
         self.assertIsNone(ig_history[1]["trajectory_kl_episode"])
         self.assertIsNone(ig_history[1]["mean_local_policy_kl"])
         self.assertEqual(ig_history[1]["status"], "incomplete")
