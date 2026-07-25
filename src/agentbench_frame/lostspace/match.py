@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import signal
 import subprocess
 import sys
@@ -39,18 +40,105 @@ class LostSpaceMatchError(RuntimeError):
     """Raised when a LostSpace match cannot reach a valid result."""
 
 
+def _to_argv(rest: str) -> list[str]:
+    """Split a (post-``cd``) command string into an argv list, Windows-safe.
+
+    ``shlex.split(posix=False)`` preserves backslashes in Windows paths but
+    leaves the surrounding double-quotes that ``subprocess.list2cmdline``
+    emits around tokens containing spaces; we strip one pair per token.
+    """
+    argv: list[str] = []
+    for token in shlex.split(rest, posix=False):
+        if len(token) >= 2 and token[0] == '"' and token[-1] == '"':
+            token = token[1:-1]
+        argv.append(token)
+    return argv
+
+
+def _split_cwd(command: str) -> tuple[str, str | None]:
+    """Pull a leading ``cd <dir> &&`` (or ``cd /d <dir> &&``) off ``command``.
+
+    Returns ``(rest, cwd)``. We strip the ``cd`` chain because leaving it in
+    the ``shell=True`` command on Windows (``cmd /c "cd /d X && prog"``)
+    mediates the stdin pipe through cmd.exe, which intermittently rejects
+    large writes with ``OSError [Errno 22] Invalid argument`` once the
+    per-turn ``roundbegin`` payload (a few hundred bytes) is flushed before
+    the child has drained it. Passing ``cwd`` to ``Popen`` instead launches
+    the program directly and keeps the pipe unmediated.
+    """
+    rest = command.strip()
+    cwd: str | None = None
+    if rest.startswith("cd "):
+        # posix=False keeps backslashes in Windows paths (D:\pymol\python.exe);
+        # we strip the surrounding quotes that list2cmdline added.
+        tokens = _to_argv(rest)
+        idx = 1
+        if idx < len(tokens) and tokens[idx] == "/d":  # Windows flag
+            idx += 1
+        if idx < len(tokens):
+            cwd = tokens[idx]
+            idx += 1
+        if idx < len(tokens) and tokens[idx] == "&&":
+            idx += 1
+        rest = " ".join(tokens[idx:])
+    return rest, cwd
+
+
+def _resolve_windows_executable(argv: list[str], cwd: str | None) -> None:
+    """Resolve a bare program name (e.g. ``main``) under Windows.
+
+    ``cmd /c`` would use PATHEXT to turn ``main`` into ``main.exe`` in the
+    current directory; a direct ``CreateProcess`` call does not, so a
+    cwd-local C++ binary built by ``make`` (``main``) would not be found.
+    Append ``.exe`` when the bare name resolves in ``cwd`` (or on PATH).
+    """
+    if not argv:
+        return
+    exe = argv[0]
+    if os.path.sep in exe or "/" in exe or "." in exe:
+        return  # already a path or has an extension
+    candidate = f"{exe}.exe"
+    search_dirs: list[str] = []
+    if cwd:
+        search_dirs.append(cwd)
+    search_dirs += os.environ.get("PATH", "").split(os.pathsep)
+    for directory in search_dirs:
+        if directory and os.path.isfile(os.path.join(directory, candidate)):
+            argv[0] = os.path.join(directory if cwd and directory == cwd else directory, candidate)
+            return
+
+
 def _start(command: str, label: str) -> subprocess.Popen[bytes]:
-    kwargs: dict[str, Any] = dict(
-        shell=True,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.DEVNULL,
-    )
+    shell_command, cwd = _split_cwd(command)
     if _IS_WINDOWS:
-        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        # Launch the program directly with an argv + cwd instead of routing
+        # through ``cmd /c``. cmd.exe as a pipe middleman intermittently
+        # rejects large stdin writes (Errno 22) on the per-turn ``roundbegin``
+        # frame; going argv-first removes the race and keeps the pipe direct.
+        argv = _to_argv(shell_command)
+        _resolve_windows_executable(argv, cwd)
+        kwargs: dict[str, Any] = dict(
+            args=argv,
+            shell=False,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+        )
+        if cwd:
+            kwargs["cwd"] = cwd
     else:
-        kwargs["start_new_session"] = True
-    process = subprocess.Popen(command, **kwargs)
+        kwargs = dict(
+            args=shell_command,
+            shell=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        if cwd:
+            kwargs["cwd"] = cwd
+    process = subprocess.Popen(**kwargs)
     if process.stdin is None or process.stdout is None:
         raise LostSpaceMatchError(f"failed to open pipes for {label}")
     return process
