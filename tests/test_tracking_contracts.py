@@ -225,6 +225,10 @@ class TrackingContractTests(unittest.TestCase):
         self.assertEqual(event["direction"], "new||old")
         self.assertEqual(event["log_base"], "e")
         self.assertEqual(event["rollout_source"], "new_policy")
+        self.assertEqual(
+            event["estimand"],
+            "epsilon_regularized_local_kl_sum_under_new_policy_occupancy",
+        )
         self.assertAlmostEqual(event["trajectory_kl_episode"], 0.3)
         self.assertAlmostEqual(event["mean_local_policy_kl"], 0.15)
         self.assertEqual(event["decision_steps"], 2)

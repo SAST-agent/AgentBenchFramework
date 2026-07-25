@@ -91,6 +91,13 @@ class _ActivePolicy:
         self.transitions.append(transition)
 
 
+class _MutatingActivePolicy(_ActivePolicy):
+    def observe_transition(self, transition):
+        transition["info"]["mutated_by_active"] = True
+        transition["next_observation"]["state"]["step"] = -999
+        self.transitions.append(transition)
+
+
 class _ReferencePolicy:
     def __init__(self, fail=False):
         self.name = "old-policy"
@@ -189,6 +196,10 @@ class TrajectoryKLRuntimeTests(unittest.TestCase):
         self.assertEqual(episode.metadata["player_id"], 0)
         self.assertEqual(episode.metadata["opponent_name"], "opponent")
         self.assertEqual(
+            episode.estimand,
+            "epsilon_regularized_local_kl_sum_under_new_policy_occupancy",
+        )
+        self.assertEqual(
             [record.selected_action_id for record in episode.decisions],
             ["a", "b"],
         )
@@ -230,6 +241,118 @@ class TrajectoryKLRuntimeTests(unittest.TestCase):
         self.assertIsNone(episode.mean_local_policy_kl)
         self.assertEqual(episode.trace, (None,))
         self.assertIn("reference unavailable", episode.errors[0])
+
+    def test_new_and_reference_sessions_receive_isolated_transition_snapshots(self):
+        from agentbench_frame.arena.match import Match
+        from agentbench_frame.eval.trajectory_kl import (
+            TrajectoryKLAgent,
+            TrajectoryKLConfig,
+        )
+
+        active = _MutatingActivePolicy()
+        reference = _ReferencePolicy()
+        measured = TrajectoryKLAgent(
+            active_policy=active,
+            reference_policy=reference,
+            support_provider=_support,
+            config=TrajectoryKLConfig("v1", "v2", 0.1),
+        )
+
+        Match(
+            _AlternatingEnv(total_steps=1),
+            measured,
+            _Opponent(),
+            alternate_starts=False,
+        ).run(n_games=1)
+
+        self.assertTrue(active.transitions[0]["info"]["mutated_by_active"])
+        self.assertNotIn("mutated_by_active", reference.transitions[0]["info"])
+        self.assertEqual(
+            reference.transitions[0]["next_observation"]["state"]["step"],
+            1,
+        )
+
+    def test_match_aborts_and_emits_incomplete_measurement_on_environment_failure(self):
+        from agentbench_frame.arena.match import Match
+        from agentbench_frame.eval.trajectory_kl import (
+            TrajectoryKLAgent,
+            TrajectoryKLConfig,
+        )
+
+        class FailingEnv(_AlternatingEnv):
+            def step(self, action):
+                self.actions.append(action)
+                raise RuntimeError("environment crashed")
+
+        completed = []
+        measured = TrajectoryKLAgent(
+            active_policy=_ActivePolicy(),
+            reference_policy=_ReferencePolicy(),
+            support_provider=_support,
+            config=TrajectoryKLConfig("v1", "v2", 0.1),
+            on_episode_complete=completed.append,
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "environment crashed"):
+            Match(
+                FailingEnv(),
+                measured,
+                _Opponent(),
+                alternate_starts=False,
+            ).run(n_games=1)
+
+        self.assertEqual(len(completed), 1)
+        self.assertEqual(completed[0].status, "incomplete")
+        self.assertIsNone(completed[0].trajectory_kl_episode)
+        self.assertIn("environment crashed", completed[0].errors[-1])
+
+    def test_measurement_persistence_callback_failure_is_not_silenced(self):
+        from agentbench_frame.arena.match import Match
+        from agentbench_frame.eval.trajectory_kl import (
+            TrajectoryKLAgent,
+            TrajectoryKLConfig,
+        )
+
+        def fail_persistence(_result):
+            raise OSError("cannot persist trajectory KL")
+
+        measured = TrajectoryKLAgent(
+            active_policy=_ActivePolicy(),
+            reference_policy=_ReferencePolicy(),
+            support_provider=_support,
+            config=TrajectoryKLConfig("v1", "v2", 0.1),
+            on_episode_complete=fail_persistence,
+        )
+
+        with self.assertRaisesRegex(OSError, "cannot persist trajectory KL"):
+            Match(
+                _AlternatingEnv(total_steps=1),
+                measured,
+                _Opponent(),
+                alternate_starts=False,
+            ).run(n_games=1)
+
+    def test_reset_aborts_unfinished_episode_before_clearing_decisions(self):
+        from agentbench_frame.eval.trajectory_kl import (
+            TrajectoryKLAgent,
+            TrajectoryKLConfig,
+        )
+
+        completed = []
+        measured = TrajectoryKLAgent(
+            active_policy=_ActivePolicy(),
+            reference_policy=_ReferencePolicy(),
+            support_provider=_support,
+            config=TrajectoryKLConfig("v1", "v2", 0.1),
+            on_episode_complete=completed.append,
+        )
+        measured.reset()
+        measured.act(_Observation(player_id=0, step=0).to_dict())
+        measured.reset()
+
+        self.assertEqual(len(completed), 1)
+        self.assertEqual(completed[0].status, "incomplete")
+        self.assertIn("reset before terminal transition", completed[0].errors[-1])
 
     def test_config_requires_fixed_non_degenerate_epsilon_and_version_ids(self):
         from agentbench_frame.eval.trajectory_kl import TrajectoryKLConfig

@@ -136,6 +136,13 @@ class InformationGainContractTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     validate_policy_distribution(invalid, support)
 
+        with self.assertRaises(TypeError):
+            validate_policy_distribution(
+                {"a": 0.2, "b": 0.2},
+                support,
+                tolerance=float("inf"),
+            )
+
     def test_epsilon_regularization_gives_finite_common_support(self):
         from agentbench_frame.eval.information_gain import epsilon_regularize, policy_kl
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
@@ -105,6 +106,9 @@ class TrajectoryKLEpisodeResult:
     direction: str = "new||old"
     log_base: str = "e"
     rollout_source: str = "new_policy"
+    estimand: str = (
+        "epsilon_regularized_local_kl_sum_under_new_policy_occupancy"
+    )
 
     @property
     def decision_steps(self) -> int:
@@ -121,6 +125,7 @@ class TrajectoryKLEpisodeResult:
             "direction": self.direction,
             "log_base": self.log_base,
             "rollout_source": self.rollout_source,
+            "estimand": self.estimand,
             "decision_steps": self.decision_steps,
             "trace": list(self.trace),
             "trajectory_kl_episode": self.trajectory_kl_episode,
@@ -167,6 +172,8 @@ class TrajectoryKLAgent:
         self._pending_episode_metadata = dict(metadata)
 
     def reset(self) -> None:
+        if self._episode > 0 and self._latest_result is None:
+            self.abort_episode("reset before terminal transition")
         self._episode += 1
         self._episode_metadata = {
             **dict(self.config.metadata),
@@ -273,6 +280,7 @@ class TrajectoryKLAgent:
         return action
 
     def observe_transition(self, transition: Mapping[str, Any]) -> None:
+        transition_snapshot = copy.deepcopy(dict(transition))
         for label, policy in (
             ("new policy", self.active_policy),
             ("reference policy", self.reference_policy),
@@ -280,13 +288,23 @@ class TrajectoryKLAgent:
             observe = getattr(policy, "observe_transition", None)
             if callable(observe):
                 try:
-                    observe(transition)
+                    observe(copy.deepcopy(transition_snapshot))
                 except Exception as exc:
                     self._errors.append(
                         f"{label} transition observation failed: {exc}"
                     )
-        if transition.get("terminated") or transition.get("truncated"):
+        if transition_snapshot.get("terminated") or transition_snapshot.get(
+            "truncated"
+        ):
             self._finish_episode()
+
+    def abort_episode(self, reason: str) -> TrajectoryKLEpisodeResult:
+        """Finalize an unfinished episode as incomplete without discarding data."""
+
+        if self._latest_result is not None:
+            return self._latest_result
+        self._errors.append(f"episode aborted: {reason}")
+        return self._finish_episode()
 
     def _finish_episode(self) -> TrajectoryKLEpisodeResult:
         if self._latest_result is not None:
@@ -334,4 +352,3 @@ class TrajectoryKLAgent:
         self,
     ) -> Optional[TrajectoryKLEpisodeResult]:
         return self._latest_result
-

@@ -144,7 +144,7 @@ $$
 
 如果不希望引入 $\epsilon$ 这一测量约定，可以使用 Jensen–Shannon divergence 或 action disagreement rate。它们能处理确定性 HL，但 JS 不具有 KL 轨迹链式分解性质。
 
-### 4.2 Episode 级 trajectory KL
+### 4.2 Episode 级 epsilon-regularized trajectory-KL estimate
 
 对于第 $i$ 个 episode，使用动作发生前的状态计算：
 
@@ -153,13 +153,19 @@ TrajectoryKL_{k,i}
 =
 \sum_{t=0}^{T_{k,i}-1}
 D_{KL}\left(
-\pi^k(\cdot\mid z_{k,i,t})
+\tilde\pi^k(\cdot\mid z_{k,i,t})
 \,\middle\|
-\pi^{k-1}(\cdot\mid z_{k,i,t})
+\tilde\pi^{k-1}(\cdot\mid z_{k,i,t})
 \right).
 $$
 
 终止状态不参与 KL，因为终止状态不再产生动作。
+
+当前 rollout 的环境动作来自原始新策略 $\pi^k$，而局部 KL 使用
+epsilon-regularized 的 $\tilde\pi$。因此严格 estimand 是
+`epsilon_regularized_local_kl_sum_under_new_policy_occupancy`，不是原始
+策略的精确 path KL。只有 rollout 也从同一个 $\tilde\pi^k$ 采样时，才能
+使用 regularized 策略 forward trajectory KL 的链式分解解释。
 
 长度归一化的辅助量为：
 

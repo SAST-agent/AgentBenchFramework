@@ -192,22 +192,73 @@ class ReportBuilder:
                 valid_trace = isinstance(trace, list) and bool(trace)
                 if valid_trace:
                     for value in trace:
-                        if value is None:
+                        if (
+                            not isinstance(value, (int, float))
+                            or isinstance(value, bool)
+                        ):
                             valid_trace = False
                             break
-                        try:
-                            number = float(value)
-                        except (TypeError, ValueError):
-                            valid_trace = False
-                            break
+                        number = float(value)
                         if not math.isfinite(number) or number < 0.0:
                             valid_trace = False
                             break
                         values.append(number)
                 declared_status = event.get("measurement_status")
-                complete = valid_trace and declared_status not in {
-                    "incomplete", "failed"
-                }
+                decision_steps = event.get(
+                    "decision_steps",
+                    len(trace) if isinstance(trace, list) else None,
+                )
+                aligned = (
+                    isinstance(decision_steps, int)
+                    and not isinstance(decision_steps, bool)
+                    and isinstance(trace, list)
+                    and decision_steps == len(trace)
+                )
+                decisions_present = "decisions" in event
+                decisions = event.get("decisions")
+                if decisions_present:
+                    aligned = (
+                        aligned
+                        and isinstance(decisions, list)
+                        and len(decisions) == len(trace)
+                    )
+                    if aligned:
+                        for decision, value in zip(decisions, values):
+                            local_value = (
+                                decision.get("local_policy_kl")
+                                if isinstance(decision, dict)
+                                else None
+                            )
+                            if (
+                                not isinstance(local_value, (int, float))
+                                or isinstance(local_value, bool)
+                                or not math.isfinite(float(local_value))
+                                or float(local_value) < 0.0
+                                or not math.isclose(
+                                    float(local_value),
+                                    value,
+                                    rel_tol=0.0,
+                                    abs_tol=1e-12,
+                                )
+                            ):
+                                aligned = False
+                                break
+                status_allows_complete = (
+                    declared_status == "complete"
+                    if decisions_present
+                    else declared_status in {None, "complete"}
+                )
+                complete = valid_trace and aligned and status_allows_complete
+                if complete:
+                    display_status = "complete"
+                elif (
+                    isinstance(declared_status, str)
+                    and declared_status
+                    and declared_status != "complete"
+                ):
+                    display_status = declared_status
+                else:
+                    display_status = "incomplete"
                 trajectory_kl_episode = sum(values) if complete else None
                 mean_local_policy_kl = (
                     trajectory_kl_episode / len(values)
@@ -219,11 +270,8 @@ class ReportBuilder:
                     "trajectory_kl_episode": trajectory_kl_episode,
                     "mean_local_policy_kl": mean_local_policy_kl,
                     "ig": trajectory_kl_episode,
-                    "decision_steps": event.get(
-                        "decision_steps",
-                        len(trace) if isinstance(trace, list) else None,
-                    ),
-                    "status": "complete" if complete else "incomplete",
+                    "decision_steps": decision_steps,
+                    "status": display_status,
                 })
             elif event_type == "occupancy":
                 state_ids = event.get("state_ids")

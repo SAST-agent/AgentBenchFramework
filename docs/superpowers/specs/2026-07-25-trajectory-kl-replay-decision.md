@@ -89,10 +89,21 @@ mean_local_policy_kl  = trajectory_kl_episode / T
 前者单位为 `nats / episode`，后者单位为 `nats / decision`。主曲线保留
 每个 episode 的 trajectory KL，不先对全部 episode 求一个全局平均。
 
-在固定初始分布、环境转移核和对手策略，并由新策略 rollout 提供测量轨迹
-时，episode trace 的期望对应 forward trajectory KL 的链式分解。若接入方
-使用其他 rollout 分布，必须在 measurement metadata 中明确记录，不能仍
-声称是 `KL(P_k || P_{k-1})`。
+当前环境动作由原始新策略产生，但局部 KL 使用 epsilon-regularized 的
+新旧分布。因此该量的严格 estimand 是：
+
+```text
+E_{trajectory ~ original new policy}
+[Σ_t KL(epsilon_regularized_new || epsilon_regularized_old)]
+```
+
+即 `epsilon_regularized_local_kl_sum_under_new_policy_occupancy`。它保持
+RL/HL 的共同量纲，但不是原始策略的 `KL(P_k || P_{k-1})`，也不是由
+epsilon-regularized 新策略生成 occupancy 时的精确 path KL。只有实际
+rollout 也从同一个 regularized 新策略采样，才能对后者使用轨迹 KL 链式
+分解的严格解释。事件必须保存 `estimand`、`rollout_source` 和 `epsilon`，
+报告将 `trajectory_kl_episode` 称为 epsilon-regularized trajectory-KL
+estimate，而不是无条件声称精确 forward trajectory KL。
 
 `occupancy_shift` 继续作为独立辅助量，不能与 trajectory KL 相加。
 

@@ -187,4 +187,3 @@ Run: `uv run --extra report --with pytest pytest -q`
 - [ ] **Step 3: Audit every requirement**
 
 Inspect the diff and map each Global Constraint to code plus a covering test. Confirm the implementation does not add replay parsing, does not infer an HL distribution, does not include opponent decisions in the target trace, does not average trajectory KL as the primary metric, and does not mutate legacy event readability.
-

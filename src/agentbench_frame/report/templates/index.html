@@ -12,7 +12,7 @@
     {% if lr.get('score_history') %}<table class="data-table"><tr><th>Act</th><th>Score</th><th>Act id</th></tr>{% for point in lr.get('score_history') %}<tr><td>{{ point.x }}</td><td>{% if point.score is none %}<span class="amber">missing</span>{% else %}{{ fmt_pct(point.score) }}{% endif %}</td><td class="mono">{{ point.act_id or '—' }}</td></tr>{% endfor %}</table>{% else %}<div class="empty-state">No score history yet.</div>{% endif %}
   </article>
   <article class="panel">
-    <div class="panel-header"><div><h2>{{ icon('spark') }} Information gain</h2><p class="panel-subtitle">Trajectory KL on each new-policy rollout; incomplete episodes remain gaps</p></div><div class="panel-meta">Trajectory KL<br>nats / episode</div></div>
+    <div class="panel-header"><div><h2>{{ icon('spark') }} Information gain</h2><p class="panel-subtitle">ε-regularized local-KL sum under new-policy occupancy; incomplete episodes remain gaps</p></div><div class="panel-meta">Trajectory KL estimate<br>nats / episode</div></div>
     {% if lr.get('ig_history') %}
     {% set chart = lr.get('ig_chart', {}) %}
     <svg class="kl-chart" aria-label="Trajectory KL by episode" data-segment-count="{{ chart.get('segments', [])|length }}" viewBox="0 0 {{ chart.get('width', 560) }} {{ chart.get('height', 180) }}" role="img">

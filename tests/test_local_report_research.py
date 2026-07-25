@@ -41,6 +41,45 @@ class LocalResearchReportTests(unittest.TestCase):
                     "mean_local_policy_kl": 999.0,
                     "decision_steps": 2,
                 }),
+                json.dumps({
+                    "event_type": "policy_kl_trace",
+                    "episode": 4,
+                    "measurement_status": "quarantined",
+                    "trace": [0.7],
+                    "decision_steps": 1,
+                    "decisions": [{"local_policy_kl": 0.7}],
+                }),
+                json.dumps({
+                    "event_type": "policy_kl_trace",
+                    "episode": 5,
+                    "measurement_status": "complete",
+                    "trace": [0.8],
+                    "decision_steps": 2,
+                    "decisions": [
+                        {"local_policy_kl": 0.8},
+                        {"local_policy_kl": 0.1},
+                    ],
+                }),
+                json.dumps({
+                    "event_type": "policy_kl_trace",
+                    "episode": 6,
+                    "trace": ["0.1", 0.3],
+                }),
+                json.dumps({
+                    "event_type": "policy_kl_trace",
+                    "episode": 7,
+                    "trace": [True, 0.3],
+                }),
+                json.dumps({
+                    "event_type": "policy_kl_trace",
+                    "episode": 8,
+                    "trace": [0.1, 0.3],
+                    "decision_steps": 2,
+                    "decisions": [
+                        {"local_policy_kl": 0.1},
+                        {"local_policy_kl": 0.3},
+                    ],
+                }),
             ]) + "\n")
 
             output = root / "site"
@@ -58,6 +97,13 @@ class LocalResearchReportTests(unittest.TestCase):
         self.assertEqual(ig_history[1]["status"], "incomplete")
         self.assertAlmostEqual(ig_history[2]["trajectory_kl_episode"], 0.6)
         self.assertAlmostEqual(ig_history[2]["mean_local_policy_kl"], 0.3)
+        self.assertIsNone(ig_history[3]["trajectory_kl_episode"])
+        self.assertEqual(ig_history[3]["status"], "quarantined")
+        self.assertIsNone(ig_history[4]["trajectory_kl_episode"])
+        self.assertEqual(ig_history[4]["status"], "incomplete")
+        for point in ig_history[5:]:
+            self.assertIsNone(point["trajectory_kl_episode"])
+            self.assertEqual(point["status"], "incomplete")
         self.assertEqual(len(ig_chart["segments"]), 2)
         self.assertIn("Information gain", html)
         self.assertIn("Trajectory KL", html)

@@ -260,6 +260,9 @@ class Run:
             direction="new||old",
             log_base="e",
             rollout_source="new_policy",
+            estimand=(
+                "epsilon_regularized_local_kl_sum_under_new_policy_occupancy"
+            ),
         )
 
     def log_trajectory_kl_result(self, result: Any) -> None:
@@ -313,6 +316,10 @@ class Run:
         payload.setdefault("direction", "new||old")
         payload.setdefault("log_base", "e")
         payload.setdefault("rollout_source", "new_policy")
+        payload.setdefault(
+            "estimand",
+            "epsilon_regularized_local_kl_sum_under_new_policy_occupancy",
+        )
         payload.setdefault(
             "context_refs",
             [decision.get("context_ref") for decision in decisions],

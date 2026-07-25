@@ -12,11 +12,12 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 from agentbench_frame.eval.measurement import ActionSupport
 
 
+POLICY_SUM_TOLERANCE = 1e-9
+
+
 def validate_policy_distribution(
     distribution: Mapping[str, float],
     support: ActionSupport,
-    *,
-    tolerance: float = 1e-9,
 ) -> List[float]:
     """Validate and align a strict action-ID probability distribution."""
 
@@ -33,7 +34,12 @@ def validate_policy_distribution(
     values = [float(distribution[action_id]) for action_id in support.action_ids]
     if any(not math.isfinite(value) or value < 0.0 for value in values):
         raise ValueError("probabilities must be finite and non-negative")
-    if not math.isclose(sum(values), 1.0, rel_tol=0.0, abs_tol=tolerance):
+    if not math.isclose(
+        sum(values),
+        1.0,
+        rel_tol=0.0,
+        abs_tol=POLICY_SUM_TOLERANCE,
+    ):
         raise ValueError("policy probabilities must sum to 1")
     return values
 

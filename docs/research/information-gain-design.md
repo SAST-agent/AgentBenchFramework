@@ -116,9 +116,16 @@ TrajectoryKL_{k,e}
 =
 \sum_{t=0}^{T_{k,e}-1}
 D_{KL}\left(
-\pi^k(\cdot\mid z_{k,e,t})\,\middle\|\,\pi^{k-1}(\cdot\mid z_{k,e,t})
+\tilde\pi^k(\cdot\mid z_{k,e,t})\,\middle\|\,
+\tilde\pi^{k-1}(\cdot\mid z_{k,e,t})
 \right).
 $$
+
+当前实现中的轨迹由原始新策略 $\pi^k$ 产生，局部项使用经过统一 epsilon
+通道的 $\tilde\pi$。所以该 episode 值严格来说是“新策略 occupancy 下的
+epsilon-regularized 局部 KL 和”，不是原始策略 path distribution 的
+$KL(P_k\|P_{k-1})$。字段名 `trajectory_kl_episode` 为数据格式稳定性保留，
+事件通过 `estimand` 明确其严格定义。
 
 长度归一化辅助量为：
 
@@ -202,8 +209,10 @@ $$
 3. 相同的先手/后手安排；
 4. 相同的 episode 终止和截断规则；
 5. 相同的合法动作编码和 epsilon；
-6. 相同的 rollout 生成协议，并明确记录提供测量轨迹的策略分布；只有新策略
-   rollout 才能把局部 trace 的期望解释为 forward trajectory KL。
+6. 相同的 rollout 生成协议，并明确记录提供测量轨迹的策略分布。当前新策略
+   rollout 对应的是 `epsilon_regularized_local_kl_sum_under_new_policy_occupancy`；
+   只有 rollout 本身也从相同的 regularized 新策略采样，才能解释为该
+   regularized 策略的精确 forward trajectory KL。
 
 横轴可同时提供两种版本：
 
@@ -539,6 +548,7 @@ decisions[*].selected_action_id
 decisions[*].new_probabilities
 decisions[*].old_probabilities
 decisions[*].support_id
+estimand
 metadata
 errors
 ```
