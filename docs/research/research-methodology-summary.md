@@ -144,14 +144,13 @@ $$
 
 如果不希望引入 $\epsilon$ 这一测量约定，可以使用 Jensen–Shannon divergence 或 action disagreement rate。它们能处理确定性 HL，但 JS 不具有 KL 轨迹链式分解性质。
 
-### 4.2 episode 级信息增益
+### 4.2 Episode 级 trajectory KL
 
 对于第 $i$ 个 episode，使用动作发生前的状态计算：
 
 $$
-IG_{k,i}
+TrajectoryKL_{k,i}
 =
-\frac{1}{T_{k,i}}
 \sum_{t=0}^{T_{k,i}-1}
 D_{KL}\left(
 \pi^k(\cdot\mid z_{k,i,t})
@@ -162,7 +161,17 @@ $$
 
 终止状态不参与 KL，因为终止状态不再产生动作。
 
-主分析保留每个 episode 的 $IG_{k,i}$；如果一轮有多个 episode，可以绘制散点、均值/中位数和置信区间。不要把所有迭代过程先压成一个全局均值。
+长度归一化的辅助量为：
+
+$$
+MeanLocalKL_{k,i}
+=
+\frac{TrajectoryKL_{k,i}}{T_{k,i}}.
+$$
+
+主分析保留每个 episode 的 $TrajectoryKL_{k,i}$；如果一轮有多个 episode，
+可以绘制散点、均值/中位数和置信区间。`MeanLocalKL` 单独展示，不与
+trajectory KL 共用名称或单位。不要把所有迭代过程先压成一个全局均值。
 
 ## 5. 时间权重与 $M$ 的含义
 
@@ -170,23 +179,25 @@ $$
 
 对于当前有限 horizon 的 Generals，主指标默认不使用时间折扣：每个决策点等权。
 
-若需要折扣版本，可额外报告：
+若需要折扣版本，可额外报告 discounted trajectory KL：
 
 $$
-IG_{\lambda}
+TrajectoryKL_{\lambda}
 =
-\frac{\sum_t\lambda^t k_t}{\sum_t\lambda^t},
+\sum_t\lambda^t k_t,
 $$
 
-其中 $\lambda$ 不应未经说明地复用 reward 的 $\gamma$。
+若除以 $\sum_t\lambda^t$，得到的是 discounted `MeanLocalKL`。其中
+$\lambda$ 不应未经说明地复用 reward 的 $\gamma$。
 
 $M$ 只是 episode 样本数量。如果计算：
 
 $$
-\frac{1}{M}\sum_{i=1}^{M}IG_{k,i},
+\frac{1}{M}\sum_{i=1}^{M}TrajectoryKL_{k,i},
 $$
 
-它描述的是评测协议下随机一个 episode 的期望平均策略变化；它是统计汇总，不是学习曲线本身。主曲线应保留 episode/迭代顺序。
+它描述的是评测协议下随机一个 episode 的期望 trajectory KL；它是统计
+汇总，不是学习曲线本身。主曲线应保留 episode/迭代顺序。
 
 ## 6. Coding agent 迭代曲线
 
@@ -381,7 +392,16 @@ local_policy_kl_k(z)
 local_policy_kl_trace = [local_policy_kl_k(z_0), ..., local_policy_kl_k(z_{T-1})]
 ```
 
-`z_t` 只包括该 episode 中真实到达的目标 agent 决策点；不构造不可行的全局测量域，也不把 coding agent 的 act 次数当作策略决策点。CI 再决定按 episode 求和、均值或绘制随 episode 变化的折线。
+`z_t` 只包括该 episode 中真实到达的目标 agent 决策点；不构造不可行的全局测量域，也不把 coding agent 的 act 次数当作策略决策点。主 episode 派生量定义为：
+
+```text
+trajectory_kl_episode = Σ_t local_policy_kl_k(z_t)
+```
+
+其单位为 `nats / episode`。`mean_local_policy_kl =
+trajectory_kl_episode / T` 只作为 `nats / decision` 的长度归一化辅助量。
+CI 保留每个 episode 的 trajectory KL 并按 episode/迭代顺序绘图，不先
+压成整个实验的单一平均值。
 
 `occupancy_shift` 描述同一评测上下文下的状态访问分布变化，可以按时间步保存分布差异，也可以保存 rollout 得到的规范化 state-ID 直方图。它反映策略变化经环境动力学和对手交互后的访问变化，不能与局部策略 KL 直接相加。
 
@@ -400,7 +420,18 @@ KL(q_k || q_{k-1})
   + E[s ~ d_k] KL(π_k(·|s) || π_{k-1}(·|s))
 ```
 
-因此，任意固定参考分布下的 `policy_kl`、occupancy KL 和 trajectory KL 不能被当成三个可独立相加的指标。RL/HL 使用同一合法动作集和概率分布；occupancy 使用规范化 state ID；HL 确定性策略使用 epsilon smoothing。优先保存原始 trace 和 occupancy 数据，trajectory KL 作为可选派生字段；统一按 episode 报告时使用 `nats / episode`。
+因此，任意固定参考分布下的 `policy_kl`、occupancy KL 和 trajectory KL 不能被当成三个可独立相加的指标。RL/HL 使用同一合法动作集和概率分布；occupancy 使用规范化 state ID；HL 自己返回 one-hot 分布，framework 再对 RL/HL 统一使用固定 epsilon。优先保存原始 trace 和 occupancy 数据，trajectory KL 是主 episode 派生量。
+
+## 15.1 Replay-based KL 暂缓决策
+
+讨论过将历史 rollout 保存为不可变 replay，再只读重放给任意两个策略版本，
+从历史上出现过的全部决策点查询概率并离线计算 KL。该方案能够把游戏迭代
+与 KL 计算解耦，但需要为不同游戏协调 replay 语义、恢复 stateful agent、
+冻结 replay/adapter/policy 身份，并提供跨语言只读查询协议。
+
+本轮不实现 replay-based KL，也不从历史动作推断概率。当前继续使用实际
+rollout 上的局部 KL trace，并按 episode 求和得到 trajectory KL。完整决策
+记录见 `docs/superpowers/specs/2026-07-25-trajectory-kl-replay-decision.md`。
 
 ## 16. Schema 前向兼容
 
@@ -428,4 +459,4 @@ created_at
 - provider-neutral 的 `ProviderAdapter`、`CodingAgentController` 和本地 workspace manifest/hash/diff snapshotter；
 - canonical state ID 与可选 `get_action_distribution(observation, legal_actions)` hook。
 
-仍由接入方决定的部分：具体 benchmark 测试集内容，以及具体环境是否能提供规范化完整动作支持集和更细粒度 state ID 编码。Codex/Claude Code CLI JSONL adapter、provider artifact、统一 act 生命周期、数据质量诊断和本地/CI research report 已落地；真实运行仍需要调用方安装并认证对应 CLI。
+仍由接入方决定的部分：具体 benchmark 测试集内容，以及具体环境是否能提供规范化完整动作支持集和更细粒度 state ID 编码。当前 report 仍展示 trace 均值；后续应把 trace 求和的 `trajectory_kl_episode` 作为主值，将均值显式标为 `mean_local_policy_kl`。Replay-based KL 已记录但暂缓实现。Codex/Claude Code CLI JSONL adapter、provider artifact、统一 act 生命周期、数据质量诊断和本地/CI research report 已落地；真实运行仍需要调用方安装并认证对应 CLI。
