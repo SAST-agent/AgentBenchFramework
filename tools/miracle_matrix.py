@@ -34,10 +34,19 @@ from agentbench_frame.games.miracle.matrix_runner import (  # noqa: E402
 from agentbench_frame.games.miracle.matrix import make_attempt_plan  # noqa: E402
 
 from agentbench_frame.games.miracle.paths import judge_dir, ifelse_dir, extracted_dir, archives_dir
-JUDGE = judge_dir()
-IFELSE = ifelse_dir()
-EXTRACTED = extracted_dir()
-ARCHIVES = archives_dir()
+
+
+def _safe_default(factory, fallback: Path) -> Path:
+    try:
+        return factory()
+    except RuntimeError:
+        return fallback
+
+
+JUDGE = _safe_default(judge_dir, REPO / ".external" / "judge")
+IFELSE = _safe_default(ifelse_dir, REPO / ".external" / "ifelse")
+EXTRACTED = _safe_default(extracted_dir, REPO / ".external" / "extracted")
+ARCHIVES = _safe_default(archives_dir, REPO / ".external" / "archives")
 VENDOR = REPO / "vendor" / "miracle_local" / "run_match.py"
 FW_SRC = REPO / "src"
 PROTOCOL = REPO / "docs" / "games" / "24_miracle_evaluation_protocol.v0.3.json"
@@ -71,6 +80,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--protocol", type=Path, default=PROTOCOL)
     parser.add_argument("--roster", type=Path, default=ROSTER)
     parser.add_argument("--protocol-sha", default=None)
+    parser.add_argument("--session-root", type=Path, default=SESSION_ROOT)
+    parser.add_argument("--judge-dir", type=Path, default=JUDGE)
+    parser.add_argument("--ifelse-dir", type=Path, default=IFELSE)
+    parser.add_argument("--extracted-root", type=Path, default=EXTRACTED)
+    parser.add_argument("--archives-root", type=Path, default=ARCHIVES)
+    parser.add_argument("--precheck-root", type=Path, default=PRECHECK_9A)
+    parser.add_argument("--rank16-build-root", type=Path, default=RANK16_BUILD)
     return parser.parse_args(argv)
 
 
@@ -112,6 +128,8 @@ def load_control_inputs(
     strategies = roster.get("strategies")
     if not isinstance(strategies, list):
         raise PreflightError("roster strategies must be a list")
+    if len(strategies) != 16 or any(not isinstance(item, dict) for item in strategies):
+        raise PreflightError("roster ranks must be exactly 1..16: invalid strategy entry")
     ranks = [item.get("rank") for item in strategies if isinstance(item, dict)]
     if ranks != list(range(1, 17)):
         raise PreflightError(f"roster ranks must be exactly 1..16: {ranks}")
@@ -199,7 +217,9 @@ def verify_python_strategy_hashes(
             errors.append(f"{label}: {exc}")
         else:
             expected_archive_sha = strategy.get("archive_sha256")
-            if expected_archive_sha and sha(archive) != expected_archive_sha:
+            if not expected_archive_sha:
+                errors.append(f"{label}: archive sha missing from roster")
+            elif sha(archive) != expected_archive_sha:
                 errors.append(f"{label}: archive sha mismatch")
     return errors
 
@@ -212,6 +232,8 @@ def verify_hashes(
     archives_root: Path = ARCHIVES,
     precheck_root: Path = PRECHECK_9A,
     rank16_build_root: Path = RANK16_BUILD,
+    ifelse_root: Path = IFELSE,
+    judge_root: Path = JUDGE,
 ):
     """Verify every opponent's runnable identity matches the frozen hashes."""
     mismatches = []
@@ -247,28 +269,43 @@ def verify_hashes(
                 want = ba[f"rank{rank:02d}"]
                 if got != want:
                     mismatches.append(f"rank{rank:02d}: main.exe sha {got} != frozen {want}")
-    if sha(IFELSE / "main.py") != v3["frozen_identities"]["evaluated_agent"]["sha256"]:
+    ifelse_main = Path(ifelse_root) / "main.py"
+    if not ifelse_main.is_file():
+        mismatches.append(f"ifelse main.py missing: {ifelse_main}")
+    elif sha(ifelse_main) != v3["frozen_identities"]["evaluated_agent"]["sha256"]:
         mismatches.append("ifelse sha mismatch")
-    if sha(JUDGE / "main.py") != v3["frozen_identities"]["judge"]["main_py_sha256"]:
+    judge_main = Path(judge_root) / "main.py"
+    if not judge_main.is_file():
+        mismatches.append(f"judge main.py missing: {judge_main}")
+    elif sha(judge_main) != v3["frozen_identities"]["judge"]["main_py_sha256"]:
         mismatches.append("judge sha mismatch")
     return mismatches
 
 
-def _run_resume(r, resume_sid):
+def _run_resume(
+    r,
+    resume_sid,
+    *,
+    control_inputs: ControlInputs | None = None,
+    session_root: Path | None = None,
+):
     """Resume an existing session. VERIFY FIRST (read-only); only if ALL checks
     pass, call resume() + write. Verification failure leaves session untouched."""
     global LOG
-    sd = SESSION_ROOT / resume_sid
+    session_root = Path(session_root or SESSION_ROOT)
+    sd = session_root / resume_sid
     if not sd.exists():
         print(f"FATAL: session not found: {sd}", file=sys.stderr)
         return 2
     # READ-ONLY verification — load protocol + roster for full identity
-    v3 = json.loads(PROTOCOL.read_text(encoding="utf-8"))
-    roster = json.loads(ROSTER.read_text(encoding="utf-8"))
+    if control_inputs is None:
+        control_inputs = load_control_inputs(PROTOCOL, ROSTER, PROTOCOL_SHA)
+    v3 = control_inputs.protocol
+    roster = control_inputs.roster
     ba = v3["frozen_identities"]["build_artifacts_win64_mingw"]
     ok, errs = verify_session_for_resume(
         sd,
-        protocol_sha=PROTOCOL_SHA,
+        protocol_sha=control_inputs.hashes["protocol"],
         code_files={
             "matrix": str(REPO / "src/agentbench_frame/games/miracle/matrix.py"),
             "matrix_runner": str(REPO / "src/agentbench_frame/games/miracle/matrix_runner.py"),
@@ -282,6 +319,7 @@ def _run_resume(r, resume_sid):
         expected_build_shas={int(k.replace("rank", "")): v for k, v in ba.items()
                              if k.startswith("rank") and isinstance(v, str) and "_" not in k},
         expected_platform=platform.platform(),
+        expected_control_inputs=control_inputs.hashes,
     )
     if not ok:
         print("FATAL: resume verification failed:", file=sys.stderr)
@@ -300,54 +338,91 @@ def _run_resume(r, resume_sid):
     return 0 if result.get("completed") else 1
 
 
-def main() -> int:
+def validate_runtime_paths(*, judge_root: Path, ifelse_root: Path, extracted_root: Path,
+                           archives_root: Path, precheck_root: Path,
+                           rank16_build_root: Path) -> None:
+    for label, path in (
+        ("judge directory", judge_root),
+        ("ifelse directory", ifelse_root),
+        ("extracted opponent directory", extracted_root),
+        ("opponent archives directory", archives_root),
+        ("precheck directory", precheck_root),
+        ("rank16 build directory", rank16_build_root),
+    ):
+        if not Path(path).is_dir():
+            raise PreflightError(f"{label} missing: {path}")
+    for label, path in (("judge main.py", Path(judge_root) / "main.py"),
+                        ("ifelse main.py", Path(ifelse_root) / "main.py")):
+        if not path.is_file():
+            raise PreflightError(f"{label} missing: {path}")
+
+
+def main(argv: Sequence[str] | None = None) -> int:
     global LOG
-    dry = "--dry-run" in sys.argv
-    # parse --resume <session_id>
-    resume_sid = None
-    if "--resume" in sys.argv:
-        idx = sys.argv.index("--resume")
-        resume_sid = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else None
-        if not resume_sid:
-            print("FATAL: --resume requires a session_id", file=sys.stderr)
-            return 2
-    if dry and resume_sid:
+    args = parse_args(argv)
+    if args.dry_run and args.resume:
         print("FATAL: --resume and --dry-run are mutually exclusive", file=sys.stderr)
         return 2
-    if "--resume" in sys.argv:
-        idx = sys.argv.index("--resume")
-        resume_sid = sys.argv[idx + 1] if idx + 1 < len(sys.argv) else None
-        if not resume_sid:
-            print("FATAL: --resume requires a session_id", file=sys.stderr)
-            return 2
-        r = MatrixRunner(
-            session_root=SESSION_ROOT, judge_dir=JUDGE, ifelse_dir=IFELSE,
-            opponent_dir_of=opponent_dir_of, vendor_script=VENDOR, framework_src=FW_SRC,
-            timeout=8.0, wrapper_timeout_s=180.0, protocol_sha=PROTOCOL_SHA,
-            python=sys.executable, evaluated_agent="miracle_ifelse", auth_text=AUTH_TEXT,
+    expected_protocol_sha = args.protocol_sha
+    if expected_protocol_sha is None and args.protocol == PROTOCOL:
+        expected_protocol_sha = PROTOCOL_SHA
+    try:
+        control_inputs = load_control_inputs(args.protocol, args.roster, expected_protocol_sha)
+        validate_runtime_paths(
+            judge_root=args.judge_dir,
+            ifelse_root=args.ifelse_dir,
+            extracted_root=args.extracted_root,
+            archives_root=args.archives_root,
+            precheck_root=args.precheck_root,
+            rank16_build_root=args.rank16_build_root,
         )
-        return _run_resume(r, resume_sid)
-    v3 = json.loads(PROTOCOL.read_text(encoding="utf-8"))
-    roster = json.loads(ROSTER.read_text(encoding="utf-8"))
-    if sha(PROTOCOL) != PROTOCOL_SHA:
-        print(f"FATAL: protocol v0.3 sha mismatch (expected {PROTOCOL_SHA})", file=sys.stderr)
+    except PreflightError as exc:
+        print(f"FATAL: {exc}", file=sys.stderr)
         return 2
+    v3 = control_inputs.protocol
+    roster = control_inputs.roster
+
+    def opponent_resolver(rank: int) -> Path:
+        return resolve_opponent_dir(
+            rank,
+            roster,
+            extracted_root=args.extracted_root,
+            precheck_root=args.precheck_root,
+            rank16_build_root=args.rank16_build_root,
+        )
 
     r = MatrixRunner(
-        session_root=SESSION_ROOT, judge_dir=JUDGE, ifelse_dir=IFELSE,
-        opponent_dir_of=opponent_dir_of, vendor_script=VENDOR, framework_src=FW_SRC,
-        timeout=8.0, wrapper_timeout_s=180.0, protocol_sha=PROTOCOL_SHA,
+        session_root=args.session_root, judge_dir=args.judge_dir, ifelse_dir=args.ifelse_dir,
+        opponent_dir_of=opponent_resolver, vendor_script=VENDOR, framework_src=FW_SRC,
+        timeout=8.0, wrapper_timeout_s=180.0,
+        protocol_sha=control_inputs.hashes["protocol"],
         python=sys.executable, evaluated_agent="miracle_ifelse", auth_text=AUTH_TEXT,
     )
+    if args.resume:
+        return _run_resume(
+            r,
+            args.resume,
+            control_inputs=control_inputs,
+            session_root=args.session_root,
+        )
     r.prepare_session()
     LOG = open(r.session_dir / "matrix.full.log", "w", encoding="utf-8")
     log(f"session_id: {r.session_id}")
     log(f"run_id: {r.run_id}")
     log(f"python: {sys.executable} ({platform.python_version()})")
-    log(f"protocol v0.3 sha: {PROTOCOL_SHA} (verified)")
-    log(f"mode: {'DRY_RUN' if dry else 'EXECUTE'}")
+    log(f"protocol v0.3 sha: {control_inputs.hashes['protocol']} (verified)")
+    log(f"mode: {'DRY_RUN' if args.dry_run else 'EXECUTE'}")
 
-    mismatches = verify_hashes(v3, roster)
+    mismatches = verify_hashes(
+        v3,
+        roster,
+        extracted_root=args.extracted_root,
+        archives_root=args.archives_root,
+        precheck_root=args.precheck_root,
+        rank16_build_root=args.rank16_build_root,
+        ifelse_root=args.ifelse_dir,
+        judge_root=args.judge_dir,
+    )
     opp_arch = {s["rank"]: s["archive_sha256"] for s in roster["strategies"]}
     cpp_build = {int(k.replace("rank", "")): v for k, v in v3["frozen_identities"]["build_artifacts_win64_mingw"].items()
                  if k.startswith("rank") and isinstance(v, str) and "_" not in k}
@@ -358,6 +433,10 @@ def main() -> int:
                      "matrix_runner": sha(REPO / "src/agentbench_frame/games/miracle/matrix_runner.py"),
                      "match_runner": sha(REPO / "src/agentbench_frame/games/miracle/match_runner.py"),
                      "vendor_run_match": sha(VENDOR)},
+        control_inputs={
+            "protocol": {"path": str(args.protocol), "sha256": control_inputs.hashes["protocol"]},
+            "roster": {"path": str(args.roster), "sha256": control_inputs.hashes["roster"]},
+        },
     )
     log(f"manifest: {r.session_dir / 'manifest.json'}")
     if mismatches:
@@ -367,7 +446,7 @@ def main() -> int:
         return 2
     log("hash verification: ALL_MATCH")
 
-    if dry:
+    if args.dry_run:
         out = r.dry_run()
         log(f"plan: {out['plan_count']} attempts; first={out['plan'][0]['game_id']} last={out['plan'][-1]['game_id']}")
         log(f"timeout={r.timeout} wrapper_timeout_s={r.wrapper_timeout_s}")

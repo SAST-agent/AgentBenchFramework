@@ -69,3 +69,31 @@ def test_load_control_inputs_rejects_non_contiguous_roster(tmp_path, monkeypatch
 
     with pytest.raises(mm.PreflightError, match="roster ranks"):
         mm.load_control_inputs(protocol_path, roster_path)
+
+
+def test_load_control_inputs_rejects_non_object_strategy(tmp_path, monkeypatch):
+    mm = _import_cli_module(monkeypatch)
+    protocol_path = tmp_path / "protocol.json"
+    roster_path = tmp_path / "roster.json"
+    protocol_path.write_text("{}", encoding="utf-8")
+    roster_path.write_text(
+        json.dumps([{"rank": rank} for rank in range(1, 17)] + ["not-an-object"]),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(mm.PreflightError, match="roster JSON must be an object"):
+        mm.load_control_inputs(protocol_path, roster_path)
+
+
+def test_cli_module_import_does_not_require_external_env(monkeypatch):
+    repo = Path(__file__).resolve().parents[2]
+    monkeypatch.delenv("AGENTBENCH_ROOT", raising=False)
+    monkeypatch.delenv("MIRACLE_IFELSE_DIR", raising=False)
+    sys.modules.pop("miracle_matrix", None)
+    tools_dir = str(repo / "tools")
+    if tools_dir not in sys.path:
+        sys.path.insert(0, tools_dir)
+
+    mm = importlib.import_module("miracle_matrix")
+
+    assert mm.PROTOCOL.name == "24_miracle_evaluation_protocol.v0.3.json"

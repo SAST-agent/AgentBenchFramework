@@ -96,3 +96,26 @@ def test_verify_python_hashes_rejects_duplicate_archives(tmp_path, monkeypatch):
     errors = mm.verify_python_strategy_hashes(strategy, extracted, archives)
 
     assert any("multiple archive files" in error for error in errors)
+
+
+def test_verify_python_hashes_requires_archive_identity(tmp_path, monkeypatch):
+    mm = _import_cli_module(monkeypatch)
+    extracted = tmp_path / "extracted"
+    archives = tmp_path / "archives"
+    extracted.mkdir()
+    archives.mkdir()
+    python_dir = extracted / "rank04__fixture"
+    python_dir.mkdir()
+    entry = python_dir / "main.py"
+    entry.write_text("print('ok')\n", encoding="utf-8")
+    (archives / "rank04__fixture.zip").write_bytes(b"archive-bytes")
+    strategy = {
+        "rank": 4,
+        "type": "python_script",
+        "entry": "main.py",
+        "runnable_sha256": _sha(entry),
+    }
+
+    errors = mm.verify_python_strategy_hashes(strategy, extracted, archives)
+
+    assert any("archive sha missing" in error for error in errors)
