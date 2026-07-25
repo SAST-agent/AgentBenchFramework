@@ -23,14 +23,54 @@ class LocalResearchReportTests(unittest.TestCase):
                 json.dumps({"event_type": "coding_agent_act", "act_id": "a1"}),
                 json.dumps({"event_type": "act_evaluation", "act_id": "a1", "score": 0.5}),
                 json.dumps({"event_type": "policy_kl_trace", "episode": 1, "trace": [0.1, 0.3]}),
+                json.dumps({
+                    "event_type": "policy_kl_trace",
+                    "episode": 2,
+                    "measurement_status": "incomplete",
+                    "trace": [0.2, None],
+                    "trajectory_kl_episode": 999.0,
+                    "mean_local_policy_kl": 999.0,
+                    "decision_steps": 2,
+                }),
+                json.dumps({
+                    "event_type": "policy_kl_trace",
+                    "episode": 3,
+                    "measurement_status": "complete",
+                    "trace": [0.2, 0.4],
+                    "trajectory_kl_episode": 999.0,
+                    "mean_local_policy_kl": 999.0,
+                    "decision_steps": 2,
+                }),
             ]) + "\n")
 
             output = root / "site"
             builder = ReportBuilder(data_dir=str(root), output_dir=str(output))
             builder.build()
+            ig_history = builder.runs[0]["research"]["ig_history"]
+            ig_chart = builder.runs[0]["research"]["ig_chart"]
             html = (output / "index.html").read_text()
 
+        self.assertAlmostEqual(ig_history[0]["trajectory_kl_episode"], 0.4)
+        self.assertAlmostEqual(ig_history[0]["mean_local_policy_kl"], 0.2)
+        self.assertEqual(ig_history[0]["status"], "complete")
+        self.assertIsNone(ig_history[1]["trajectory_kl_episode"])
+        self.assertIsNone(ig_history[1]["mean_local_policy_kl"])
+        self.assertEqual(ig_history[1]["status"], "incomplete")
+        self.assertAlmostEqual(ig_history[2]["trajectory_kl_episode"], 0.6)
+        self.assertAlmostEqual(ig_history[2]["mean_local_policy_kl"], 0.3)
+        self.assertEqual(len(ig_chart["segments"]), 2)
         self.assertIn("Information gain", html)
+        self.assertIn("Trajectory KL", html)
+        self.assertIn("Mean local policy KL", html)
+        self.assertIn("nats / episode", html)
+        self.assertIn("nats / decision", html)
+        self.assertIn('aria-label="Trajectory KL by episode"', html)
+        self.assertIn('data-segment-count="2"', html)
+        self.assertIn("0.40", html)
+        self.assertIn("0.20", html)
+        self.assertIn("0.60", html)
+        self.assertIn("missing", html)
+        self.assertNotIn("999.00", html)
         self.assertIn("AUC / act", html)
         self.assertIn("case-1", html)
         self.assertIn("raw event records", html)

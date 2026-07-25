@@ -13,6 +13,7 @@ Usage:
 """
 
 import json
+import math
 import os
 from collections import Counter
 from typing import Any, Dict, List, Optional
@@ -187,11 +188,43 @@ class ReportBuilder:
             event_type = event.get("event_type", event.get("event"))
             if event_type == "policy_kl_trace":
                 trace = event.get("trace")
-                if isinstance(trace, list) and trace:
-                    values = [float(value) for value in trace]
-                    ig_history.append({"episode": event.get("episode", index),
-                                       "ig": sum(values) / len(values),
-                                       "decision_steps": event.get("decision_steps", len(values))})
+                values = []
+                valid_trace = isinstance(trace, list) and bool(trace)
+                if valid_trace:
+                    for value in trace:
+                        if value is None:
+                            valid_trace = False
+                            break
+                        try:
+                            number = float(value)
+                        except (TypeError, ValueError):
+                            valid_trace = False
+                            break
+                        if not math.isfinite(number) or number < 0.0:
+                            valid_trace = False
+                            break
+                        values.append(number)
+                declared_status = event.get("measurement_status")
+                complete = valid_trace and declared_status not in {
+                    "incomplete", "failed"
+                }
+                trajectory_kl_episode = sum(values) if complete else None
+                mean_local_policy_kl = (
+                    trajectory_kl_episode / len(values)
+                    if trajectory_kl_episode is not None
+                    else None
+                )
+                ig_history.append({
+                    "episode": event.get("episode", index),
+                    "trajectory_kl_episode": trajectory_kl_episode,
+                    "mean_local_policy_kl": mean_local_policy_kl,
+                    "ig": trajectory_kl_episode,
+                    "decision_steps": event.get(
+                        "decision_steps",
+                        len(trace) if isinstance(trace, list) else None,
+                    ),
+                    "status": "complete" if complete else "incomplete",
+                })
             elif event_type == "occupancy":
                 state_ids = event.get("state_ids")
                 occupancy_history.append({
@@ -217,11 +250,63 @@ class ReportBuilder:
             "score_history": score_history,
             "auc": multi_axis_auc(auc_points) if auc_points else {},
             "ig_history": ig_history,
+            "ig_chart": ReportBuilder._trajectory_kl_chart(ig_history),
             "occupancy_history": occupancy_history,
             "benchmark_results": summary.get("benchmark_results", []),
             "event_counts": dict(Counter(event.get("event_type", event.get("event", "unknown")) for event in events)),
             "raw_event_count": len(events),
             "quality": quality,
+        }
+
+    @staticmethod
+    def _trajectory_kl_chart(history: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Build dependency-free SVG coordinates while preserving missing gaps."""
+
+        width = 560
+        height = 180
+        padding = 24
+        complete_values = [
+            float(point["trajectory_kl_episode"])
+            for point in history
+            if point.get("trajectory_kl_episode") is not None
+        ]
+        y_max = max(complete_values, default=0.0)
+        scale_max = y_max if y_max > 0.0 else 1.0
+        denominator = max(1, len(history) - 1)
+        segments = []
+        current = []
+        for index, point in enumerate(history):
+            value = point.get("trajectory_kl_episode")
+            if value is None:
+                if current:
+                    segments.append(current)
+                    current = []
+                continue
+            x = padding + index * (width - 2 * padding) / denominator
+            y = height - padding - float(value) * (
+                height - 2 * padding
+            ) / scale_max
+            current.append({
+                "x": round(x, 2),
+                "y": round(y, 2),
+                "episode": point.get("episode"),
+                "value": float(value),
+            })
+        if current:
+            segments.append(current)
+        return {
+            "width": width,
+            "height": height,
+            "y_max": y_max,
+            "segments": [
+                {
+                    "points": " ".join(
+                        f"{node['x']},{node['y']}" for node in segment
+                    ),
+                    "nodes": segment,
+                }
+                for segment in segments
+            ],
         }
 
     def _aggregate(self):
@@ -358,6 +443,56 @@ class ReportBuilder:
                     f"<td>{wr:.1%}</td></tr>"
                 )
             lines.append("</table>")
+
+            research = ctx["latest_research"]
+            lines.append("<h2>Information gain</h2>")
+            lines.append(
+                "<p>Trajectory KL (nats / episode); "
+                "Mean local policy KL (nats / decision)</p>"
+            )
+            chart = research.get("ig_chart", {})
+            segments = chart.get("segments", [])
+            lines.append(
+                '<svg aria-label="Trajectory KL by episode" '
+                f'data-segment-count="{len(segments)}" '
+                f'viewBox="0 0 {chart.get("width", 560)} {chart.get("height", 180)}">'
+            )
+            for segment in segments:
+                lines.append(
+                    f'<polyline fill="none" stroke="#277c68" '
+                    f'points="{segment.get("points", "")}"/>'
+                )
+            lines.append("</svg>")
+            lines.append(
+                "<table><tr><th>Episode</th><th>Trajectory KL</th>"
+                "<th>Mean local policy KL</th><th>Status</th></tr>"
+            )
+            for point in research.get("ig_history", []):
+                trajectory_value = point.get("trajectory_kl_episode")
+                mean_value = point.get("mean_local_policy_kl")
+                trajectory_text = (
+                    f"{trajectory_value:.2f}"
+                    if trajectory_value is not None
+                    else "missing"
+                )
+                mean_text = (
+                    f"{mean_value:.2f}" if mean_value is not None else "missing"
+                )
+                lines.append(
+                    f"<tr><td>{point.get('episode')}</td>"
+                    f"<td>{trajectory_text}</td><td>{mean_text}</td>"
+                    f"<td>{point.get('status')}</td></tr>"
+                )
+            lines.append("</table>")
+            lines.append(
+                f"<p>AUC / act: "
+                f"{research.get('auc', {}).get('auc_coding_agent_act', '—')}</p>"
+            )
+            lines.append(
+                f"<p>{research.get('raw_event_count', 0)} raw event records</p>"
+            )
+            for result in research.get("benchmark_results", []):
+                lines.append(f"<p>{result.get('case_id', 'unknown case')}</p>")
 
         lines.append("</body></html>")
         return "\n".join(lines)

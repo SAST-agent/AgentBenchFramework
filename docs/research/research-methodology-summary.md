@@ -433,6 +433,22 @@ KL(q_k || q_{k-1})
 rollout 上的局部 KL trace，并按 episode 求和得到 trajectory KL。完整决策
 记录见 `docs/superpowers/specs/2026-07-25-trajectory-kl-replay-decision.md`。
 
+## 15.2 在线 trajectory-KL 接口
+
+当前实现不使用历史 replay。下游 runtime 为每个真实目标-agent 决策点提供
+版本化、完整且有限的 `ActionSupport`。每个 action 由稳定字符串 ID 和实际
+环境 action payload 组成；新旧策略都按完全相同的 action-ID 集合返回概率。
+
+新策略通过 `decide_with_distribution()` 在同一次调用中返回选择的 action
+ID 与概率分布；旧策略通过 `distribution_for_measurement()` 只返回同一
+上下文上的分布。环境仅执行新策略动作。两个 session 接收相同的实际
+transition，从而使 stateful adapter 沿新策略真实轨迹同步推进。
+
+Framework 严格检查支持集身份、概率键、有限性、非负性和单位质量。任一
+决策测量失败都会把整个 episode 标记为 `incomplete`；一手支持集、实际
+动作、新旧原始分布、错误和协议 metadata 仍写入 `policy_kl_trace` 事件，
+但 `trajectory_kl_episode` 与 `mean_local_policy_kl` 保持缺失。
+
 ## 16. Schema 前向兼容
 
 所有事件包含公共字段：
@@ -457,6 +473,14 @@ created_at
 - `local_policy_kl_trace`、`occupancy` 原始数据写入口，以及局部 KL、occupancy shift、trajectory 汇总和 AUC 纯计算函数；
 - 固定 benchmark case 列表的 `BaseEvalRunner` 执行路径。
 - provider-neutral 的 `ProviderAdapter`、`CodingAgentController` 和本地 workspace manifest/hash/diff snapshotter；
-- canonical state ID 与可选 `get_action_distribution(observation, legal_actions)` hook。
+- canonical state ID、严格 action-ID 支持集和在线新/旧策略对照 session；
+- 完整与 incomplete trajectory-KL 一手事件；
+- 正确区分 `nats / episode` 主值和 `nats / decision` 辅助值的报告，以及
+  保留 incomplete 缺口的 episode 折线图。
 
-仍由接入方决定的部分：具体 benchmark 测试集内容，以及具体环境是否能提供规范化完整动作支持集和更细粒度 state ID 编码。当前 report 仍展示 trace 均值；后续应把 trace 求和的 `trajectory_kl_episode` 作为主值，将均值显式标为 `mean_local_policy_kl`。Replay-based KL 已记录但暂缓实现。Codex/Claude Code CLI JSONL adapter、provider artifact、统一 act 生命周期、数据质量诊断和本地/CI research report 已落地；真实运行仍需要调用方安装并认证对应 CLI。
+仍由接入方决定的部分：具体 benchmark 测试集内容，以及具体游戏 runtime
+如何提供完整动作支持集、版本化动作 schema 和 RL/HL 的严格分布 adapter。
+Generals 当前的简化动作模板不能直接当作完整科研测量域。Replay-based KL
+已记录但暂缓实现。Codex/Claude Code CLI JSONL adapter、provider artifact、
+统一 act 生命周期、数据质量诊断和本地/CI research report 已落地；真实
+运行仍需要调用方安装并认证对应 CLI。

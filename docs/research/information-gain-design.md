@@ -488,6 +488,65 @@ artifact 身份以及失败完整性语义。当前不新增 replay-based KL 接
 求和得到的 `trajectory_kl_episode`。完整讨论与重新启动条件见
 `docs/superpowers/specs/2026-07-25-trajectory-kl-replay-decision.md`。
 
+### 10.13.2 在线测量接口
+
+Framework 已提供 `TrajectoryKLAgent` 在线测量 wrapper。下游游戏 runtime
+在每个目标 agent 决策点提供一个 `ActionSupport`：
+
+```text
+ActionSupport(
+    schema_version,
+    [(action_id, environment_action_payload), ...]
+)
+```
+
+支持集必须完整、有限、非空、顺序稳定且 action ID 无重复。策略分布必须
+使用 `action_id -> probability` 映射，键集合与支持集严格相等，概率为有限
+非负数且总和在 `1e-9` 绝对误差内等于 1。
+
+新版本 adapter 实现：
+
+```text
+decide_with_distribution(observation, support)
+-> PolicyDecision(selected_action_id, new_distribution)
+```
+
+旧版本在线对照 adapter 实现：
+
+```text
+distribution_for_measurement(observation, support)
+-> old_distribution
+```
+
+新版本在一次调用中同时给出动作 ID 和分布，避免独立调用 `act()` 与概率
+接口造成随机性或内部状态不一致。环境只执行新版本选择的动作。两个 session
+都通过可选的 `observe_transition(actual_transition)` 接收相同的真实环境
+事件；旧版本不能提交一个没有实际执行的旧策略动作。
+
+`TrajectoryKLAgent` 可把 episode 结果直接回调给
+`Run.log_trajectory_kl_result()`。`policy_kl_trace` 事件保留旧字段，并增量
+保存：
+
+```text
+measurement_status
+direction
+log_base
+rollout_source
+trajectory_kl_episode
+mean_local_policy_kl
+decisions[*].legal_action_ids
+decisions[*].selected_action_id
+decisions[*].new_probabilities
+decisions[*].old_probabilities
+decisions[*].support_id
+metadata
+errors
+```
+
+若任一目标决策的支持集、分布或旧策略查询无效，episode 保留已获得的一手
+记录，但 `measurement_status=incomplete`，主 trajectory KL 与均值均为
+缺失值，不能使用局部和冒充完整结果。
+
 ### 10.14 Schema 前向兼容
 
 所有事件包含公共字段：
@@ -512,6 +571,15 @@ created_at
 - `local_policy_kl_trace`、`occupancy` 原始数据写入口，以及局部 KL、occupancy shift、trajectory 汇总和 AUC 纯计算函数；
 - 固定 benchmark case 列表的 `BaseEvalRunner` 执行路径。
 - provider-neutral 的 `ProviderAdapter`、`CodingAgentController` 和本地 workspace manifest/hash/diff snapshotter；
-- canonical state ID 与可选 `get_action_distribution(observation, legal_actions)` hook。
+- canonical state ID、严格 `ActionSupport`/`PolicyDecision` 契约、在线
+  `TrajectoryKLAgent` 对照 session；
+- 完整和 incomplete trajectory-KL 一手 JSONL 记录；
+- 以 episode trace 求和为主值、局部均值为辅助值的本地报告，以及保留缺口
+  的 episode 折线图。
 
-仍由接入方决定的部分：具体 benchmark 测试集内容，以及具体环境是否能提供规范化完整动作支持集和更细粒度 state ID 编码。当前 report 仍把 trace 均值展示为 IG；后续实现应改为以 trace 求和的 `trajectory_kl_episode` 为主，并将均值明确命名为 `mean_local_policy_kl`。Replay-based KL 已记录但暂缓实现。Codex/Claude Code CLI JSONL adapter、provider artifact、统一 act 生命周期、数据质量诊断和本地/CI research report 已落地；真实运行仍需要调用方安装并认证对应 CLI。
+仍由接入方决定的部分：具体 benchmark 测试集内容，以及具体环境 runtime
+如何枚举本游戏完整动作支持集、冻结动作 schema、让 RL/HL adapter 提供
+严格分布。Generals 当前的简化 `get_legal_actions()` 仍不能声明为完整科研
+动作域。Replay-based KL 已记录但暂缓实现。Codex/Claude Code CLI JSONL
+adapter、provider artifact、统一 act 生命周期、数据质量诊断和本地/CI
+research report 已落地；真实运行仍需要调用方安装并认证对应 CLI。
