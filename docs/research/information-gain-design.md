@@ -502,6 +502,10 @@ artifact 身份以及失败完整性语义。当前不新增 replay-based KL 接
 Framework 已提供 `TrajectoryKLAgent` 在线测量 wrapper。下游游戏 runtime
 在每个目标 agent 决策点提供一个 `ActionSupport`：
 
+具体游戏、RL/HL agent 和自定义 runner 的完整接入步骤见
+[Trajectory KL 下游接入指南](../integration/trajectory-kl.md)。本节只保留
+科研定义和公共接口摘要。
+
 ```text
 ActionSupport(
     schema_version,
