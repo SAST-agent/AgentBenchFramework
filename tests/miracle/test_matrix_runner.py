@@ -93,6 +93,20 @@ def test_manifest_atomic_with_hashes(tmp_path):
     assert not (r.session_dir / "manifest.json.tmp").exists()
 
 
+def test_manifest_records_control_input_hashes(tmp_path):
+    r = _runner(tmp_path, lambda **k: None)
+    r.prepare_session()
+    r.record_manifest(
+        opponent_hashes={i: "h" + str(i) for i in range(1, 17)},
+        build_hashes={i: "b" + str(i) for i in range(1, 17)},
+        ifelse_sha="IF", judge_sha="JD", code_hashes={},
+        control_inputs={"protocol": {"path": "/p.json", "sha256": "p"},
+                        "roster": {"path": "/r.json", "sha256": "r"}},
+    )
+    manifest = json.loads((r.session_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["control_inputs"]["protocol"]["sha256"] == "p"
+
+
 # 6. running -> UNCERTAIN_IN_FLIGHT, no auto-rerun
 def test_running_state_uncertain_no_rerun(tmp_path):
     r = _runner(tmp_path, lambda **k: None)

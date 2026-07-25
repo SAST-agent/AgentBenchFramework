@@ -110,7 +110,8 @@ def verify_session_for_resume(session_dir, *,
                               expected_opponent_shas: Optional[Dict[int, str]] = None,
                               expected_build_shas: Optional[Dict[int, str]] = None,
                               expected_python: Optional[str] = None,
-                              expected_platform: Optional[str] = None) -> Tuple[bool, List[str]]:
+                              expected_platform: Optional[str] = None,
+                              expected_control_inputs: Optional[Dict[str, str]] = None) -> Tuple[bool, List[str]]:
     """Full READ-ONLY session verification before resume. Returns (ok, errors).
     Does NOT write or modify anything. If ANY check fails, the session must be
     left byte-for-byte unchanged."""
@@ -126,6 +127,22 @@ def verify_session_for_resume(session_dir, *,
         m = json.loads(mp.read_text(encoding="utf-8"))
     except Exception:
         return (False, ["manifest corrupt/unparseable"])
+    if expected_control_inputs is not None:
+        stored_inputs = m.get("control_inputs")
+        if not isinstance(stored_inputs, dict):
+            errs.append("control input hash mismatch: control_inputs missing")
+        else:
+            expected_names = set(expected_control_inputs)
+            stored_names = set(stored_inputs)
+            for name in sorted(expected_names - stored_names):
+                errs.append(f"control input hash mismatch: {name} missing")
+            for name in sorted(stored_names - expected_names):
+                errs.append(f"control input hash mismatch: {name} unexpected")
+            for name in sorted(expected_names & stored_names):
+                item = stored_inputs[name]
+                stored_sha = item.get("sha256") if isinstance(item, dict) else None
+                if stored_sha != expected_control_inputs[name]:
+                    errs.append(f"control input hash mismatch: {name}")
     if protocol_sha and m.get("protocol_sha256") != protocol_sha:
         errs.append(f"protocol sha mismatch")
     if code_files:
@@ -439,6 +456,7 @@ class MatrixRunner:
     # ---- manifest ---- #
     def record_manifest(self, *, opponent_hashes: Dict[int, str], build_hashes: Dict[int, str],
                         ifelse_sha: str, judge_sha: str, code_hashes: Dict[str, str],
+                        control_inputs: Optional[Dict[str, Dict[str, str]]] = None,
                     ) -> Path:
         import platform, time
         m = {
@@ -454,6 +472,8 @@ class MatrixRunner:
             "code_hashes": code_hashes,
             "platform": platform.platform(),
         }
+        if control_inputs is not None:
+            m["control_inputs"] = control_inputs
         mp = self.session_dir / "manifest.json"
         tmp = mp.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(m, ensure_ascii=False, indent=2), encoding="utf-8")

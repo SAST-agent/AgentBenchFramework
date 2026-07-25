@@ -139,6 +139,21 @@ def test_manifest_code_hash_extra_key_rejected(tmp_path):
                for e in errs), errs
 
 
+def test_resume_rejects_control_input_hash_change(tmp_path):
+    m = _wm(tmp_path)
+    m["control_inputs"] = {
+        "protocol": {"path": "/p.json", "sha256": "old"},
+        "roster": {"path": "/r.json", "sha256": "same"},
+    }
+    (tmp_path / "manifest.json").write_text(json.dumps(m, ensure_ascii=False), encoding="utf-8")
+    ok, errors = verify_session_for_resume(
+        tmp_path,
+        expected_control_inputs={"protocol": "new", "roster": "same"},
+    )
+    assert not ok
+    assert any("control input hash mismatch" in error for error in errors), errors
+
+
 def test_manifest_opponent_missing_key_rejected(tmp_path):
     m = _wm(tmp_path)
     del m["opponent_archive_sha256"]["rank16"]
