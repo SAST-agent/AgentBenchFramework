@@ -106,6 +106,15 @@ git add runs/ && git commit -m "ppo_v3: Elo 1520" && git push
 └──────────────────────────────────────────────┘
 ```
 
+### 已集成的游戏（subprocess 评测模块）
+
+`agentbench_frame/<game>/` 下每个游戏一套对等的 6 文件模块（`__main__/cli/evaluator/match/protocol`），
+走 Saiblo 协议拉起官方 logic + AI 子进程，统一 `Run` 追踪与 `runs/{game}/{agent}/{run_id}/` 产出：
+
+- [`aquawar/`](src/agentbench_frame/aquawar/) — 2 人对战
+- [`lostspace/`](src/agentbench_frame/lostspace/) — 4 人 FFA，含 baseline（sample_ai/random_agent）、
+  文本回放查看器、迭代闭环 demo。详见 [`lostspace/README.md`](src/agentbench_frame/lostspace/README.md)。
+
 ## 核心基类与扩展
 
 框架设计原则：所有关键行为都通过基类约束，子类只需重写 1-2 个方法。
