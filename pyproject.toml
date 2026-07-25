@@ -8,6 +8,7 @@ dependencies = []
 
 [project.optional-dependencies]
 tracking = ["psutil"]
+miracle = ["psutil"]
 rl = ["torch", "numpy"]
 report = ["jinja2"]
 all = ["psutil", "torch", "numpy", "jinja2"]

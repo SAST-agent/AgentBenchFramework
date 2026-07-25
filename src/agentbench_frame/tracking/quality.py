@@ -13,6 +13,7 @@ KNOWN_EVENT_TYPES = frozenset({
     "benchmark_game_result", "benchmark_evaluation", "evaluation", "budget",
     "policy_kl_trace", "occupancy", "elo", "h2h", "resource", "provider_event",
     "provider_invocation",
+    "game",
 })
 
 

@@ -28,7 +28,7 @@ class LocalResearchReportTests(unittest.TestCase):
             output = root / "site"
             builder = ReportBuilder(data_dir=str(root), output_dir=str(output))
             builder.build()
-            html = (output / "index.html").read_text()
+            html = (output / "index.html").read_text(encoding="utf-8")
 
         self.assertIn("Information gain", html)
         self.assertIn("AUC / act", html)
