@@ -439,8 +439,15 @@ class HLReferencePolicyAdapter:
 HL adapter 不需要自行给零概率加平滑。framework 会使用统一 epsilon 对新旧
 分布同时进行 regularization，从而保持有限 KL 和 RL/HL 一致的单位。
 
-如果 HL 内部含随机规则选择，当前 one-hot 协议记录本次行为决策。下游必须
-固定 RNG seed，并保证 reference 的只读选择不会消费 RNG 或改变 session。
+当前 HL one-hot 契约只适用于：给定完整 measurement context 后，规则选择是
+确定性的。固定 RNG seed 只能让随机策略可复现，不能把随机策略变成 one-hot
+behavior policy。如果 HL 的随机性实际参与动作选择，下游必须：
+
+1. 在评测模式关闭该随机性，使行为策略真正成为 one-hot；或者
+2. 暴露并按真实 categorical 分布采样，此时不得再上报 one-hot。
+
+若两者都做不到，该 HL 版本不能进行严格 trajectory KL 测量。reference 的
+只读查询在任何情况下都不能消费 RNG 或改变 session。
 
 ## 10. 使用内置 Match
 
@@ -456,7 +463,7 @@ run = Run.start(
     game="my-game",
     agent="my-agent",
     run_type="eval",
-    data_dir="runs",
+    data_dir=".",
 )
 
 measured_agent = TrajectoryKLAgent(
@@ -474,17 +481,27 @@ measured_agent = TrajectoryKLAgent(
     on_episode_complete=run.log_trajectory_kl_result,
 )
 
-result = Match(
-    env=env,
-    agent1=measured_agent,
-    agent2=opponent,
-    alternate_starts=True,
-    seed=42,
-).run(n_games=100)
-
-run.finish({
-    "benchmark_score": result.benchmark_score,
-})
+try:
+    result = Match(
+        env=env,
+        agent1=measured_agent,
+        agent2=opponent,
+        alternate_starts=True,
+        seed=42,
+    ).run(n_games=100)
+except Exception as match_exc:
+    try:
+        run.finish({
+            "evaluation_status": "incomplete",
+        })
+    except Exception as finish_exc:
+        raise finish_exc from match_exc
+    raise
+else:
+    run.finish({
+        "evaluation_status": "complete",
+        "benchmark_score": result.benchmark_score,
+    })
 ```
 
 内置 `Match` 自动完成：
@@ -501,7 +518,9 @@ run.finish({
 
 `on_episode_complete=run.log_trajectory_kl_result` 会把 rich result 写入
 `events.jsonl`。持久化 callback 如果失败会向上抛出，runner 不会静默声称
-测量成功。
+测量成功。示例在成功和失败分支都恰好调用一次 `Run.finish()`，以 flush
+buffered JSONL 并写出最终运行状态；如果 match 与 finalization 同时失败，
+finalization 错误会保留 match 错误作为 cause。
 
 内置 `Match` 还要求环境 observation 至少支持：
 
@@ -517,6 +536,9 @@ run.finish({
 游戏特有的 observation、对手和终局处理由下游替换：
 
 ```python
+import copy
+
+
 def run_measured_episode(
     *,
     env,
@@ -526,12 +548,17 @@ def run_measured_episode(
     metadata,
 ):
     measured_agent.set_measurement_episode_metadata(metadata)
-    measured_agent.reset()
-    observation = env.reset(seed=seed)
-    done = False
-    env_step = 0
 
     try:
+        measured_agent.reset()
+        opponent_reset = getattr(opponent, "reset", None)
+        if callable(opponent_reset):
+            opponent_reset()
+
+        observation = env.reset(seed=seed)
+        done = False
+        env_step = 0
+
         while not done:
             previous = observation
             actor = actor_player_id(previous)
@@ -552,7 +579,7 @@ def run_measured_episode(
             terminated = bool(env_done and not truncated)
             done = terminated or truncated
 
-            measured_agent.observe_transition({
+            transition = {
                 "observation": observation_to_dict(previous),
                 "actor_player_id": actor,
                 "action": action,
@@ -563,11 +590,23 @@ def run_measured_episode(
                 "done": done,
                 "info": info,
                 "env_step": env_step,
-            })
+            }
+            measured_agent.observe_transition(transition)
+
+            opponent_observe = getattr(
+                opponent,
+                "observe_transition",
+                None,
+            )
+            if callable(opponent_observe):
+                opponent_observe(copy.deepcopy(transition))
     except Exception as exc:
-        measured_agent.abort_episode(
-            f"{type(exc).__name__}: {exc}"
-        )
+        try:
+            measured_agent.abort_episode(
+                f"{type(exc).__name__}: {exc}"
+            )
+        except Exception as abort_exc:
+            raise abort_exc from exc
         raise
 
     return measured_agent.latest_trajectory_kl_result
@@ -582,6 +621,11 @@ def run_measured_episode(
 5. runner 异常必须调用 `abort_episode()` 并继续向上抛出原异常；
 6. 不要在 terminal 后继续调用 `act()` 或 `observe_transition()`；
 7. 不要把未执行的旧策略候选动作伪造成 transition。
+
+`measured_agent.reset()` 和 `env.reset()` 必须位于同一个异常保护区内；只要
+measurement episode 已开始，后续 reset、环境初始化或运行错误都必须触发
+`abort_episode()`。对手自身的 `reset()` 和 transition 生命周期也由自定义
+runner 维护，不能假定 measurement wrapper 会替对手维护状态。
 
 ### 11.1 Transition 的最小语义
 
@@ -626,8 +670,11 @@ on_episode_complete=run.log_trajectory_kl_result
 事实源位于：
 
 ```text
-runs/{game}/{agent}/{run_id}/events.jsonl
+{data_dir}/runs/{game}/{agent}/{run_id}/events.jsonl
 ```
+
+上一节示例使用 `data_dir="."`，所以实际路径为
+`./runs/{game}/{agent}/{run_id}/events.jsonl`。
 
 ### 12.1 每个决策点的一手字段
 
@@ -640,7 +687,7 @@ runs/{game}/{agent}/{run_id}/events.jsonl
 | `legal_action_ids` | 完整、有序合法动作 ID |
 | `selected_action_id` | 新策略实际选择的动作 ID |
 | `new_distribution` | 新 adapter 返回的原始 mapping |
-| `old_distribution` | 旧 adapter 返回的原始 mapping；失败时为缺失 |
+| `old_distribution` | 旧 adapter 返回的原始 mapping；query 抛异常或返回非 mapping 时缺失，mapping 校验失败时仍保留 |
 | `new_probabilities` | 按支持集顺序对齐并校验后的新概率 |
 | `old_probabilities` | 按支持集顺序对齐并校验后的旧概率 |
 | `local_policy_kl` | epsilon-regularized local KL；失败时为缺失 |
@@ -718,7 +765,8 @@ epsilon 由 `TrajectoryKLConfig` 固定，必须满足：
 | 分布缺少或多出 key | 记录该决策错误，episode incomplete | mapping 必须与 `support.action_ids` 严格相等 |
 | 概率为负、NaN 或 infinity | 记录该决策错误，episode incomplete | 检查 mask、softmax 和数值转换 |
 | 概率和不为 1 | 记录该决策错误，episode incomplete | 在 adapter 中按实际行为策略归一化 |
-| 旧策略查询失败 | 新动作仍可执行；旧分布和 local KL 缺失，episode incomplete | 检查旧 artifact、只读 API 和 session 同步 |
+| 旧查询抛异常或返回非 mapping | 新动作仍可执行；旧原始分布和 local KL 缺失，episode incomplete | 检查旧 artifact、只读 API 和 session 同步 |
+| 旧 mapping 校验失败 | 原始 `old_distribution` 保留；对齐概率和 local KL 缺失，episode incomplete | 检查 key、概率范围与归一化 |
 | 没有目标决策点 | episode incomplete，主指标缺失 | 检查角色映射、立即终局或 runner 回合判断 |
 | terminal 前再次 reset | 旧 episode 先以 incomplete 结束 | 修复 episode 生命周期 |
 | transition observer 失败 | 错误写入 episode，主指标缺失 | 检查新旧 session 的 transition 解析 |
@@ -729,6 +777,17 @@ epsilon 由 `TrajectoryKLConfig` 固定，必须满足：
 一个决策出现错误后，framework 仍可能让新策略动作继续执行，以保留真实
 rollout；但该 episode 不再产生主标量。下游不能从已有 local KL 手工求部分
 和并标记为 complete。
+
+一手证据能保留到哪个阶段取决于失败发生的位置：
+
+- 支持集构造失败、active 返回类型错误或所选 action ID 不合法时，当前决策
+  record 尚未创建；framework 保留之前已经完成的 decisions 和 episode 级
+  abort error；
+- 新分布校验失败、旧查询失败或旧分布校验失败时，当前决策 record 已创建，
+  会保留当时取得的原始 mapping、可用字段和 errors。
+
+因此“incomplete 会保留一手数据”不表示每一种前置失败都能凭空产生当前决策
+的 raw record。
 
 ## 15. 下游验收清单
 
@@ -746,7 +805,8 @@ rollout；但该 episode 不再产生主标量。下游不能从已有 local KL 
 - [ ] 新分布描述实际 behavior policy，而不是另一个未执行的 soft policy。
 - [ ] 旧分布查询不会提交动作或推进隐藏状态。
 - [ ] RL 和 HL 都返回完整的 `action_id -> probability` mapping。
-- [ ] HL 按协议返回 one-hot，epsilon 只由 framework 添加。
+- [ ] 确定性 HL 按协议返回 one-hot；随机 HL 不会把 realized action 谎报为 one-hot。
+- [ ] epsilon 只由 framework 添加。
 - [ ] 新旧 mapping 的 key 与当前支持集严格相等。
 
 ### 15.3 Runner
@@ -756,6 +816,8 @@ rollout；但该 episode 不再产生主标量。下游不能从已有 local KL 
 - [ ] 每个实际环境 step，包括对手动作，都同步给 wrapper。
 - [ ] terminal transition 正确区分 `terminated` 和 `truncated`。
 - [ ] runner 异常会调用 `abort_episode()`，且异常继续向上抛出。
+- [ ] agent reset 或 env reset 失败也会结束已打开的 measurement episode。
+- [ ] `Run.finish()` 在成功和失败路径都恰好执行一次。
 - [ ] seed、对手、先后手和 benchmark case ID 写入 metadata。
 
 ### 15.4 数据与数值
@@ -764,7 +826,8 @@ rollout；但该 episode 不再产生主标量。下游不能从已有 local KL 
 - [ ] 每个正常 local KL 有限且非负。
 - [ ] `trajectory_kl_episode` 等于完整 trace 之和。
 - [ ] 单位明确为主 `nats / episode`、辅 `nats / decision`。
-- [ ] 任一无效决策会保留 raw evidence，但 episode 为 incomplete。
+- [ ] 分布/查询失败会保留当前决策已取得的 raw evidence，并使 episode incomplete。
+- [ ] support、active 类型或非法动作的前置失败只要求保留先前 decisions 和 abort error。
 - [ ] incomplete episode 的总和与均值为缺失，不是 0。
 - [ ] `version_before`、`version_after` 和 epsilon 可复现。
 - [ ] 本地报告和 CI 都从 trace 派生标量并保留缺口。
@@ -780,7 +843,9 @@ rollout；但该 episode 不再产生主标量。下游不能从已有 local KL 
 5. HL 新旧选择不同动作，确认 one-hot 经 epsilon 后得到有限 KL；
 6. 环境中途抛出异常，确认已有 decisions 被保留；
 7. persistence callback 失败，确认任务失败而不是生成假成功；
-8. 用同一 seed、对手和版本重跑，确认协议与 metadata 一致。
+8. agent reset 或 env reset 抛出异常，确认已打开 episode 被中止；
+9. match 失败后调用 `Run.finish()`，确认 buffered incomplete 事件被 flush；
+10. 用同一 seed、对手和版本重跑，确认协议与 metadata 一致。
 
 ## 16. 不属于当前方案的做法
 
