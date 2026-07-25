@@ -15,11 +15,14 @@ Opponent runnable dirs (frozen builds, NOT recompiled):
 from __future__ import annotations
 
 import hashlib
+import argparse
 import json
 import platform
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Sequence
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "src"))
@@ -50,6 +53,27 @@ CPP_RANKS = (1, 2, 3, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16)
 LOG = None
 
 
+class PreflightError(RuntimeError):
+    """A stable, user-facing input validation failure."""
+
+
+@dataclass(frozen=True)
+class ControlInputs:
+    protocol: dict
+    roster: dict
+    hashes: dict[str, str]
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run the 24_miracle evaluation matrix")
+    parser.add_argument("--dry-run", action="store_true", help="plan only; do not start a game")
+    parser.add_argument("--resume", metavar="SESSION_ID", help="resume an existing session")
+    parser.add_argument("--protocol", type=Path, default=PROTOCOL)
+    parser.add_argument("--roster", type=Path, default=ROSTER)
+    parser.add_argument("--protocol-sha", default=None)
+    return parser.parse_args(argv)
+
+
 def log(msg=""):
     print(msg, flush=True)
     if LOG:
@@ -62,6 +86,45 @@ def sha(p: Path) -> str:
         for b in iter(lambda: f.read(1 << 20), b""):
             h.update(b)
     return h.hexdigest()
+
+
+def _load_json_object(path: Path, label: str) -> dict:
+    if not path.exists():
+        raise PreflightError(f"{label} file missing: {path}")
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        raise PreflightError(f"{label} JSON invalid: {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise PreflightError(f"{label} JSON must be an object: {path}")
+    return value
+
+
+def load_control_inputs(
+    protocol_path: Path,
+    roster_path: Path,
+    expected_protocol_sha: str | None = None,
+) -> ControlInputs:
+    protocol_path = Path(protocol_path)
+    roster_path = Path(roster_path)
+    protocol = _load_json_object(protocol_path, "protocol")
+    roster = _load_json_object(roster_path, "roster")
+    strategies = roster.get("strategies")
+    if not isinstance(strategies, list):
+        raise PreflightError("roster strategies must be a list")
+    ranks = [item.get("rank") for item in strategies if isinstance(item, dict)]
+    if ranks != list(range(1, 17)):
+        raise PreflightError(f"roster ranks must be exactly 1..16: {ranks}")
+    protocol_hash = sha(protocol_path)
+    if expected_protocol_sha and protocol_hash != expected_protocol_sha:
+        raise PreflightError(
+            f"protocol sha mismatch: got {protocol_hash}, expected {expected_protocol_sha}"
+        )
+    return ControlInputs(
+        protocol=protocol,
+        roster=roster,
+        hashes={"protocol": protocol_hash, "roster": sha(roster_path)},
+    )
 
 
 def opponent_dir_of(rank: int) -> Path:
