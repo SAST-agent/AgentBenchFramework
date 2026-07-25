@@ -1,0 +1,1 @@
+﻿# Failure history`n`nThe earlier session had two infrastructure-invalid rank04 attempts caused by a relative replay path being resolved from the Judge working directory. It remains preserved. The replacement session supersedes it after the infrastructure repair; total actual attempts across both sessions: 10.

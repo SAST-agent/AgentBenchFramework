@@ -1,0 +1,1 @@
+﻿# Posthoc manifest notice`n`nThe runtime omitted its preregistration manifest. The local manifest is explicitly labeled POSTHOC_RECONSTRUCTED, not preregistration. Its pre-execution inventory fixes every pre-existing file hash; unavailable pre-execution repair hashes are null and marked unavailable_not_recorded_before_execution.
