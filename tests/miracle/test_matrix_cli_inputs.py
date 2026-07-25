@@ -57,6 +57,32 @@ def test_load_control_inputs_validates_protocol_and_roster(tmp_path, monkeypatch
     assert len(inputs.hashes["roster"]) == 64
 
 
+def test_control_text_sha_is_identical_for_lf_and_crlf(tmp_path, monkeypatch):
+    mm = _import_cli_module(monkeypatch)
+    lf = tmp_path / "lf.json"
+    crlf = tmp_path / "crlf.json"
+    lf.write_bytes(b'{\n  "protocol_version": "test"\n}\n')
+    crlf.write_bytes(b'{\r\n  "protocol_version": "test"\r\n}\r\n')
+    assert mm.control_text_sha(lf) == mm.control_text_sha(crlf)
+
+
+def test_windows_crlf_protocol_checkout_passes_expected_hash(tmp_path, monkeypatch):
+    mm = _import_cli_module(monkeypatch)
+    protocol = tmp_path / "protocol.json"
+    roster = tmp_path / "roster.json"
+    protocol.write_bytes(b'{\r\n  "protocol_version": "test"\r\n}\r\n')
+    roster.write_text(json.dumps({"strategies": [{"rank": rank} for rank in range(1, 17)]}), encoding="utf-8")
+    mm.load_control_inputs(protocol, roster, mm.control_text_sha(protocol))
+
+
+def test_tracked_control_files_have_no_machine_paths(monkeypatch):
+    mm = _import_cli_module(monkeypatch)
+    for path in (mm.PROTOCOL, mm.ROSTER):
+        text = path.read_text(encoding="utf-8")
+        for marker in ("C:/Users/", "C:\\Users\\", "/home/", "/Users/"):
+            assert marker not in text
+
+
 def test_load_control_inputs_rejects_non_contiguous_roster(tmp_path, monkeypatch):
     mm = _import_cli_module(monkeypatch)
     protocol_path = tmp_path / "protocol.json"

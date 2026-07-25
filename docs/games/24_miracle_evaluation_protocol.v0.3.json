@@ -22,7 +22,7 @@
 
   "frozen_identities": {
     "evaluated_agent": {"name": "miracle_ifelse", "source": "高翔 ifelse_bot/main.py", "sha256": "98199fae8875de63b41d2eacd92ad5c58b4d5aa95b01b05aeacedd0b55402f4b", "modifiable": false},
-    "judge": {"source": "C:/Users/gongh/Documents/agentbench/.../judge_dev_logic", "main_py_sha256": "104f77bf4ec59b96b46ffc05e20482319f40fc83401a9becd785d0be98a7fc09", "modifiable": false},
+    "judge": {"source": "external_asset:judge_dev_logic", "main_py_sha256": "104f77bf4ec59b96b46ffc05e20482319f40fc83401a9becd785d0be98a7fc09", "modifiable": false},
     "opponents": "见 docs/games/24_miracle_roster_manifest.json（16 策略 archive_sha256）",
     "build_artifacts_win64_mingw": {
       "_note": "阶段9A 预检隔离编译产物 SHA256（g++ 15.2.0 MinGW, GNU Make 4.4.1，策略自带 makefile 原样编译）",

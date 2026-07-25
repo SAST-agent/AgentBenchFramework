@@ -54,7 +54,7 @@ ROSTER = REPO / "docs" / "games" / "24_miracle_roster_manifest.json"
 PRECHECK_9A = REPO / ".smoke" / "precheck" / "20260721-184652_da899d"
 RANK16_BUILD = REPO / ".smoke" / "rank16build" / "20260721-195738_baff71"
 SESSION_ROOT = REPO / ".smoke" / "matrix"
-PROTOCOL_SHA = "866696fd9e094da85e3f2c04dc5ba20d0500faf8461531a242362323c4efe0b3"
+PROTOCOL_SHA = "f64b948c3dfef1e59d0d2db9ea747ed1d742d054bafd9abe6e6b824d65723b99"
 AUTH_TEXT = "用户授权 A 方案 32 局正式矩阵（v0.3）；逐对手分批审计；成功局不重跑；infra 即停；完成后聚合+本地 Results 验收；不 push/不上传。"
 
 PYTHON_RANKS = (4, 5, 7)
@@ -104,6 +104,13 @@ def sha(p: Path) -> str:
     return h.hexdigest()
 
 
+def control_text_sha(path: Path) -> str:
+    """Hash UTF-8 control text after normalizing physical newlines to LF."""
+    text = Path(path).read_text(encoding="utf-8")
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
 def _load_json_object(path: Path, label: str) -> dict:
     if not path.exists():
         raise PreflightError(f"{label} file missing: {path}")
@@ -133,7 +140,7 @@ def load_control_inputs(
     ranks = [item.get("rank") for item in strategies if isinstance(item, dict)]
     if ranks != list(range(1, 17)):
         raise PreflightError(f"roster ranks must be exactly 1..16: {ranks}")
-    protocol_hash = sha(protocol_path)
+    protocol_hash = control_text_sha(protocol_path)
     if expected_protocol_sha and protocol_hash != expected_protocol_sha:
         raise PreflightError(
             f"protocol sha mismatch: got {protocol_hash}, expected {expected_protocol_sha}"
@@ -141,7 +148,7 @@ def load_control_inputs(
     return ControlInputs(
         protocol=protocol,
         roster=roster,
-        hashes={"protocol": protocol_hash, "roster": sha(roster_path)},
+        hashes={"protocol": protocol_hash, "roster": control_text_sha(roster_path)},
     )
 
 

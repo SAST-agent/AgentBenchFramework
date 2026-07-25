@@ -1,8 +1,8 @@
 {
   "_doc": "24_miracle 16 决赛策略运行时兼容性静态盘点。仅静态检查与轻量入口审计；未编译、未启动任何 Judge/AI 比赛/完整策略。每个策略的 verification_status 标注为 static_only，绝不写成已成功运行。",
   "_generated": "2026-07-21",
-  "_source_extracted": "C:/Users/gongh/Documents/agentbench/top_algorithms/corpus/24_miracle_final/extracted",
-  "_source_archives": "C:/Users/gongh/Documents/agentbench/top_algorithms/corpus/24_miracle_final/archives",
+  "_source_extracted": "external_asset:24_miracle_final/extracted",
+  "_source_archives": "external_asset:24_miracle_final/archives",
   "_toolchain_observed": {
     "g++": "MinGW 15.2.0 (x86_64-win32-seh) available at /c/Program Files/mingw64/bin/g++",
     "make": "GNU Make 4.4.1 available",
