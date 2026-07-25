@@ -22,7 +22,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from agentbench_frame.lostspace.protocol import read_frame, write_frame
+from agentbench_frame.lostspace.protocol import (
+    LostSpaceProtocolError,
+    read_frame,
+    write_frame,
+)
 
 _IS_WINDOWS = sys.platform.startswith("win")
 
@@ -34,6 +38,69 @@ _IS_WINDOWS = sys.platform.startswith("win")
 # consumes silently. ``roundbegin`` starts a turn, ``action`` is the per-action
 # response, and ``format error`` is a re-prompt after a malformed action.
 _ACTION_REQUEST_TYPES = frozenset({"roundbegin", "action", "format error"})
+
+# LostSpace PlayerStatus values: 0=Alive, 1=Died, 2=Escaped, 3=Skipped,
+# 4=WaitForEscape, 5=Error. The logic only opens its in-round action loop
+# (``inround()``, which actually waits for the player's move) when the
+# in-turn player is Alive or WaitForEscape. For every other status the
+# logic emits the ``roundbegin`` with ``listen=[player]`` but never blocks —
+# so the harness must not block either, or it will burn a full TLE every
+# round for each dead/errored/escaped player.
+_ACTION_STATUSES = frozenset({0, 4})
+
+
+def _expects_reply(content: str) -> bool:
+    """Whether the in-turn player must emit an action for this frame."""
+    parsed = _decode_content(content)
+    if not isinstance(parsed, dict):
+        return False
+    ctype = parsed.get("type")
+    if ctype not in _ACTION_REQUEST_TYPES:
+        return False
+    if ctype == "roundbegin":
+        # No status field ⇒ assume actionable (first-turn / unknown form).
+        status = parsed.get("status")
+        if status is not None and status not in _ACTION_STATUSES:
+            return False
+    return True
+
+
+def _report_ai_error(
+    logic: subprocess.Popen[bytes],
+    trace: list[dict[str, Any]],
+    player: int,
+    state: int,
+    error_log: str,
+) -> None:
+    """Tell the logic a player has failed (TLE or crash) and the game goes on.
+
+    Mirrors the saiblo judger's ``ai_error`` message: the logic's in-round loop
+    treats it as a fatal error for that player (hp=0, marked lose) and, if it
+    is the in-turn player, ends the turn. Idempotent for players already out.
+    """
+    error_code = 0 if error_log == "runError" else 1
+    inner = json.dumps(
+        {
+            "player": player,
+            "state": state,
+            "error": error_code,
+            "error_log": error_log,
+        },
+        separators=(",", ":"),
+    )
+    routed = json.dumps(
+        {"player": -1, "content": inner},
+        separators=(",", ":"),
+    ).encode()
+    write_frame(logic.stdin, routed)
+    trace.append(
+        {
+            "state": state,
+            "type": "ai_error",
+            "player": player,
+            "content": error_log,
+        }
+    )
 
 
 class LostSpaceMatchError(RuntimeError):
@@ -95,21 +162,57 @@ def _resolve_windows_executable(argv: list[str], cwd: str | None) -> None:
     if not argv:
         return
     exe = argv[0]
-    if os.path.sep in exe or "/" in exe or "." in exe:
-        return  # already a path or has an extension
-    candidate = f"{exe}.exe"
+    if os.path.sep in exe or "/" in exe:
+        return  # already a path
+    # A bare program name (``main`` or ``main.exe``) launched with an explicit
+    # application name is resolved by CreateProcess against the *calling*
+    # process cwd, NOT the ``cwd=`` we pass — so it must be made absolute
+    # against the intended working directory first.
+    candidates = [exe, f"{exe}.exe"] if "." not in os.path.basename(exe) else [exe]
     search_dirs: list[str] = []
     if cwd:
         search_dirs.append(cwd)
     search_dirs += os.environ.get("PATH", "").split(os.pathsep)
     for directory in search_dirs:
-        if directory and os.path.isfile(os.path.join(directory, candidate)):
-            argv[0] = os.path.join(directory if cwd and directory == cwd else directory, candidate)
-            return
+        if not directory:
+            continue
+        for candidate in candidates:
+            if os.path.isfile(os.path.join(directory, candidate)):
+                argv[0] = os.path.join(directory, candidate)
+                return
+
+
+def _stderr_for(label: str) -> Any:
+    """Return a stderr target for a child process.
+
+    When ``LOSTSPACE_DEBUG_DIR`` is set, each child's stderr is written to a
+    file named after its label so a stall/death can be post-mortemed.
+    """
+    debug_dir = os.environ.get("LOSTSPACE_DEBUG_DIR")
+    if not debug_dir:
+        return subprocess.DEVNULL
+    path = Path(debug_dir) / f"{label}.stderr"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return open(path, "ab", buffering=0)
+
+
+def _child_env() -> dict[str, str]:
+    """Environment for child processes (logic + AIs).
+
+    ``PYTHONHOME`` / ``PYTHONPATH`` are stripped so a Python child launched
+    with its own interpreter (e.g. the bundled logic under
+    ``D:\\pymol\\python.exe``) is not poisoned by the parent's interpreter —
+    a real failure mode when the harness itself runs under ``uv`` (whose
+    ``PYTHONHOME`` points at a different CPython and breaks the child's
+    ``importlib``).
+    """
+    env = {k: v for k, v in os.environ.items() if k not in {"PYTHONHOME", "PYTHONPATH"}}
+    return env
 
 
 def _start(command: str, label: str) -> subprocess.Popen[bytes]:
     shell_command, cwd = _split_cwd(command)
+    env = _child_env()
     if _IS_WINDOWS:
         # Launch the program directly with an argv + cwd instead of routing
         # through ``cmd /c``. cmd.exe as a pipe middleman intermittently
@@ -122,8 +225,9 @@ def _start(command: str, label: str) -> subprocess.Popen[bytes]:
             shell=False,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=_stderr_for(label),
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            env=env,
         )
         if cwd:
             kwargs["cwd"] = cwd
@@ -133,8 +237,9 @@ def _start(command: str, label: str) -> subprocess.Popen[bytes]:
             shell=True,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=_stderr_for(label),
             start_new_session=True,
+            env=env,
         )
         if cwd:
             kwargs["cwd"] = cwd
@@ -233,13 +338,54 @@ def run_match(
         ).encode()
         write_frame(logic.stdin, init)
 
+        pending_responder: int | None = None
         while True:
-            packet = read_frame(
-                logic.stdout,
-                timeout,
-                "logic",
-                has_target=True,
-            )
+            try:
+                packet = read_frame(
+                    logic.stdout,
+                    timeout,
+                    "logic",
+                    has_target=True,
+                )
+            except LostSpaceProtocolError as exc:
+                # Symmetric-deadlock break: the logic emits a frame after every
+                # action it accepts, so a logic-read stall means the logic is
+                # itself blocked waiting for the player who just acted (a
+                # multi-action turn where the AI went quiet without
+                # ``finish``). Attribute the timeout to that player and let the
+                # logic's ai_error handling advance the game, exactly as the
+                # saiblo TLE would.
+                if pending_responder is None:
+                    raise
+                error_log = (
+                    "runError" if "exited" in str(exc) else "timeOutError"
+                )
+                error_code = 0 if error_log == "runError" else 1
+                inner = json.dumps(
+                    {
+                        "player": pending_responder,
+                        "state": state,
+                        "error": error_code,
+                        "error_log": error_log,
+                    },
+                    separators=(",", ":"),
+                )
+                routed = json.dumps(
+                    {"player": -1, "content": inner},
+                    separators=(",", ":"),
+                ).encode()
+                write_frame(logic.stdin, routed)
+                trace.append(
+                    {
+                        "state": state,
+                        "type": "ai_error",
+                        "player": pending_responder,
+                        "content": error_log,
+                    }
+                )
+                turns += 1
+                pending_responder = None
+                continue
             try:
                 message = json.loads(packet)
             except json.JSONDecodeError as exc:
@@ -289,8 +435,14 @@ def run_match(
                         "content": parsed_content,
                     }
                 )
-                ais[player].stdin.write(content.encode())
-                ais[player].stdin.flush()
+                try:
+                    ais[player].stdin.write(content.encode())
+                    ais[player].stdin.flush()
+                except OSError:
+                    # The AI process has exited (broken pipe). Report it as a
+                    # runError so the logic eliminates the player and the match
+                    # continues, instead of crashing the whole game.
+                    _report_ai_error(logic, trace, player, state, "runError")
 
             # A listener actually replies only when the frame is an action
             # request addressed to it. LostSpace carries the in-turn player in
@@ -304,14 +456,29 @@ def run_match(
                 responder = int(listener)
                 if responder not in content_by_player:
                     continue
-                ctype = _decode_content(content_by_player[responder]).get("type")
-                if ctype not in _ACTION_REQUEST_TYPES:
+                if not _expects_reply(content_by_player[responder]):
                     continue
-                response = read_frame(
-                    ais[responder].stdout,
-                    timeout,
-                    f"player {responder}",
-                )
+                try:
+                    response = read_frame(
+                        ais[responder].stdout,
+                        timeout,
+                        f"player {responder}",
+                    )
+                except LostSpaceProtocolError as exc:
+                    # Saiblo enforces a per-round time limit: an AI that does
+                    # not answer an action request in time is reported to the
+                    # logic as an ``ai_error`` (TimeOutError / RunError) and the
+                    # game continues — the logic marks the player errored and
+                    # moves on. Several ranked algorithms legitimately stall in
+                    # specific branches (e.g. rank01 returns from its get-key
+                    # strategy without sending ``finish``); replicating the TLE
+                    # instead of deadlocking the whole match is the faithful
+                    # behaviour. A crashed/closed pipe is a RunError; a stall
+                    # is a TimeOutError.
+                    error_log = "runError" if "exited" in str(exc) else "timeOutError"
+                    _report_ai_error(logic, trace, responder, state, error_log)
+                    turns += 1
+                    continue
                 try:
                     action: Any = json.loads(response)
                 except json.JSONDecodeError:
@@ -333,6 +500,9 @@ def run_match(
                 ).encode()
                 write_frame(logic.stdin, routed)
                 turns += 1
+                # This player just acted; if the logic subsequently stalls
+                # (next read), the stall is attributed to them.
+                pending_responder = responder
     except LostSpaceMatchError:
         raise
     except Exception as exc:

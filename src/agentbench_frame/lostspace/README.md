@@ -102,8 +102,9 @@ re-evaluate, compare.
 
 See [`baselines/README.md`](baselines/README.md). Bundled Python baselines:
 official `sample_ai` (heuristic BFS) and `random_agent` (weak filler). The 16
-ranked C++ algorithms under `top_algorithms/corpus/25_lostspace_final_ladder/`
-are future work.
+ranked contest algorithms under `top_algorithms/corpus/25_lostspace_final_ladder/`
+are wired in via `--ladder-opponent rank=NAME` (see
+[`ladder.py`](ladder.py) and [`scripts/build_ladder.py`](scripts/build_ladder.py)).
 
 ## How it works (protocol)
 

@@ -1,1 +1,7 @@
 __pycache__/
+.cache/
+_scratch_out/
+agentbench_data/
+_e2e_data/
+_rank01_stderr.log
+_scratch_realmatch.py

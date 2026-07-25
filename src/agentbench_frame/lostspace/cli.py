@@ -53,8 +53,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--opponent",
         action="append",
         type=parse_opponent,
-        required=True,
+        default=[],
         metavar="NAME=COMMAND",
+        help="explicit opponent as NAME=COMMAND (repeatable)",
+    )
+    parser.add_argument(
+        "--ladder-opponent",
+        action="append",
+        default=[],
+        metavar="rank=NAME",
+        help=(
+            "add a ranked human algorithm as an opponent. NAME is a rank "
+            "(rank=1), username (rank=omegafantasy) or display name "
+            "(rank=最终幻想). C++ algorithms are built into a cache dir on "
+            "first use. Repeatable."
+        ),
     )
     parser.add_argument(
         "--filler",
@@ -76,11 +89,22 @@ def main(
     evaluator_class: Type[LostSpaceEvaluator] = LostSpaceEvaluator,
 ) -> int:
     args = build_parser().parse_args(argv)
+    from agentbench_frame.lostspace import ladder
+
+    opponents = list(args.opponent)
+    for selector in args.ladder_opponent:
+        entry = ladder.resolve(selector)
+        cmd, _cwd = ladder.launch_command(entry)
+        opponents.append(Opponent(name=f"rank{entry.rank:02d}", command=cmd))
+    if not opponents:
+        build_parser().error(
+            "at least one of --opponent or --ladder-opponent is required"
+        )
     evaluator = evaluator_class(
         logic_command=args.logic,
         candidate_name=args.candidate_name,
         candidate_command=args.candidate,
-        opponents=args.opponent,
+        opponents=opponents,
         filler_command=args.filler or default_filler_command(),
         pairs=args.pairs,
         seats=args.seats,

@@ -101,17 +101,31 @@ class MatchTest(unittest.TestCase):
                 )
 
     def test_reports_ai_timeout(self):
+        # A player that does not answer an action request in time is reported
+        # to the logic as an ``ai_error`` (TimeOutError) and the match
+        # continues — mirroring the saiblo per-round TLE, instead of
+        # deadlocking the whole game. The timeout is recorded in the trace.
         with tempfile.TemporaryDirectory() as directory:
-            with self.assertRaisesRegex(LostSpaceMatchError, "player 0 timed out"):
-                run_match(
-                    command("fake_logic.py"),
-                    [
-                        command("fake_ai.py", "--sleep", "2.0"),
-                        *self._four_ais()[1:],
-                    ],
-                    timeout=0.5,
-                    replay_path=Path(directory) / "replay.json",
-                )
+            root = Path(directory)
+            trace = root / "trace.jsonl"
+            result = run_match(
+                command("fake_logic.py"),
+                [
+                    command("fake_ai.py", "--sleep", "2.0"),
+                    *self._four_ais()[1:],
+                ],
+                timeout=0.5,
+                replay_path=root / "replay.json",
+                trace_path=trace,
+            )
+            self.assertEqual(result["winner"], 0)
+            records = [json.loads(line) for line in trace.read_text().splitlines()]
+            errors = [
+                r for r in records
+                if r.get("type") == "ai_error" and r.get("player") == 0
+            ]
+            self.assertEqual(len(errors), 1)
+            self.assertEqual(errors[0]["content"], "timeOutError")
 
     def test_cleans_up_ai_processes(self):
         with tempfile.TemporaryDirectory() as directory:
