@@ -34,6 +34,12 @@ from agentbench_frame.eval.measurement import (
     canonical_state_id,
     canonical_state_payload,
 )
+from agentbench_frame.eval.trajectory_kl import (
+    TrajectoryKLAgent,
+    TrajectoryKLConfig,
+    TrajectoryKLDecisionRecord,
+    TrajectoryKLEpisodeResult,
+)
 
 __all__ = [
     "TrajectoryRecorder",
@@ -58,4 +64,8 @@ __all__ = [
     "StateIdProvider",
     "canonical_state_id",
     "canonical_state_payload",
+    "TrajectoryKLAgent",
+    "TrajectoryKLConfig",
+    "TrajectoryKLDecisionRecord",
+    "TrajectoryKLEpisodeResult",
 ]
