@@ -127,24 +127,118 @@ def load_control_inputs(
     )
 
 
-def opponent_dir_of(rank: int) -> Path:
+def resolve_unique_dir(root: Path, pattern: str) -> Path:
+    root = Path(root)
+    matches = sorted(path for path in root.glob(pattern) if path.is_dir())
+    if not matches:
+        raise FileNotFoundError(f"no opponent directory matching {pattern}: {root}")
+    if len(matches) > 1:
+        names = ", ".join(str(path) for path in matches)
+        raise RuntimeError(f"multiple opponent directories matching {pattern}: {names}")
+    return matches[0]
+
+
+def resolve_unique_file(root: Path, pattern: str) -> Path:
+    root = Path(root)
+    matches = sorted(path for path in root.glob(pattern) if path.is_file())
+    if not matches:
+        raise FileNotFoundError(f"no archive file matching {pattern}: {root}")
+    if len(matches) > 1:
+        names = ", ".join(str(path) for path in matches)
+        raise RuntimeError(f"multiple archive files matching {pattern}: {names}")
+    return matches[0]
+
+
+def resolve_opponent_dir(
+    rank: int,
+    roster: dict | None = None,
+    *,
+    extracted_root: Path = EXTRACTED,
+    precheck_root: Path = PRECHECK_9A,
+    rank16_build_root: Path = RANK16_BUILD,
+) -> Path:
     if rank in PYTHON_RANKS:
-        return next(EXTRACTED.glob(f"rank{rank:02d}__*"))
+        return resolve_unique_dir(extracted_root, f"rank{rank:02d}__*")
     if rank == 16:
-        return RANK16_BUILD / "rank16_copy"
-    return PRECHECK_9A / "strategies" / f"rank{rank:02d}"
+        return Path(rank16_build_root) / "rank16_copy"
+    return Path(precheck_root) / "strategies" / f"rank{rank:02d}"
 
 
-def verify_hashes(v3: dict, roster: dict):
+def opponent_dir_of(rank: int) -> Path:
+    return resolve_opponent_dir(rank)
+
+
+def verify_python_strategy_hashes(
+    strategy: dict,
+    extracted_root: Path,
+    archives_root: Path | None = None,
+) -> list[str]:
+    rank = strategy.get("rank", "unknown")
+    label = f"rank{int(rank):02d}" if isinstance(rank, int) else f"rank{rank}"
+    errors: list[str] = []
+    try:
+        directory = resolve_unique_dir(extracted_root, f"rank{int(rank):02d}__*")
+    except (FileNotFoundError, RuntimeError) as exc:
+        return [f"{label}: {exc}"]
+    entry = strategy.get("entry")
+    if not isinstance(entry, str) or not entry or Path(entry).is_absolute() or ".." in Path(entry).parts:
+        return [f"{label}: invalid runnable entry"]
+    entry_path = directory / entry
+    if not entry_path.is_file():
+        errors.append(f"{label}: runnable entry missing: {entry_path}")
+    else:
+        expected_entry_sha = strategy.get("runnable_sha256")
+        if not expected_entry_sha:
+            errors.append(f"{label}: runnable sha missing from roster")
+        elif sha(entry_path) != expected_entry_sha:
+            errors.append(f"{label}: runnable sha mismatch")
+    if archives_root is not None:
+        try:
+            archive = resolve_unique_file(Path(archives_root), f"rank{int(rank):02d}__*.zip")
+        except (FileNotFoundError, RuntimeError) as exc:
+            errors.append(f"{label}: {exc}")
+        else:
+            expected_archive_sha = strategy.get("archive_sha256")
+            if expected_archive_sha and sha(archive) != expected_archive_sha:
+                errors.append(f"{label}: archive sha mismatch")
+    return errors
+
+
+def verify_hashes(
+    v3: dict,
+    roster: dict,
+    *,
+    extracted_root: Path = EXTRACTED,
+    archives_root: Path = ARCHIVES,
+    precheck_root: Path = PRECHECK_9A,
+    rank16_build_root: Path = RANK16_BUILD,
+):
     """Verify every opponent's runnable identity matches the frozen hashes."""
     mismatches = []
     ba = v3["frozen_identities"]["build_artifacts_win64_mingw"]
+    strategies = {item["rank"]: item for item in roster.get("strategies", []) if isinstance(item, dict)}
     for rank in range(1, 17):
-        d = opponent_dir_of(rank)
+        try:
+            d = resolve_opponent_dir(
+                rank,
+                roster,
+                extracted_root=extracted_root,
+                precheck_root=precheck_root,
+                rank16_build_root=rank16_build_root,
+            )
+        except (FileNotFoundError, RuntimeError) as exc:
+            mismatches.append(f"rank{rank:02d}: {exc}")
+            continue
         if not d.exists():
             mismatches.append(f"rank{rank:02d}: opponent dir missing {d}")
             continue
-        if rank in CPP_RANKS:
+        if rank in PYTHON_RANKS:
+            strategy = strategies.get(rank)
+            if strategy is None:
+                mismatches.append(f"rank{rank:02d}: roster strategy missing")
+            else:
+                mismatches.extend(verify_python_strategy_hashes(strategy, extracted_root, archives_root))
+        else:
             me = d / "main.exe"
             if not me.exists():
                 mismatches.append(f"rank{rank:02d}: main.exe missing")
