@@ -95,6 +95,11 @@ class LocalResearchReportTests(unittest.TestCase):
                     "episode": 10,
                     "trace": [1e308, 1e308],
                 }),
+                json.dumps({
+                    "event_type": "policy_kl_trace",
+                    "episode": 11,
+                    "trace": [10 ** 3999],
+                }),
             ]) + "\n")
 
             output = root / "site"
@@ -107,6 +112,7 @@ class LocalResearchReportTests(unittest.TestCase):
         self.assertAlmostEqual(ig_history[0]["trajectory_kl_episode"], 0.4)
         self.assertAlmostEqual(ig_history[0]["mean_local_policy_kl"], 0.2)
         self.assertEqual(ig_history[0]["status"], "complete")
+        self.assertEqual(ig_history[0]["estimand"], "legacy_unspecified")
         self.assertIsNone(ig_history[1]["trajectory_kl_episode"])
         self.assertIsNone(ig_history[1]["mean_local_policy_kl"])
         self.assertEqual(ig_history[1]["status"], "incomplete")

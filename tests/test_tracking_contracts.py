@@ -157,6 +157,11 @@ class TrackingContractTests(unittest.TestCase):
             occupancy = next(record for record in records if record["event_type"] == "occupancy")
             self.assertEqual(trace["trace"], [0.1, 0.2])
             self.assertEqual(trace["context_refs"], ["s0", "s1"])
+            self.assertEqual(
+                trace["estimand"],
+                "epsilon_regularized_local_kl_sum_under_unspecified_occupancy",
+            )
+            self.assertEqual(trace["rollout_source"], "unspecified")
             self.assertEqual(occupancy["state_ids"], ["s0", "s1", "s1"])
 
     def test_run_persists_complete_first_hand_trajectory_kl_result(self):
@@ -301,6 +306,68 @@ class TrackingContractTests(unittest.TestCase):
         self.assertIsNone(event["mean_local_policy_kl"])
         self.assertEqual(event["decisions"][0]["new_probabilities"], [1.0, 0.0])
         self.assertIsNone(event["decisions"][0]["old_probabilities"])
+
+    def test_run_never_writes_complete_infinite_trajectory_kl_scalar(self):
+        from agentbench_frame.eval.trajectory_kl import (
+            TrajectoryKLDecisionRecord,
+            TrajectoryKLEpisodeResult,
+        )
+        from agentbench_frame.tracking.run import Run
+
+        decision = TrajectoryKLDecisionRecord(
+            decision_step=1,
+            context_ref="context",
+            action_schema_version="actions-v1",
+            support_id="support",
+            legal_action_ids=("a",),
+            selected_action_id="a",
+            new_distribution={"a": 1.0},
+            old_distribution={"a": 1.0},
+            new_probabilities=(1.0,),
+            old_probabilities=(1.0,),
+            local_policy_kl=1e308,
+        )
+        rich = TrajectoryKLEpisodeResult(
+            episode=2,
+            version_before="v1",
+            version_after="v2",
+            epsilon=0.01,
+            status="complete",
+            decisions=(decision, decision),
+            trace=(1e308, 1e308),
+            trajectory_kl_episode=float("inf"),
+            mean_local_policy_kl=float("inf"),
+            errors=(),
+            metadata={},
+        )
+
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Run.start("game", "agent", data_dir=tmp)
+            run.log_policy_kl_trace(
+                episode=1,
+                version_before="v0",
+                version_after="v1",
+                trace=[1e308, 1e308],
+            )
+            run.log_trajectory_kl_result(rich)
+            run.finish()
+            events = [
+                json.loads(line)
+                for line in Path(run.run_dir, "events.jsonl").read_text().splitlines()
+            ]
+
+        traces = [
+            event for event in events
+            if event["event_type"] == "policy_kl_trace"
+        ]
+        self.assertEqual(len(traces), 2)
+        self.assertEqual(traces[0]["estimand"], "legacy_unspecified")
+        self.assertEqual(traces[0]["rollout_source"], "unspecified")
+        for event in traces:
+            self.assertEqual(event["measurement_status"], "incomplete")
+            self.assertIsNone(event["trajectory_kl_episode"])
+            self.assertIsNone(event["mean_local_policy_kl"])
+            self.assertTrue(event["errors"])
 
     def test_run_attaches_budget_coordinates_to_act_evaluation(self):
         from agentbench_frame.tracking.run import Run

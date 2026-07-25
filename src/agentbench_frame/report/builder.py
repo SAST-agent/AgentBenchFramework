@@ -28,6 +28,18 @@ except ImportError:
     HAS_JINJA2 = False
 
 
+def _strict_nonnegative_number(value: Any) -> Optional[float]:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(number) or number < 0.0:
+        return None
+    return number
+
+
 class ReportBuilder:
     """Reads experiment data and builds a static HTML report site.
 
@@ -192,14 +204,8 @@ class ReportBuilder:
                 valid_trace = isinstance(trace, list) and bool(trace)
                 if valid_trace:
                     for value in trace:
-                        if (
-                            not isinstance(value, (int, float))
-                            or isinstance(value, bool)
-                        ):
-                            valid_trace = False
-                            break
-                        number = float(value)
-                        if not math.isfinite(number) or number < 0.0:
+                        number = _strict_nonnegative_number(value)
+                        if number is None:
                             valid_trace = False
                             break
                         values.append(number)
@@ -231,13 +237,13 @@ class ReportBuilder:
                                 if isinstance(decision, dict)
                                 else None
                             )
+                            local_number = _strict_nonnegative_number(
+                                local_value
+                            )
                             if (
-                                not isinstance(local_value, (int, float))
-                                or isinstance(local_value, bool)
-                                or not math.isfinite(float(local_value))
-                                or float(local_value) < 0.0
+                                local_number is None
                                 or not math.isclose(
-                                    float(local_value),
+                                    local_number,
                                     value,
                                     rel_tol=0.0,
                                     abs_tol=1e-12,
@@ -280,6 +286,9 @@ class ReportBuilder:
                     "ig": trajectory_kl_episode,
                     "decision_steps": decision_steps,
                     "status": display_status,
+                    "estimand": event.get(
+                        "estimand", "legacy_unspecified"
+                    ),
                 })
             elif event_type == "occupancy":
                 state_ids = event.get("state_ids")

@@ -245,6 +245,25 @@ class Run:
             raise ValueError("policy KL trace values must be finite and non-negative")
         if context_refs is not None and len(context_refs) != len(values):
             raise ValueError("context_refs must align one-to-one with the KL trace")
+        if epsilon is not None and (
+            not math.isfinite(float(epsilon))
+            or not 0.0 < float(epsilon) < 1.0
+        ):
+            raise ValueError("epsilon must be finite and strictly between 0 and 1")
+        trajectory_kl_episode = sum(values) if values else None
+        errors = []
+        if (
+            trajectory_kl_episode is not None
+            and not math.isfinite(trajectory_kl_episode)
+        ):
+            trajectory_kl_episode = None
+            errors.append("trajectory KL sum is not finite")
+        complete = bool(values) and trajectory_kl_episode is not None
+        estimand = (
+            "legacy_unspecified"
+            if epsilon is None
+            else "epsilon_regularized_local_kl_sum_under_unspecified_occupancy"
+        )
         self.write(
             "policy_kl_trace",
             episode=episode,
@@ -254,15 +273,18 @@ class Run:
             decision_steps=len(values),
             context_refs=context_refs,
             epsilon=epsilon,
-            measurement_status="complete" if values else "incomplete",
-            trajectory_kl_episode=sum(values) if values else None,
-            mean_local_policy_kl=(sum(values) / len(values)) if values else None,
+            measurement_status="complete" if complete else "incomplete",
+            trajectory_kl_episode=trajectory_kl_episode,
+            mean_local_policy_kl=(
+                trajectory_kl_episode / len(values)
+                if trajectory_kl_episode is not None
+                else None
+            ),
             direction="new||old",
             log_base="e",
-            rollout_source="new_policy",
-            estimand=(
-                "epsilon_regularized_local_kl_sum_under_new_policy_occupancy"
-            ),
+            rollout_source="unspecified",
+            estimand=estimand,
+            errors=errors,
         )
 
     def log_trajectory_kl_result(self, result: Any) -> None:
@@ -294,7 +316,19 @@ class Run:
                     "complete trajectory KL trace values must be finite and non-negative"
                 )
             trajectory_kl_episode = sum(values)
-            mean_local_policy_kl = trajectory_kl_episode / len(values)
+            if math.isfinite(trajectory_kl_episode):
+                mean_local_policy_kl = trajectory_kl_episode / len(values)
+            else:
+                status = "incomplete"
+                trajectory_kl_episode = None
+                mean_local_policy_kl = None
+                errors = payload.get("errors")
+                if not isinstance(errors, list):
+                    errors = []
+                payload["errors"] = [
+                    *errors,
+                    "trajectory KL sum is not finite",
+                ]
             trace = values
         else:
             for value in trace:
