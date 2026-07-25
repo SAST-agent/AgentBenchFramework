@@ -208,6 +208,7 @@ class ReportBuilder:
                     "decision_steps",
                     len(trace) if isinstance(trace, list) else None,
                 )
+                decision_steps_present = "decision_steps" in event
                 aligned = (
                     isinstance(decision_steps, int)
                     and not isinstance(decision_steps, bool)
@@ -219,6 +220,7 @@ class ReportBuilder:
                 if decisions_present:
                     aligned = (
                         aligned
+                        and decision_steps_present
                         and isinstance(decisions, list)
                         and len(decisions) == len(trace)
                     )
@@ -249,6 +251,13 @@ class ReportBuilder:
                     else declared_status in {None, "complete"}
                 )
                 complete = valid_trace and aligned and status_allows_complete
+                trajectory_kl_episode = sum(values) if complete else None
+                if (
+                    trajectory_kl_episode is not None
+                    and not math.isfinite(trajectory_kl_episode)
+                ):
+                    complete = False
+                    trajectory_kl_episode = None
                 if complete:
                     display_status = "complete"
                 elif (
@@ -259,7 +268,6 @@ class ReportBuilder:
                     display_status = declared_status
                 else:
                     display_status = "incomplete"
-                trajectory_kl_episode = sum(values) if complete else None
                 mean_local_policy_kl = (
                     trajectory_kl_episode / len(values)
                     if trajectory_kl_episode is not None

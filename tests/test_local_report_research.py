@@ -80,6 +80,21 @@ class LocalResearchReportTests(unittest.TestCase):
                         {"local_policy_kl": 0.3},
                     ],
                 }),
+                json.dumps({
+                    "event_type": "policy_kl_trace",
+                    "episode": 9,
+                    "measurement_status": "complete",
+                    "trace": [0.1, 0.3],
+                    "decisions": [
+                        {"local_policy_kl": 0.1},
+                        {"local_policy_kl": 0.3},
+                    ],
+                }),
+                json.dumps({
+                    "event_type": "policy_kl_trace",
+                    "episode": 10,
+                    "trace": [1e308, 1e308],
+                }),
             ]) + "\n")
 
             output = root / "site"
