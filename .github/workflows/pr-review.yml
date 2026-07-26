@@ -1,0 +1,101 @@
+name: Framework PR checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: framework-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  framework-tests:
+    name: framework-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout PR merge ref
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[tracking,report]" pytest
+      - name: Run test suite
+        run: python -m pytest -q
+
+  ai-pr-review:
+    name: ai-pr-review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout trusted base revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+      - name: Fetch PR metadata and diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" > /tmp/pr-review-metadata.json
+          gh api --header 'Accept: application/vnd.github.v3.diff' \
+            "repos/${REPOSITORY}/pulls/${PR_NUMBER}" > /tmp/pr-review.diff
+      - name: Build bounded review input
+        env:
+          PR_REVIEW_METADATA_FILE: /tmp/pr-review-metadata.json
+          PR_REVIEW_DIFF_FILE: /tmp/pr-review.diff
+          PR_REVIEW_INPUT_JSON: /tmp/pr-review-input.json
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          metadata = json.loads(Path(os.environ["PR_REVIEW_METADATA_FILE"]).read_text(encoding="utf-8"))
+          raw_diff = Path(os.environ["PR_REVIEW_DIFF_FILE"]).read_bytes()
+          limit = 350_000
+          truncated = len(raw_diff) > limit
+          diff = raw_diff[:limit].decode("utf-8", errors="replace")
+          payload = {
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "pull_request": {
+                  "number": metadata.get("number"),
+                  "title": metadata.get("title"),
+                  "url": metadata.get("html_url"),
+                  "base_sha": (metadata.get("base") or {}).get("sha"),
+                  "head_sha": (metadata.get("head") or {}).get("sha"),
+              },
+              "diff": diff,
+              "diff_truncated": truncated,
+              "diff_bytes": len(raw_diff),
+              "review_policy": {
+                  "block_on": ["P0", "P1", "decision=fail"],
+                  "focus": [
+                      "correctness",
+                      "scientific data integrity",
+                      "reproducibility",
+                      "process and secret safety",
+                      "forward compatibility",
+                  ],
+              },
+          }
+          Path(os.environ["PR_REVIEW_INPUT_JSON"]).write_text(
+              json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+          )
+          PY
+      - name: Run blocking AI review
+        env:
+          PR_REVIEW_API_KEY: ${{ secrets.PR_REVIEW_API_KEY }}
+          PR_REVIEW_ENDPOINT: ${{ secrets.PR_REVIEW_ENDPOINT }}
+          PR_REVIEW_MODEL: ${{ vars.PR_REVIEW_MODEL }}
+          PR_REVIEW_API_MODE: ${{ vars.PR_REVIEW_API_MODE || 'responses' }}
+          PR_REVIEW_INPUT_JSON: /tmp/pr-review-input.json
+          PR_REVIEW_TIMEOUT_S: "90"
+        run: python tools/pr_review.py
