@@ -30,7 +30,7 @@ API key 不应写入 workflow、代码、PR 描述或普通变量。workflow 只
 
 ## Endpoint 请求与响应
 
-Responses 模式发送 `model`、`instructions`、`input`、`reasoning.effort=high` 和 strict JSON Schema text format；Chat Completions 模式发送 `model`、`messages`、`reasoning_effort=high` 和 strict JSON Schema response format。两种响应都会被转换为同一审查文档：
+Responses 模式优先发送 `model`、`instructions`、`input`、`reasoning.effort=high` 和 strict JSON Schema text format；Chat Completions 模式优先发送 `model`、`messages`、`reasoning_effort=high` 和 strict JSON Schema response format。两种响应都会被转换为同一审查文档：
 
 ```json
 {
@@ -49,6 +49,8 @@ Responses 模式发送 `model`、`instructions`、`input`、`reasoning.effort=hi
 ```
 
 结构化输出要求 `decision`、`summary` 和 `findings` 始终存在；没有可行动问题时必须返回 `findings: []`。每个 finding 都必须包含 `severity`、`path`、`line`、`message` 和 `suggestion`，其中不适用的可选值使用 `null`，`message` 必须是具体的非空说明。框架仍会在解析后再次校验这些约束，并对非法或不完整响应 fail-closed。
+
+如果 endpoint 以 HTTP 400 或 422 明确拒绝 reasoning 或 Structured Outputs 参数，框架会对同一请求自动回退一次历史兼容格式：`json_object`，且不发送 reasoning 参数。回退响应仍经过同一严格解析器；其他 HTTP 错误不会回退，仍然 fail-closed。
 
 `decision` 只能是 `pass` 或 `fail`；严重级别只能是 `P0`、`P1`、`P2`、`P3`。`decision=fail` 或任意 P0/P1 finding 会使 check 失败。HTTP 错误、超时、缺少配置、非法 JSON、字段非法也会失败。
 

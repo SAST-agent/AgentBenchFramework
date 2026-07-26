@@ -185,41 +185,54 @@ def build_api_request(
     model: str,
     instructions: str,
     payload: str,
-    reasoning_effort: str = DEFAULT_REASONING_EFFORT,
+    reasoning_effort: str | None = DEFAULT_REASONING_EFFORT,
+    structured_outputs: bool = True,
 ) -> dict[str, Any]:
     """Build a JSON request body for the selected OpenAI-compatible API."""
     if api_mode == "responses":
-        return {
+        request = {
             "model": model,
             "instructions": instructions,
             "input": payload,
-            "reasoning": {"effort": reasoning_effort},
             "text": {
-                "format": {
-                    "type": "json_schema",
-                    "name": "pr_review",
-                    "strict": True,
-                    "schema": REVIEW_RESPONSE_SCHEMA,
-                }
+                "format": (
+                    {
+                        "type": "json_schema",
+                        "name": "pr_review",
+                        "strict": True,
+                        "schema": REVIEW_RESPONSE_SCHEMA,
+                    }
+                    if structured_outputs
+                    else {"type": "json_object"}
+                ),
             },
         }
+        if reasoning_effort is not None:
+            request["reasoning"] = {"effort": reasoning_effort}
+        return request
     if api_mode == "chat_completions":
-        return {
+        request = {
             "model": model,
             "messages": [
                 {"role": "system", "content": instructions},
                 {"role": "user", "content": payload},
             ],
-            "reasoning_effort": reasoning_effort,
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "pr_review",
-                    "strict": True,
-                    "schema": REVIEW_RESPONSE_SCHEMA,
-                },
-            },
+            "response_format": (
+                {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "pr_review",
+                        "strict": True,
+                        "schema": REVIEW_RESPONSE_SCHEMA,
+                    },
+                }
+                if structured_outputs
+                else {"type": "json_object"}
+            ),
         }
+        if reasoning_effort is not None:
+            request["reasoning_effort"] = reasoning_effort
+        return request
     raise ValueError(f"unsupported api mode: {api_mode}")
 
 
@@ -261,6 +274,25 @@ def _write_summary(review: dict[str, Any] | None, error: str | None, secret: str
         handle.write(content)
 
 
+def _post_review_request(
+    endpoint: str,
+    api_key: str,
+    request_body: dict[str, Any],
+    timeout: float,
+) -> dict[str, Any]:
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
 def _emit_review(review: dict[str, Any], secret: str) -> None:
     print(f"PR review decision={review['decision']} findings={len(review['findings'])}")
     print(_redact(review["summary"], secret))
@@ -294,19 +326,22 @@ def run_review() -> int:
         payload_bytes = payload.encode("utf-8")
         if len(payload_bytes) > MAX_INPUT_BYTES:
             raise ValueError(f"review input exceeds {MAX_INPUT_BYTES} bytes")
-        request_body = build_api_request(api_mode, model, REVIEW_INSTRUCTIONS, payload)
-        request = urllib.request.Request(
-            endpoint,
-            data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
         timeout = float(os.environ.get("PR_REVIEW_TIMEOUT_S", DEFAULT_TIMEOUT_S))
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            response_data = json.loads(response.read().decode("utf-8"))
+        request_body = build_api_request(api_mode, model, REVIEW_INSTRUCTIONS, payload)
+        try:
+            response_data = _post_review_request(endpoint, api_key, request_body, timeout)
+        except urllib.error.HTTPError as exc:
+            if exc.code not in {400, 422}:
+                raise
+            legacy_request = build_api_request(
+                api_mode,
+                model,
+                REVIEW_INSTRUCTIONS,
+                payload,
+                reasoning_effort=None,
+                structured_outputs=False,
+            )
+            response_data = _post_review_request(endpoint, api_key, legacy_request, timeout)
         if isinstance(response_data, dict) and {"decision", "summary", "findings"} <= response_data.keys():
             review = parse_review_document(json.dumps(response_data, ensure_ascii=False))
         else:
