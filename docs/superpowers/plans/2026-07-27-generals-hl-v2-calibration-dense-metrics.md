@@ -62,7 +62,7 @@ uv pip install --python .venv/bin/python -e . 'pytest>=8,<9' 'jinja2>=3,<4'
 - `backend_sources/corpus/28_generals/calibration/weak_v1/state_view.py` — stable SDK state normalization.
 - `backend_sources/corpus/28_generals/calibration/weak_v1/strategy.py` — deterministic `passive`, `local-expander`, and `resource-greedy` modes.
 - `backend_sources/corpus/28_generals/calibration/weak_v1/README.md` — policy limits and scientific role.
-- `backend_sources/corpus/28_generals/calibration/weak_v1/tests/test_strategy.py` — deterministic strategy tests.
+- `backend_sources/corpus/28_generals/calibration/weak_v1/tests/test_calibration_strategy.py` — deterministic strategy tests.
 
 ### AgentBenchFramework
 
@@ -198,7 +198,7 @@ git commit -m "feat(tracking): separate calibration construction budget"
 - Create [Assets]: `backend_sources/corpus/28_generals/calibration/weak_v1/state_view.py`
 - Create [Assets]: `backend_sources/corpus/28_generals/calibration/weak_v1/strategy.py`
 - Create [Assets]: `backend_sources/corpus/28_generals/calibration/weak_v1/README.md`
-- Create [Assets]: `backend_sources/corpus/28_generals/calibration/weak_v1/tests/test_strategy.py`
+- Create [Assets]: `backend_sources/corpus/28_generals/calibration/weak_v1/tests/test_calibration_strategy.py`
 
 **Interfaces:**
 - Consumes: official SDK initial JSON and peer command stream; environment variable `AGENTBENCH_CALIBRATION_MODE`
