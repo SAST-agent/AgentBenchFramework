@@ -60,6 +60,43 @@ class ResearchBoundaryTests(unittest.TestCase):
         self.assertEqual(report.missing_event_ids, 1)
         self.assertTrue(report.warnings)
 
+    def test_round2_event_types_are_known_without_hiding_future_types(self):
+        from agentbench_frame.tracking.quality import inspect_event_lines
+
+        known = [
+            "calibration_spec",
+            "calibration_result",
+            "dense_trajectory",
+            "dense_episode_summary",
+            "dense_metric_error",
+            "lineage_import",
+            "behavior_change_episode",
+        ]
+        lines = [
+            json.dumps(
+                {
+                    "event_id": f"e{index}",
+                    "event_type": event_type,
+                    "run_id": "r",
+                }
+            )
+            for index, event_type in enumerate(known)
+        ]
+        lines.append(
+            json.dumps(
+                {
+                    "event_id": "future",
+                    "event_type": "future_round3_event",
+                    "run_id": "r",
+                }
+            )
+        )
+
+        report = inspect_event_lines(lines)
+
+        self.assertEqual(report.valid_events, 8)
+        self.assertEqual(report.unknown_event_types, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

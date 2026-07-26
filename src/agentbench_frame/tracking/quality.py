@@ -15,6 +15,9 @@ KNOWN_EVENT_TYPES = frozenset({
     "provider_invocation",
     "benchmark_spec", "version", "game_result", "behavior_change",
     "pipeline_error", "pipeline_resumed",
+    "calibration_spec", "calibration_result", "dense_trajectory",
+    "dense_episode_summary", "dense_metric_error", "lineage_import",
+    "behavior_change_episode",
 })
 
 

@@ -61,6 +61,17 @@ def build_learning_cases(config: PilotConfig) -> tuple[BenchmarkCase, ...]:
     )
 
 
+def build_round2_learning_cases(config: PilotConfig) -> tuple[BenchmarkCase, ...]:
+    """Build the frozen round-2 learning matrix without formal-evaluation cases."""
+    seeds = (283101, 283202, 283303)
+    return tuple(
+        _case(opponent, seed, seat, "learn2")
+        for opponent in config.learning_opponents
+        for seed in seeds
+        for seat in (0, 1)
+    )
+
+
 class GeneralsEvaluator:
     def __init__(
         self,

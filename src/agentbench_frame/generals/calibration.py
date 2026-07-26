@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from pathlib import Path
 from typing import Callable, Mapping
 
@@ -14,6 +15,7 @@ from agentbench_frame.eval.benchmark import (
 from agentbench_frame.tracking.run import Run
 
 from .assets import CALIBRATION_SELECTION_RULE
+from .dense import persist_dense_diagnostics
 from .models import CalibrationConfig, CalibrationEvaluation, MatchResult
 
 
@@ -98,6 +100,40 @@ class CalibrationEvaluator:
             )
             match = self.execute_match(case, workspace, version, artifact_dir)
             matches.append(match)
+            try:
+                dense_trace, dense_summary = persist_dense_diagnostics(
+                    match, artifact_dir
+                )
+                run.write(
+                    "dense_trajectory",
+                    case_id=case.case_id,
+                    version=version,
+                    phase=budget_phase,
+                    suite="calibration",
+                    split=split,
+                    evaluated_seat=case.first_player,
+                    trace=[asdict(sample) for sample in dense_trace],
+                    artifact_ref=str(artifact_dir / "dense-trace.jsonl"),
+                )
+                run.write(
+                    "dense_episode_summary",
+                    version=version,
+                    phase=budget_phase,
+                    suite="calibration",
+                    split=split,
+                    artifact_ref=str(artifact_dir / "dense-summary.json"),
+                    **asdict(dense_summary),
+                )
+            except Exception as exc:
+                run.write(
+                    "dense_metric_error",
+                    case_id=case.case_id,
+                    version=version,
+                    phase=budget_phase,
+                    suite="calibration",
+                    split=split,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
             if match.winner == -1:
                 outcome = "draw"
             elif match.winner == case.first_player:

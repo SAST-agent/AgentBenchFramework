@@ -170,6 +170,46 @@ def load_calibration_selection(
     return selection
 
 
+def resolve_calibration_source(
+    config: CalibrationConfig,
+    selection: CalibrationSelection,
+    agentbench_root: Path,
+) -> Path:
+    """Resolve and verify the immutable weak-opponent source selected on development seeds."""
+    source = _resolve_below(
+        agentbench_root, config.source, "calibration source"
+    )
+    if not source.is_dir() or not (source / "main.py").is_file():
+        raise AssetValidationError("calibration source must contain main.py")
+    actual_hash = _stable_tree_hash(source)
+    if actual_hash != selection.source_hash:
+        raise AssetValidationError(
+            "calibration source hash does not match frozen selection"
+        )
+    return source
+
+
+def resolve_calibration_candidate_source(
+    config: CalibrationConfig,
+    agentbench_root: Path,
+) -> Path:
+    """Resolve mutable development candidates before a selection hash is frozen."""
+    source = _resolve_below(
+        agentbench_root, config.source, "calibration source"
+    )
+    if not source.is_dir() or not (source / "main.py").is_file():
+        raise AssetValidationError("calibration source must contain main.py")
+    return source
+
+
+def calibration_source_hash(source: Path) -> str:
+    """Return the stable digest stored in the calibration selection manifest."""
+    digest = _stable_tree_hash(Path(source))
+    if not digest:
+        raise AssetValidationError("calibration source hash is empty")
+    return digest
+
+
 def _validate_config(config: PilotConfig) -> None:
     if config.benchmark_id != BENCHMARK_ID:
         raise AssetValidationError(f"benchmark_id must be {BENCHMARK_ID}")

@@ -1,4 +1,5 @@
 from dataclasses import replace
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -8,6 +9,7 @@ from agentbench_frame.generals.assets import (
     AssetValidationError,
     load_calibration_config,
     load_calibration_selection,
+    resolve_calibration_source,
 )
 from agentbench_frame.generals.calibration import (
     CalibrationEvaluator,
@@ -109,6 +111,30 @@ def test_selection_rejects_unknown_mode_and_bad_hash(tmp_path):
         load_calibration_selection(bad_hash, config)
 
 
+def test_calibration_source_must_match_frozen_selection_hash(tmp_path):
+    source = tmp_path / "calibration"
+    source.mkdir()
+    content = b"print('calibration')\n"
+    (source / "main.py").write_bytes(content)
+    digest = hashlib.sha256()
+    digest.update(b"main.py")
+    digest.update(b"\0")
+    digest.update(content)
+    digest.update(b"\0")
+    expected_hash = digest.hexdigest()
+    config = replace(load_calibration_config(FIXTURE), source=Path("calibration"))
+    selection = replace(
+        load_calibration_selection(SELECTION, config),
+        source_hash=expected_hash,
+    )
+
+    assert resolve_calibration_source(config, selection, tmp_path) == source
+    with pytest.raises(AssetValidationError, match="source hash"):
+        resolve_calibration_source(
+            config, replace(selection, source_hash="0" * 64), tmp_path
+        )
+
+
 def test_candidate_selection_uses_distance_to_point_four_then_manifest_order():
     config = load_calibration_config(FIXTURE)
     results = {
@@ -197,6 +223,14 @@ def test_heldout_calibration_score_and_seat_split_are_separate(tmp_path):
     assert result.in_target_range is True
     assert run.budget_snapshot()["evaluation_episodes"] == 10
     assert run.budget_snapshot()["learning_episodes"] == 0
+    first_artifact = (
+        Path(run.run_dir)
+        / "matches"
+        / "v0"
+        / result.matches[0].case_id
+    )
+    assert (first_artifact / "dense-trace.jsonl").is_file()
+    assert (first_artifact / "dense-summary.json").is_file()
     run.finish()
 
 
