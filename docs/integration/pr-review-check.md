@@ -55,11 +55,11 @@ Fork PR 默认无法读取仓库 Secrets。当前策略是 fail-closed：如果�
 
 ## 分支保护
 
-如果仓库计划支持 Branch protection rules 或 rulesets，将以下 checks 设为 required：
+当前仓库已经是 public，GitHub Free 支持 Branch protection rules。请在目标分支 `worktree/framework` 上将以下 checks 设为 required：
 
 ```text
 Framework PR checks / framework-tests
 Framework PR checks / ai-pr-review
 ```
 
-本次部署检查到当前 private 仓库的 branch protection/rulesets API 返回套餐限制（403）。因此本实现没有自动修改保护规则；需要仓库管理员升级套餐、改为公开仓库，或在可用的仓库设置中手动启用上述 required checks。
+公开仓库后，GitHub Actions 检查本身会正常运行；required checks 仍需在仓库设置中启用，启用后失败的 PR 才会被 GitHub 阻止合并。
