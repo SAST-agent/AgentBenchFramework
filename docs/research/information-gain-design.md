@@ -112,42 +112,68 @@ $$
 若第 (k) 次策略迭代对应第 (e) 个评测 episode：
 
 $$
-IG_{k,e}
+TrajectoryKL_{k,e}
 =
-\frac{1}{T_{k,e}}
 \sum_{t=0}^{T_{k,e}-1}
 D_{KL}\left(
-\pi^k(\cdot\mid z_{k,e,t})\,\middle\|\,\pi^{k-1}(\cdot\mid z_{k,e,t})
+\tilde\pi^k(\cdot\mid z_{k,e,t})\,\middle\|\,
+\tilde\pi^{k-1}(\cdot\mid z_{k,e,t})
 \right).
+$$
+
+当前实现中的轨迹由原始新策略 $\pi^k$ 产生，局部项使用经过统一 epsilon
+通道的 $\tilde\pi$。所以该 episode 值严格来说是“新策略 occupancy 下的
+epsilon-regularized 局部 KL 和”，不是原始策略 path distribution 的
+$KL(P_k\|P_{k-1})$。字段名 `trajectory_kl_episode` 为数据格式稳定性保留，
+事件通过 `estimand` 明确其严格定义。
+
+长度归一化辅助量为：
+
+$$
+MeanLocalKL_{k,e}
+=
+\frac{TrajectoryKL_{k,e}}{T_{k,e}}.
 $$
 
 主要图像应为：
 
 $$
 x=\text{policy iteration }k,
-\qquad y=IG_{k,e}.
+\qquad y=TrajectoryKL_{k,e}.
 $$
 
 如果每轮有多个 episode，则保留散点，同时可绘制该轮均值/中位数和置信区间：
 
 $$
-\bar{IG}_k=\frac{1}{M_k}\sum_{e=1}^{M_k}IG_{k,e}.
+\overline{TrajectoryKL}_k
+=
+\frac{1}{M_k}\sum_{e=1}^{M_k}TrajectoryKL_{k,e}.
 $$
 
 这里的 (M_k) 只是同一轮的重复实验数量，不是学习曲线的主指标。
 
-## 7. 两种平均的不同含义
+## 7. Episode 汇总与决策归一化
 
-episode-balanced：
+随机抽取一个 episode 时的平均 trajectory KL：
+
+$$
+\frac{1}{M}\sum_i
+\left(\sum_t k_{i,t}\right)
+$$
+
+描述每个 episode 的总策略轨迹变化，是主 trajectory KL 的跨 episode
+统计汇总。
+
+Episode-balanced 的平均局部 KL：
 
 $$
 \frac{1}{M}\sum_i
 \left(\frac{1}{T_i}\sum_t k_{i,t}\right)
 $$
 
-描述一个随机 episode 的平均策略变化，每盘游戏权重相同。
+描述先随机抽一个 episode、再抽取其中一个 decision 时的平均局部变化。
 
-decision-balanced：
+Decision-balanced 的平均局部 KL：
 
 $$
 \frac{\sum_i\sum_t k_{i,t}}{\sum_i T_i}
@@ -155,21 +181,24 @@ $$
 
 描述从所有已采集 decision 中随机抽一个 decision 时的平均策略变化，长 episode 权重更大。
 
-当前 Generals 游戏长度可能不同，主曲线建议使用 episode-balanced，decision-balanced 作为辅助分析。
+主曲线保留逐 episode 的 `TrajectoryKL`；后两种归一化只作为辅助分析，
+不能与主值共用名称或单位。
 
 ## 8. 时间权重不是必需的
 
 $\lambda^t$ 只是 discounted occupancy 的一种选择，不是 KL 的要求。指数权重对应“每一步以固定比例衰减重要性”，也可解释为几何随机终止时间。
 
-对于当前有限 horizon 的 Generals，默认主指标不使用时间折扣更直观：每个决策同等重要。若要与 reward 的 discounted objective 对齐，可以额外报告：
+对于当前有限 horizon 的 Generals，默认主指标不使用时间折扣更直观：每个决策同等重要。若要与 reward 的 discounted objective 对齐，可以额外报告 discounted trajectory KL：
 
 $$
-IG_{\lambda}
+TrajectoryKL_{\lambda}
 =
-\frac{\sum_t\lambda^t k_t}{\sum_t\lambda^t},
+\sum_t\lambda^t k_t.
 $$
 
-但信息增益的 $\lambda$ 不应未经说明地复用 reward 的 $\gamma$。
+若再除以 $\sum_t\lambda^t$，得到的是归一化的 discounted
+`MeanLocalKL`，不是 trajectory KL。信息增益的 $\lambda$ 不应未经说明地
+复用 reward 的 $\gamma$。
 
 ## 9. 评测协议要求
 
@@ -180,7 +209,10 @@ $$
 3. 相同的先手/后手安排；
 4. 相同的 episode 终止和截断规则；
 5. 相同的合法动作编码和 epsilon；
-6. 固定的参考状态集，避免把 state distribution shift 混入局部 policy KL。
+6. 相同的 rollout 生成协议，并明确记录提供测量轨迹的策略分布。当前新策略
+   rollout 对应的是 `epsilon_regularized_local_kl_sum_under_new_policy_occupancy`；
+   只有 rollout 本身也从相同的 regularized 新策略采样，才能解释为该
+   regularized 策略的精确 forward trajectory KL。
 
 横轴可同时提供两种版本：
 
@@ -420,7 +452,16 @@ local_policy_kl_k(z)
 local_policy_kl_trace = [local_policy_kl_k(z_0), ..., local_policy_kl_k(z_{T-1})]
 ```
 
-这里的 `z_t` 只包括该 episode 中真实到达的目标 agent 决策点，不需要构造全局测量域，也不把 coding agent 的 act 次数当作策略决策点。该 trace 是策略变化的原始测量数据；是否按 episode 求和、均值或绘图，由 CI 决定。
+这里的 `z_t` 只包括该 episode 中真实到达的目标 agent 决策点，不需要构造全局测量域，也不把 coding agent 的 act 次数当作策略决策点。该 trace 是策略变化的原始测量数据。当前主派生量按 episode 求和：
+
+```text
+trajectory_kl_episode = Σ_t local_policy_kl_k(z_t)
+```
+
+`trajectory_kl_episode` 的单位是 `nats / episode`。长度归一化的
+`mean_local_policy_kl = trajectory_kl_episode / T` 可以作为辅助统计，
+其单位是 `nats / decision`，不能替代 trajectory KL。CI 保留每个
+episode 的点并按 episode/迭代顺序绘图，不先压成整个实验的单一平均值。
 
 第二个核心对象是同一评测上下文下的状态访问变化 `occupancy_shift`。它可以按时间步保存状态分布差异，或者保存由 rollout 得到的规范化 state-ID 直方图；它描述策略变化通过环境动力学和对手交互后造成的访问分布变化，不能和局部策略 KL 直接相加当作一个“总信息增益”。
 
@@ -439,7 +480,86 @@ KL(q_k || q_{k-1})
   + E[s ~ d_k] KL(π_k(·|s) || π_{k-1}(·|s))
 ```
 
-因此不能把任意固定参考分布下的 `policy_kl`、状态 occupancy KL 和 trajectory KL 当成三个可独立相加的指标。RL/HL 必须使用同一合法动作集和概率分布；occupancy 必须使用可比较的规范化 state ID；HL 的确定性策略需要 epsilon smoothing，否则局部 KL 可能为无穷。原始 trace 和 occupancy 数据优先保存，trajectory KL 作为可选派生字段，统一按 episode 报告时使用 `nats / episode`。
+因此不能把任意固定参考分布下的 `policy_kl`、状态 occupancy KL 和 trajectory KL 当成三个可独立相加的指标。RL/HL 必须使用同一合法动作集和概率分布；occupancy 必须使用可比较的规范化 state ID；HL 自己提供 one-hot 分布，framework 不推断其内部逻辑；之后 RL/HL 统一使用 benchmark 固定的 epsilon smoothing。原始 trace 和 occupancy 数据优先保存，trajectory KL 是主 episode 派生量。
+
+### 10.13.1 Replay-based KL 讨论结论
+
+曾讨论将完整历史 rollout 固化为 replay corpus，再把同一 replay 只读重放
+给任意两个策略版本，在所有历史决策点重新查询概率并计算 KL。该方案可以
+解耦 rollout collection 与 KL measurement，也能分析历史状态上的遗忘。
+
+本轮决定暂缓该方案。原因是它还需要统一不同游戏的 replay adapter、
+stateful agent 的历史恢复、跨语言只读概率查询、replay/parser/policy
+artifact 身份以及失败完整性语义。当前不新增 replay-based KL 接口，也不
+把历史动作频率解释为策略概率。
+
+当前生效方案仍是实际 rollout 上的 `local_policy_kl_trace` 和按 episode
+求和得到的 `trajectory_kl_episode`。完整讨论与重新启动条件见
+`docs/superpowers/specs/2026-07-25-trajectory-kl-replay-decision.md`。
+
+### 10.13.2 在线测量接口
+
+Framework 已提供 `TrajectoryKLAgent` 在线测量 wrapper。下游游戏 runtime
+在每个目标 agent 决策点提供一个 `ActionSupport`：
+
+具体游戏、RL/HL agent 和自定义 runner 的完整接入步骤见
+[Trajectory KL 下游接入指南](../integration/trajectory-kl.md)。本节只保留
+科研定义和公共接口摘要。
+
+```text
+ActionSupport(
+    schema_version,
+    [(action_id, environment_action_payload), ...]
+)
+```
+
+支持集必须完整、有限、非空、顺序稳定且 action ID 无重复。策略分布必须
+使用 `action_id -> probability` 映射，键集合与支持集严格相等，概率为有限
+非负数且总和在 `1e-9` 绝对误差内等于 1。
+
+新版本 adapter 实现：
+
+```text
+decide_with_distribution(observation, support)
+-> PolicyDecision(selected_action_id, new_distribution)
+```
+
+旧版本在线对照 adapter 实现：
+
+```text
+distribution_for_measurement(observation, support)
+-> old_distribution
+```
+
+新版本在一次调用中同时给出动作 ID 和分布，避免独立调用 `act()` 与概率
+接口造成随机性或内部状态不一致。环境只执行新版本选择的动作。两个 session
+都通过可选的 `observe_transition(actual_transition)` 接收相同的真实环境
+事件；旧版本不能提交一个没有实际执行的旧策略动作。
+
+`TrajectoryKLAgent` 可把 episode 结果直接回调给
+`Run.log_trajectory_kl_result()`。`policy_kl_trace` 事件保留旧字段，并增量
+保存：
+
+```text
+measurement_status
+direction
+log_base
+rollout_source
+trajectory_kl_episode
+mean_local_policy_kl
+decisions[*].legal_action_ids
+decisions[*].selected_action_id
+decisions[*].new_probabilities
+decisions[*].old_probabilities
+decisions[*].support_id
+estimand
+metadata
+errors
+```
+
+若任一目标决策的支持集、分布或旧策略查询无效，episode 保留已获得的一手
+记录，但 `measurement_status=incomplete`，主 trajectory KL 与均值均为
+缺失值，不能使用局部和冒充完整结果。
 
 ### 10.14 Schema 前向兼容
 
@@ -465,6 +585,15 @@ created_at
 - `local_policy_kl_trace`、`occupancy` 原始数据写入口，以及局部 KL、occupancy shift、trajectory 汇总和 AUC 纯计算函数；
 - 固定 benchmark case 列表的 `BaseEvalRunner` 执行路径。
 - provider-neutral 的 `ProviderAdapter`、`CodingAgentController` 和本地 workspace manifest/hash/diff snapshotter；
-- canonical state ID 与可选 `get_action_distribution(observation, legal_actions)` hook。
+- canonical state ID、严格 `ActionSupport`/`PolicyDecision` 契约、在线
+  `TrajectoryKLAgent` 对照 session；
+- 完整和 incomplete trajectory-KL 一手 JSONL 记录；
+- 以 episode trace 求和为主值、局部均值为辅助值的本地报告，以及保留缺口
+  的 episode 折线图。
 
-仍由接入方决定的部分：具体 benchmark 测试集内容，以及具体环境是否能提供规范化完整动作支持集和更细粒度 state ID 编码。Codex/Claude Code CLI JSONL adapter、provider artifact、统一 act 生命周期、数据质量诊断和本地/CI research report 已落地；真实运行仍需要调用方安装并认证对应 CLI。
+仍由接入方决定的部分：具体 benchmark 测试集内容，以及具体环境 runtime
+如何枚举本游戏完整动作支持集、冻结动作 schema、让 RL/HL adapter 提供
+严格分布。Generals 当前的简化 `get_legal_actions()` 仍不能声明为完整科研
+动作域。Replay-based KL 已记录但暂缓实现。Codex/Claude Code CLI JSONL
+adapter、provider artifact、统一 act 生命周期、数据质量诊断和本地/CI
+research report 已落地；真实运行仍需要调用方安装并认证对应 CLI。

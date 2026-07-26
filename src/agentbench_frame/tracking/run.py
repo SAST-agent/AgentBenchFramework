@@ -277,6 +277,25 @@ class Run:
             raise ValueError("policy KL trace values must be finite and non-negative")
         if context_refs is not None and len(context_refs) != len(values):
             raise ValueError("context_refs must align one-to-one with the KL trace")
+        if epsilon is not None and (
+            not math.isfinite(float(epsilon))
+            or not 0.0 < float(epsilon) < 1.0
+        ):
+            raise ValueError("epsilon must be finite and strictly between 0 and 1")
+        trajectory_kl_episode = sum(values) if values else None
+        errors = []
+        if (
+            trajectory_kl_episode is not None
+            and not math.isfinite(trajectory_kl_episode)
+        ):
+            trajectory_kl_episode = None
+            errors.append("trajectory KL sum is not finite")
+        complete = bool(values) and trajectory_kl_episode is not None
+        estimand = (
+            "legacy_unspecified"
+            if epsilon is None
+            else "epsilon_regularized_local_kl_sum_under_unspecified_occupancy"
+        )
         self.write(
             "policy_kl_trace",
             episode=episode,
@@ -286,7 +305,92 @@ class Run:
             decision_steps=len(values),
             context_refs=context_refs,
             epsilon=epsilon,
+            measurement_status="complete" if complete else "incomplete",
+            trajectory_kl_episode=trajectory_kl_episode,
+            mean_local_policy_kl=(
+                trajectory_kl_episode / len(values)
+                if trajectory_kl_episode is not None
+                else None
+            ),
+            direction="new||old",
+            log_base="e",
+            rollout_source="unspecified",
+            estimand=estimand,
+            errors=errors,
         )
+
+    def log_trajectory_kl_result(self, result: Any) -> None:
+        """Persist a rich trajectory-KL result under the legacy event type."""
+
+        if hasattr(result, "to_dict"):
+            payload = result.to_dict()
+        elif isinstance(result, dict):
+            payload = dict(result)
+        else:
+            raise TypeError("trajectory KL result must be a mapping or expose to_dict()")
+
+        status = payload.get("measurement_status", payload.get("status"))
+        if status not in {"complete", "incomplete"}:
+            raise ValueError("trajectory KL measurement status must be complete or incomplete")
+        trace = payload.get("trace")
+        decisions = payload.get("decisions")
+        if not isinstance(trace, list) or not isinstance(decisions, list):
+            raise ValueError("trajectory KL result must contain trace and decisions lists")
+        if len(trace) != len(decisions):
+            raise ValueError("trajectory KL decisions must align one-to-one with the trace")
+
+        if status == "complete":
+            if not trace:
+                raise ValueError("a complete trajectory KL result cannot be empty")
+            values = [float(value) for value in trace]
+            if any(not math.isfinite(value) or value < 0.0 for value in values):
+                raise ValueError(
+                    "complete trajectory KL trace values must be finite and non-negative"
+                )
+            trajectory_kl_episode = sum(values)
+            if math.isfinite(trajectory_kl_episode):
+                mean_local_policy_kl = trajectory_kl_episode / len(values)
+            else:
+                status = "incomplete"
+                trajectory_kl_episode = None
+                mean_local_policy_kl = None
+                errors = payload.get("errors")
+                if not isinstance(errors, list):
+                    errors = []
+                payload["errors"] = [
+                    *errors,
+                    "trajectory KL sum is not finite",
+                ]
+            trace = values
+        else:
+            for value in trace:
+                if value is not None:
+                    number = float(value)
+                    if not math.isfinite(number) or number < 0.0:
+                        raise ValueError(
+                            "available trajectory KL trace values must be finite and non-negative"
+                        )
+            trajectory_kl_episode = None
+            mean_local_policy_kl = None
+
+        payload.pop("status", None)
+        payload["measurement_status"] = status
+        payload["trace"] = trace
+        payload["decision_steps"] = len(decisions)
+        payload["trajectory_kl_episode"] = trajectory_kl_episode
+        payload["mean_local_policy_kl"] = mean_local_policy_kl
+        payload.setdefault("direction", "new||old")
+        payload.setdefault("log_base", "e")
+        payload.setdefault("rollout_source", "new_policy")
+        payload.setdefault(
+            "estimand",
+            "epsilon_regularized_local_kl_sum_under_new_policy_occupancy",
+        )
+        payload.setdefault(
+            "context_refs",
+            [decision.get("context_ref") for decision in decisions],
+        )
+        self.write("policy_kl_trace", **payload)
 
     def log_occupancy(
         self,

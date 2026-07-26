@@ -49,7 +49,7 @@ def test_verify_python_hashes_detects_modified_entry(tmp_path, monkeypatch):
     assert any("rank04" in error and "runnable sha" in error for error in errors)
 
 
-def test_verify_python_hashes_checks_archive_and_entry(tmp_path, monkeypatch):
+def test_verify_python_hashes_checks_entry(tmp_path, monkeypatch):
     mm = _import_cli_module(monkeypatch)
     extracted = tmp_path / "extracted"
     archives = tmp_path / "archives"
@@ -69,12 +69,12 @@ def test_verify_python_hashes_checks_archive_and_entry(tmp_path, monkeypatch):
         "archive_sha256": _sha(archive),
     }
 
-    errors = mm.verify_python_strategy_hashes(strategy, extracted, archives)
+    errors = mm.verify_python_strategy_hashes(strategy, extracted)
 
     assert errors == []
 
 
-def test_verify_python_hashes_rejects_duplicate_archives(tmp_path, monkeypatch):
+def test_verify_archive_hash_rejects_duplicate_archives(tmp_path, monkeypatch):
     mm = _import_cli_module(monkeypatch)
     extracted = tmp_path / "extracted"
     archives = tmp_path / "archives"
@@ -93,12 +93,12 @@ def test_verify_python_hashes_rejects_duplicate_archives(tmp_path, monkeypatch):
         "archive_sha256": _sha(archives / "rank04__a.zip"),
     }
 
-    errors = mm.verify_python_strategy_hashes(strategy, extracted, archives)
+    errors = mm.verify_archive_hash(strategy, archives)
 
     assert any("multiple archive files" in error for error in errors)
 
 
-def test_verify_python_hashes_requires_archive_identity(tmp_path, monkeypatch):
+def test_verify_archive_hash_requires_archive_identity(tmp_path, monkeypatch):
     mm = _import_cli_module(monkeypatch)
     extracted = tmp_path / "extracted"
     archives = tmp_path / "archives"
@@ -116,6 +116,6 @@ def test_verify_python_hashes_requires_archive_identity(tmp_path, monkeypatch):
         "runnable_sha256": _sha(entry),
     }
 
-    errors = mm.verify_python_strategy_hashes(strategy, extracted, archives)
+    errors = mm.verify_archive_hash(strategy, archives)
 
     assert any("archive sha missing" in error for error in errors)

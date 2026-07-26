@@ -65,6 +65,84 @@ class BenchmarkContractTests(unittest.TestCase):
 
 
 class InformationGainContractTests(unittest.TestCase):
+    def test_action_support_requires_stable_unique_ids_and_preserves_order(self):
+        from agentbench_frame.eval.measurement import ActionCandidate, ActionSupport
+
+        support = ActionSupport(
+            actions=[
+                ActionCandidate("end", [[8]]),
+                ActionCandidate("move-1", [[1, 0, 0, 1, 1]]),
+            ],
+            schema_version="generals-macro-v1",
+        )
+        same_support = ActionSupport(
+            actions=[
+                ActionCandidate("end", [[8]]),
+                ActionCandidate("move-1", [[1, 9, 9, 4, 1]]),
+            ],
+            schema_version="generals-macro-v1",
+        )
+        reversed_support = ActionSupport(
+            actions=list(reversed(support.actions)),
+            schema_version="generals-macro-v1",
+        )
+
+        self.assertEqual(support.action_ids, ("end", "move-1"))
+        self.assertEqual(support.resolve("move-1"), [[1, 0, 0, 1, 1]])
+        self.assertEqual(support.support_id, same_support.support_id)
+        self.assertNotEqual(support.support_id, reversed_support.support_id)
+
+        with self.assertRaises(ValueError):
+            ActionSupport(
+                actions=[ActionCandidate("same", 1), ActionCandidate("same", 2)],
+                schema_version="schema-v1",
+            )
+        with self.assertRaises(ValueError):
+            ActionSupport(actions=[ActionCandidate("", 1)], schema_version="schema-v1")
+        with self.assertRaises(ValueError):
+            ActionSupport(actions=[ActionCandidate("a", 1)], schema_version="")
+
+    def test_strict_policy_distribution_is_aligned_by_action_id(self):
+        from agentbench_frame.eval.information_gain import validate_policy_distribution
+        from agentbench_frame.eval.measurement import ActionCandidate, ActionSupport
+
+        support = ActionSupport(
+            actions=[ActionCandidate("b", 20), ActionCandidate("a", 10)],
+            schema_version="schema-v1",
+        )
+
+        self.assertEqual(
+            validate_policy_distribution({"a": 0.25, "b": 0.75}, support),
+            [0.75, 0.25],
+        )
+
+    def test_strict_policy_distribution_rejects_inexact_or_invalid_mass(self):
+        from agentbench_frame.eval.information_gain import validate_policy_distribution
+        from agentbench_frame.eval.measurement import ActionCandidate, ActionSupport
+
+        support = ActionSupport(
+            actions=[ActionCandidate("a", 10), ActionCandidate("b", 20)],
+            schema_version="schema-v1",
+        )
+
+        for invalid in (
+            {"a": 1.0},
+            {"a": 0.5, "b": 0.4, "c": 0.1},
+            {"a": 0.5, "b": 0.4},
+            {"a": float("nan"), "b": 0.0},
+            {"a": -0.1, "b": 1.1},
+        ):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ValueError):
+                    validate_policy_distribution(invalid, support)
+
+        with self.assertRaises(TypeError):
+            validate_policy_distribution(
+                {"a": 0.2, "b": 0.2},
+                support,
+                tolerance=float("inf"),
+            )
+
     def test_epsilon_regularization_gives_finite_common_support(self):
         from agentbench_frame.eval.information_gain import epsilon_regularize, policy_kl
 

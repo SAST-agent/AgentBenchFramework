@@ -396,7 +396,12 @@ def test_cli_run_resume_invokes_verify_and_proceeds(tmp_path, monkeypatch):
             return {"total_attempts": 0, "valid_games": 0,
                     "invalid_games": 0, "win_rate": None}
 
-    rc = mm._run_resume(FakeRunner(), sid)
+    roots = {name: tmp_path / name for name in (
+        "judge_dir", "ifelse_dir", "extracted_root", "archives_root",
+        "precheck_root", "rank16_build_root",
+    )}
+    monkeypatch.setattr(mm, "verify_hashes", lambda *_a, **_k: [])
+    rc = mm._run_resume(FakeRunner(), sid, **roots)
     assert rc == 0
     assert len(verified) == 1, "verify_session_for_resume must be called exactly once"
     assert resumed["count"] == 1, "r.resume() must be called after verify OK"
@@ -441,7 +446,11 @@ def test_cli_run_resume_no_resume_when_verify_fails(tmp_path, monkeypatch):
         def aggregate_from_events(self):
             return {}
 
-    rc = mm._run_resume(FakeRunner(), sid)
+    roots = {name: tmp_path / name for name in (
+        "judge_dir", "ifelse_dir", "extracted_root", "archives_root",
+        "precheck_root", "rank16_build_root",
+    )}
+    rc = mm._run_resume(FakeRunner(), sid, **roots)
     assert rc == 2, "verify-fail must return 2"
     assert resumed["count"] == 0, "must NOT resume when verify fails"
     assert executed["count"] == 0

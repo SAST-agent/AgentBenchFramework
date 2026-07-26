@@ -2,9 +2,9 @@
 """LOCAL VERIFICATION COPY of 高翔's ``tools/miracle/run_match.py``.
 
 VENDOR PROVENANCE
-  Original source : C:\\Users\\gongh\\Desktop\\AgentBench-gaoxiang\\AgentBench-gaoxiang\\tools\\miracle\\run_match.py
+  Original source : external_asset:AgentBench-gaoxiang/tools/miracle/run_match.py
   Original SHA256 : 91d5693651402a3579146181ee6ada5586c103f38ba5f321b92c23a17a7a8ae2
-  Authoritative Judge : C:\\Users\\gongh\\Documents\\agentbench\\backend_sources\\corpus\\24_miracle\\logic\\judge_dev_logic
+  Authoritative Judge : external_asset:24_miracle/judge_dev_logic
                        (高翔's in-tree Judge copy is byte-identical to it, diff verified.)
   Role : local Windows verification only; the original stays frozen, this is a
          minimally-patched vendored copy used by match_runner.py.

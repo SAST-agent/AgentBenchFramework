@@ -5,7 +5,7 @@ Handles running multiple games between two agents, collecting results,
 and computing win rates and statistics.
 """
 
-import time
+import copy
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 import time
@@ -125,10 +125,6 @@ class Match:
     def _play_game(self, game_idx: int) -> Dict[str, Any]:
         """Play a single game between the two agents."""
         seed = self.seed + game_idx
-        self.agent1.reset()
-        self.agent2.reset()
-        obs = self.env.reset(seed=seed)
-        done = False
 
         # Track which side the agents are on
         # Alternate who goes first
@@ -137,19 +133,82 @@ class Match:
         else:
             player_agents = {0: self.agent1, 1: self.agent2}
 
-        current_player = getattr(obs, "player_id", 0)
-        total_rewards = {0: 0.0, 1: 0.0}
-        step_count = 0
+        for player_id, agent in player_agents.items():
+            set_metadata = getattr(
+                agent, "set_measurement_episode_metadata", None
+            )
+            if callable(set_metadata):
+                opponent = player_agents[1 - player_id]
+                set_metadata({
+                    "game_index": game_idx,
+                    "seed": seed,
+                    "player_id": player_id,
+                    "opponent_name": getattr(opponent, "name", "unknown"),
+                })
 
-        while not done:
-            agent = player_agents[current_player]
-            action = agent.act(obs.to_dict())
-            obs, reward, done, info = self.env.step(action)
-            step_count += 1
+        try:
+            self.agent1.reset()
+            self.agent2.reset()
+            obs = self.env.reset(seed=seed)
+            done = False
+            current_player = getattr(obs, "player_id", 0)
+            total_rewards = {0: 0.0, 1: 0.0}
+            step_count = 0
 
-            total_rewards[current_player] += reward
-            # Relay observation to the other agent's perspective
-            current_player = obs.player_id
+            while not done:
+                previous_obs = obs
+                actor_player = current_player
+                agent = player_agents[current_player]
+                action = agent.act(obs.to_dict())
+                obs, reward, done, info = self.env.step(action)
+                step_count += 1
+
+                total_rewards[actor_player] += reward
+                transition = {
+                    "observation": previous_obs.to_dict(),
+                    "actor_player_id": actor_player,
+                    "action": action,
+                    "next_observation": obs.to_dict(),
+                    "reward": reward,
+                    "terminated": bool(done),
+                    "truncated": False,
+                    "done": bool(done),
+                    "info": info or {},
+                    "env_step": step_count,
+                }
+                notified = set()
+                for participant in player_agents.values():
+                    identity = id(participant)
+                    if identity in notified:
+                        continue
+                    notified.add(identity)
+                    observe = getattr(
+                        participant, "observe_transition", None
+                    )
+                    if callable(observe):
+                        observe(copy.deepcopy(transition))
+                # Relay observation to the other agent's perspective
+                current_player = obs.player_id
+        except Exception as exc:
+            abort_error = None
+            notified = set()
+            for participant in player_agents.values():
+                identity = id(participant)
+                if identity in notified:
+                    continue
+                notified.add(identity)
+                abort = getattr(participant, "abort_episode", None)
+                if callable(abort):
+                    try:
+                        abort(
+                            f"{type(exc).__name__}: {exc}"
+                        )
+                    except Exception as candidate:
+                        if abort_error is None:
+                            abort_error = candidate
+            if abort_error is not None:
+                raise abort_error from exc
+            raise
 
         # Map winner back to agent identity
         raw_winner = obs.state.get("winner", -1)
@@ -167,6 +226,23 @@ class Match:
             agent1_reward = total_rewards[1]
             agent2_reward = total_rewards[0]
 
+        measurements = []
+        seen = set()
+        for participant in player_agents.values():
+            identity = id(participant)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            measurement = getattr(
+                participant, "latest_trajectory_kl_result", None
+            )
+            if measurement is not None:
+                measurements.append(
+                    measurement.to_dict()
+                    if hasattr(measurement, "to_dict")
+                    else measurement
+                )
+
         return {
             "game_idx": game_idx,
             "winner": raw_winner,
@@ -178,6 +254,7 @@ class Match:
             "agent1_reward": agent1_reward,
             "agent2_reward": agent2_reward,
             "trajectory": self.env.get_trajectory(),
+            "trajectory_kl_measurements": measurements,
         }
 
     def run_parallel(self, n_games: int = 10, n_workers: int = 4) -> MatchResult:

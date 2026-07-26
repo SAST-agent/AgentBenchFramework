@@ -123,6 +123,53 @@ def _load_json_object(path: Path, label: str) -> dict:
     return value
 
 
+def _require_control_mapping(value, label: str) -> dict:
+    if not isinstance(value, dict):
+        raise PreflightError(f"control schema: {label} missing or not an object")
+    return value
+
+
+def _require_control_sha(value, label: str) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(char not in "0123456789abcdef" for char in value)
+    ):
+        raise PreflightError(f"control schema: {label} missing or not a 64-character lowercase hexadecimal SHA256")
+    return value
+
+
+def _validate_control_schema(protocol: dict, strategies: list[dict]) -> None:
+    """Reject incomplete control inputs before a runner or session exists."""
+    identities = _require_control_mapping(protocol.get("frozen_identities"), "frozen_identities")
+    evaluated_agent = _require_control_mapping(
+        identities.get("evaluated_agent"), "frozen_identities.evaluated_agent"
+    )
+    _require_control_sha(
+        evaluated_agent.get("sha256"), "frozen_identities.evaluated_agent.sha256"
+    )
+    judge = _require_control_mapping(identities.get("judge"), "frozen_identities.judge")
+    _require_control_sha(judge.get("main_py_sha256"), "frozen_identities.judge.main_py_sha256")
+    builds = _require_control_mapping(
+        identities.get("build_artifacts_win64_mingw"),
+        "frozen_identities.build_artifacts_win64_mingw",
+    )
+    for rank in CPP_RANKS:
+        _require_control_sha(
+            builds.get(f"rank{rank:02d}"),
+            f"frozen_identities.build_artifacts_win64_mingw.rank{rank:02d}",
+        )
+    for strategy in strategies:
+        rank = strategy["rank"]
+        label = f"roster.strategies.rank{rank:02d}"
+        _require_control_sha(strategy.get("archive_sha256"), f"{label}.archive_sha256")
+        if rank in PYTHON_RANKS:
+            entry = strategy.get("entry")
+            if not isinstance(entry, str) or not entry:
+                raise PreflightError(f"control schema: {label}.entry missing or not a string")
+            _require_control_sha(strategy.get("runnable_sha256"), f"{label}.runnable_sha256")
+
+
 def load_control_inputs(
     protocol_path: Path,
     roster_path: Path,
@@ -140,6 +187,7 @@ def load_control_inputs(
     ranks = [item.get("rank") for item in strategies if isinstance(item, dict)]
     if ranks != list(range(1, 17)):
         raise PreflightError(f"roster ranks must be exactly 1..16: {ranks}")
+    _validate_control_schema(protocol, strategies)
     protocol_hash = control_text_sha(protocol_path)
     if expected_protocol_sha and protocol_hash != expected_protocol_sha:
         raise PreflightError(
@@ -193,13 +241,40 @@ def opponent_dir_of(rank: int) -> Path:
     return resolve_opponent_dir(rank)
 
 
-def verify_python_strategy_hashes(
-    strategy: dict,
-    extracted_root: Path,
-    archives_root: Path | None = None,
-) -> list[str]:
+def _strategy_label(strategy: dict) -> str:
     rank = strategy.get("rank", "unknown")
-    label = f"rank{int(rank):02d}" if isinstance(rank, int) else f"rank{rank}"
+    return f"rank{int(rank):02d}" if isinstance(rank, int) else f"rank{rank}"
+
+
+def verify_archive_hash(strategy: dict, archives_root: Path) -> list[str]:
+    """Verify the unique archive for one roster entry using raw-byte hashing."""
+    rank = strategy.get("rank")
+    label = _strategy_label(strategy)
+    if not isinstance(rank, int):
+        return [f"{label}: invalid roster rank"]
+    try:
+        archive = resolve_unique_file(Path(archives_root), f"rank{rank:02d}__*.zip")
+    except (FileNotFoundError, RuntimeError) as exc:
+        return [f"{label}: {exc}"]
+    expected_archive_sha = strategy.get("archive_sha256")
+    if not expected_archive_sha:
+        return [f"{label}: archive sha missing from roster"]
+    try:
+        actual_archive_sha = sha(archive)
+    except OSError as exc:
+        return [f"{label}: archive sha unreadable: {exc}"]
+    if actual_archive_sha != expected_archive_sha:
+        return [f"{label}: archive sha mismatch"]
+    return []
+
+
+def verify_python_strategy_hashes(strategy: dict, extracted_root: Path) -> list[str]:
+    """Verify a Python opponent's extracted runnable entry only.
+
+    Archives are verified once for every roster entry by ``verify_archive_hash``.
+    """
+    rank = strategy.get("rank", "unknown")
+    label = _strategy_label(strategy)
     errors: list[str] = []
     try:
         directory = resolve_unique_dir(extracted_root, f"rank{int(rank):02d}__*")
@@ -215,19 +290,14 @@ def verify_python_strategy_hashes(
         expected_entry_sha = strategy.get("runnable_sha256")
         if not expected_entry_sha:
             errors.append(f"{label}: runnable sha missing from roster")
-        elif sha(entry_path) != expected_entry_sha:
-            errors.append(f"{label}: runnable sha mismatch")
-    if archives_root is not None:
-        try:
-            archive = resolve_unique_file(Path(archives_root), f"rank{int(rank):02d}__*.zip")
-        except (FileNotFoundError, RuntimeError) as exc:
-            errors.append(f"{label}: {exc}")
         else:
-            expected_archive_sha = strategy.get("archive_sha256")
-            if not expected_archive_sha:
-                errors.append(f"{label}: archive sha missing from roster")
-            elif sha(archive) != expected_archive_sha:
-                errors.append(f"{label}: archive sha mismatch")
+            try:
+                actual_entry_sha = sha(entry_path)
+            except OSError as exc:
+                errors.append(f"{label}: runnable sha unreadable: {exc}")
+            else:
+                if actual_entry_sha != expected_entry_sha:
+                    errors.append(f"{label}: runnable sha mismatch")
     return errors
 
 
@@ -241,12 +311,18 @@ def verify_hashes(
     rank16_build_root: Path = RANK16_BUILD,
     ifelse_root: Path = IFELSE,
     judge_root: Path = JUDGE,
+    asset_digests: dict[str, str] | None = None,
 ):
     """Verify every opponent's runnable identity matches the frozen hashes."""
     mismatches = []
     ba = v3["frozen_identities"]["build_artifacts_win64_mingw"]
     strategies = {item["rank"]: item for item in roster.get("strategies", []) if isinstance(item, dict)}
     for rank in range(1, 17):
+        strategy = strategies.get(rank)
+        if strategy is None:
+            mismatches.append(f"rank{rank:02d}: roster strategy missing")
+        else:
+            mismatches.extend(verify_archive_hash(strategy, archives_root))
         try:
             d = resolve_opponent_dir(
                 rank,
@@ -262,30 +338,49 @@ def verify_hashes(
             mismatches.append(f"rank{rank:02d}: opponent dir missing {d}")
             continue
         if rank in PYTHON_RANKS:
-            strategy = strategies.get(rank)
             if strategy is None:
-                mismatches.append(f"rank{rank:02d}: roster strategy missing")
+                continue
             else:
-                mismatches.extend(verify_python_strategy_hashes(strategy, extracted_root, archives_root))
+                mismatches.extend(verify_python_strategy_hashes(strategy, extracted_root))
         else:
             me = d / "main.exe"
-            if not me.exists():
+            if not me.is_file():
                 mismatches.append(f"rank{rank:02d}: main.exe missing")
             else:
-                got = sha(me)
                 want = ba[f"rank{rank:02d}"]
-                if got != want:
-                    mismatches.append(f"rank{rank:02d}: main.exe sha {got} != frozen {want}")
+                try:
+                    got = sha(me)
+                except OSError as exc:
+                    mismatches.append(f"rank{rank:02d}: main.exe sha unreadable: {exc}")
+                else:
+                    if got != want:
+                        mismatches.append(f"rank{rank:02d}: main.exe sha {got} != frozen {want}")
     ifelse_main = Path(ifelse_root) / "main.py"
     if not ifelse_main.is_file():
         mismatches.append(f"ifelse main.py missing: {ifelse_main}")
-    elif sha(ifelse_main) != v3["frozen_identities"]["evaluated_agent"]["sha256"]:
-        mismatches.append("ifelse sha mismatch")
+    else:
+        try:
+            ifelse_sha = sha(ifelse_main)
+        except OSError as exc:
+            mismatches.append(f"ifelse sha unreadable: {exc}")
+        else:
+            if ifelse_sha != v3["frozen_identities"]["evaluated_agent"]["sha256"]:
+                mismatches.append("ifelse sha mismatch")
+            elif asset_digests is not None:
+                asset_digests["ifelse"] = ifelse_sha
     judge_main = Path(judge_root) / "main.py"
     if not judge_main.is_file():
         mismatches.append(f"judge main.py missing: {judge_main}")
-    elif sha(judge_main) != v3["frozen_identities"]["judge"]["main_py_sha256"]:
-        mismatches.append("judge sha mismatch")
+    else:
+        try:
+            judge_sha = sha(judge_main)
+        except OSError as exc:
+            mismatches.append(f"judge sha unreadable: {exc}")
+        else:
+            if judge_sha != v3["frozen_identities"]["judge"]["main_py_sha256"]:
+                mismatches.append("judge sha mismatch")
+            elif asset_digests is not None:
+                asset_digests["judge"] = judge_sha
     return mismatches
 
 
@@ -295,6 +390,12 @@ def _run_resume(
     *,
     control_inputs: ControlInputs | None = None,
     session_root: Path | None = None,
+    judge_dir: Path | None = None,
+    ifelse_dir: Path | None = None,
+    extracted_root: Path | None = None,
+    archives_root: Path | None = None,
+    precheck_root: Path | None = None,
+    rank16_build_root: Path | None = None,
 ):
     """Resume an existing session. VERIFY FIRST (read-only); only if ALL checks
     pass, call resume() + write. Verification failure leaves session untouched."""
@@ -332,6 +433,26 @@ def _run_resume(
         print("FATAL: resume verification failed:", file=sys.stderr)
         for e in errs:
             print(f"  - {e}", file=sys.stderr)
+        return 2
+    runtime_roots = (
+        ("judge_dir", judge_dir), ("ifelse_dir", ifelse_dir),
+        ("extracted_root", extracted_root), ("archives_root", archives_root),
+        ("precheck_root", precheck_root), ("rank16_build_root", rank16_build_root),
+    )
+    missing_roots = [name for name, value in runtime_roots if value is None]
+    if missing_roots:
+        print(f"FATAL: resume runtime root missing: {', '.join(missing_roots)}", file=sys.stderr)
+        return 2
+    mismatches = verify_hashes(
+        v3, roster,
+        extracted_root=Path(extracted_root), archives_root=Path(archives_root),
+        precheck_root=Path(precheck_root), rank16_build_root=Path(rank16_build_root),
+        ifelse_root=Path(ifelse_dir), judge_root=Path(judge_dir),
+    )
+    if mismatches:
+        print("FATAL: resume current asset verification failed:", file=sys.stderr)
+        for mismatch in mismatches:
+            print(f"  - {mismatch}", file=sys.stderr)
         return 2
     # only now: open session + write
     r.resume(resume_sid)
@@ -411,6 +532,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.resume,
             control_inputs=control_inputs,
             session_root=args.session_root,
+            judge_dir=args.judge_dir,
+            ifelse_dir=args.ifelse_dir,
+            extracted_root=args.extracted_root,
+            archives_root=args.archives_root,
+            precheck_root=args.precheck_root,
+            rank16_build_root=args.rank16_build_root,
         )
     r.prepare_session()
     LOG = open(r.session_dir / "matrix.full.log", "w", encoding="utf-8")
@@ -420,6 +547,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     log(f"protocol v0.3 sha: {control_inputs.hashes['protocol']} (verified)")
     log(f"mode: {'DRY_RUN' if args.dry_run else 'EXECUTE'}")
 
+    asset_digests: dict[str, str] = {}
     mismatches = verify_hashes(
         v3,
         roster,
@@ -429,13 +557,25 @@ def main(argv: Sequence[str] | None = None) -> int:
         rank16_build_root=args.rank16_build_root,
         ifelse_root=args.ifelse_dir,
         judge_root=args.judge_dir,
+        asset_digests=asset_digests,
     )
+    if mismatches:
+        log("FATAL: hash mismatches -> STOP before any game:")
+        for m in mismatches:
+            log("  - " + m)
+        return 2
+    ifelse_sha = asset_digests.get("ifelse")
+    judge_sha = asset_digests.get("judge")
+    if ifelse_sha is None or judge_sha is None:
+        log("FATAL: verified ifelse/judge digest missing -> STOP before any game")
+        return 2
     opp_arch = {s["rank"]: s["archive_sha256"] for s in roster["strategies"]}
     cpp_build = {int(k.replace("rank", "")): v for k, v in v3["frozen_identities"]["build_artifacts_win64_mingw"].items()
                  if k.startswith("rank") and isinstance(v, str) and "_" not in k}
     r.record_manifest(
         opponent_hashes=opp_arch, build_hashes=cpp_build,
-        ifelse_sha=sha(IFELSE / "main.py"), judge_sha=sha(JUDGE / "main.py"),
+        ifelse_sha=ifelse_sha,
+        judge_sha=judge_sha,
         code_hashes={"matrix": sha(REPO / "src/agentbench_frame/games/miracle/matrix.py"),
                      "matrix_runner": sha(REPO / "src/agentbench_frame/games/miracle/matrix_runner.py"),
                      "match_runner": sha(REPO / "src/agentbench_frame/games/miracle/match_runner.py"),
@@ -446,11 +586,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         },
     )
     log(f"manifest: {r.session_dir / 'manifest.json'}")
-    if mismatches:
-        log("FATAL: hash mismatches -> STOP before any game:")
-        for m in mismatches:
-            log("  - " + m)
-        return 2
     log("hash verification: ALL_MATCH")
 
     if args.dry_run:

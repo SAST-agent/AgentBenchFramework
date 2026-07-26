@@ -9,6 +9,40 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
+from agentbench_frame.eval.measurement import ActionSupport
+
+
+POLICY_SUM_TOLERANCE = 1e-9
+
+
+def validate_policy_distribution(
+    distribution: Mapping[str, float],
+    support: ActionSupport,
+) -> List[float]:
+    """Validate and align a strict action-ID probability distribution."""
+
+    if not isinstance(distribution, Mapping):
+        raise TypeError("policy distribution must be an action-ID mapping")
+    expected = set(support.action_ids)
+    actual = set(distribution)
+    if actual != expected:
+        missing = sorted(expected - actual)
+        extra = sorted(str(value) for value in actual - expected)
+        raise ValueError(
+            f"policy distribution support mismatch; missing={missing}, extra={extra}"
+        )
+    values = [float(distribution[action_id]) for action_id in support.action_ids]
+    if any(not math.isfinite(value) or value < 0.0 for value in values):
+        raise ValueError("probabilities must be finite and non-negative")
+    if not math.isclose(
+        sum(values),
+        1.0,
+        rel_tol=0.0,
+        abs_tol=POLICY_SUM_TOLERANCE,
+    ):
+        raise ValueError("policy probabilities must sum to 1")
+    return values
+
 
 def _normalize(values: Sequence[float]) -> List[float]:
     if not values:

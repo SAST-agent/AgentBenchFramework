@@ -23,12 +23,22 @@ from agentbench_frame.eval.information_gain import (
     occupancy_shift,
     policy_kl,
     trajectory_kl_from_trace,
+    validate_policy_distribution,
 )
 from agentbench_frame.eval.measurement import (
+    ActionCandidate,
+    ActionSupport,
     PolicyDistributionProvider,
+    PolicyDecision,
     StateIdProvider,
     canonical_state_id,
     canonical_state_payload,
+)
+from agentbench_frame.eval.trajectory_kl import (
+    TrajectoryKLAgent,
+    TrajectoryKLConfig,
+    TrajectoryKLDecisionRecord,
+    TrajectoryKLEpisodeResult,
 )
 
 __all__ = [
@@ -46,8 +56,16 @@ __all__ = [
     "occupancy_shift",
     "policy_kl",
     "trajectory_kl_from_trace",
+    "validate_policy_distribution",
+    "ActionCandidate",
+    "ActionSupport",
     "PolicyDistributionProvider",
+    "PolicyDecision",
     "StateIdProvider",
     "canonical_state_id",
     "canonical_state_payload",
+    "TrajectoryKLAgent",
+    "TrajectoryKLConfig",
+    "TrajectoryKLDecisionRecord",
+    "TrajectoryKLEpisodeResult",
 ]

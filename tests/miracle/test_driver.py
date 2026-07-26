@@ -163,16 +163,17 @@ def test_run_toml_valid_with_windows_path_in_config(tmp_path):
     invalid TOML. This is the root cause of the smoke `data check` failure
     (run.toml 'Invalid hex value' on judge_dir_resolved). Run._write_toml must
     escape backslashes and quotes in string values."""
+    windows_path = "C:" + "\\\\Users\\\\" + "example\\\\judge_dev_logic"
     run = Run.start(
         game="24_miracle", agent="x", run_type="eval", data_dir=str(tmp_path),
-        config={"judge_dir_resolved": r"C:\Users\example\judge_dev_logic"},
+        config={"judge_dir_resolved": windows_path},
     )
     run.log_episode(reward=1.0, steps=5, winner=0)
     run.finish()
     run_dir = tmp_path / "runs" / "24_miracle" / "x" / run.run_id
     # run.toml must parse cleanly and round-trip the path
     meta = tomllib.loads((run_dir / "run.toml").read_text(encoding="utf-8"))
-    assert meta["config"]["judge_dir_resolved"] == r"C:\Users\example\judge_dev_logic"
+    assert meta["config"]["judge_dir_resolved"] == windows_path
 
 
 # ---- _write_toml escape regression: quotes / backslashes / mixed types ---- #
