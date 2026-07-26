@@ -154,7 +154,10 @@ class ReportBuilder:
             if score is None and event.get("evaluation_status") not in {"incomplete", "failed"}:
                 continue
             phase = event.get("phase")
-            if phase == "raw":
+            explicit_act = event.get("global_coding_agent_act")
+            if explicit_act is not None:
+                act_x = explicit_act
+            elif phase == "raw":
                 act_x = 0
             elif phase == "evolved":
                 act_x = budget.get("learning_coding_agent_acts", 1)
@@ -173,6 +176,12 @@ class ReportBuilder:
                 "time_s": event.get("time_s"),
                 "score": score,
             })
+        if "evo_score_1" in summary or "evo_score_2" in summary:
+            score_history = [
+                {"x": 0, "score": summary.get("raw_score"), "act_id": None},
+                {"x": 1, "score": summary.get("evo_score_1"), "act_id": None},
+                {"x": 2, "score": summary.get("evo_score_2"), "act_id": None},
+            ]
         if not score_history and summary.get("benchmark_score") is not None:
             score_history = [{
                 "x": budget.get("learning_coding_agent_acts", 0),
@@ -190,6 +199,7 @@ class ReportBuilder:
         ig_history = []
         occupancy_history = []
         action_disagreement_history = []
+        dense_history = []
         for index, event in enumerate(events, start=1):
             event_type = event.get("event_type", event.get("event"))
             if event_type == "policy_kl_trace":
@@ -215,9 +225,31 @@ class ReportBuilder:
                     "policy_kl_status": event.get("policy_kl_status"),
                     "occupancy_shift": event.get("occupancy_shift"),
                 })
+            elif event_type == "dense_episode_summary":
+                dense_history.append({
+                    "case_id": event.get("case_id"),
+                    "version": event.get("version"),
+                    "phase": event.get("phase"),
+                    "suite": event.get("suite", "formal"),
+                    "split": event.get("split"),
+                    "outcome": event.get("outcome"),
+                    "completed_rounds_survived": event.get(
+                        "completed_rounds_survived"
+                    ),
+                    "territory_share": event.get("territory_share", {}),
+                    "army_share": event.get("army_share", {}),
+                    "coin_share": event.get("coin_share", {}),
+                    "net_main_pressure": event.get(
+                        "net_main_pressure", {}
+                    ),
+                    "artifact_ref": event.get("artifact_ref"),
+                })
         raw_score = summary.get("raw_score")
-        evo_score = summary.get("evo_score", summary.get("benchmark_score"))
-        gain = summary.get("gain")
+        evo_score = summary.get(
+            "evo_score_2",
+            summary.get("evo_score", summary.get("benchmark_score")),
+        )
+        gain = summary.get("gain_2", summary.get("gain"))
         if gain is None and raw_score is not None and evo_score is not None:
             gain = float(evo_score) - float(raw_score)
         quality = inspect_event_file(events_path).to_dict() if os.path.exists(events_path) else {
@@ -229,6 +261,19 @@ class ReportBuilder:
         benchmark_score = summary.get("benchmark_score")
         if benchmark_score is None:
             benchmark_score = evo_score
+        calibration = {
+            "benchmark_id": summary.get("calibration_benchmark_id"),
+            "status": summary.get("calibration_status"),
+            "score": summary.get("calibration_score"),
+            "wins": summary.get("calibration_wins"),
+            "losses": summary.get("calibration_losses"),
+            "draws": summary.get("calibration_draws"),
+            "per_seat": summary.get("calibration_per_seat"),
+            "target_range": summary.get("calibration_target_range"),
+            "in_target_range": summary.get(
+                "calibration_in_target_range"
+            ),
+        }
         return {
             "benchmark_score": benchmark_score,
             "raw_score": raw_score,
@@ -244,6 +289,8 @@ class ReportBuilder:
             "ig_history": ig_history,
             "occupancy_history": occupancy_history,
             "action_disagreement_history": action_disagreement_history,
+            "calibration": calibration,
+            "dense_history": dense_history,
             "benchmark_results": summary.get("benchmark_results", []),
             "event_counts": dict(Counter(event.get("event_type", event.get("event", "unknown")) for event in events)),
             "raw_event_count": len(events),

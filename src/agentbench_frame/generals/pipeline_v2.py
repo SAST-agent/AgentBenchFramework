@@ -567,6 +567,7 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
                     status=v1_formal.status,
                     score=v1_formal.score,
                     parent_score=evo_score_1,
+                    global_coding_agent_act=1,
                     reproducible=(
                         v1_formal.score == evo_score_1
                         if v1_formal.score is not None
