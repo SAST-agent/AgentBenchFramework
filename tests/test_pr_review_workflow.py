@@ -24,6 +24,7 @@ def test_pr_review_workflow_keeps_required_job_names():
 def test_pr_review_workflow_routes_forks_without_secrets():
     text = WORKFLOW.read_text(encoding="utf-8")
 
+    assert "pull_request_target" not in text
     assert "name: Run blocking AI review" in text
     assert "if: github.event.pull_request.head.repo.full_name == github.repository" in text
     assert "name: Run credential-free fork preflight" in text
