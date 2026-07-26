@@ -188,6 +188,15 @@ class Run:
         self.write("budget", phase=phase, observation=kwargs, **snapshot)
         return snapshot
 
+    def log_game_result(
+        self, phase: str, version: str, payload: Dict[str, Any]
+    ) -> None:
+        """Persist one generic first-hand game result event."""
+        event = dict(payload)
+        event.setdefault("phase", phase)
+        event.setdefault("version", version)
+        self.write("game_result", **event)
+
     def budget_snapshot(self) -> Dict[str, Optional[float]]:
         return self._budget.snapshot()
 
