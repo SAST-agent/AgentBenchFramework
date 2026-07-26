@@ -66,7 +66,7 @@ class MatchTest(unittest.TestCase):
             root = Path(directory)
             pid_paths = [root / "ai0.pid", root / "ai1.pid"]
             run_match(
-                command("fake_logic.py"),
+                command("fake_logic.py", "--delay", "0.1"),
                 [
                     command("fake_ai.py", "--pid-file", str(pid_paths[0])),
                     command("fake_ai.py", "--pid-file", str(pid_paths[1])),
@@ -77,8 +77,15 @@ class MatchTest(unittest.TestCase):
 
             for path in pid_paths:
                 pid = int(path.read_text())
-                with self.assertRaises(ProcessLookupError):
-                    os.kill(pid, 0)
+                deadline = time.monotonic() + 1
+                while True:
+                    try:
+                        os.kill(pid, 0)
+                    except ProcessLookupError:
+                        break
+                    if time.monotonic() >= deadline:
+                        self.fail(f"AI process {pid} was not cleaned up")
+                    time.sleep(0.01)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ import argparse
 import json
 import struct
 import sys
+import time
 
 
 def read_frame():
@@ -19,12 +20,15 @@ def write_logic_message(value):
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--mode", choices=("success", "malformed"), default="success")
+parser.add_argument("--delay", type=float, default=0.0)
 args = parser.parse_args()
 
 read_frame()
 if args.mode == "malformed":
     write_logic_message(b"not-json")
     raise SystemExit(0)
+
+time.sleep(args.delay)
 
 observation = '{"turn":1}'
 write_logic_message(
