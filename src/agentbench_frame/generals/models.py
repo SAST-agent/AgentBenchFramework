@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Mapping
 
 
 @dataclass(frozen=True)
@@ -48,3 +49,11 @@ class AssetLayout:
     baseline_root: Path
     opponents: tuple[OpponentSpec, ...]
     engine_hash: str
+
+
+@dataclass(frozen=True)
+class AgentProcessSpec:
+    agent_id: str
+    argv: tuple[str, ...]
+    cwd: Path
+    env: Mapping[str, str]

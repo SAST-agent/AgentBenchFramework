@@ -5,9 +5,12 @@ from __future__ import annotations
 from dataclasses import replace
 import hashlib
 from pathlib import Path
+import os
+import shutil
+import subprocess
 import tomllib
 
-from .models import AssetLayout, OpponentSpec, PilotConfig, ProcessLimits
+from .models import AgentProcessSpec, AssetLayout, OpponentSpec, PilotConfig, ProcessLimits
 
 
 BENCHMARK_ID = "generals-hl-pilot-v1"
@@ -157,3 +160,52 @@ def require_valid_assets(layout: AssetLayout) -> None:
     diagnostics = validate_assets(layout)
     if diagnostics:
         raise AssetValidationError("; ".join(diagnostics))
+
+
+def prepare_opponents(
+    layout: AssetLayout,
+    preparation_root: Path,
+    python_executable: Path,
+) -> tuple[AgentProcessSpec, ...]:
+    """Copy preserved submissions, build the C++ entry, and return local specs."""
+    preparation_root.mkdir(parents=True, exist_ok=True)
+    prepared: list[AgentProcessSpec] = []
+    for opponent in layout.opponents:
+        target = preparation_root / opponent.opponent_id
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(opponent.source, target)
+        if opponent.build_argv:
+            completed = subprocess.run(
+                opponent.build_argv,
+                cwd=target,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            (target / "build.stdout.log").write_text(completed.stdout, encoding="utf-8")
+            (target / "build.stderr.log").write_text(completed.stderr, encoding="utf-8")
+            if completed.returncode:
+                raise AssetValidationError(
+                    f"opponent build failed: {opponent.opponent_id} ({completed.returncode})"
+                )
+        argv = tuple(
+            str(python_executable) if value in {"python", "python3"} else value
+            for value in opponent.argv
+        )
+        if opponent.language == "cpp" and not (target / argv[0]).is_file():
+            raise AssetValidationError(f"missing built executable: {opponent.opponent_id}")
+        prepared.append(
+            AgentProcessSpec(
+                agent_id=opponent.opponent_id,
+                argv=argv,
+                cwd=target,
+                env={
+                    "PYTHONPATH": str(target),
+                    "PYTHONUNBUFFERED": "1",
+                    "LANG": os.environ.get("LANG", "C.UTF-8"),
+                },
+            )
+        )
+    return tuple(prepared)
