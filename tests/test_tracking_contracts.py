@@ -92,6 +92,46 @@ class TrackingContractTests(unittest.TestCase):
         self.assertIsNone(snapshot["total_tokens"])
         self.assertAlmostEqual(snapshot["total_time_s"], 3.5)
 
+    def test_budget_ledger_separates_calibration_without_polluting_learning(self):
+        from agentbench_frame.tracking.budget import BudgetLedger
+
+        ledger = BudgetLedger()
+        ledger.add(
+            "calibration",
+            episodes=3,
+            env_steps=30,
+            game_agent_decision_steps=15,
+            primitive_commands=45,
+            time_s=2.0,
+        )
+        ledger.add(
+            "learning",
+            episodes=2,
+            env_steps=20,
+            game_agent_decision_steps=10,
+            primitive_commands=30,
+            time_s=1.0,
+        )
+        ledger.add(
+            "evaluation",
+            episodes=1,
+            env_steps=10,
+            game_agent_decision_steps=5,
+            primitive_commands=15,
+            time_s=0.5,
+        )
+
+        snapshot = ledger.snapshot()
+
+        self.assertEqual(snapshot["calibration_episodes"], 3)
+        self.assertEqual(snapshot["learning_episodes"], 2)
+        self.assertEqual(snapshot["evaluation_episodes"], 1)
+        self.assertEqual(snapshot["total_episodes"], 6)
+        self.assertEqual(snapshot["total_env_steps"], 60)
+        self.assertEqual(snapshot["total_game_agent_decision_steps"], 30)
+        self.assertEqual(snapshot["total_primitive_commands"], 90)
+        self.assertAlmostEqual(snapshot["total_time_s"], 3.5)
+
     def test_act_recorder_keeps_failed_act_and_creates_logical_version_for_unchanged_content(self):
         from agentbench_frame.tracking.iteration import VersionedActRecorder
 

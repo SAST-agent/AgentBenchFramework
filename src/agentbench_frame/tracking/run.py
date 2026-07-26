@@ -113,10 +113,16 @@ class Run:
             config=config,
         )
         budget = summary.get("budget") or {}
-        for phase in ("learning", "evaluation"):
+        for phase in ("calibration", "learning", "evaluation"):
             values = {
                 "episodes": int(budget.get(f"{phase}_episodes", 0) or 0),
                 "env_steps": int(budget.get(f"{phase}_env_steps", 0) or 0),
+                "game_agent_decision_steps": int(
+                    budget.get(f"{phase}_game_agent_decision_steps", 0) or 0
+                ),
+                "primitive_commands": int(
+                    budget.get(f"{phase}_primitive_commands", 0) or 0
+                ),
                 "coding_agent_acts": int(
                     budget.get(f"{phase}_coding_agent_acts", 0) or 0
                 ),
@@ -226,7 +232,7 @@ class Run:
                    info=info or {})
 
     def log_budget(self, phase: str, **kwargs) -> Dict[str, Optional[float]]:
-        """Add a learning/evaluation budget observation and persist it."""
+        """Add a phase-specific budget observation and persist it."""
         self._budget.add(phase, **kwargs)
         snapshot = self._budget.snapshot()
         self.write("budget", phase=phase, observation=kwargs, **snapshot)

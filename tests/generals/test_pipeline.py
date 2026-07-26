@@ -97,12 +97,34 @@ def test_probe_adapter_accepts_legacy_engine_normalization():
 
 def test_run_resume_restores_phase_budgets(tmp_path):
     run = Run.start("28_generals", "baseline", data_dir=str(tmp_path))
-    run.log_budget("learning", episodes=2, env_steps=5, coding_agent_acts=1,
-                   prompt_tokens=7, completion_tokens=3, time_s=0.5)
+    run.log_budget(
+        "calibration",
+        episodes=3,
+        env_steps=6,
+        game_agent_decision_steps=3,
+        primitive_commands=9,
+        time_s=0.25,
+    )
+    run.log_budget(
+        "learning",
+        episodes=2,
+        env_steps=5,
+        game_agent_decision_steps=2,
+        primitive_commands=7,
+        coding_agent_acts=1,
+        prompt_tokens=7,
+        completion_tokens=3,
+        time_s=0.5,
+    )
     run.finish({"status": "failed"})
     resumed = Run.resume(Path(run.run_dir))
+    assert resumed.budget_snapshot()["calibration_episodes"] == 3
+    assert resumed.budget_snapshot()["calibration_game_agent_decision_steps"] == 3
+    assert resumed.budget_snapshot()["calibration_primitive_commands"] == 9
     assert resumed.budget_snapshot()["learning_episodes"] == 2
     assert resumed.budget_snapshot()["learning_total_tokens"] == 10
+    assert resumed.budget_snapshot()["learning_game_agent_decision_steps"] == 2
+    assert resumed.budget_snapshot()["learning_primitive_commands"] == 7
     resumed.finish({"status": "complete"})
 
 
