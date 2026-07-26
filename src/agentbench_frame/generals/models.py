@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Mapping
+from typing import Any, Mapping
 
 
 @dataclass(frozen=True)
@@ -57,3 +57,38 @@ class AgentProcessSpec:
     argv: tuple[str, ...]
     cwd: Path
     env: Mapping[str, str]
+
+
+@dataclass(frozen=True)
+class MatchCase:
+    case_id: str
+    seed: int
+    evaluated_seat: int
+    opponent_id: str = "fake"
+    opponent_tier: str = "unknown"
+
+
+@dataclass(frozen=True)
+class TurnRecord:
+    step: int
+    round_number: int
+    player: int
+    state_id_before: str
+    state_before: Mapping[str, Any]
+    commands: tuple[tuple[int, ...], ...]
+    state_id_after: str
+    state_after: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class MatchResult:
+    case_id: str
+    valid: bool
+    winner: int | None
+    termination_type: str
+    seed: int
+    evaluated_seat: int
+    turns: tuple[TurnRecord, ...]
+    elapsed_time_s: float
+    engine_hash: str
+    error: str | None = None
