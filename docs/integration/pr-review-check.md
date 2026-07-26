@@ -5,7 +5,7 @@
 - `Framework PR checks / framework-tests`：在 PR 合并引用上运行完整 pytest。
 - `Framework PR checks / ai-pr-review`：读取 PR diff，调用外部审查 endpoint。
 
-两个 check 任意失败时都会返回失败；只有在仓库保护规则中将它们设为 required 后，失败才会阻止合并。workflow 位于 `worktree/framework` 基础分支，只监听目标为该分支的 PR。
+两个 check 任意失败时都会返回失败；只有在仓库保护规则中将它们设为 required 后，失败才会阻止合并。workflow 监听所有 PR 目标分支，但目标分支必须已经包含该 workflow 文件；长期接收 PR 的分支需要同步同一份 workflow。
 
 ## GitHub 配置
 
@@ -64,11 +64,17 @@ Fork PR 默认无法读取仓库 Secrets。当前策略是 fail-closed：如果�
 
 ## 分支保护
 
-当前仓库已经是 public，GitHub Free 支持 Branch protection rules。请在目标分支 `worktree/framework` 上将以下 checks 设为 required：
+当前仓库已经是 public，GitHub Free 支持 Branch protection rules。最终集成分支是 `main`，研发阶段集成分支是 `worktree/framework`；两个分支都应将以下 checks 设为 required：
 
 ```text
 Framework PR checks / framework-tests
 Framework PR checks / ai-pr-review
 ```
 
-公开仓库后，GitHub Actions 检查本身会正常运行；required checks 仍需在仓库设置中启用，启用后失败的 PR 才会被 GitHub 阻止合并。
+其他实际接收 PR 的长期分支也应同步 workflow 并设置相同的 required checks；临时 feature 分支不单独设置保护规则。
+
+开发分支先通过 PR 合并到 `worktree/framework`，稳定后再通过 promotion PR 合并到 `main`。不自动执行 merge，required checks 只负责阻止不合格 PR 合并。
+
+由于 GitHub 不会为 workflow 加入前的历史事件自动补跑，workflow 首次进入 `main` 后，已有目标为 `main` 的 PR 需要通过新的 commit、synchronize、reopen 或其他新的有效事件重新触发检查。
+
+公开仓库后，GitHub Actions 检查本身会正常运行；required checks 仍需在各目标集成分支的设置中启用，启用后失败的 PR 才会被 GitHub 阻止合并。
