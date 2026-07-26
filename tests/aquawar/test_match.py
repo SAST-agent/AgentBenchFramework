@@ -56,8 +56,8 @@ class MatchTest(unittest.TestCase):
             with self.assertRaisesRegex(AquaWarMatchError, "player 0 timed out"):
                 run_match(
                     command("fake_logic.py"),
-                    [command("fake_ai.py", "--sleep", "0.2"), command("fake_ai.py")],
-                    timeout=0.02,
+                    [command("fake_ai.py", "--sleep", "0.5"), command("fake_ai.py")],
+                    timeout=0.1,
                     replay_path=Path(directory) / "replay.json",
                 )
 
