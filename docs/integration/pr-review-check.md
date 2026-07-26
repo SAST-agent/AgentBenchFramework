@@ -1,11 +1,11 @@
 # Framework PR 自动审查 Check
 
-该仓库的 PR 检查包含两个 required checks：
+该仓库的 PR 检查包含两个 check：
 
 - `Framework PR checks / framework-tests`：在 PR 合并引用上运行完整 pytest。
 - `Framework PR checks / ai-pr-review`：读取 PR diff，调用外部审查 endpoint。
 
-两个 check 任意失败都应阻止合并。workflow 位于 `worktree/framework` 基础分支，只监听目标为该分支的 PR。
+两个 check 任意失败时都会返回失败；只有在仓库保护规则中将它们设为 required 后，失败才会阻止合并。workflow 位于 `worktree/framework` 基础分支，只监听目标为该分支的 PR。
 
 ## GitHub 配置
 
@@ -55,9 +55,11 @@ Fork PR 默认无法读取仓库 Secrets。当前策略是 fail-closed：如果�
 
 ## 分支保护
 
-在 Branch protection rules 中将以下 checks 设为 required：
+如果仓库计划支持 Branch protection rules 或 rulesets，将以下 checks 设为 required：
 
 ```text
 Framework PR checks / framework-tests
 Framework PR checks / ai-pr-review
 ```
+
+本次部署检查到当前 private 仓库的 branch protection/rulesets API 返回套餐限制（403）。因此本实现没有自动修改保护规则；需要仓库管理员升级套餐、改为公开仓库，或在可用的仓库设置中手动启用上述 required checks。
