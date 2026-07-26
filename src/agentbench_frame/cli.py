@@ -245,6 +245,10 @@ def main(argv: Optional[List[str]] = None):
     p_list = p_data_sub.add_parser("list", help="List all runs in data directory")
     p_list.add_argument("--data-dir", default=None, help="Data directory (default: $AGENTBENCH_DATA)")
 
+    # --- official-engine Generals HL ---
+    from agentbench_frame.generals.cli import register_parser as register_generals_parser
+    register_generals_parser(sub)
+
     args = parser.parse_args(argv)
 
     if args.command == "train":
@@ -266,9 +270,13 @@ def main(argv: Optional[List[str]] = None):
             _cmd_data_list(args)
         else:
             p_data.print_help()
+    elif args.command == "generals":
+        from agentbench_frame.generals.cli import handle as handle_generals
+        return handle_generals(args)
     else:
         parser.print_help()
         sys.exit(1)
+    return 0
 
 
 if __name__ == "__main__":

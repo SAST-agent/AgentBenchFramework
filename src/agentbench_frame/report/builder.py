@@ -183,6 +183,7 @@ class ReportBuilder:
             }]
         ig_history = []
         occupancy_history = []
+        action_disagreement_history = []
         for index, event in enumerate(events, start=1):
             event_type = event.get("event_type", event.get("event"))
             if event_type == "policy_kl_trace":
@@ -199,6 +200,15 @@ class ReportBuilder:
                     "shift": event.get("occupancy_shift"),
                     "state_count": event.get("state_count", len(state_ids) if isinstance(state_ids, list) else None),
                 })
+            elif event_type == "behavior_change":
+                action_disagreement_history.append({
+                    "version_before": event.get("version_before"),
+                    "version_after": event.get("version_after"),
+                    "mean": event.get("action_disagreement"),
+                    "trace": event.get("action_disagreement_trace", []),
+                    "policy_kl_status": event.get("policy_kl_status"),
+                    "occupancy_shift": event.get("occupancy_shift"),
+                })
         raw_score = summary.get("raw_score")
         evo_score = summary.get("evo_score", summary.get("benchmark_score"))
         gain = summary.get("gain")
@@ -207,6 +217,9 @@ class ReportBuilder:
         quality = inspect_event_file(events_path).to_dict() if os.path.exists(events_path) else {
             "total_lines": 0, "valid_events": 0, "warnings": []
         }
+        auc = multi_axis_auc(auc_points) if auc_points else {}
+        if summary.get("AUC_coding_agent_act") is not None:
+            auc["auc_coding_agent_act"] = summary["AUC_coding_agent_act"]
         return {
             "benchmark_score": summary.get("benchmark_score", evo_score),
             "raw_score": raw_score,
@@ -215,9 +228,10 @@ class ReportBuilder:
             "evaluation_status": summary.get("evaluation_status", "complete" if evo_score is not None else "unknown"),
             "budget": budget,
             "score_history": score_history,
-            "auc": multi_axis_auc(auc_points) if auc_points else {},
+            "auc": auc,
             "ig_history": ig_history,
             "occupancy_history": occupancy_history,
+            "action_disagreement_history": action_disagreement_history,
             "benchmark_results": summary.get("benchmark_results", []),
             "event_counts": dict(Counter(event.get("event_type", event.get("event", "unknown")) for event in events)),
             "raw_event_count": len(events),
