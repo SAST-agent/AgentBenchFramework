@@ -52,8 +52,8 @@ def test_pr_review_workflow_listens_to_all_pull_request_base_branches():
 def test_pr_review_workflow_keeps_required_job_names():
     text = WORKFLOW.read_text(encoding="utf-8")
 
-    assert "    framework-tests:" in text
-    assert "    ai-pr-review:" in text
+    assert "  framework-tests:" in text
+    assert "  ai-pr-review:" in text
     assert "name: framework-tests" in text
     assert "name: ai-pr-review" in text
 ```
