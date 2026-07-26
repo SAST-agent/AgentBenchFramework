@@ -7,13 +7,26 @@ as JSON data rather than interpolated into shell source.
 from __future__ import annotations
 
 import json
+import os
 import re
+import sys
+import urllib.error
+import urllib.request
 from typing import Any
 
 
 API_MODES = frozenset({"responses", "chat_completions"})
 SEVERITIES = frozenset({"P0", "P1", "P2", "P3"})
 _FENCED_JSON = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL | re.IGNORECASE)
+DEFAULT_API_MODE = "responses"
+DEFAULT_TIMEOUT_S = 90.0
+MAX_INPUT_BYTES = 400_000
+REVIEW_INSTRUCTIONS = """You are the blocking code reviewer for AgentBenchFramework.
+Review the supplied pull request diff for correctness, scientific data integrity,
+reproducibility, process and secret safety, and forward compatibility. Only
+report actionable findings. P0/P1 findings block merging. Return ONLY the JSON
+object required by the review response schema; do not use Markdown fences.
+"""
 
 
 def _text_from_parts(value: Any) -> str | None:
@@ -146,3 +159,108 @@ def build_api_request(api_mode: str, model: str, instructions: str, payload: str
             "response_format": {"type": "json_object"},
         }
     raise ValueError(f"unsupported api mode: {api_mode}")
+
+
+def _required_env(name: str) -> str:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise ValueError(f"missing required environment variable: {name}")
+    return value
+
+
+def _redact(text: str, secret: str) -> str:
+    return text.replace(secret, "[REDACTED]") if secret else text
+
+
+def _escape_annotation(text: str) -> str:
+    return (str(text).replace("%", "%25").replace("\r", "%0D")
+            .replace("\n", "%0A").replace(":", "%3A").replace(",", "%2C"))
+
+
+def _write_summary(review: dict[str, Any] | None, error: str | None, secret: str) -> None:
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not summary_path:
+        return
+    if error is not None:
+        content = f"## Automated PR review\n\n**FAIL:** {_redact(error, secret)}\n"
+    else:
+        findings = review["findings"] if review else []
+        lines = ["## Automated PR review", "", f"**Decision:** `{review['decision']}`", "",
+                 _redact(review["summary"], secret), "", "### Findings"]
+        if findings:
+            lines.extend(
+                f"- `{f['severity']}` { _redact(f['message'], secret) }"
+                for f in findings
+            )
+        else:
+            lines.append("- None")
+        content = "\n".join(lines) + "\n"
+    with open(summary_path, "a", encoding="utf-8") as handle:
+        handle.write(content)
+
+
+def _emit_review(review: dict[str, Any], secret: str) -> None:
+    print(f"PR review decision={review['decision']} findings={len(review['findings'])}")
+    print(_redact(review["summary"], secret))
+    for finding in review["findings"]:
+        message = finding["message"]
+        suggestion = finding.get("suggestion")
+        if suggestion:
+            message = f"{message} Suggestion: {suggestion}"
+        escaped = _escape_annotation(_redact(message, secret))
+        path = finding.get("path")
+        line = finding.get("line")
+        if isinstance(path, str) and path and isinstance(line, int):
+            print(f"::{ 'error' if finding['severity'] in {'P0', 'P1'} else 'warning' } "
+                  f"file={_escape_annotation(path)},line={line}::{escaped}")
+        else:
+            print(f"{finding['severity']}: {escaped}")
+
+
+def run_review() -> int:
+    """Read workflow inputs, call the configured endpoint, and return a check exit code."""
+    secret = os.environ.get("PR_REVIEW_API_KEY", "")
+    try:
+        api_key = _required_env("PR_REVIEW_API_KEY")
+        endpoint = _required_env("PR_REVIEW_ENDPOINT")
+        model = _required_env("PR_REVIEW_MODEL")
+        input_path = _required_env("PR_REVIEW_INPUT_JSON")
+        api_mode = os.environ.get("PR_REVIEW_API_MODE", DEFAULT_API_MODE).strip().lower()
+        with open(input_path, "r", encoding="utf-8") as handle:
+            input_data = json.load(handle)
+        payload = json.dumps(input_data, ensure_ascii=False, separators=(",", ":"))
+        payload_bytes = payload.encode("utf-8")
+        if len(payload_bytes) > MAX_INPUT_BYTES:
+            raise ValueError(f"review input exceeds {MAX_INPUT_BYTES} bytes")
+        request_body = build_api_request(api_mode, model, REVIEW_INSTRUCTIONS, payload)
+        request = urllib.request.Request(
+            endpoint,
+            data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        timeout = float(os.environ.get("PR_REVIEW_TIMEOUT_S", DEFAULT_TIMEOUT_S))
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            response_data = json.loads(response.read().decode("utf-8"))
+        if isinstance(response_data, dict) and {"decision", "summary", "findings"} <= response_data.keys():
+            review = parse_review_document(json.dumps(response_data, ensure_ascii=False))
+        else:
+            review = parse_review_document(extract_model_text(api_mode, response_data))
+        _write_summary(review, None, api_key)
+        _emit_review(review, api_key)
+        return 1 if review_should_fail(review) else 0
+    except (OSError, ValueError, TypeError, json.JSONDecodeError, urllib.error.URLError) as exc:
+        message = _redact(str(exc), secret)
+        print(f"Automated PR review failed closed: {message}", file=sys.stderr)
+        try:
+            _write_summary(None, message, secret)
+        except OSError:
+            pass
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(run_review())

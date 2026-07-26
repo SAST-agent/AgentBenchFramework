@@ -1,6 +1,13 @@
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import subprocess
+import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import pytest
 
@@ -10,6 +17,45 @@ from tools.pr_review import (
     parse_review_document,
     review_should_fail,
 )
+
+
+@contextlib.contextmanager
+def serve(handler_class):
+    server = ThreadingHTTPServer(("127.0.0.1", 0), handler_class)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/review"
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+
+def _input_file(tmp_path: Path) -> Path:
+    path = tmp_path / "review-input.json"
+    path.write_text(json.dumps({"diff": "diff --git a/a.py b/a.py"}), encoding="utf-8")
+    return path
+
+
+def _cli_env(tmp_path: Path, endpoint: str, mode: str = "responses") -> dict[str, str]:
+    return {
+        **os.environ,
+        "PR_REVIEW_API_KEY": "secret-value",
+        "PR_REVIEW_ENDPOINT": endpoint,
+        "PR_REVIEW_MODEL": "review-model",
+        "PR_REVIEW_API_MODE": mode,
+        "PR_REVIEW_INPUT_JSON": str(_input_file(tmp_path)),
+    }
+
+
+def _run_cli(env: dict[str, str]):
+    return subprocess.run(
+        [sys.executable, "tools/pr_review.py"],
+        env=env,
+        text=True,
+        capture_output=True,
+    )
 
 
 def test_extracts_responses_output_text_and_validates_review():
@@ -100,3 +146,108 @@ def test_builds_protocol_specific_json_requests():
 def test_rejects_unknown_api_mode():
     with pytest.raises(ValueError, match="api mode"):
         build_api_request("legacy", "m", "system", "payload")
+
+
+def test_cli_sends_auth_and_passes_without_printing_secret(tmp_path):
+    seen = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            seen["authorization"] = self.headers.get("Authorization")
+            seen["body"] = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            body = {"output_text": json.dumps({
+                "decision": "pass", "summary": "ok", "findings": [],
+            })}
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(body).encode())
+
+        def log_message(self, *_args):
+            return
+
+    with serve(Handler) as endpoint:
+        result = _run_cli(_cli_env(tmp_path, endpoint))
+
+    assert result.returncode == 0
+    assert seen["authorization"] == "Bearer secret-value"
+    assert seen["body"]["model"] == "review-model"
+    assert "secret-value" not in result.stdout + result.stderr
+
+
+def test_cli_supports_chat_completions_mode(tmp_path):
+    seen = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            seen["body"] = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            body = {"choices": [{"message": {"content": json.dumps({
+                "decision": "pass", "summary": "ok", "findings": [],
+            })}}]}
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(body).encode())
+
+        def log_message(self, *_args):
+            return
+
+    with serve(Handler) as endpoint:
+        result = _run_cli(_cli_env(tmp_path, endpoint, mode="chat_completions"))
+
+    assert result.returncode == 0
+    assert "messages" in seen["body"]
+
+
+@pytest.mark.parametrize("env_name", [
+    "PR_REVIEW_API_KEY", "PR_REVIEW_ENDPOINT", "PR_REVIEW_MODEL",
+    "PR_REVIEW_INPUT_JSON",
+])
+def test_cli_fails_when_required_configuration_is_missing(tmp_path, env_name):
+    env = _cli_env(tmp_path, "http://127.0.0.1:1/review")
+    env.pop(env_name)
+
+    result = _run_cli(env)
+
+    assert result.returncode != 0
+    assert "secret-value" not in result.stdout + result.stderr
+
+
+def test_cli_fails_closed_on_http_error(tmp_path):
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            self.send_response(500)
+            self.end_headers()
+
+        def log_message(self, *_args):
+            return
+
+    with serve(Handler) as endpoint:
+        result = _run_cli(_cli_env(tmp_path, endpoint))
+
+    assert result.returncode != 0
+
+
+@pytest.mark.parametrize("review_body", [
+    {"output_text": "not json"},
+    {"output_text": json.dumps({
+        "decision": "pass", "summary": "bad", "findings": [
+            {"severity": "P1", "message": "blocking"},
+        ],
+    })},
+])
+def test_cli_fails_closed_on_invalid_or_blocking_review(tmp_path, review_body):
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(review_body).encode())
+
+        def log_message(self, *_args):
+            return
+
+    with serve(Handler) as endpoint:
+        result = _run_cli(_cli_env(tmp_path, endpoint))
+
+    assert result.returncode != 0
