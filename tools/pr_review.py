@@ -22,6 +22,8 @@ DEFAULT_API_MODE = "responses"
 DEFAULT_REASONING_EFFORT = "high"
 DEFAULT_TIMEOUT_S = 90.0
 MAX_INPUT_BYTES = 400_000
+CAPABILITY_FALLBACK_STATUS_CODES = frozenset({400, 422})
+GATEWAY_RETRY_STATUS_CODES = frozenset({502, 503, 504})
 REVIEW_RESPONSE_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
@@ -331,17 +333,27 @@ def run_review() -> int:
         try:
             response_data = _post_review_request(endpoint, api_key, request_body, timeout)
         except urllib.error.HTTPError as exc:
-            if exc.code not in {400, 422}:
+            if exc.code in GATEWAY_RETRY_STATUS_CODES:
+                retry_request = build_api_request(
+                    api_mode,
+                    model,
+                    REVIEW_INSTRUCTIONS,
+                    payload,
+                    reasoning_effort=None,
+                )
+                response_data = _post_review_request(endpoint, api_key, retry_request, timeout)
+            elif exc.code in CAPABILITY_FALLBACK_STATUS_CODES:
+                legacy_request = build_api_request(
+                    api_mode,
+                    model,
+                    REVIEW_INSTRUCTIONS,
+                    payload,
+                    reasoning_effort=None,
+                    structured_outputs=False,
+                )
+                response_data = _post_review_request(endpoint, api_key, legacy_request, timeout)
+            else:
                 raise
-            legacy_request = build_api_request(
-                api_mode,
-                model,
-                REVIEW_INSTRUCTIONS,
-                payload,
-                reasoning_effort=None,
-                structured_outputs=False,
-            )
-            response_data = _post_review_request(endpoint, api_key, legacy_request, timeout)
         if isinstance(response_data, dict) and {"decision", "summary", "findings"} <= response_data.keys():
             review = parse_review_document(json.dumps(response_data, ensure_ascii=False))
         else:

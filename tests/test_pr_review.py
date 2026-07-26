@@ -243,6 +243,38 @@ def test_cli_falls_back_to_legacy_json_when_structured_output_is_rejected(tmp_pa
     assert "reasoning" not in seen[1]
 
 
+def test_cli_retries_strict_schema_without_reasoning_after_gateway_timeout(tmp_path):
+    seen = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            seen.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            if len(seen) == 1:
+                self.send_response(504)
+                self.end_headers()
+                return
+            body = {"output_text": json.dumps({
+                "decision": "pass", "summary": "ok", "findings": [],
+            })}
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(body).encode())
+
+        def log_message(self, *_args):
+            return
+
+    with serve(Handler) as endpoint:
+        result = _run_cli(_cli_env(tmp_path, endpoint))
+
+    assert result.returncode == 0
+    assert len(seen) == 2
+    assert seen[0]["text"]["format"]["type"] == "json_schema"
+    assert seen[0]["reasoning"] == {"effort": "high"}
+    assert seen[1]["text"]["format"]["type"] == "json_schema"
+    assert "reasoning" not in seen[1]
+
+
 @pytest.mark.parametrize("env_name", [
     "PR_REVIEW_API_KEY", "PR_REVIEW_ENDPOINT", "PR_REVIEW_MODEL",
     "PR_REVIEW_INPUT_JSON",
