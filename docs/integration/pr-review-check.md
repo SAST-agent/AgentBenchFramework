@@ -62,6 +62,12 @@ PR diff 最大发送 350,000 字节；超过上限时仍发送前缀，并在请
 
 Fork PR 默认无法读取仓库 Secrets。当前策略是 fail-closed：如果没有审查凭据，`ai-pr-review` 会失败，管理员需要批准可信执行或配置适用的仓库策略后才能合并。
 
+## 首次接入 main 的两阶段 bootstrap
+
+`main` 首次接入时必须分两步完成。第一步只把 `tools/pr_review.py`、它的测试和本文档放入 `main`，不同时放入 workflow；这是因为审查 job 必须 checkout trusted base revision，而 bootstrap PR 的 base 还没有审查工具。第一步合并后，再提交第二个 PR，把 `.github/workflows/pr-review.yml` 和 workflow 契约测试加入 `main`。第二步成功后，后续 PR 才会正常同时运行两个 check，随后才能在 `main` 上启用 required checks。
+
+这个 bootstrap 顺序避免了让 AI job 执行 PR head 中尚未进入 trusted base 的代码，也避免了用一次性的 PR 编号特判 workflow。
+
 ## 分支保护
 
 当前仓库已经是 public，GitHub Free 支持 Branch protection rules。最终集成分支是 `main`，研发阶段集成分支是 `worktree/framework`；两个分支都应将以下 checks 设为 required：
