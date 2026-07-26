@@ -1,7 +1,7 @@
 # Generals HL Closed-Loop Design
 
-**Date:** 2026-07-26  
-**Status:** Draft for user review  
+**Date:** 2026-07-26
+**Status:** Approved on 2026-07-26
 **Benchmark version:** `generals-hl-pilot-v1`
 
 ## 1. Goal
@@ -307,8 +307,9 @@ runs/28_generals/{run_id}/
 ├── matches/{match_id}/
 │   ├── metadata.json
 │   ├── replay.jsonl
-│   ├── agent.protocol.bin
-│   └── agent.stderr.log
+│   └── players/{0,1}/
+│       ├── agent.protocol.bin
+│       └── agent.stderr.log
 ├── versions/
 │   ├── v0/manifest.json
 │   ├── v1/manifest.json
