@@ -1,0 +1,37 @@
+benchmark_id = "generals-hl-pilot-v1"
+engine_path = "engine"
+baseline_path = "baseline"
+evaluation_seeds = [280101, 280202, 280303]
+learning_seeds = [281101, 281202, 281303]
+
+[limits]
+startup_timeout_s = 10
+decision_timeout_s = 2
+match_timeout_s = 600
+max_packet_bytes = 65536
+max_artifact_bytes = 10485760
+
+[[opponents]]
+opponent_id = "advanced-rank02-robinliu-v18"
+tier = "high"
+language = "cpp"
+source = "opponents/high"
+argv = ["./main"]
+build_argv = ["make"]
+learning = false
+
+[[opponents]]
+opponent_id = "advanced-rank08-nashjunheng-v20"
+tier = "medium"
+language = "python"
+source = "opponents/medium"
+argv = ["python", "main.py"]
+learning = true
+
+[[opponents]]
+opponent_id = "popular-rank16-xiaoaojianghu-v1"
+tier = "low"
+language = "python"
+source = "opponents/low"
+argv = ["python", "main.py"]
+learning = true
