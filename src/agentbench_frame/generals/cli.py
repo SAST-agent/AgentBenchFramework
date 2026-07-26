@@ -41,6 +41,10 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
             "iterate-v2",
             "Run held-out calibration → v1 learning → one Codex act → v2",
         ),
+        (
+            "recover-v2",
+            "Retry a pre-thread provider failure without reopening held-out",
+        ),
     ):
         command = commands.add_parser(name, help=help_text)
         command.add_argument("--agentbench-root", type=Path, required=True)
@@ -49,10 +53,10 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
             command.add_argument("--data-dir", type=Path, required=True)
         if name == "eval":
             command.add_argument("--version", choices=("v0",), default="v0")
-        if name in {"iterate", "iterate-v2"}:
+        if name in {"iterate", "iterate-v2", "recover-v2"}:
             command.add_argument("--codex-executable", default="codex")
             command.add_argument("--provider-timeout", type=float, default=1800)
-        if name in {"calibrate-dev", "iterate-v2"}:
+        if name in {"calibrate-dev", "iterate-v2", "recover-v2"}:
             command.add_argument(
                 "--calibration-manifest", type=Path, required=True
             )
@@ -60,10 +64,12 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
             command.add_argument("--expected-parent-hash", required=True)
         if name == "calibrate-dev":
             command.add_argument("--selection-output", type=Path, required=True)
-        if name == "iterate-v2":
+        if name in {"iterate-v2", "recover-v2"}:
             command.add_argument(
                 "--calibration-selection", type=Path, required=True
             )
+        if name == "recover-v2":
+            command.add_argument("--failed-run", type=Path, required=True)
     return parser
 
 
@@ -127,8 +133,8 @@ def handle(args) -> int:
                 timeout_s=args.provider_timeout,
                 sandbox="workspace-write",
             )
-        if args.generals_command == "iterate-v2":
-            result = GeneralsHLRound2Pipeline.from_paths(
+        if args.generals_command in {"iterate-v2", "recover-v2"}:
+            pipeline = GeneralsHLRound2Pipeline.from_paths(
                 agentbench_root=args.agentbench_root,
                 manifest_path=args.manifest,
                 calibration_manifest_path=args.calibration_manifest,
@@ -137,7 +143,12 @@ def handle(args) -> int:
                 expected_parent_hash=args.expected_parent_hash,
                 data_dir=args.data_dir,
                 provider=provider,
-            ).run()
+            )
+            result = (
+                pipeline.run()
+                if args.generals_command == "iterate-v2"
+                else pipeline.recover_provider_init_failure(args.failed_run)
+            )
             print(json.dumps({
                 "status": result.status,
                 "run_dir": str(result.run_dir),

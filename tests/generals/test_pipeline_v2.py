@@ -102,6 +102,25 @@ class FakeProvider:
         )
 
 
+class FakeProviderInitFailure:
+    provider_name = "codex"
+
+    def __init__(self):
+        self.calls = 0
+
+    def invoke(self, context):
+        self.calls += 1
+        return ProviderInvocation(
+            status="failed",
+            error="failed to initialize app-server client",
+            metadata={
+                "thread_id": None,
+                "raw_event_count": 0,
+                "event_types": [],
+            },
+        )
+
+
 class FakeFormalEvaluator:
     def evaluate(self, workspace, version, phase, run, cases=None):
         selected = tuple(cases or build_evaluation_spec(CONFIG).cases)
@@ -389,3 +408,36 @@ def test_development_calibration_does_not_freeze_out_of_range_candidate(tmp_path
     assert result.status == "calibration_failed"
     assert result.selected_mode == "passive"
     assert not output.exists()
+
+
+def test_pre_thread_provider_failure_recovers_without_reopening_heldout(tmp_path):
+    failed_provider = FakeProviderInitFailure()
+    calibration = FakeCalibrationEvaluator()
+    failed = _pipeline(tmp_path, failed_provider, calibration).run()
+    assert failed.status == "provider_failed"
+    assert failed_provider.calls == 1
+
+    retry_provider = FakeProvider()
+    recovery_pipeline = _pipeline(
+        tmp_path / "recovery-fixture",
+        retry_provider,
+        FakeCalibrationEvaluator(heldout_score=0.1),
+    )
+    recovered = recovery_pipeline.recover_provider_init_failure(
+        failed.run_dir
+    )
+
+    assert recovered.status == "complete"
+    assert recovered.calibration_score == 0.4
+    assert recovered.evo_score_2 == 0.5
+    assert recovered.round_act_count == 1
+    assert retry_provider.calls == 1
+    summary = json.loads((recovered.run_dir / "summary.json").read_text())
+    assert summary["recovery_from_run_id"]
+    assert summary["reused_heldout_calibration"] is True
+    events = [
+        json.loads(line)
+        for line in (recovered.run_dir / "events.jsonl").read_text().splitlines()
+    ]
+    assert sum(event["event_type"] == "coding_agent_act" for event in events) == 1
+    assert any(event["event_type"] == "provider_retry" for event in events)

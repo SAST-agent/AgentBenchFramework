@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, replace
 import json
 from pathlib import Path
+import shutil
 import sys
 from typing import Any, Iterable
 
@@ -45,7 +46,7 @@ from .models import (
     MatchCase,
     PilotConfig,
 )
-from .pipeline import GeneralsHLPipeline
+from .pipeline import GeneralsHLPipeline, _load_match_result
 from .process import build_baseline_process, build_calibration_process
 from .prompt import build_round2_prompt
 from .replay import build_compact_evidence, build_learning_replay
@@ -864,6 +865,415 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
             calibration_score,
             global_act_count,
             round_act_count,
+            status,
+        )
+
+    def recover_provider_init_failure(
+        self, failed_run_dir: Path
+    ) -> Round2PipelineResult:
+        """Retry a pre-thread infrastructure failure without reopening held-out."""
+        source_dir = Path(failed_run_dir).resolve()
+        source_summary = json.loads(
+            (source_dir / "summary.json").read_text(encoding="utf-8")
+        )
+        if source_summary.get("status") != "provider_failed":
+            raise ValueError("recovery source must have provider_failed status")
+        source_events = [
+            json.loads(line)
+            for line in (source_dir / "events.jsonl").read_text(
+                encoding="utf-8"
+            ).splitlines()
+            if line.strip()
+        ]
+        failed_acts = [
+            event
+            for event in source_events
+            if event.get("event_type") == "coding_agent_act"
+        ]
+        if len(failed_acts) != 1 or failed_acts[0].get("status") != "failed":
+            raise ValueError("recovery requires exactly one failed provider act")
+        metadata = failed_acts[0].get("provider_metadata") or {}
+        if (
+            metadata.get("thread_id") is not None
+            or metadata.get("raw_event_count") not in {None, 0}
+            or failed_acts[0].get("changed_files")
+        ):
+            raise ValueError("provider failure occurred after a Codex thread started")
+        if source_summary.get("evo_score_2") is not None:
+            raise ValueError("recovery source already contains a v2 score")
+        if source_summary.get("calibration_in_target_range") is not True:
+            raise ValueError("recovery source lacks a passed held-out calibration")
+        source_prompt = source_dir / "provider" / "prompt.txt"
+        source_prompt_manifest = (
+            source_dir / "provider" / "prompt-manifest.json"
+        )
+        if not source_prompt.is_file() or not source_prompt_manifest.is_file():
+            raise ValueError("recovery source prompt artifacts are missing")
+
+        lineage = load_parent_lineage(
+            self.parent_run_dir, self.expected_parent_hash
+        )
+        run = Run.start(
+            game="28_generals",
+            agent="generals-hl",
+            run_type="rule_iter",
+            data_dir=str(self.data_dir),
+            config={
+                "benchmark_id": self.config.benchmark_id,
+                "calibration_benchmark_id": (
+                    self.calibration_config.benchmark_id
+                ),
+                "provider": self.provider.provider_name,
+                "budget_phase": "learning",
+                "engine_hash": self.assets.engine_hash,
+                "round": 2,
+                "recovery_from_run_id": source_summary.get("run_id"),
+            },
+        )
+        run_dir = Path(run.run_dir)
+        raw_score = source_summary.get("raw_score")
+        evo_score_1 = source_summary.get("evo_score_1")
+        evo_score_2 = gain_2 = None
+        calibration_score = source_summary.get("calibration_score")
+        status = "failed"
+        error = None
+        v2_formal = None
+        try:
+            imported = import_parent_v1(lineage, run_dir, self.snapshotter)
+            workspace = run_dir / "workspace"
+            run.write(
+                "lineage_import",
+                parent_run_id=lineage.parent_run_id,
+                parent_version="v1",
+                version="v1",
+                manifest_hash=imported.content_hash,
+            )
+            run.write(
+                "provider_retry",
+                recovery_from_run_id=source_summary.get("run_id"),
+                failed_act_id=failed_acts[0].get("act_id"),
+                failure_stage="pre_thread_initialization",
+                reused_prompt=True,
+                reused_learning_evidence=True,
+                reused_heldout_calibration=True,
+            )
+            run.write(
+                "calibration_result",
+                calibration_benchmark_id=self.calibration_config.benchmark_id,
+                version="v0",
+                split="heldout",
+                status=source_summary.get("calibration_status"),
+                score=calibration_score,
+                wins=source_summary.get("calibration_wins"),
+                losses=source_summary.get("calibration_losses"),
+                draws=source_summary.get("calibration_draws"),
+                per_seat=source_summary.get("calibration_per_seat"),
+                in_target_range=True,
+                reused_from_run_id=source_summary.get("run_id"),
+            )
+            run.write(
+                "benchmark_spec",
+                benchmark_id=self.config.benchmark_id,
+                evaluation_cases=[
+                    asdict(case)
+                    for case in build_evaluation_spec(self.config).cases
+                ],
+                engine_hash=self.assets.engine_hash,
+                recovery=True,
+            )
+            provider_dir = run_dir / "provider"
+            provider_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_prompt, provider_dir / "prompt.txt")
+            shutil.copy2(
+                source_prompt_manifest,
+                provider_dir / "prompt-manifest.json",
+            )
+            prompt_text = source_prompt.read_text(encoding="utf-8")
+            controller = run.create_coding_agent_controller(
+                self.provider,
+                snapshotter=self.snapshotter,
+                budget_phase="learning",
+            )
+            act = controller.run_act(
+                {
+                    "prompt": prompt_text,
+                    "workspace_root": str(workspace),
+                    "raw_output_path": str(
+                        provider_dir / "codex.raw.jsonl"
+                    ),
+                    "stderr_output_path": str(
+                        provider_dir / "codex.stderr.log"
+                    ),
+                    "max_artifact_bytes": self.config.limits.max_artifact_bytes,
+                },
+                workspace_root=str(workspace),
+                version_before="v1",
+                previous_manifest=imported,
+            )
+            v2 = self._write_version(
+                run_dir, "v2", workspace, previous=imported
+            )
+            self.snapshotter.write_unified_patch(
+                run_dir / "versions" / "v1" / "source",
+                run_dir / "versions" / "v2" / "source",
+                run_dir / "versions" / "v1-to-v2.patch",
+            )
+            allowed = all(
+                path in {"strategy.py", "STRATEGY.md"}
+                or path.startswith("tests/")
+                for path in v2.changed_files
+            )
+            tests_ok, test_output = self._baseline_tests(workspace)
+            (run_dir / "versions" / "v2" / "tests.log").write_text(
+                test_output, encoding="utf-8"
+            )
+            version_status = (
+                "available"
+                if act.status == "completed" and allowed and tests_ok
+                else "invalid"
+            )
+            run.write(
+                "version",
+                version="v2",
+                version_before="v1",
+                status=version_status,
+                manifest_hash=v2.content_hash,
+                changed_files=v2.changed_files,
+                provider_status=act.status,
+                protected_files_unchanged=allowed,
+                tests_passed=tests_ok,
+            )
+            if version_status != "available":
+                status = (
+                    "provider_failed"
+                    if act.status != "completed"
+                    else "invalid_version"
+                )
+            else:
+                learning_root = source_dir / "matches" / "v1"
+                episode_probes = []
+                if learning_root.is_dir():
+                    for artifact in sorted(learning_root.iterdir()):
+                        if not (
+                            artifact.name.startswith("learn2-")
+                            or artifact.name.startswith(
+                                "calibration-development-"
+                            )
+                        ):
+                            continue
+                        match = _load_match_result(artifact)
+                        replay = build_learning_replay(
+                            match, "baseline", "recovery"
+                        )
+                        probes = tuple(
+                            ProbeState(
+                                decision.state_id,
+                                {
+                                    **decision.state,
+                                    "my_seat": decision.seat,
+                                },
+                                decision.action,
+                            )
+                            for decision in replay.decisions
+                        )
+                        episode_probes.append((match.case_id, probes))
+                all_trace = []
+                for episode_index, (case_id, probes) in enumerate(
+                    episode_probes, start=1
+                ):
+                    if not probes:
+                        continue
+                    behavior = measure_action_disagreement(
+                        probes, self._probe_actions(workspace, probes)
+                    )
+                    all_trace.extend(behavior.trace)
+                    run.write(
+                        "behavior_change_episode",
+                        episode=episode_index,
+                        case_id=case_id,
+                        version_before="v1",
+                        version_after="v2",
+                        action_disagreement_trace=list(behavior.trace),
+                        action_disagreement=behavior.mean,
+                        policy_kl=None,
+                        policy_kl_status=behavior.policy_kl_status,
+                        source_run_id=source_summary.get("run_id"),
+                    )
+                run.write(
+                    "behavior_change",
+                    version_before="v1",
+                    version_after="v2",
+                    episode_count=len(episode_probes),
+                    decision_count=len(all_trace),
+                    action_disagreement=(
+                        sum(all_trace) / len(all_trace)
+                        if all_trace
+                        else None
+                    ),
+                    policy_kl=None,
+                    policy_kl_status=(
+                        "complete_macro_action_distribution_unavailable"
+                    ),
+                    occupancy_shift=None,
+                )
+                if self.evaluator is not None:
+                    evaluator = self.evaluator
+                else:
+                    evaluator, _unused = self._production_evaluators(run_dir)
+                v2_formal = evaluator.evaluate(
+                    workspace, "v2", "evaluation", run
+                )
+                evo_score_2 = v2_formal.score
+                gain_2 = (
+                    evo_score_2 - raw_score
+                    if evo_score_2 is not None and raw_score is not None
+                    else None
+                )
+                v1_states = []
+                if learning_root.is_dir():
+                    for artifact in sorted(learning_root.iterdir()):
+                        if not artifact.name.startswith("eval-"):
+                            continue
+                        match = _load_match_result(artifact)
+                        v1_states.extend(
+                            turn.state_id_before
+                            for turn in match.turns
+                            if turn.player == match.evaluated_seat
+                        )
+                v2_states = [
+                    turn.state_id_before
+                    for match in v2_formal.matches
+                    for turn in match.turns
+                    if turn.player == match.evaluated_seat
+                ]
+                if v1_states and v2_states:
+                    run.log_occupancy(
+                        episode=2,
+                        version_before="v1",
+                        version_after="v2",
+                        state_ids=v2_states,
+                        reference_state_ids=v1_states,
+                        context={
+                            "domain": "frozen_evaluation_matrix",
+                            "v1_source_run_id": source_summary.get("run_id"),
+                        },
+                    )
+                run.write(
+                    "evaluation",
+                    phase="evolved_2",
+                    version="v2",
+                    status=v2_formal.status,
+                    score=v2_formal.score,
+                    gain=gain_2,
+                    global_coding_agent_act=2,
+                    per_tier=dict(v2_formal.per_tier),
+                    seat_gap=v2_formal.seat_gap,
+                )
+                run.record_act_evaluation(
+                    act.act_id,
+                    {
+                        "benchmark_id": self.config.benchmark_id,
+                        "version": "v2",
+                        "score": v2_formal.score,
+                        "gain": gain_2,
+                        "global_coding_agent_act": 2,
+                    },
+                )
+                status = (
+                    "complete"
+                    if v2_formal.status == "complete"
+                    else "incomplete"
+                )
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            run.write("pipeline_error", error=error, recovery=True)
+        finally:
+            run.writer.flush()
+            self._write_json(
+                run_dir / "quality.json",
+                inspect_event_file(run_dir / "events.jsonl").to_dict(),
+            )
+            auc = (
+                0.5 * (raw_score + evo_score_1)
+                + 0.5 * (evo_score_1 + evo_score_2)
+                if (
+                    raw_score is not None
+                    and evo_score_1 is not None
+                    and evo_score_2 is not None
+                )
+                else None
+            )
+            benchmark_results = [
+                item
+                for item in source_summary.get("benchmark_results", [])
+                if item.get("version") == "v1"
+            ]
+            benchmark_results.extend(
+                self._result_rows((v2_formal,))
+            )
+            run.finish(
+                {
+                    "status": status,
+                    "benchmark_id": self.config.benchmark_id,
+                    "raw_score": raw_score,
+                    "evo_score": evo_score_2,
+                    "evo_score_1": evo_score_1,
+                    "evo_score_2": evo_score_2,
+                    "gain": gain_2,
+                    "gain_1": (
+                        evo_score_1 - raw_score
+                        if evo_score_1 is not None and raw_score is not None
+                        else None
+                    ),
+                    "gain_2": gain_2,
+                    "benchmark_score": evo_score_2,
+                    "evaluation_status": (
+                        v2_formal.status if v2_formal is not None else None
+                    ),
+                    "AUC_coding_agent_act": auc,
+                    "act_count": 2,
+                    "round_act_count": 1,
+                    "parent_run_id": lineage.parent_run_id,
+                    "parent_version": "v1",
+                    "recovery_from_run_id": source_summary.get("run_id"),
+                    "reused_heldout_calibration": True,
+                    "source_learning_budget": source_summary.get("budget"),
+                    "calibration_benchmark_id": (
+                        self.calibration_config.benchmark_id
+                    ),
+                    "calibration_status": source_summary.get(
+                        "calibration_status"
+                    ),
+                    "calibration_score": calibration_score,
+                    "calibration_wins": source_summary.get(
+                        "calibration_wins"
+                    ),
+                    "calibration_losses": source_summary.get(
+                        "calibration_losses"
+                    ),
+                    "calibration_draws": source_summary.get(
+                        "calibration_draws"
+                    ),
+                    "calibration_per_seat": source_summary.get(
+                        "calibration_per_seat"
+                    ),
+                    "calibration_target_range": source_summary.get(
+                        "calibration_target_range"
+                    ),
+                    "calibration_in_target_range": True,
+                    "error": error,
+                    "benchmark_results": benchmark_results,
+                }
+            )
+        return Round2PipelineResult(
+            run_dir,
+            raw_score,
+            evo_score_1,
+            evo_score_2,
+            gain_2,
+            calibration_score,
+            2,
+            1,
             status,
         )
 

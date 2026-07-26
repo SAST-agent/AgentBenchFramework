@@ -18,6 +18,7 @@ KNOWN_EVENT_TYPES = frozenset({
     "calibration_spec", "calibration_result", "dense_trajectory",
     "dense_episode_summary", "dense_metric_error", "lineage_import",
     "behavior_change_episode",
+    "provider_retry",
 })
 
 
