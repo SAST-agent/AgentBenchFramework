@@ -47,6 +47,20 @@ jobs:
           gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" > /tmp/pr-review-metadata.json
           gh api --header 'Accept: application/vnd.github.v3.diff' \
             "repos/${REPOSITORY}/pulls/${PR_NUMBER}" > /tmp/pr-review.diff
+      - name: Reject unsupported file count
+        env:
+          PR_REVIEW_METADATA_FILE: /tmp/pr-review-metadata.json
+        run: |
+          changed_files=$(python -c 'import json, sys; value=json.load(open(sys.argv[1], encoding="utf-8")).get("changed_files"); print(value if isinstance(value, int) and not isinstance(value, bool) else "")' "$PR_REVIEW_METADATA_FILE")
+          max_changed_files=300
+          if [ -z "$changed_files" ] || [ "$changed_files" -gt "$max_changed_files" ]; then
+            {
+              echo "### AI review"
+              echo "Rejected: GitHub reports ${changed_files:-an invalid} changed files; maximum supported is ${max_changed_files}."
+              echo "The blocking reviewer was not invoked because the diff may be incomplete."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
       - name: Reject oversized diff
         env:
           PR_REVIEW_DIFF_FILE: /tmp/pr-review.diff
@@ -112,11 +126,12 @@ jobs:
           PR_REVIEW_TIMEOUT_S: "90"
         if: github.event.pull_request.head.repo.full_name == github.repository
         run: python tools/pr_review.py
-      - name: Run credential-free fork preflight
+      - name: Reject fork PR without credentialed review
         if: github.event.pull_request.head.repo.full_name != github.repository
         run: |
           {
             echo "### AI review"
-            echo "External model review was skipped because GitHub does not expose repository secrets to fork PRs."
-            echo "Credential-free preflight passed; framework-tests remains required for the PR code."
+            echo "Fork PRs cannot receive the credentialed blocking review because repository secrets are unavailable."
+            echo "A maintainer must provide a controlled trusted review path before merging this PR."
           } >> "$GITHUB_STEP_SUMMARY"
+          exit 1

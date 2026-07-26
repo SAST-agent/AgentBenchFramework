@@ -58,9 +58,9 @@ Responses 模式优先发送 `model`、`instructions`、`input`、`reasoning.eff
 
 模型审查 job 只 checkout PR 的 trusted base revision，并通过 GitHub API 读取 diff；它不会执行 PR head 中的代码。测试 job 可以执行 PR 合并引用，但不接触 API key。
 
-PR diff 最大允许 350,000 字节；超过上限时在调用模型前直接失败，不发送任何前缀，也不允许模型对不完整 diff 给出通过结论。审查结果只写入 Actions Summary 和 workflow annotations，不自动修改 PR 或提交代码。
+PR diff 最大允许 350,000 字节，且最多允许 300 个 changed files；任一上限超出时在调用模型前直接失败，不发送任何前缀，也不允许模型对不完整 diff 给出通过结论。审查结果只写入 Actions Summary 和 workflow annotations，不自动修改 PR 或提交代码。
 
-Fork PR 无法读取仓库 Secrets，因此 `ai-pr-review` 不调用外部模型，而是走无凭据 preflight，并在 Summary 中明确记录；`framework-tests` 仍验证 PR 合并引用。对于同仓 PR，缺少审查凭据仍然 fail-closed。该分流不 checkout 或执行 fork 的 PR head 代码。
+Fork PR 无法读取仓库 Secrets，因此 `ai-pr-review` fail-closed，不伪装成通过；需要维护者提供一个只使用 trusted base、且不 checkout 或执行 fork head 的受控审查路径后才能合并。`framework-tests` 仍验证 PR 合并引用。对于同仓 PR，缺少审查凭据也 fail-closed。
 
 ## 首次接入 main 的两阶段 bootstrap
 

@@ -27,8 +27,9 @@ def test_pr_review_workflow_routes_forks_without_secrets():
     assert "pull_request_target" not in text
     assert "name: Run blocking AI review" in text
     assert "if: github.event.pull_request.head.repo.full_name == github.repository" in text
-    assert "name: Run credential-free fork preflight" in text
+    assert "name: Reject fork PR without credentialed review" in text
     assert "if: github.event.pull_request.head.repo.full_name != github.repository" in text
+    assert "Fork PRs cannot receive the credentialed blocking review" in text
 
 
 def test_pr_review_workflow_rejects_oversized_diffs_before_review():
@@ -38,3 +39,11 @@ def test_pr_review_workflow_rejects_oversized_diffs_before_review():
     assert "diff_bytes" in text
     assert "exit 1" in text
     assert "raw_diff[:350_000]" not in text
+
+
+def test_pr_review_workflow_rejects_unsupported_changed_file_counts():
+    text = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "name: Reject unsupported file count" in text
+    assert "changed_files" in text
+    assert "max_changed_files=300" in text
