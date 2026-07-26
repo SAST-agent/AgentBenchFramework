@@ -251,3 +251,33 @@ def test_cli_fails_closed_on_invalid_or_blocking_review(tmp_path, review_body):
         result = _run_cli(_cli_env(tmp_path, endpoint))
 
     assert result.returncode != 0
+
+
+def test_workflow_is_pr_scoped_and_read_only():
+    workflow = Path(".github/workflows/pr-review.yml").read_text(encoding="utf-8")
+
+    assert "pull_request:" in workflow
+    assert "pull_request_target" not in workflow
+    assert "contents: read" in workflow
+    assert "pull-requests: read" in workflow
+    assert "framework-tests:" in workflow
+    assert "ai-pr-review:" in workflow
+    assert '.[tracking,report]' in workflow
+    assert '.[miracle,report]' not in workflow
+    for name in (
+        "PR_REVIEW_API_KEY", "PR_REVIEW_ENDPOINT", "PR_REVIEW_MODEL",
+        "PR_REVIEW_API_MODE",
+    ):
+        assert name in workflow
+
+
+def test_setup_document_names_workflow_configuration():
+    document = Path("docs/integration/pr-review-check.md").read_text(encoding="utf-8")
+
+    for name in (
+        "PR_REVIEW_API_KEY", "PR_REVIEW_ENDPOINT", "PR_REVIEW_MODEL",
+        "PR_REVIEW_API_MODE",
+    ):
+        assert name in document
+    assert "framework-tests" in document
+    assert "ai-pr-review" in document
