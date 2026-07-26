@@ -217,14 +217,22 @@ def calibrate_development(
             for mode, score in scores.items()
             if score is not None
         }
-        _write_calibration_selection(
-            Path(selection_output),
-            calibration_config,
-            selected_mode,
-            calibration_source_hash(calibration_source),
-            complete_scores,
-        )
-        status = "complete"
+        selected_score = complete_scores[selected_mode]
+        if (
+            calibration_config.target_min
+            <= selected_score
+            <= calibration_config.target_max
+        ):
+            _write_calibration_selection(
+                Path(selection_output),
+                calibration_config,
+                selected_mode,
+                calibration_source_hash(calibration_source),
+                complete_scores,
+            )
+            status = "complete"
+        else:
+            status = "calibration_failed"
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
         run.write("pipeline_error", error=error)

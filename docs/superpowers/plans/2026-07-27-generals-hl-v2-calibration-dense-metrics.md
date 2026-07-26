@@ -305,9 +305,13 @@ def choose_actions(round_number, my_seat, view, mode):
     return [[8]]
 ```
 
-No mode may upgrade technology, search for the enemy main, use randomness, or
-read time. Neighbor and BFS tie-breaking use the fixed order
-`up, down, left, right`.
+No mode may perform global enemy-main search, use randomness, or read time.
+Neighbor and BFS tie-breaking use the fixed order `up, down, left, right`.
+Development-only tuning may promote `resource-greedy` to the frozen v0 rule
+ceiling, including affordable main-production upgrades and spare-stack
+movement, when the weaker candidates do not enter the target interval. This
+tuning and all failed development runs must be retained before held-out is
+opened.
 
 Freeze the TOML values:
 

@@ -179,6 +179,16 @@ class FakeCalibrationEvaluator:
         )
 
 
+class OutOfRangeDevelopmentCalibration(FakeCalibrationEvaluator):
+    def evaluate(self, workspace, version, split, mode, run, budget_phase):
+        result = super().evaluate(
+            workspace, version, split, mode, run, budget_phase
+        )
+        if split == "development":
+            return replace(result, score=1.0, wins=10, losses=0)
+        return result
+
+
 def _parent(tmp_path):
     parent = tmp_path / "parent"
     snapshotter = LocalWorkspaceSnapshotter()
@@ -347,3 +357,35 @@ def test_development_calibration_freezes_selection_without_heldout_games(tmp_pat
     assert summary["budget"]["calibration_episodes"] == 30
     events = (result.run_dir / "events.jsonl").read_text()
     assert '"split":"heldout"' not in events
+
+
+def test_development_calibration_does_not_freeze_out_of_range_candidate(tmp_path):
+    parent, manifest = _parent(tmp_path)
+    root = tmp_path / "assets"
+    source = root / "calibration"
+    source.mkdir(parents=True)
+    (source / "main.py").write_text("print('weak')\n")
+    layout = AssetLayout(
+        root=root,
+        engine_root=root,
+        baseline_root=root,
+        opponents=tuple(replace(item, source=root) for item in CONFIG.opponents),
+        engine_hash="engine-hash",
+    )
+    output = tmp_path / "calibration-v1-selection.toml"
+
+    result = calibrate_development(
+        config=CONFIG,
+        assets=layout,
+        calibration_config=CALIBRATION,
+        calibration_source=source,
+        parent_run_dir=parent,
+        expected_parent_hash=manifest.content_hash,
+        data_dir=tmp_path / "data",
+        selection_output=output,
+        evaluator=OutOfRangeDevelopmentCalibration(),
+    )
+
+    assert result.status == "calibration_failed"
+    assert result.selected_mode == "passive"
+    assert not output.exists()

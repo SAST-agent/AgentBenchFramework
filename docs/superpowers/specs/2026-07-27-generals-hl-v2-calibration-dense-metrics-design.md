@@ -169,7 +169,8 @@ Candidate weak policies are declared before held-out evaluation:
 1. `passive`: legal end-turn behavior with minimal defensive movement;
 2. `local-expander`: attacks adjacent capturable neutral resources;
 3. `resource-greedy`: routes one stack toward the nearest resource but does
-   not perform global opponent search.
+   not perform global opponent search. Its development-tuned ceiling may use
+   the same bounded production and spare-stack rules as frozen v0.
 
 Only development cases may select the candidate or tune fixed thresholds.
 The selected opponent source, parameters, manifest, and content hash are then
@@ -182,6 +183,14 @@ not overwritten.
 
 Calibration test replays, results, and seeds are never included in the Codex
 prompt. Calibration-development episodes may be used as learning feedback.
+
+Implementation note (2026-07-27): the initially bounded versions of all three
+candidates gave v0 a 100% development win rate. Without opening held-out
+seeds, `resource-greedy` was promoted to a deterministic mirror-strength
+ceiling: adjacent combat, non-owned-resource routing, affordable main
+production upgrades, and one spare-stack move. The repeated development
+scores were 100%, 100%, and 50%, so `resource-greedy` was frozen. The failed
+development runs remain separate append-only run records.
 
 ### 5.3 Calibration reporting
 
