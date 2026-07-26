@@ -47,6 +47,20 @@ jobs:
           gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" > /tmp/pr-review-metadata.json
           gh api --header 'Accept: application/vnd.github.v3.diff' \
             "repos/${REPOSITORY}/pulls/${PR_NUMBER}" > /tmp/pr-review.diff
+      - name: Reject oversized diff
+        env:
+          PR_REVIEW_DIFF_FILE: /tmp/pr-review.diff
+        run: |
+          diff_bytes=$(wc -c < "$PR_REVIEW_DIFF_FILE")
+          max_diff_bytes=350000
+          if [ "$diff_bytes" -gt "$max_diff_bytes" ]; then
+            {
+              echo "### AI review"
+              echo "Rejected: PR diff is ${diff_bytes} bytes; maximum is ${max_diff_bytes}."
+              echo "The blocking reviewer was not invoked."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
       - name: Build bounded review input
         env:
           PR_REVIEW_METADATA_FILE: /tmp/pr-review-metadata.json
@@ -60,9 +74,7 @@ jobs:
 
           metadata = json.loads(Path(os.environ["PR_REVIEW_METADATA_FILE"]).read_text(encoding="utf-8"))
           raw_diff = Path(os.environ["PR_REVIEW_DIFF_FILE"]).read_bytes()
-          limit = 350_000
-          truncated = len(raw_diff) > limit
-          diff = raw_diff[:limit].decode("utf-8", errors="replace")
+          diff = raw_diff.decode("utf-8", errors="replace")
           payload = {
               "repository": os.environ["GITHUB_REPOSITORY"],
               "pull_request": {
@@ -73,7 +85,7 @@ jobs:
                   "head_sha": (metadata.get("head") or {}).get("sha"),
               },
               "diff": diff,
-              "diff_truncated": truncated,
+              "diff_truncated": False,
               "diff_bytes": len(raw_diff),
               "review_policy": {
                   "block_on": ["P0", "P1", "decision=fail"],
@@ -98,4 +110,13 @@ jobs:
           PR_REVIEW_API_MODE: ${{ vars.PR_REVIEW_API_MODE || 'responses' }}
           PR_REVIEW_INPUT_JSON: /tmp/pr-review-input.json
           PR_REVIEW_TIMEOUT_S: "90"
+        if: github.event.pull_request.head.repo.full_name == github.repository
         run: python tools/pr_review.py
+      - name: Run credential-free fork preflight
+        if: github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          {
+            echo "### AI review"
+            echo "External model review was skipped because GitHub does not expose repository secrets to fork PRs."
+            echo "Credential-free preflight passed; framework-tests remains required for the PR code."
+          } >> "$GITHUB_STEP_SUMMARY"
