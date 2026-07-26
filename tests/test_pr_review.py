@@ -249,7 +249,7 @@ def test_cli_retries_strict_schema_without_reasoning_after_gateway_timeout(tmp_p
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):  # noqa: N802
             seen.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
-            if len(seen) == 1:
+            if len(seen) <= 2:
                 self.send_response(504)
                 self.end_headers()
                 return
@@ -268,11 +268,13 @@ def test_cli_retries_strict_schema_without_reasoning_after_gateway_timeout(tmp_p
         result = _run_cli(_cli_env(tmp_path, endpoint))
 
     assert result.returncode == 0
-    assert len(seen) == 2
+    assert len(seen) == 3
     assert seen[0]["text"]["format"]["type"] == "json_schema"
     assert seen[0]["reasoning"] == {"effort": "high"}
     assert seen[1]["text"]["format"]["type"] == "json_schema"
     assert "reasoning" not in seen[1]
+    assert seen[2]["text"]["format"] == {"type": "json_object"}
+    assert "reasoning" not in seen[2]
 
 
 @pytest.mark.parametrize("env_name", [

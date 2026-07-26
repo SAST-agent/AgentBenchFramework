@@ -341,7 +341,24 @@ def run_review() -> int:
                     payload,
                     reasoning_effort=None,
                 )
-                response_data = _post_review_request(endpoint, api_key, retry_request, timeout)
+                try:
+                    response_data = _post_review_request(
+                        endpoint, api_key, retry_request, timeout
+                    )
+                except urllib.error.HTTPError as retry_exc:
+                    if retry_exc.code not in GATEWAY_RETRY_STATUS_CODES:
+                        raise
+                    legacy_request = build_api_request(
+                        api_mode,
+                        model,
+                        REVIEW_INSTRUCTIONS,
+                        payload,
+                        reasoning_effort=None,
+                        structured_outputs=False,
+                    )
+                    response_data = _post_review_request(
+                        endpoint, api_key, legacy_request, timeout
+                    )
             elif exc.code in CAPABILITY_FALLBACK_STATUS_CODES:
                 legacy_request = build_api_request(
                     api_mode,
