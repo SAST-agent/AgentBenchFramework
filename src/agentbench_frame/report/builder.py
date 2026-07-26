@@ -153,7 +153,13 @@ class ReportBuilder:
                           if event.get(key) is not None), None)
             if score is None and event.get("evaluation_status") not in {"incomplete", "failed"}:
                 continue
-            act_x = act_order.get(event.get("act_id"), index)
+            phase = event.get("phase")
+            if phase == "raw":
+                act_x = 0
+            elif phase == "evolved":
+                act_x = budget.get("learning_coding_agent_acts", 1)
+            else:
+                act_x = act_order.get(event.get("act_id"), index)
             score_history.append({
                 "x": act_x,
                 "score": score,
@@ -220,12 +226,18 @@ class ReportBuilder:
         auc = multi_axis_auc(auc_points) if auc_points else {}
         if summary.get("AUC_coding_agent_act") is not None:
             auc["auc_coding_agent_act"] = summary["AUC_coding_agent_act"]
+        benchmark_score = summary.get("benchmark_score")
+        if benchmark_score is None:
+            benchmark_score = evo_score
         return {
-            "benchmark_score": summary.get("benchmark_score", evo_score),
+            "benchmark_score": benchmark_score,
             "raw_score": raw_score,
             "evo_score": evo_score,
             "gain": gain,
-            "evaluation_status": summary.get("evaluation_status", "complete" if evo_score is not None else "unknown"),
+            "evaluation_status": summary.get(
+                "evaluation_status",
+                summary.get("status", "complete" if evo_score is not None else "unknown"),
+            ),
             "budget": budget,
             "score_history": score_history,
             "auc": auc,

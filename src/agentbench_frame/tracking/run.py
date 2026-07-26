@@ -88,6 +88,50 @@ class Run:
         writer = JSONLWriter(os.path.join(run_path, "events.jsonl"))
         return cls(run_id=run_id, run_dir=run_path, meta=meta, writer=writer, config=config or {})
 
+    @classmethod
+    def resume(cls, run_dir: str | os.PathLike) -> "Run":
+        """Reopen a finalized run for an explicit recovery continuation."""
+        run_path = os.fspath(run_dir)
+        with open(os.path.join(run_path, "summary.json"), encoding="utf-8") as handle:
+            summary = json.load(handle)
+        config = dict(summary.get("config") or {})
+        meta = RunMeta(
+            run_id=summary["run_id"],
+            game=summary["game"],
+            agent=summary["agent"],
+            run_type=summary.get("run_type", "eval"),
+            created=summary.get("created", ""),
+            git_commit=summary.get("git_commit", ""),
+            started_at=float(summary.get("started_at", time.time())),
+            config=config,
+        )
+        resumed = cls(
+            run_id=meta.run_id,
+            run_dir=run_path,
+            meta=meta,
+            writer=JSONLWriter(os.path.join(run_path, "events.jsonl"), append=True),
+            config=config,
+        )
+        budget = summary.get("budget") or {}
+        for phase in ("learning", "evaluation"):
+            values = {
+                "episodes": int(budget.get(f"{phase}_episodes", 0) or 0),
+                "env_steps": int(budget.get(f"{phase}_env_steps", 0) or 0),
+                "coding_agent_acts": int(
+                    budget.get(f"{phase}_coding_agent_acts", 0) or 0
+                ),
+            }
+            prompt = budget.get(f"{phase}_prompt_tokens")
+            completion = budget.get(f"{phase}_completion_tokens")
+            if prompt is not None or completion is not None:
+                values["prompt_tokens"] = prompt
+                values["completion_tokens"] = completion
+            phase_time = budget.get(f"{phase}_time_s")
+            if phase_time is not None:
+                values["time_s"] = phase_time
+            resumed._budget.add(phase, **values)
+        return resumed
+
     @staticmethod
     def _make_run_id() -> str:
         ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")

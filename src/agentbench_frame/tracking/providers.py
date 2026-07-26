@@ -178,6 +178,9 @@ class _SubprocessProvider:
     def build_command(self, context: Mapping[str, Any]) -> list[str]:
         raise NotImplementedError
 
+    def stdin_text(self, context: Mapping[str, Any]) -> str | None:
+        return None
+
     def invoke(self, context: Mapping[str, Any]) -> ProviderInvocation:
         command = self.build_command(context)
         started = time.monotonic()
@@ -188,6 +191,7 @@ class _SubprocessProvider:
                 env=(None if self.env is None else {**os.environ, **self.env}),
                 capture_output=True,
                 text=True,
+                input=self.stdin_text(context),
                 timeout=self.timeout_s,
                 check=False,
             )
@@ -245,8 +249,16 @@ class CodexProvider(_SubprocessProvider):
         if not prompt:
             raise ValueError("Codex provider requires context['prompt'] or context['task']")
         sandbox = context.get("sandbox", self.sandbox)
+        if len(str(prompt).encode("utf-8")) > 64 * 1024:
+            prompt = "-"
         return [self.executable, "exec", "--json", "--sandbox", str(sandbox),
                 *self.extra_args, str(prompt)]
+
+    def stdin_text(self, context: Mapping[str, Any]) -> str | None:
+        prompt = context.get("prompt", context.get("task"))
+        if prompt and len(str(prompt).encode("utf-8")) > 64 * 1024:
+            return str(prompt)
+        return None
 
     def cli_version(self) -> str | None:
         try:

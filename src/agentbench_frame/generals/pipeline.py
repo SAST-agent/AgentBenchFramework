@@ -11,6 +11,7 @@ import subprocess
 import sys
 from typing import Any
 
+from agentbench_frame.eval.benchmark import GameResult
 from agentbench_frame.tracking.provider import ProviderAdapter
 from agentbench_frame.tracking.quality import inspect_event_file
 from agentbench_frame.tracking.run import Run
@@ -24,8 +25,8 @@ from .assets import (
 )
 from .evaluator import GeneralsEvaluation, GeneralsEvaluator, build_evaluation_spec, build_learning_cases
 from .match import GeneralsMatchRunner
-from .measurement import ProbeState, measure_action_disagreement, measure_occupancy_shift
-from .models import AssetLayout, MatchCase, PilotConfig
+from .measurement import ProbeState, measure_action_disagreement
+from .models import AssetLayout, MatchCase, MatchResult, PilotConfig, TurnRecord
 from .process import build_baseline_process
 from .prompt import build_codex_prompt
 from .replay import LearningReplay, build_learning_replay
@@ -39,6 +40,57 @@ class PipelineResult:
     gain: float | None
     act_count: int
     status: str
+
+
+def _strategy_view(state: dict, seat: int) -> dict:
+    """Adapt current or legacy normalized engine states to the policy contract."""
+    if isinstance(state.get("generals"), dict) and isinstance(state.get("cells"), dict):
+        result = dict(state)
+        result["my_seat"] = seat
+        return result
+    generals = {}
+    for general in state.get("generals", []):
+        item = dict(general)
+        name = str(item.pop("class", item.get("type", "resource"))).lower()
+        item["type"] = "main" if "main" in name else "sub" if "sub" in name else "resource"
+        generals[str(item["id"])] = item
+    cells = {}
+    for row in state.get("board", []):
+        for cell in row:
+            item = dict(cell)
+            position = item.pop("position")
+            cells[f"{position[0]},{position[1]}"] = item
+    return {
+        "round": int(state.get("round", 1)),
+        "my_seat": int(seat),
+        "coins": list(state.get("coins", [0, 0])),
+        "tech_level": state.get("tech_level", [[2, 0, 0, 0], [2, 0, 0, 0]]),
+        "cells": cells,
+        "generals": generals,
+    }
+
+
+def _load_match_result(artifact_dir: Path) -> MatchResult:
+    metadata = json.loads((artifact_dir / "metadata.json").read_text(encoding="utf-8"))
+    turns = []
+    replay_path = artifact_dir / "replay.jsonl"
+    if replay_path.is_file():
+        for line in replay_path.read_text(encoding="utf-8").splitlines():
+            item = json.loads(line)
+            item["commands"] = tuple(tuple(command) for command in item["commands"])
+            turns.append(TurnRecord(**item))
+    return MatchResult(
+        case_id=metadata["case_id"],
+        valid=bool(metadata["valid"]),
+        winner=metadata.get("winner"),
+        termination_type=metadata["termination_type"],
+        seed=int(metadata["seed"]),
+        evaluated_seat=int(metadata["evaluated_seat"]),
+        turns=tuple(turns),
+        elapsed_time_s=float(metadata["elapsed_time_s"]),
+        engine_hash=metadata["engine_hash"],
+        error=metadata.get("error"),
+    )
 
 
 class GeneralsHLPipeline:
@@ -150,7 +202,9 @@ class GeneralsHLPipeline:
                     "id": probe.state_id,
                     "round": int(probe.state.get("round", 1)),
                     "seat": int(probe.state.get("my_seat", 0)),
-                    "state": probe.state,
+                    "state": _strategy_view(
+                        dict(probe.state), int(probe.state.get("my_seat", 0))
+                    ),
                 },
                 ensure_ascii=False,
             )
@@ -222,6 +276,13 @@ class GeneralsHLPipeline:
             )
             workspace = run_dir / "workspace"
             shutil.copytree(self.assets.baseline_root, workspace)
+            subprocess.run(
+                ["git", "init", "-q"],
+                cwd=workspace,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
             v0 = self._write_version(run_dir, "v0", workspace)
             run.write("version", version="v0", status="available", manifest_hash=v0.content_hash)
 
@@ -306,7 +367,7 @@ class GeneralsHLPipeline:
                 probes = tuple(
                     ProbeState(
                         decision.state_id,
-                        decision.state,
+                        {**decision.state, "my_seat": decision.seat},
                         decision.action,
                     )
                     for replay in replays
@@ -315,18 +376,6 @@ class GeneralsHLPipeline:
                 if probes:
                     new_actions = self._probe_actions(workspace, probes)
                     behavior = measure_action_disagreement(probes, new_actions)
-                    old_states = tuple(probe.state_id for probe in probes)
-                    new_states = tuple(
-                        turn.state_id_before
-                        for match in learning.matches
-                        for turn in match.turns
-                        if turn.player == match.evaluated_seat
-                    )[: len(old_states)]
-                    occupancy = (
-                        measure_occupancy_shift(new_states, old_states)
-                        if new_states
-                        else None
-                    )
                     run.write(
                         "behavior_change",
                         version_before="v0",
@@ -335,9 +384,30 @@ class GeneralsHLPipeline:
                         action_disagreement=behavior.mean,
                         policy_kl=behavior.policy_kl,
                         policy_kl_status=behavior.policy_kl_status,
-                        occupancy_shift=occupancy,
+                        occupancy_shift=None,
                     )
                 evolved = evaluator.evaluate(workspace, "v1", "evaluation", run)
+                raw_states = [
+                    turn.state_id_before
+                    for match in raw_eval.matches
+                    for turn in match.turns
+                    if turn.player == match.evaluated_seat
+                ]
+                evolved_states = [
+                    turn.state_id_before
+                    for match in evolved.matches
+                    for turn in match.turns
+                    if turn.player == match.evaluated_seat
+                ]
+                if raw_states and evolved_states:
+                    run.log_occupancy(
+                        episode=1,
+                        version_before="v0",
+                        version_after="v1",
+                        state_ids=evolved_states,
+                        reference_state_ids=raw_states,
+                        context={"domain": "frozen_evaluation_matrix"},
+                    )
                 evo_score = evolved.score
                 gain = (
                     evo_score - raw_score
@@ -378,6 +448,8 @@ class GeneralsHLPipeline:
                 "raw_score": raw_score,
                 "evo_score": evo_score,
                 "gain": gain,
+                "benchmark_score": evo_score,
+                "evaluation_status": status,
                 "AUC_coding_agent_act": auc,
                 "act_count": act_count,
                 "error": error,
@@ -396,3 +468,220 @@ class GeneralsHLPipeline:
             }
             run.finish(summary)
         return PipelineResult(run_dir, raw_score, evo_score, gain, act_count, status)
+
+    def resume_after_act(self, run_dir: Path) -> PipelineResult:
+        """Continue a run whose single provider act succeeded before harness failure."""
+        run_dir = Path(run_dir)
+        previous = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+        events = [
+            json.loads(line)
+            for line in (run_dir / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        ]
+        completed_acts = [
+            event
+            for event in events
+            if event.get("event_type") == "coding_agent_act"
+            and event.get("status") == "completed"
+        ]
+        if len(completed_acts) != 1:
+            raise ValueError("recovery requires exactly one completed coding-agent act")
+        workspace = run_dir / "workspace"
+        if not workspace.is_dir():
+            raise ValueError("recovery workspace is missing")
+        run = Run.resume(run_dir)
+        raw_score = previous.get("raw_score")
+        evo_score = gain = None
+        status = "failed"
+        error = None
+        evolved = None
+        try:
+            raw_match_dirs = sorted(
+                path
+                for path in (run_dir / "matches" / "v0").iterdir()
+                if path.name.startswith("eval-")
+            )
+            learning_match_dirs = sorted(
+                path
+                for path in (run_dir / "matches" / "v0").iterdir()
+                if path.name.startswith("learn-")
+            )
+            raw_matches = tuple(_load_match_result(path) for path in raw_match_dirs)
+            learning_matches = tuple(
+                _load_match_result(path) for path in learning_match_dirs
+            )
+            previous_results = previous.get("benchmark_results", [])
+            raw_results = tuple(
+                GameResult(
+                    case_id=item["case_id"],
+                    outcome=item["outcome"],
+                    valid=item["valid"],
+                    error=item.get("error"),
+                    metadata={
+                        key: value
+                        for key, value in item.items()
+                        if key not in {"case_id", "outcome", "valid", "error"}
+                    },
+                )
+                for item in previous_results
+                if item.get("version") == "v0"
+                and item.get("phase") == "evaluation"
+            )
+            raw_eval = GeneralsEvaluation(
+                version="v0",
+                status="complete" if raw_score is not None else "incomplete",
+                score=raw_score,
+                wins=sum(item.outcome == "win" for item in raw_results),
+                losses=sum(item.outcome == "loss" for item in raw_results),
+                draws=sum(item.outcome == "draw" for item in raw_results),
+                per_tier={},
+                seat_gap=None,
+                results=raw_results,
+                matches=raw_matches,
+            )
+            learning_results = tuple(
+                GameResult(
+                    case_id=match.case_id,
+                    outcome=(
+                        "draw"
+                        if match.winner == -1
+                        else "win"
+                        if match.winner == match.evaluated_seat
+                        else "loss"
+                    ),
+                    valid=match.valid,
+                    error=match.error,
+                    metadata={
+                        "tier": json.loads(
+                            (learning_match_dirs[index] / "metadata.json").read_text(
+                                encoding="utf-8"
+                            )
+                        ).get("opponent_tier", "unknown")
+                    },
+                )
+                for index, match in enumerate(learning_matches)
+            )
+            learning = GeneralsEvaluation(
+                "v0",
+                "complete",
+                None,
+                sum(item.outcome == "win" for item in learning_results),
+                sum(item.outcome == "loss" for item in learning_results),
+                sum(item.outcome == "draw" for item in learning_results),
+                {},
+                None,
+                learning_results,
+                learning_matches,
+            )
+            replays = self._replays(learning)
+            probes = tuple(
+                ProbeState(
+                    decision.state_id,
+                    {**decision.state, "my_seat": decision.seat},
+                    decision.action,
+                )
+                for replay in replays
+                for decision in replay.decisions
+            )
+            behavior = measure_action_disagreement(
+                probes, self._probe_actions(workspace, probes)
+            )
+            run.write(
+                "pipeline_resumed",
+                recovery_from="post_act_probe_failure",
+                completed_act_id=completed_acts[0]["act_id"],
+            )
+            run.write(
+                "behavior_change",
+                version_before="v0",
+                version_after="v1",
+                action_disagreement_trace=list(behavior.trace),
+                action_disagreement=behavior.mean,
+                policy_kl=behavior.policy_kl,
+                policy_kl_status=behavior.policy_kl_status,
+                occupancy_shift=None,
+            )
+            evaluator = self.evaluator or self._production_evaluator(run_dir)
+            evolved = evaluator.evaluate(workspace, "v1", "evaluation", run)
+            evo_score = evolved.score
+            gain = (
+                evo_score - raw_score
+                if evo_score is not None and raw_score is not None
+                else None
+            )
+            raw_states = [
+                turn.state_id_before
+                for match in raw_matches
+                for turn in match.turns
+                if turn.player == match.evaluated_seat
+            ]
+            evolved_states = [
+                turn.state_id_before
+                for match in evolved.matches
+                for turn in match.turns
+                if turn.player == match.evaluated_seat
+            ]
+            if raw_states and evolved_states:
+                run.log_occupancy(
+                    episode=1,
+                    version_before="v0",
+                    version_after="v1",
+                    state_ids=evolved_states,
+                    reference_state_ids=raw_states,
+                    context={"domain": "frozen_evaluation_matrix"},
+                )
+            run.write(
+                "evaluation",
+                phase="evolved",
+                version="v1",
+                status=evolved.status,
+                score=evolved.score,
+                gain=gain,
+                per_tier=dict(evolved.per_tier),
+                seat_gap=evolved.seat_gap,
+            )
+            status = "complete" if evolved.status == "complete" else "incomplete"
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+            run.write("pipeline_error", error=error, recovery=True)
+        finally:
+            run.writer.flush()
+            quality = inspect_event_file(str(run_dir / "events.jsonl")).to_dict()
+            (run_dir / "quality.json").write_text(
+                json.dumps(quality, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+            benchmark_results = [
+                item
+                for item in previous.get("benchmark_results", [])
+                if item.get("version") == "v0"
+            ]
+            if evolved is not None:
+                benchmark_results.extend(
+                    {
+                        "case_id": item.case_id,
+                        "outcome": item.outcome,
+                        "valid": item.valid,
+                        "error": item.error,
+                        **item.metadata,
+                    }
+                    for item in evolved.results
+                )
+            run.finish(
+                {
+                    "status": status,
+                    "benchmark_id": self.config.benchmark_id,
+                    "raw_score": raw_score,
+                    "evo_score": evo_score,
+                    "gain": gain,
+                    "benchmark_score": evo_score,
+                    "evaluation_status": status,
+                    "AUC_coding_agent_act": (
+                        (raw_score + evo_score) / 2
+                        if raw_score is not None and evo_score is not None
+                        else None
+                    ),
+                    "act_count": 1,
+                    "error": error,
+                    "benchmark_results": benchmark_results,
+                }
+            )
+        return PipelineResult(run_dir, raw_score, evo_score, gain, 1, status)

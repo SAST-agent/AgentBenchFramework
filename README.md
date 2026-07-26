@@ -19,6 +19,50 @@ uv sync --extra all              # 全部
 
 ## 快速开始
 
+### Generals HL 官方引擎闭环
+
+以下 pilot 不使用 `GeneralsEnv` 计分，而是直接调用 AgentBench 中保存的官方
+Python 逻辑。先设置资产仓库和实验清单：
+
+```bash
+ASSET_ROOT=/path/to/AgentBench
+MANIFEST="$ASSET_ROOT/backend_sources/corpus/28_generals/benchmark/pilot-v1.toml"
+
+agentbench generals prepare \
+  --agentbench-root "$ASSET_ROOT" --manifest "$MANIFEST"
+
+agentbench generals eval \
+  --agentbench-root "$ASSET_ROOT" --manifest "$MANIFEST" \
+  --version v0 --data-dir ./agentbench_data
+
+agentbench generals iterate \
+  --agentbench-root "$ASSET_ROOT" --manifest "$MANIFEST" \
+  --data-dir ./agentbench_data --codex-executable "$(command -v codex)"
+```
+
+`iterate` 固定执行 18 局 v0 评测、12 局独立 learning replay、一次非交互
+Codex act 和相同 18 局 v1 评测。对手为
+`advanced-rank02-robinliu-v18`、`advanced-rank08-nashjunheng-v20` 和
+`popular-rank16-xiaoaojianghu-v1`；评测 seed 为 280101/280202/280303，
+learning seed 为 281101/281202/281303。
+
+每个 run 位于
+`agentbench_data/runs/28_generals/generals-hl/{run_id}/`，包含
+`events.jsonl`、`summary.json`、`quality.json`、逐局
+`matches/`、provider 原始 JSONL/stderr、`versions/v0`、`versions/v1`
+和统一 patch。可用下面的命令校验和生成报告：
+
+```bash
+agentbench data check --data-dir ./agentbench_data
+agentbench report --data-dir ./agentbench_data --output-dir ./_site
+```
+
+本地子进程限制用于实验可靠性，不是安全沙箱，也不使用 Docker。官方非法动作和
+单步 TLE 是有效负局；进程崩溃、协议错误和整局 harness 超时使 case 无效，聚合
+分数保持缺失。规则策略没有完整动作分布，因此严格 policy KL 明确记为不可用；
+action disagreement 与 occupancy shift 分开记录。真实 act 需要本机已安装并认证
+Codex CLI。
+
 ### 5 行跑一场对战
 
 ```python

@@ -5,6 +5,7 @@ import pytest
 
 from agentbench_frame.generals.assets import (
     AssetValidationError,
+    _stable_tree_hash,
     load_pilot_config,
     resolve_assets,
 )
@@ -54,3 +55,12 @@ def test_loader_rejects_wrong_frozen_limits(tmp_path):
 
     with pytest.raises(AssetValidationError, match="frozen values"):
         load_pilot_config(manifest)
+
+
+def test_engine_hash_ignores_generated_python_cache(tmp_path):
+    (tmp_path / "main.py").write_text("VALUE = 1\n")
+    before = _stable_tree_hash(tmp_path)
+    cache = tmp_path / "__pycache__"
+    cache.mkdir()
+    (cache / "main.cpython-311.pyc").write_bytes(b"generated")
+    assert _stable_tree_hash(tmp_path) == before

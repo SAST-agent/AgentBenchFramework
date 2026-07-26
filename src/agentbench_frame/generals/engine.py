@@ -102,40 +102,37 @@ class OfficialGeneralsEngine:
         return TurnOutcome(False, None, None)
 
     def normalized_state(self) -> dict:
-        board = [
-            [
-                {
-                    "position": [int(cell.position[0]), int(cell.position[1])],
+        cells = {}
+        for row in self.state.board:
+            for cell in row:
+                key = f"{int(cell.position[0])},{int(cell.position[1])}"
+                cells[key] = {
                     "type": int(cell.type),
                     "player": int(cell.player),
                     "army": int(cell.army),
                     "general_id": int(cell.generals.id) if cell.generals else None,
                 }
-                for cell in row
-            ]
-            for row in self.state.board
-        ]
-        generals = []
+        generals = {}
         for general in sorted(self.state.generals, key=lambda item: int(item.id)):
-            generals.append(
-                {
-                    "id": int(general.id),
-                    "class": type(general).__name__,
-                    "player": int(general.player),
-                    "position": [int(item) for item in general.position],
-                    "produce_level": int(getattr(general, "produce_level", 0)),
-                    "defense_level": int(getattr(general, "defense_level", 0)),
-                    "mobility_level": int(getattr(general, "mobility_level", 0)),
-                    "skills_cd": [int(item) for item in getattr(general, "skills_cd", [])],
-                    "skill_duration": [
-                        int(item) for item in getattr(general, "skill_duration", [])
-                    ],
-                }
-            )
+            name = type(general).__name__.lower()
+            general_type = "main" if "main" in name else "sub" if "sub" in name else "resource"
+            generals[str(general.id)] = {
+                "id": int(general.id),
+                "type": general_type,
+                "player": int(general.player),
+                "position": [int(item) for item in general.position],
+                "produce_level": int(getattr(general, "produce_level", 0)),
+                "defense_level": int(getattr(general, "defense_level", 0)),
+                "mobility_level": int(getattr(general, "mobility_level", 0)),
+                "skills_cd": [int(item) for item in getattr(general, "skills_cd", [])],
+                "skill_duration": [
+                    int(item) for item in getattr(general, "skill_duration", [])
+                ],
+            }
         return {
             "round": int(self.state.round),
             "next_actor": 0,
-            "board": board,
+            "cells": cells,
             "generals": generals,
             "coins": [int(item) for item in self.state.coin],
             "tech_level": _primitive(self.state.tech_level),

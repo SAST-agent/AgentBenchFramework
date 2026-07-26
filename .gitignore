@@ -1,2 +1,5 @@
 __pycache__/
 .worktrees/
+.venv/
+agentbench_data*/
+_site/

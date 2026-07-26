@@ -6,8 +6,9 @@ from agentbench_frame.eval.benchmark import GameResult
 from agentbench_frame.generals.assets import load_pilot_config
 from agentbench_frame.generals.evaluator import GeneralsEvaluation
 from agentbench_frame.generals.models import AssetLayout, MatchResult, TurnRecord
-from agentbench_frame.generals.pipeline import GeneralsHLPipeline
+from agentbench_frame.generals.pipeline import GeneralsHLPipeline, _strategy_view
 from agentbench_frame.tracking.provider import ProviderInvocation, ProviderUsage
+from agentbench_frame.tracking.run import Run
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "pilot-v1.toml"
@@ -18,6 +19,7 @@ class FakeProvider:
 
     def invoke(self, context):
         workspace = Path(context["workspace_root"])
+        assert (workspace / ".git").is_dir()
         strategy = workspace / "strategy.py"
         strategy.write_text(strategy.read_text().replace("POLICY = 0", "POLICY = 1"))
         raw = Path(context["raw_output_path"])
@@ -74,6 +76,34 @@ class FakeEvaluator:
 
 
 CONFIG = load_pilot_config(FIXTURE)
+
+
+def test_probe_adapter_accepts_legacy_engine_normalization():
+    state = {
+        "round": 1,
+        "board": [[{"position": [0, 0], "type": 0, "player": 1, "army": 2,
+                    "general_id": 3}]],
+        "generals": [{"id": 3, "class": "MainGenerals", "player": 1,
+                      "position": [0, 0], "produce_level": 1,
+                      "defense_level": 1, "mobility_level": 1}],
+        "coins": [40, 40],
+        "tech_level": [[2, 0, 0, 0], [2, 0, 0, 0]],
+    }
+    view = _strategy_view(state, 1)
+    assert view["generals"]["3"]["type"] == "main"
+    assert view["cells"]["0,0"]["army"] == 2
+    assert view["my_seat"] == 1
+
+
+def test_run_resume_restores_phase_budgets(tmp_path):
+    run = Run.start("28_generals", "baseline", data_dir=str(tmp_path))
+    run.log_budget("learning", episodes=2, env_steps=5, coding_agent_acts=1,
+                   prompt_tokens=7, completion_tokens=3, time_s=0.5)
+    run.finish({"status": "failed"})
+    resumed = Run.resume(Path(run.run_dir))
+    assert resumed.budget_snapshot()["learning_episodes"] == 2
+    assert resumed.budget_snapshot()["learning_total_tokens"] == 10
+    resumed.finish({"status": "complete"})
 
 
 def test_pipeline_writes_complete_v0_v1_evidence_chain(tmp_path):

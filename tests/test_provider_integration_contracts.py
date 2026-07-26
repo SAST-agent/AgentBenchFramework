@@ -123,6 +123,13 @@ class ProviderParsingContractTests(unittest.TestCase):
             self.assertEqual(result.raw_output_ref, str(raw))
             self.assertIn("turn.completed", raw.read_text())
 
+    def test_codex_provider_routes_large_prompt_through_stdin(self):
+        from agentbench_frame.tracking.providers import CodexProvider
+
+        provider = CodexProvider(executable="codex")
+        command = provider.build_command({"prompt": "x" * 200_000})
+        self.assertEqual(command[-1], "-")
+
 
 if __name__ == "__main__":
     unittest.main()

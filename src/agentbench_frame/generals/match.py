@@ -59,6 +59,7 @@ class GeneralsMatchRunner:
                         break
                     for player in (0, 1):
                         before = engine.normalized_state()
+                        before["my_seat"] = player
                         before_id = engine.state_id()
                         try:
                             commands = managed[player].request_turn()
@@ -70,6 +71,7 @@ class GeneralsMatchRunner:
                             raise _MatchFinished
                         outcome = engine.apply_turn(player, commands)
                         after = engine.normalized_state()
+                        after["my_seat"] = 1 - player
                         record = TurnRecord(
                             step=step,
                             round_number=int(before["round"]),

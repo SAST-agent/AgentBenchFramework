@@ -35,3 +35,10 @@ def test_illegal_official_command_is_valid_ia_loss(engine_root):
     assert outcome.done is True
     assert outcome.winner == 1
     assert outcome.termination_type == "illegal_action"
+
+
+def test_normalized_state_matches_editable_strategy_view_contract(engine_root):
+    state = OfficialGeneralsEngine(engine_root, seed=280101).normalized_state()
+    assert isinstance(state["cells"], dict)
+    assert isinstance(state["generals"], dict)
+    assert all("type" in item for item in state["generals"].values())

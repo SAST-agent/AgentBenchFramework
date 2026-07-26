@@ -14,7 +14,7 @@ KNOWN_EVENT_TYPES = frozenset({
     "policy_kl_trace", "occupancy", "elo", "h2h", "resource", "provider_event",
     "provider_invocation",
     "benchmark_spec", "version", "game_result", "behavior_change",
-    "pipeline_error",
+    "pipeline_error", "pipeline_resumed",
 })
 
 
