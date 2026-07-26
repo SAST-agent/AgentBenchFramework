@@ -39,7 +39,17 @@ class TrackedEnv:
         wall_ms = (time.time() - start) * 1000
         self._step += 1
 
-        obs, reward, done, info = result
+        if len(result) == 4:
+            obs, reward, done, info = result
+            terminated = bool(done)
+            truncated = False
+        elif len(result) == 5:
+            obs, reward, terminated, truncated, info = result
+            done = bool(terminated or truncated)
+        else:
+            raise ValueError("environment step must return a 4-tuple or 5-tuple")
+        info = info or {}
+        termination_reason = info.get("termination_reason") if isinstance(info, dict) else None
         if self._on_step is not None:
             record = StepRecord(
                 timestamp=time.time(),
@@ -48,9 +58,13 @@ class TrackedEnv:
                 action=action,
                 reward=float(reward),
                 done=done,
-                info=info or {},
+                info=info,
                 wall_time_ms=wall_ms,
                 agent_time_ms=0.0,
+                terminated=terminated,
+                truncated=truncated,
+                termination_reason=termination_reason,
+                actor=getattr(obs, "player_id", None),
             )
             try:
                 self._on_step(record)
@@ -85,6 +99,7 @@ class TimedAgent:
         self._on_act = on_act
         self._total_calls = 0
         self._total_time_ms = 0.0
+        self._episode_calls = 0
 
     def act(self, observation: Any) -> Any:
         start = time.time()
@@ -92,6 +107,7 @@ class TimedAgent:
         elapsed_ms = (time.time() - start) * 1000
         self._total_calls += 1
         self._total_time_ms += elapsed_ms
+        self._episode_calls += 1
 
         if self._on_act is not None:
             try:
@@ -100,6 +116,8 @@ class TimedAgent:
                     "timestamp": time.time(),
                     "agent_name": getattr(self._agent, "name", "unknown"),
                     "time_ms": elapsed_ms,
+                    "act_index": self._total_calls,
+                    "game_agent_decision_step": self._episode_calls,
                 })
             except Exception:
                 pass
@@ -117,6 +135,7 @@ class TimedAgent:
 
     def reset(self):
         self._agent.reset()
+        self._episode_calls = 0
 
     def get_stats(self) -> Dict[str, Any]:
         return {

@@ -14,7 +14,11 @@ Usage:
 
 import json
 import os
+from collections import Counter
 from typing import Any, Dict, List, Optional
+
+from agentbench_frame.eval.curves import multi_axis_auc
+from agentbench_frame.tracking.quality import inspect_event_file
 
 try:
     import jinja2
@@ -106,12 +110,119 @@ class ReportBuilder:
                         run_dir = os.path.basename(dirpath)
                         data["_dir"] = run_dir
                         data["_path"] = full_path
+                        events_path = os.path.join(dirpath, "events.jsonl")
+                        events = []
+                        if os.path.exists(events_path):
+                            with open(events_path, encoding="utf-8") as event_file:
+                                for line in event_file:
+                                    try:
+                                        value = json.loads(line)
+                                    except (TypeError, json.JSONDecodeError):
+                                        continue
+                                    if isinstance(value, dict):
+                                        events.append(value)
+                        data["research"] = self._derive_research(data, events, events_path)
+                        data.setdefault("win_rate", data["research"].get("benchmark_score", 0.0) or 0.0)
+                        data.setdefault("total_episodes", 0)
+                        data.setdefault("total_steps", 0)
+                        data.setdefault("avg_reward_per_episode", 0.0)
+                        data.setdefault("duration_s", 0.0)
                         self.runs.append(data)
                     except (json.JSONDecodeError, IOError):
                         continue
 
         # Sort by started_at (newest first)
         self.runs.sort(key=lambda r: r.get("started_at", 0), reverse=True)
+
+    @staticmethod
+    def _derive_research(summary: Dict[str, Any], events: List[Dict[str, Any]], events_path: str) -> Dict[str, Any]:
+        """Add chart-ready fields while leaving summary/events untouched."""
+        act_order = {}
+        for event in events:
+            if event.get("event_type", event.get("event")) == "coding_agent_act":
+                act_id = event.get("act_id")
+                if act_id and act_id not in act_order:
+                    act_order[act_id] = len(act_order) + 1
+        score_history = []
+        auc_points = []
+        budget = summary.get("budget") if isinstance(summary.get("budget"), dict) else {}
+        for index, event in enumerate(events, start=1):
+            if event.get("event_type", event.get("event")) not in {"act_evaluation", "evaluation", "benchmark_evaluation"}:
+                continue
+            score = next((event.get(key) for key in ("score", "benchmark_score", "evo_score")
+                          if event.get(key) is not None), None)
+            if score is None and event.get("evaluation_status") not in {"incomplete", "failed"}:
+                continue
+            act_x = act_order.get(event.get("act_id"), index)
+            score_history.append({
+                "x": act_x,
+                "score": score,
+                "act_id": event.get("act_id"),
+            })
+            auc_points.append({
+                "coding_agent_act": event.get("coding_agent_act", act_x),
+                "episode": event.get("episode"),
+                "env_step": event.get("env_step"),
+                "token": event.get("token"),
+                "time_s": event.get("time_s"),
+                "score": score,
+            })
+        if not score_history and summary.get("benchmark_score") is not None:
+            score_history = [{
+                "x": budget.get("learning_coding_agent_acts", 0),
+                "score": summary.get("benchmark_score"),
+                "act_id": None,
+            }]
+            auc_points = [{
+                "coding_agent_act": budget.get("learning_coding_agent_acts", score_history[0]["x"]),
+                "episode": budget.get("learning_episodes"),
+                "env_step": budget.get("learning_env_steps"),
+                "token": budget.get("learning_total_tokens"),
+                "time_s": budget.get("learning_time_s"),
+                "score": score_history[0]["score"],
+            }]
+        ig_history = []
+        occupancy_history = []
+        for index, event in enumerate(events, start=1):
+            event_type = event.get("event_type", event.get("event"))
+            if event_type == "policy_kl_trace":
+                trace = event.get("trace")
+                if isinstance(trace, list) and trace:
+                    values = [float(value) for value in trace]
+                    ig_history.append({"episode": event.get("episode", index),
+                                       "ig": sum(values) / len(values),
+                                       "decision_steps": event.get("decision_steps", len(values))})
+            elif event_type == "occupancy":
+                state_ids = event.get("state_ids")
+                occupancy_history.append({
+                    "episode": event.get("episode", index),
+                    "shift": event.get("occupancy_shift"),
+                    "state_count": event.get("state_count", len(state_ids) if isinstance(state_ids, list) else None),
+                })
+        raw_score = summary.get("raw_score")
+        evo_score = summary.get("evo_score", summary.get("benchmark_score"))
+        gain = summary.get("gain")
+        if gain is None and raw_score is not None and evo_score is not None:
+            gain = float(evo_score) - float(raw_score)
+        quality = inspect_event_file(events_path).to_dict() if os.path.exists(events_path) else {
+            "total_lines": 0, "valid_events": 0, "warnings": []
+        }
+        return {
+            "benchmark_score": summary.get("benchmark_score", evo_score),
+            "raw_score": raw_score,
+            "evo_score": evo_score,
+            "gain": gain,
+            "evaluation_status": summary.get("evaluation_status", "complete" if evo_score is not None else "unknown"),
+            "budget": budget,
+            "score_history": score_history,
+            "auc": multi_axis_auc(auc_points) if auc_points else {},
+            "ig_history": ig_history,
+            "occupancy_history": occupancy_history,
+            "benchmark_results": summary.get("benchmark_results", []),
+            "event_counts": dict(Counter(event.get("event_type", event.get("event", "unknown")) for event in events)),
+            "raw_event_count": len(events),
+            "quality": quality,
+        }
 
     def _aggregate(self):
         """Build per-agent and per-game aggregations."""
@@ -139,6 +250,11 @@ class ReportBuilder:
         env = jinja2.Environment(
             loader=jinja2.FileSystemLoader(self.template_dir),
             autoescape=jinja2.select_autoescape(["html"]),
+        )
+        env.globals.update(
+            fmt_num=lambda value: "—" if value is None else (f"{value:.2f}" if isinstance(value, float) else str(value)),
+            fmt_pct=lambda value: "—" if value is None else f"{float(value) * 100:.1f}%",
+            status_class=lambda value: {"complete": "success", "incomplete": "warning", "failed": "danger"}.get(value, "muted"),
         )
 
         ctx = self._build_context()
@@ -207,6 +323,8 @@ class ReportBuilder:
             "num_runs": len(self.runs),
             "num_games": len(self.games),
             "num_agents": len(self.agents),
+            "latest": self.runs[0] if self.runs else None,
+            "latest_research": self.runs[0].get("research", {}) if self.runs else {},
         }
 
     def _simple_html(self, ctx: Dict[str, Any]) -> str:

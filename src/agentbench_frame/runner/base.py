@@ -22,6 +22,8 @@ class BaseRunner(ABC):
         runner.run()
     """
 
+    run_type = "eval"
+
     def __init__(self,
                  game: str,
                  agent: str,
@@ -55,6 +57,7 @@ class BaseRunner(ABC):
         run = Run.start(
             game=self.game,
             agent=self.agent_name,
+            run_type=self.config.get("run_type", self.run_type),
             data_dir=self.data_dir,
             config=self.config,
         )
@@ -80,8 +83,7 @@ class BaseRunner(ABC):
             result = {"error": str(e)}
 
         result["wall_time_s"] = time.time() - t0
-        summary = run.finish()
-        summary.update(result)
+        summary = run.finish(extra_summary=result)
         return summary
 
     def _create_env(self):

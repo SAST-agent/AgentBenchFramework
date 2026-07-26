@@ -184,6 +184,11 @@ class BaseEnv(ABC):
         """Return the recorded trajectory of this episode."""
         return self._trajectory.copy()
 
+    def canonical_state_id(self, observation: Observation) -> str:
+        """Return a stable ID for an adapter-visible observation."""
+        from agentbench_frame.eval.measurement import canonical_state_id
+        return canonical_state_id(observation)
+
     def render(self, mode: str = "text") -> Any:
         """Render the current game state."""
         raise NotImplementedError

@@ -19,6 +19,8 @@ class BaseRuleRunner(BaseRunner):
         runner.run()
     """
 
+    run_type = "rule_iter"
+
     def __init__(self, opponent: str = "random", **kwargs):
         super().__init__(**kwargs)
         self.opponent_name = opponent

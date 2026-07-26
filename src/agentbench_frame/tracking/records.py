@@ -23,6 +23,10 @@ class StepRecord:
     info: Dict[str, Any] = field(default_factory=dict)
     wall_time_ms: float = 0.0
     agent_time_ms: float = 0.0
+    terminated: Optional[bool] = None
+    truncated: Optional[bool] = None
+    termination_reason: Optional[str] = None
+    actor: Optional[str] = None
 
 
 @dataclass
