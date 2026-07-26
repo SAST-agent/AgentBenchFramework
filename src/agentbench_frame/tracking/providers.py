@@ -206,14 +206,24 @@ class _SubprocessProvider:
         if raw_path:
             target = Path(str(raw_path))
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(raw_output, encoding="utf-8")
+            limit = int(context.get("max_artifact_bytes", 10 * 1024 * 1024))
+            target.write_bytes(raw_output.encode("utf-8")[:limit])
             raw_ref = str(target)
         result = self.parser(raw_output)
         result.elapsed_time_s = elapsed
         result.raw_output_ref = raw_ref
         result.metadata["command"] = command
         result.metadata["return_code"] = completed.returncode
-        result.metadata["stderr"] = completed.stderr or ""
+        stderr = completed.stderr or ""
+        stderr_path = context.get("stderr_output_path")
+        if stderr_path:
+            target = Path(str(stderr_path))
+            target.parent.mkdir(parents=True, exist_ok=True)
+            limit = int(context.get("max_artifact_bytes", 10 * 1024 * 1024))
+            target.write_bytes(stderr.encode("utf-8", errors="replace")[:limit])
+            result.metadata["stderr_ref"] = str(target)
+        else:
+            result.metadata["stderr"] = stderr
         if completed.returncode != 0:
             result.status = "failed"
             result.error = result.error or (completed.stderr.strip() or f"provider exited {completed.returncode}")
@@ -237,6 +247,19 @@ class CodexProvider(_SubprocessProvider):
         sandbox = context.get("sandbox", self.sandbox)
         return [self.executable, "exec", "--json", "--sandbox", str(sandbox),
                 *self.extra_args, str(prompt)]
+
+    def cli_version(self) -> str | None:
+        try:
+            completed = subprocess.run(
+                [self.executable, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_s,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        return completed.stdout.strip() if completed.returncode == 0 else None
 
 
 class ClaudeCodeProvider(_SubprocessProvider):

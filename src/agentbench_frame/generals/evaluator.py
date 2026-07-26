@@ -131,6 +131,9 @@ class GeneralsEvaluator:
         per_tier: dict[str, float | None] = {}
         for tier in ("high", "medium", "low"):
             tier_cases = [case for case in selected if case.metadata["tier"] == tier]
+            if not tier_cases:
+                per_tier[tier] = None
+                continue
             tier_ids = {case.case_id for case in tier_cases}
             tier_results = [result for result in raw if result.case_id in tier_ids]
             per_tier[tier] = evaluate_benchmark(

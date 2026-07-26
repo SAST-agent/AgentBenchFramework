@@ -1,8 +1,10 @@
 """Local workspace manifest snapshots for version tracking."""
 
 import hashlib
+import difflib
 import json
 import os
+import shutil
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, Optional, Union
@@ -78,3 +80,59 @@ class LocalWorkspaceSnapshotter:
         target.parent.mkdir(parents=True, exist_ok=True)
         with open(target, "w", encoding="utf-8") as handle:
             json.dump(manifest.to_dict(), handle, indent=2, sort_keys=True)
+
+    def copy_snapshot(
+        self, root: PathLike, destination: PathLike
+    ) -> WorkspaceManifest:
+        root_path = Path(root).resolve()
+        target = Path(destination)
+        target.mkdir(parents=True, exist_ok=True)
+        manifest = self.capture(root_path)
+        for relative in manifest.files:
+            source = root_path / relative
+            output = target / relative
+            output.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, output)
+        self.write_manifest(manifest, target.parent / "manifest.json")
+        return manifest
+
+    def write_unified_patch(
+        self, before_root: PathLike, after_root: PathLike, destination: PathLike
+    ) -> None:
+        before = Path(before_root)
+        after = Path(after_root)
+        paths = sorted(
+            {
+                path.relative_to(before).as_posix()
+                for path in before.rglob("*")
+                if path.is_file() and not path.is_symlink()
+            }
+            | {
+                path.relative_to(after).as_posix()
+                for path in after.rglob("*")
+                if path.is_file() and not path.is_symlink()
+            }
+        )
+        chunks: list[str] = []
+        for relative in paths:
+            old_bytes = (before / relative).read_bytes() if (before / relative).is_file() else b""
+            new_bytes = (after / relative).read_bytes() if (after / relative).is_file() else b""
+            if old_bytes == new_bytes:
+                continue
+            try:
+                old_text = old_bytes.decode("utf-8").splitlines(keepends=True)
+                new_text = new_bytes.decode("utf-8").splitlines(keepends=True)
+            except UnicodeDecodeError:
+                chunks.append(f"Binary files a/{relative} and b/{relative} differ\n")
+                continue
+            chunks.extend(
+                difflib.unified_diff(
+                    old_text,
+                    new_text,
+                    fromfile=f"a/{relative}",
+                    tofile=f"b/{relative}",
+                )
+            )
+        target = Path(destination)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("".join(chunks), encoding="utf-8")
