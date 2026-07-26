@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
@@ -15,6 +15,7 @@ from agentbench_frame.eval.benchmark import (
 from agentbench_frame.tracking.run import Run
 
 from .models import MatchResult, PilotConfig
+from .dense import persist_dense_diagnostics
 
 
 @dataclass(frozen=True)
@@ -85,6 +86,34 @@ class GeneralsEvaluator:
             artifact_dir = Path(run.run_dir) / "matches" / version / case.case_id
             match = self.execute_match(case, workspace, version, artifact_dir)
             matches.append(match)
+            try:
+                dense_trace, dense_summary = persist_dense_diagnostics(
+                    match, artifact_dir
+                )
+                run.write(
+                    "dense_trajectory",
+                    case_id=case.case_id,
+                    version=version,
+                    phase=phase,
+                    evaluated_seat=case.first_player,
+                    trace=[asdict(sample) for sample in dense_trace],
+                    artifact_ref=str(artifact_dir / "dense-trace.jsonl"),
+                )
+                run.write(
+                    "dense_episode_summary",
+                    version=version,
+                    phase=phase,
+                    artifact_ref=str(artifact_dir / "dense-summary.json"),
+                    **asdict(dense_summary),
+                )
+            except Exception as exc:
+                run.write(
+                    "dense_metric_error",
+                    case_id=case.case_id,
+                    version=version,
+                    phase=phase,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
             if match.valid:
                 if match.winner == -1:
                     outcome = "draw"
@@ -118,6 +147,12 @@ class GeneralsEvaluator:
                 phase,
                 episodes=1,
                 env_steps=len(match.turns),
+                game_agent_decision_steps=sum(
+                    turn.player == match.evaluated_seat for turn in match.turns
+                ),
+                primitive_commands=sum(
+                    len(turn.commands) for turn in match.turns
+                ),
                 time_s=match.elapsed_time_s,
             )
             run.log_game_result(phase, version, {

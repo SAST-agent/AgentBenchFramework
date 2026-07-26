@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 from agentbench_frame.generals.assets import load_pilot_config
 from agentbench_frame.generals.evaluator import (
@@ -70,6 +71,14 @@ def test_complete_evaluation_scores_draw_as_half(tmp_path):
     assert result.score == 0.5
     assert set(result.per_tier) == {"high", "medium", "low"}
     assert run.budget_snapshot()["evaluation_episodes"] == 18
+    assert run.budget_snapshot()["evaluation_game_agent_decision_steps"] == 0
+    run.writer.flush()
+    events = [
+        json.loads(line)
+        for line in (Path(run.run_dir) / "events.jsonl").read_text().splitlines()
+    ]
+    assert sum(event["event_type"] == "dense_trajectory" for event in events) == 18
+    assert sum(event["event_type"] == "dense_episode_summary" for event in events) == 18
     run.finish()
 
 
