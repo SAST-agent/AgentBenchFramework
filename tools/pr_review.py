@@ -19,6 +19,7 @@ API_MODES = frozenset({"responses", "chat_completions"})
 SEVERITIES = frozenset({"P0", "P1", "P2", "P3"})
 _FENCED_JSON = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL | re.IGNORECASE)
 DEFAULT_API_MODE = "responses"
+DEFAULT_REASONING_EFFORT = "high"
 DEFAULT_TIMEOUT_S = 90.0
 MAX_INPUT_BYTES = 400_000
 REVIEW_INSTRUCTIONS = """You are the blocking code reviewer for AgentBenchFramework.
@@ -140,13 +141,20 @@ def review_should_fail(review: dict[str, Any]) -> bool:
     )
 
 
-def build_api_request(api_mode: str, model: str, instructions: str, payload: str) -> dict[str, Any]:
+def build_api_request(
+    api_mode: str,
+    model: str,
+    instructions: str,
+    payload: str,
+    reasoning_effort: str = DEFAULT_REASONING_EFFORT,
+) -> dict[str, Any]:
     """Build a JSON request body for the selected OpenAI-compatible API."""
     if api_mode == "responses":
         return {
             "model": model,
             "instructions": instructions,
             "input": payload,
+            "reasoning": {"effort": reasoning_effort},
             "text": {"format": {"type": "json_object"}},
         }
     if api_mode == "chat_completions":
@@ -156,6 +164,7 @@ def build_api_request(api_mode: str, model: str, instructions: str, payload: str
                 {"role": "system", "content": instructions},
                 {"role": "user", "content": payload},
             ],
+            "reasoning_effort": reasoning_effort,
             "response_format": {"type": "json_object"},
         }
     raise ValueError(f"unsupported api mode: {api_mode}")

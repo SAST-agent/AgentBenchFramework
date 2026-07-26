@@ -21,11 +21,16 @@
 - `PR_REVIEW_MODEL`：审查模型名，必填。
 - `PR_REVIEW_API_MODE`：`responses` 或 `chat_completions`；不配置时默认为 `responses`。
 
+如果使用 OpenAI GPT-5.6 Sol，填写 `PR_REVIEW_MODEL=gpt-5.6-sol`、
+`PR_REVIEW_API_MODE=responses`。审查请求已经固定使用 high reasoning effort：
+Responses 发送 `reasoning.effort=high`，Chat Completions 发送
+`reasoning_effort=high`，不需要额外配置变量。
+
 API key 不应写入 workflow、代码、PR 描述或普通变量。workflow 只在模型审查步骤注入该 Secret。
 
 ## Endpoint 请求与响应
 
-Responses 模式发送 `model`、`instructions`、`input` 和 JSON object text format；Chat Completions 模式发送 `model`、`messages` 和 JSON object response format。两种响应都会被转换为同一审查文档：
+Responses 模式发送 `model`、`instructions`、`input`、`reasoning.effort=high` 和 JSON object text format；Chat Completions 模式发送 `model`、`messages`、`reasoning_effort=high` 和 JSON object response format。两种响应都会被转换为同一审查文档：
 
 ```json
 {

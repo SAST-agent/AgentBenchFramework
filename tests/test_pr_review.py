@@ -135,12 +135,14 @@ def test_builds_protocol_specific_json_requests():
     assert responses["model"] == "review-model"
     assert responses["input"] == "diff"
     assert responses["text"]["format"] == {"type": "json_object"}
+    assert responses["reasoning"] == {"effort": "high"}
     assert chat["model"] == "review-model"
     assert chat["messages"] == [
         {"role": "system", "content": "system"},
         {"role": "user", "content": "diff"},
     ]
     assert chat["response_format"] == {"type": "json_object"}
+    assert chat["reasoning_effort"] == "high"
 
 
 def test_rejects_unknown_api_mode():
