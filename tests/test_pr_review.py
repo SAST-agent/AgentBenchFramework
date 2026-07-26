@@ -134,14 +134,24 @@ def test_builds_protocol_specific_json_requests():
 
     assert responses["model"] == "review-model"
     assert responses["input"] == "diff"
-    assert responses["text"]["format"] == {"type": "json_object"}
+    responses_format = responses["text"]["format"]
+    assert responses_format["type"] == "json_schema"
+    assert responses_format["name"] == "pr_review"
+    assert responses_format["strict"] is True
+    message_schema = responses_format["schema"]["properties"]["findings"]["items"]["properties"]["message"]
+    assert message_schema["type"] == "string"
+    assert "non-empty" in message_schema["description"]
     assert responses["reasoning"] == {"effort": "high"}
     assert chat["model"] == "review-model"
     assert chat["messages"] == [
         {"role": "system", "content": "system"},
         {"role": "user", "content": "diff"},
     ]
-    assert chat["response_format"] == {"type": "json_object"}
+    chat_format = chat["response_format"]
+    assert chat_format["type"] == "json_schema"
+    assert chat_format["json_schema"]["name"] == "pr_review"
+    assert chat_format["json_schema"]["strict"] is True
+    assert chat_format["json_schema"]["schema"] == responses_format["schema"]
     assert chat["reasoning_effort"] == "high"
 
 

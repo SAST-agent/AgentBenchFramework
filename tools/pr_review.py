@@ -22,10 +22,49 @@ DEFAULT_API_MODE = "responses"
 DEFAULT_REASONING_EFFORT = "high"
 DEFAULT_TIMEOUT_S = 90.0
 MAX_INPUT_BYTES = 400_000
+REVIEW_RESPONSE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "decision": {
+            "type": "string",
+            "enum": ["pass", "fail"],
+        },
+        "summary": {
+            "type": "string",
+            "description": "A concise non-empty review summary.",
+        },
+        "findings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "severity": {
+                        "type": "string",
+                        "enum": ["P0", "P1", "P2", "P3"],
+                    },
+                    "path": {"type": ["string", "null"]},
+                    "line": {"type": ["integer", "null"]},
+                    "message": {
+                        "type": "string",
+                        "description": "A concise non-empty actionable finding message.",
+                    },
+                    "suggestion": {"type": ["string", "null"]},
+                },
+                "required": ["severity", "path", "line", "message", "suggestion"],
+            },
+        },
+    },
+    "required": ["decision", "summary", "findings"],
+}
 REVIEW_INSTRUCTIONS = """You are the blocking code reviewer for AgentBenchFramework.
 Review the supplied pull request diff for correctness, scientific data integrity,
 reproducibility, process and secret safety, and forward compatibility. Only
-report actionable findings. P0/P1 findings block merging. Return ONLY the JSON
+report actionable findings. P0/P1 findings block merging. The response must
+conform to the supplied structured review schema. If there are no actionable
+findings, set findings to []. Never emit a placeholder finding: every finding
+message must contain a concrete, non-empty explanation. Return ONLY the JSON
 object required by the review response schema; do not use Markdown fences.
 """
 
@@ -155,7 +194,14 @@ def build_api_request(
             "instructions": instructions,
             "input": payload,
             "reasoning": {"effort": reasoning_effort},
-            "text": {"format": {"type": "json_object"}},
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "pr_review",
+                    "strict": True,
+                    "schema": REVIEW_RESPONSE_SCHEMA,
+                }
+            },
         }
     if api_mode == "chat_completions":
         return {
@@ -165,7 +211,14 @@ def build_api_request(
                 {"role": "user", "content": payload},
             ],
             "reasoning_effort": reasoning_effort,
-            "response_format": {"type": "json_object"},
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "pr_review",
+                    "strict": True,
+                    "schema": REVIEW_RESPONSE_SCHEMA,
+                },
+            },
         }
     raise ValueError(f"unsupported api mode: {api_mode}")
 
