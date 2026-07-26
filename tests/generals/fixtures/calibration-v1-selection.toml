@@ -1,0 +1,9 @@
+benchmark_id = "generals-hl-calibration-v1"
+selected_mode = "local-expander"
+source_hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+selection_rule = "closest_to_0.4_then_manifest_order"
+
+[development_scores]
+passive = 0.7
+local-expander = 0.3
+resource-greedy = 0.5

@@ -1,0 +1,8 @@
+benchmark_id = "generals-hl-calibration-v1"
+source = "calibration"
+candidate_modes = ["passive", "local-expander", "resource-greedy"]
+development_seeds = [282101, 282202, 282303, 282404, 282505]
+heldout_seeds = [282601, 282702, 282803, 282904, 283005]
+target_min = 0.2
+target_max = 0.6
+target_midpoint = 0.4

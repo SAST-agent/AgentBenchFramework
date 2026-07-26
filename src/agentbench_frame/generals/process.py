@@ -206,3 +206,27 @@ def build_baseline_process(
         cwd=workspace,
         env={"PYTHONPATH": os.pathsep.join(python_path), "PYTHONUNBUFFERED": "1"},
     )
+
+
+def build_calibration_process(
+    source_root: Path,
+    engine_root: Path,
+    python_executable: Path,
+    sdk_root: Path,
+    mode: str,
+) -> AgentProcessSpec:
+    from .assets import CALIBRATION_MODES
+
+    if mode not in CALIBRATION_MODES:
+        raise ValueError(f"unsupported calibration mode: {mode}")
+    python_path = (str(source_root), str(engine_root), str(sdk_root))
+    return AgentProcessSpec(
+        agent_id=f"calibration-{mode}",
+        argv=(str(python_executable), str(source_root / "main.py")),
+        cwd=source_root,
+        env={
+            "AGENTBENCH_CALIBRATION_MODE": mode,
+            "PYTHONPATH": os.pathsep.join(python_path),
+            "PYTHONUNBUFFERED": "1",
+        },
+    )

@@ -10,10 +10,21 @@ import shutil
 import subprocess
 import tomllib
 
-from .models import AgentProcessSpec, AssetLayout, OpponentSpec, PilotConfig, ProcessLimits
+from .models import (
+    AgentProcessSpec,
+    AssetLayout,
+    CalibrationConfig,
+    CalibrationSelection,
+    OpponentSpec,
+    PilotConfig,
+    ProcessLimits,
+)
 
 
 BENCHMARK_ID = "generals-hl-pilot-v1"
+CALIBRATION_BENCHMARK_ID = "generals-hl-calibration-v1"
+CALIBRATION_MODES = ("passive", "local-expander", "resource-greedy")
+CALIBRATION_SELECTION_RULE = "closest_to_0.4_then_manifest_order"
 FROZEN_LIMITS = ProcessLimits(10.0, 2.0, 600.0, 65_536, 10_485_760)
 EXPECTED_TIERS = ("high", "medium", "low")
 
@@ -70,6 +81,93 @@ def load_pilot_config(path: Path) -> PilotConfig:
 
     _validate_config(config)
     return config
+
+
+def load_calibration_config(path: Path) -> CalibrationConfig:
+    """Parse the separate weak-opponent calibration manifest."""
+    try:
+        raw = tomllib.loads(path.read_text(encoding="utf-8"))
+        config = CalibrationConfig(
+            benchmark_id=str(raw["benchmark_id"]),
+            source=Path(raw["source"]),
+            candidate_modes=_tuple_strings(
+                raw["candidate_modes"], "candidate_modes"
+            ),
+            development_seeds=tuple(int(item) for item in raw["development_seeds"]),
+            heldout_seeds=tuple(int(item) for item in raw["heldout_seeds"]),
+            target_min=float(raw["target_min"]),
+            target_max=float(raw["target_max"]),
+            target_midpoint=float(raw["target_midpoint"]),
+        )
+    except (OSError, tomllib.TOMLDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise AssetValidationError(f"invalid calibration manifest: {exc}") from exc
+    validate_calibration_config(config)
+    return config
+
+
+def validate_calibration_config(config: CalibrationConfig) -> None:
+    if config.benchmark_id != CALIBRATION_BENCHMARK_ID:
+        raise AssetValidationError(
+            f"calibration benchmark_id must be {CALIBRATION_BENCHMARK_ID}"
+        )
+    if config.candidate_modes != CALIBRATION_MODES:
+        raise AssetValidationError(
+            "candidate modes must be unique and ordered passive, "
+            "local-expander, resource-greedy"
+        )
+    if len(config.development_seeds) != 5 or len(set(config.development_seeds)) != 5:
+        raise AssetValidationError(
+            "development seeds must contain exactly five unique values"
+        )
+    if len(config.heldout_seeds) != 5 or len(set(config.heldout_seeds)) != 5:
+        raise AssetValidationError(
+            "heldout seeds must contain exactly five unique values"
+        )
+    if set(config.development_seeds) & set(config.heldout_seeds):
+        raise AssetValidationError("calibration seed sets must be disjoint")
+    if not 0.0 <= config.target_min <= config.target_max <= 1.0:
+        raise AssetValidationError("target range must lie within [0, 1]")
+    if not config.target_min <= config.target_midpoint <= config.target_max:
+        raise AssetValidationError("target midpoint must lie inside target range")
+    if config.source.is_absolute():
+        raise AssetValidationError("calibration source must be relative")
+
+
+def load_calibration_selection(
+    path: Path, config: CalibrationConfig
+) -> CalibrationSelection:
+    """Read a finalized development-only calibration selection."""
+    try:
+        raw = tomllib.loads(path.read_text(encoding="utf-8"))
+        scores = {
+            str(key): float(value)
+            for key, value in dict(raw["development_scores"]).items()
+        }
+        selection = CalibrationSelection(
+            benchmark_id=str(raw["benchmark_id"]),
+            selected_mode=str(raw["selected_mode"]),
+            source_hash=str(raw["source_hash"]),
+            development_scores=scores,
+            selection_rule=str(raw["selection_rule"]),
+        )
+    except (OSError, tomllib.TOMLDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise AssetValidationError(f"invalid calibration selection: {exc}") from exc
+    if selection.benchmark_id != config.benchmark_id:
+        raise AssetValidationError("selection benchmark_id does not match calibration")
+    if selection.selected_mode not in config.candidate_modes:
+        raise AssetValidationError("selected mode is not a declared candidate")
+    if (
+        len(selection.source_hash) != 64
+        or any(character not in "0123456789abcdef" for character in selection.source_hash)
+    ):
+        raise AssetValidationError("source_hash must be a lowercase SHA-256 digest")
+    if selection.selection_rule != CALIBRATION_SELECTION_RULE:
+        raise AssetValidationError("selection rule is not recognized")
+    if set(selection.development_scores) != set(config.candidate_modes):
+        raise AssetValidationError("development scores must cover every candidate mode")
+    if any(not 0.0 <= score <= 1.0 for score in selection.development_scores.values()):
+        raise AssetValidationError("development scores must lie within [0, 1]")
+    return selection
 
 
 def _validate_config(config: PilotConfig) -> None:
