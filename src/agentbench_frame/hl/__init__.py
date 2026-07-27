@@ -30,6 +30,12 @@ from agentbench_frame.hl.distribution import (
     LegalActionSet,
     FINISH,
 )
+from agentbench_frame.hl.adapter import stage_candidate, candidate_command
+from agentbench_frame.hl.reference import (
+    BenchmarkSpec,
+    ReferenceSample,
+    ReferenceStateSet,
+)
 
 __all__ = [
     "HLEventWriter",
@@ -48,4 +54,9 @@ __all__ = [
     "local_policy_kl_trace",
     "LegalActionSet",
     "FINISH",
+    "stage_candidate",
+    "candidate_command",
+    "BenchmarkSpec",
+    "ReferenceSample",
+    "ReferenceStateSet",
 ]
