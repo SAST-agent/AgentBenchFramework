@@ -94,28 +94,84 @@ class QueryHistoryTool(MCPTool):
             return {"success": False, "error": str(e)}
 
     def _load_history(self) -> List[Dict]:
-        """Load historical data from disk."""
+        """Load per-match history from the real run layout.
+
+        Reads ``{data_dir}/runs/{game}/{agent}/{run_id}/matches.jsonl`` and
+        yields one record per match, enriched with ``agent``/``opponent``/
+        ``winner`` keys so the existing query methods work unchanged. Falls
+        back to flat ``*.json`` files in ``data_dir`` for legacy layouts.
+        """
         if self._history_cache is not None:
             return self._history_cache
 
-        history = []
+        history: List[Dict] = []
 
         if not os.path.isdir(self.data_dir):
             self._history_cache = history
             return history
 
-        for fname in os.listdir(self.data_dir):
-            if fname.endswith(".json"):
-                fpath = os.path.join(self.data_dir, fname)
-                try:
-                    with open(fpath, "r") as f:
-                        data = json.load(f)
-                        if isinstance(data, list):
-                            history.extend(data)
-                        elif isinstance(data, dict):
-                            history.append(data)
-                except (json.JSONDecodeError, IOError):
+        runs_root = os.path.join(self.data_dir, "runs")
+        if os.path.isdir(runs_root):
+            # real layout: runs/{game}/{agent}/{run_id}/matches.jsonl
+            for game in os.listdir(runs_root):
+                game_dir = os.path.join(runs_root, game)
+                if not os.path.isdir(game_dir):
                     continue
+                for agent in os.listdir(game_dir):
+                    agent_dir = os.path.join(game_dir, agent)
+                    if not os.path.isdir(agent_dir):
+                        continue
+                    for run_id in os.listdir(agent_dir):
+                        mp = os.path.join(agent_dir, run_id, "matches.jsonl")
+                        if not os.path.exists(mp):
+                            continue
+                        # agent name comes from the summary if present,
+                        # else from the path segment.
+                        agent_name = agent
+                        sp = os.path.join(agent_dir, run_id, "summary.json")
+                        if os.path.exists(sp):
+                            try:
+                                with open(sp, "r", encoding="utf-8") as f:
+                                    summary = json.load(f)
+                                agent_name = summary.get("agent", agent)
+                            except (json.JSONDecodeError, IOError):
+                                pass
+                        try:
+                            with open(mp, "r", encoding="utf-8") as f:
+                                for line in f:
+                                    line = line.strip()
+                                    if not line:
+                                        continue
+                                    try:
+                                        rec = json.loads(line)
+                                    except json.JSONDecodeError:
+                                        continue
+                                    rec.setdefault("agent", agent_name)
+                                    rec.setdefault(
+                                        "opponent", rec.get("opponent", "")
+                                    )
+                                    # map candidate_result -> winner (0=cand
+                                    # win, 1=cand loss) for the query methods
+                                    res = rec.get("candidate_result")
+                                    if "winner" not in rec and res:
+                                        rec["winner"] = 0 if res == "win" else 1
+                                    history.append(rec)
+                        except IOError:
+                            continue
+        else:
+            # legacy: flat *.json files directly in data_dir
+            for fname in os.listdir(self.data_dir):
+                if fname.endswith(".json"):
+                    fpath = os.path.join(self.data_dir, fname)
+                    try:
+                        with open(fpath, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                            if isinstance(data, list):
+                                history.extend(data)
+                            elif isinstance(data, dict):
+                                history.append(data)
+                    except (json.JSONDecodeError, IOError):
+                        continue
 
         self._history_cache = history
         return history
