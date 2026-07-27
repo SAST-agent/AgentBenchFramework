@@ -1,0 +1,112 @@
+name: Framework PR trusted review
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: framework-pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  ai-pr-review:
+    name: ai-pr-review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout trusted base revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Fetch PR metadata and diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" > /tmp/pr-review-metadata.json
+          gh api --header 'Accept: application/vnd.github.v3.diff' \
+            "repos/${REPOSITORY}/pulls/${PR_NUMBER}" > /tmp/pr-review.diff
+      - name: Reject unsupported file count
+        env:
+          PR_REVIEW_METADATA_FILE: /tmp/pr-review-metadata.json
+        run: |
+          changed_files=$(python -c 'import json, sys; value=json.load(open(sys.argv[1], encoding="utf-8")).get("changed_files"); print(value if isinstance(value, int) and not isinstance(value, bool) else "")' "$PR_REVIEW_METADATA_FILE")
+          max_changed_files=300
+          if [ -z "$changed_files" ] || [ "$changed_files" -gt "$max_changed_files" ]; then
+            {
+              echo "### AI review"
+              echo "Rejected: GitHub reports ${changed_files:-an invalid} changed files; maximum supported is ${max_changed_files}."
+              echo "The blocking reviewer was not invoked because the diff may be incomplete."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+      - name: Reject oversized diff
+        env:
+          PR_REVIEW_DIFF_FILE: /tmp/pr-review.diff
+        run: |
+          diff_bytes=$(wc -c < "$PR_REVIEW_DIFF_FILE")
+          max_diff_bytes=350000
+          if [ "$diff_bytes" -gt "$max_diff_bytes" ]; then
+            {
+              echo "### AI review"
+              echo "Rejected: PR diff is ${diff_bytes} bytes; maximum is ${max_diff_bytes}."
+              echo "The blocking reviewer was not invoked."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+      - name: Build bounded review input
+        env:
+          PR_REVIEW_METADATA_FILE: /tmp/pr-review-metadata.json
+          PR_REVIEW_DIFF_FILE: /tmp/pr-review.diff
+          PR_REVIEW_INPUT_JSON: /tmp/pr-review-input.json
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          metadata = json.loads(Path(os.environ["PR_REVIEW_METADATA_FILE"]).read_text(encoding="utf-8"))
+          raw_diff = Path(os.environ["PR_REVIEW_DIFF_FILE"]).read_bytes()
+          diff = raw_diff.decode("utf-8", errors="replace")
+          payload = {
+              "repository": os.environ["GITHUB_REPOSITORY"],
+              "pull_request": {
+                  "number": metadata.get("number"),
+                  "title": metadata.get("title"),
+                  "url": metadata.get("html_url"),
+                  "base_sha": (metadata.get("base") or {}).get("sha"),
+                  "head_sha": (metadata.get("head") or {}).get("sha"),
+              },
+              "diff": diff,
+              "diff_truncated": False,
+              "diff_bytes": len(raw_diff),
+              "review_policy": {
+                  "block_on": ["P0", "P1", "decision=fail"],
+                  "focus": [
+                      "correctness",
+                      "scientific data integrity",
+                      "reproducibility",
+                      "process and secret safety",
+                      "forward compatibility",
+                  ],
+              },
+          }
+          Path(os.environ["PR_REVIEW_INPUT_JSON"]).write_text(
+              json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+          )
+          PY
+      - name: Run blocking AI review
+        env:
+          PR_REVIEW_API_KEY: ${{ secrets.PR_REVIEW_API_KEY }}
+          PR_REVIEW_ENDPOINT: ${{ secrets.PR_REVIEW_ENDPOINT }}
+          PR_REVIEW_MODEL: ${{ vars.PR_REVIEW_MODEL }}
+          PR_REVIEW_API_MODE: ${{ vars.PR_REVIEW_API_MODE || 'responses' }}
+          PR_REVIEW_INPUT_JSON: /tmp/pr-review-input.json
+          PR_REVIEW_TIMEOUT_S: "90"
+        run: python tools/pr_review.py

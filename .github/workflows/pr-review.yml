@@ -1,0 +1,30 @@
+name: Framework PR checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: framework-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  framework-tests:
+    name: framework-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout PR merge ref
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip && python -m pip install -e ".[tracking,report]" pytest
+      - name: Run test suite
+        run: python -m pytest -q
