@@ -20,8 +20,8 @@ Example::
       --acts 5 --pairs 3 --seats 0 --timeout 15 \\
       --dangerously-skip-permissions
 
-See ``ITERATE-HL.md`` (or the run-process walkthrough printed at the end of a
-dry run) for the full procedure.
+See ``hl/README.md`` for the full operator guide (env setup, run procedure,
+data layout, customizing opponents/ν/acts, gotchas).
 """
 from __future__ import annotations
 
