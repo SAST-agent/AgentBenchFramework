@@ -19,12 +19,54 @@ API_MODES = frozenset({"responses", "chat_completions"})
 SEVERITIES = frozenset({"P0", "P1", "P2", "P3"})
 _FENCED_JSON = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL | re.IGNORECASE)
 DEFAULT_API_MODE = "responses"
+DEFAULT_REASONING_EFFORT = "high"
 DEFAULT_TIMEOUT_S = 90.0
 MAX_INPUT_BYTES = 400_000
+CAPABILITY_FALLBACK_STATUS_CODES = frozenset({400, 422})
+GATEWAY_RETRY_STATUS_CODES = frozenset({502, 503, 504})
+REVIEW_RESPONSE_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "decision": {
+            "type": "string",
+            "enum": ["pass", "fail"],
+        },
+        "summary": {
+            "type": "string",
+            "description": "A concise non-empty review summary.",
+        },
+        "findings": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "severity": {
+                        "type": "string",
+                        "enum": ["P0", "P1", "P2", "P3"],
+                    },
+                    "path": {"type": ["string", "null"]},
+                    "line": {"type": ["integer", "null"]},
+                    "message": {
+                        "type": "string",
+                        "description": "A concise non-empty actionable finding message.",
+                    },
+                    "suggestion": {"type": ["string", "null"]},
+                },
+                "required": ["severity", "path", "line", "message", "suggestion"],
+            },
+        },
+    },
+    "required": ["decision", "summary", "findings"],
+}
 REVIEW_INSTRUCTIONS = """You are the blocking code reviewer for AgentBenchFramework.
 Review the supplied pull request diff for correctness, scientific data integrity,
 reproducibility, process and secret safety, and forward compatibility. Only
-report actionable findings. P0/P1 findings block merging. Return ONLY the JSON
+report actionable findings. P0/P1 findings block merging. The response must
+conform to the supplied structured review schema. If there are no actionable
+findings, set findings to []. Never emit a placeholder finding: every finding
+message must contain a concrete, non-empty explanation. Return ONLY the JSON
 object required by the review response schema; do not use Markdown fences.
 """
 
@@ -140,24 +182,59 @@ def review_should_fail(review: dict[str, Any]) -> bool:
     )
 
 
-def build_api_request(api_mode: str, model: str, instructions: str, payload: str) -> dict[str, Any]:
+def build_api_request(
+    api_mode: str,
+    model: str,
+    instructions: str,
+    payload: str,
+    reasoning_effort: str | None = DEFAULT_REASONING_EFFORT,
+    structured_outputs: bool = True,
+) -> dict[str, Any]:
     """Build a JSON request body for the selected OpenAI-compatible API."""
     if api_mode == "responses":
-        return {
+        request = {
             "model": model,
             "instructions": instructions,
             "input": payload,
-            "text": {"format": {"type": "json_object"}},
+            "text": {
+                "format": (
+                    {
+                        "type": "json_schema",
+                        "name": "pr_review",
+                        "strict": True,
+                        "schema": REVIEW_RESPONSE_SCHEMA,
+                    }
+                    if structured_outputs
+                    else {"type": "json_object"}
+                ),
+            },
         }
+        if reasoning_effort is not None:
+            request["reasoning"] = {"effort": reasoning_effort}
+        return request
     if api_mode == "chat_completions":
-        return {
+        request = {
             "model": model,
             "messages": [
                 {"role": "system", "content": instructions},
                 {"role": "user", "content": payload},
             ],
-            "response_format": {"type": "json_object"},
+            "response_format": (
+                {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "pr_review",
+                        "strict": True,
+                        "schema": REVIEW_RESPONSE_SCHEMA,
+                    },
+                }
+                if structured_outputs
+                else {"type": "json_object"}
+            ),
         }
+        if reasoning_effort is not None:
+            request["reasoning_effort"] = reasoning_effort
+        return request
     raise ValueError(f"unsupported api mode: {api_mode}")
 
 
@@ -199,6 +276,25 @@ def _write_summary(review: dict[str, Any] | None, error: str | None, secret: str
         handle.write(content)
 
 
+def _post_review_request(
+    endpoint: str,
+    api_key: str,
+    request_body: dict[str, Any],
+    timeout: float,
+) -> dict[str, Any]:
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
 def _emit_review(review: dict[str, Any], secret: str) -> None:
     print(f"PR review decision={review['decision']} findings={len(review['findings'])}")
     print(_redact(review["summary"], secret))
@@ -232,19 +328,49 @@ def run_review() -> int:
         payload_bytes = payload.encode("utf-8")
         if len(payload_bytes) > MAX_INPUT_BYTES:
             raise ValueError(f"review input exceeds {MAX_INPUT_BYTES} bytes")
-        request_body = build_api_request(api_mode, model, REVIEW_INSTRUCTIONS, payload)
-        request = urllib.request.Request(
-            endpoint,
-            data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
         timeout = float(os.environ.get("PR_REVIEW_TIMEOUT_S", DEFAULT_TIMEOUT_S))
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            response_data = json.loads(response.read().decode("utf-8"))
+        request_body = build_api_request(api_mode, model, REVIEW_INSTRUCTIONS, payload)
+        try:
+            response_data = _post_review_request(endpoint, api_key, request_body, timeout)
+        except urllib.error.HTTPError as exc:
+            if exc.code in GATEWAY_RETRY_STATUS_CODES:
+                retry_request = build_api_request(
+                    api_mode,
+                    model,
+                    REVIEW_INSTRUCTIONS,
+                    payload,
+                    reasoning_effort=None,
+                )
+                try:
+                    response_data = _post_review_request(
+                        endpoint, api_key, retry_request, timeout
+                    )
+                except urllib.error.HTTPError as retry_exc:
+                    if retry_exc.code not in GATEWAY_RETRY_STATUS_CODES:
+                        raise
+                    legacy_request = build_api_request(
+                        api_mode,
+                        model,
+                        REVIEW_INSTRUCTIONS,
+                        payload,
+                        reasoning_effort=None,
+                        structured_outputs=False,
+                    )
+                    response_data = _post_review_request(
+                        endpoint, api_key, legacy_request, timeout
+                    )
+            elif exc.code in CAPABILITY_FALLBACK_STATUS_CODES:
+                legacy_request = build_api_request(
+                    api_mode,
+                    model,
+                    REVIEW_INSTRUCTIONS,
+                    payload,
+                    reasoning_effort=None,
+                    structured_outputs=False,
+                )
+                response_data = _post_review_request(endpoint, api_key, legacy_request, timeout)
+            else:
+                raise
         if isinstance(response_data, dict) and {"decision", "summary", "findings"} <= response_data.keys():
             review = parse_review_document(json.dumps(response_data, ensure_ascii=False))
         else:

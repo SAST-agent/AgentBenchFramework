@@ -2,8 +2,6 @@ name: Framework PR checks
 
 on:
   pull_request:
-    branches:
-      - worktree/framework
     types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:

@@ -134,13 +134,25 @@ def test_builds_protocol_specific_json_requests():
 
     assert responses["model"] == "review-model"
     assert responses["input"] == "diff"
-    assert responses["text"]["format"] == {"type": "json_object"}
+    responses_format = responses["text"]["format"]
+    assert responses_format["type"] == "json_schema"
+    assert responses_format["name"] == "pr_review"
+    assert responses_format["strict"] is True
+    message_schema = responses_format["schema"]["properties"]["findings"]["items"]["properties"]["message"]
+    assert message_schema["type"] == "string"
+    assert "non-empty" in message_schema["description"]
+    assert responses["reasoning"] == {"effort": "high"}
     assert chat["model"] == "review-model"
     assert chat["messages"] == [
         {"role": "system", "content": "system"},
         {"role": "user", "content": "diff"},
     ]
-    assert chat["response_format"] == {"type": "json_object"}
+    chat_format = chat["response_format"]
+    assert chat_format["type"] == "json_schema"
+    assert chat_format["json_schema"]["name"] == "pr_review"
+    assert chat_format["json_schema"]["strict"] is True
+    assert chat_format["json_schema"]["schema"] == responses_format["schema"]
+    assert chat["reasoning_effort"] == "high"
 
 
 def test_rejects_unknown_api_mode():
@@ -197,6 +209,72 @@ def test_cli_supports_chat_completions_mode(tmp_path):
 
     assert result.returncode == 0
     assert "messages" in seen["body"]
+
+
+def test_cli_falls_back_to_legacy_json_when_structured_output_is_rejected(tmp_path):
+    seen = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            seen.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            if len(seen) == 1:
+                self.send_response(400)
+                self.end_headers()
+                return
+            body = {"output_text": json.dumps({
+                "decision": "pass", "summary": "ok", "findings": [],
+            })}
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(body).encode())
+
+        def log_message(self, *_args):
+            return
+
+    with serve(Handler) as endpoint:
+        result = _run_cli(_cli_env(tmp_path, endpoint))
+
+    assert result.returncode == 0
+    assert len(seen) == 2
+    assert seen[0]["text"]["format"]["type"] == "json_schema"
+    assert seen[0]["reasoning"] == {"effort": "high"}
+    assert seen[1]["text"]["format"] == {"type": "json_object"}
+    assert "reasoning" not in seen[1]
+
+
+def test_cli_retries_strict_schema_without_reasoning_after_gateway_timeout(tmp_path):
+    seen = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            seen.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            if len(seen) <= 2:
+                self.send_response(504)
+                self.end_headers()
+                return
+            body = {"output_text": json.dumps({
+                "decision": "pass", "summary": "ok", "findings": [],
+            })}
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(body).encode())
+
+        def log_message(self, *_args):
+            return
+
+    with serve(Handler) as endpoint:
+        result = _run_cli(_cli_env(tmp_path, endpoint))
+
+    assert result.returncode == 0
+    assert len(seen) == 3
+    assert seen[0]["text"]["format"]["type"] == "json_schema"
+    assert seen[0]["reasoning"] == {"effort": "high"}
+    assert seen[1]["text"]["format"]["type"] == "json_schema"
+    assert "reasoning" not in seen[1]
+    assert seen[2]["text"]["format"] == {"type": "json_object"}
+    assert "reasoning" not in seen[2]
 
 
 @pytest.mark.parametrize("env_name", [
