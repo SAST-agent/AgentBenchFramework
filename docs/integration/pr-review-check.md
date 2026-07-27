@@ -3,9 +3,9 @@
 该仓库的 PR 检查包含两个 check：
 
 - `Framework PR checks / framework-tests`：在 PR 合并引用上运行完整 pytest。
-- `Framework PR checks / ai-pr-review`：读取 PR diff，调用外部审查 endpoint。
+- `Framework PR trusted review / ai-pr-review`：在 trusted base 上读取 PR diff，调用外部审查 endpoint。
 
-两个 check 任意失败时都会返回失败；只有在仓库保护规则中将它们设为 required 后，失败才会阻止合并。workflow 监听所有 PR 目标分支，但目标分支必须已经包含该 workflow 文件；长期接收 PR 的分支需要同步同一份 workflow。
+两个 check 任意失败时都会返回失败；只有在仓库保护规则中将它们设为 required 后，失败才会阻止合并。测试 workflow 监听所有 PR 目标分支；trusted review workflow 使用 `pull_request_target`，其定义从目标分支的 trusted base 加载。长期接收 PR 的分支需要同步两份 workflow 文件。
 
 ## GitHub 配置
 
@@ -56,15 +56,17 @@ Responses 模式优先发送 `model`、`instructions`、`input`、`reasoning.eff
 
 ## 安全边界
 
-模型审查 job 只 checkout PR 的 trusted base revision，并通过 GitHub API 读取 diff；它不会执行 PR head 中的代码。测试 job 可以执行 PR 合并引用，但不接触 API key。
+两个 workflow 有意分开：`pr-review.yml` 运行在普通 `pull_request` 上，只 checkout 和执行 PR 合并引用中的测试代码，但不接触任何审查 Secret；`pr-review-trusted.yml` 运行在 `pull_request_target` 上，workflow 定义从目标分支的 trusted base 加载，并只 checkout `github.event.pull_request.base.sha`。
+
+模型审查 job 通过 GitHub API 读取 PR 元数据和 diff，把它们作为 JSON 数据传给 trusted base 中的 `tools/pr_review.py`；它不会 checkout、导入或执行 PR head 中的代码。`persist-credentials: false` 也会关闭 trusted checkout 中不必要的 Git 凭据持久化。
 
 PR diff 最大允许 350,000 字节，且最多允许 300 个 changed files；任一上限超出时在调用模型前直接失败，不发送任何前缀，也不允许模型对不完整 diff 给出通过结论。审查结果只写入 Actions Summary 和 workflow annotations，不自动修改 PR 或提交代码。
 
-Fork PR 无法读取仓库 Secrets，因此 `ai-pr-review` fail-closed，不伪装成通过；需要维护者提供一个只使用 trusted base、且不 checkout 或执行 fork head 的受控审查路径后才能合并。`framework-tests` 仍验证 PR 合并引用。对于同仓 PR，缺少审查凭据也 fail-closed。
+由于审查 job 使用 `pull_request_target` 的 trusted base 上下文，fork PR 也可以获得同一套审查流程；这不意味着可以执行 fork head。所有 PR 都只把 API 获取的 diff 当作不可信数据处理，缺少审查凭据、HTTP 错误、超时或非法响应仍然 fail-closed。
 
 ## 首次接入 main 的两阶段 bootstrap
 
-`main` 首次接入时必须分两步完成。第一步只把 `tools/pr_review.py`、它的测试和本文档放入 `main`，不同时放入 workflow；这是因为审查 job 必须 checkout trusted base revision，而 bootstrap PR 的 base 还没有审查工具。第一步合并后，再提交第二个 PR，把 `.github/workflows/pr-review.yml` 和 workflow 契约测试加入 `main`。第二步成功后，后续 PR 才会正常同时运行两个 check，随后才能在 `main` 上启用 required checks。
+`main` 首次接入时必须分两步完成。第一步只把 `tools/pr_review.py`、它的测试和本文档放入 `main`，不同时放入 workflow；这是因为审查 job 必须 checkout trusted base revision，而 bootstrap PR 的 base 还没有审查工具。第一步合并后，再提交第二个 PR，把普通测试 workflow、trusted review workflow 和 workflow 契约测试加入 `main`。由于 `pull_request_target` 必须从 base 分支加载定义，第二步 bootstrap PR 本身只能先依靠普通测试和维护者审查；两份 workflow 进入 `main` 后，后续 PR 才会正常运行两个 check，随后才能在 `main` 上启用 required checks。
 
 这个 bootstrap 顺序避免了让 AI job 执行 PR head 中尚未进入 trusted base 的代码，也避免了用一次性的 PR 编号特判 workflow。
 
@@ -74,7 +76,7 @@ Fork PR 无法读取仓库 Secrets，因此 `ai-pr-review` fail-closed，不伪�
 
 ```text
 Framework PR checks / framework-tests
-Framework PR checks / ai-pr-review
+Framework PR trusted review / ai-pr-review
 ```
 
 其他实际接收 PR 的长期分支也应同步 workflow 并设置相同的 required checks；临时 feature 分支不单独设置保护规则。
