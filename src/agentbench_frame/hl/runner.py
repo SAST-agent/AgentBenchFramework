@@ -98,22 +98,51 @@ class ClaudeCodeRunner:
     Constructs even if the claude binary isn't found (fails on ``run()``
     instead) so importing this module never breaks in test environments
     without the CLI.
+
+    Real-CLI knobs:
+    - ``system_prompt`` → ``--append-system-prompt`` (the HL role + rules).
+    - ``permission_mode`` → ``--permission-mode`` (default ``acceptEdits`` so
+      the non-interactive run can edit files without prompting). Use
+      ``bypassPermissions`` (= ``--dangerously-skip-permissions``) for a
+      fully autonomous loop, but only when you trust the sandbox.
+    - ``model`` → ``--model``.
     """
 
     def __init__(self, *, claude_path: str = "claude",
                  extra_args: Optional[List[str]] = None,
-                 print_format: str = "json"):
+                 print_format: str = "json",
+                 system_prompt: Optional[str] = None,
+                 permission_mode: str = "acceptEdits",
+                 dangerously_skip_permissions: bool = False,
+                 model: Optional[str] = None):
         self.claude_path = claude_path
         self.extra_args = list(extra_args or [])
         self.print_format = print_format
+        self.system_prompt = system_prompt
+        self.permission_mode = permission_mode
+        self.dangerously_skip_permissions = dangerously_skip_permissions
+        self.model = model
+
+    def _build_argv(self, prompt: str) -> List[str]:
+        argv = [self.claude_path, "-p", prompt,
+                "--output-format", self.print_format]
+        if self.system_prompt:
+            argv += ["--append-system-prompt", self.system_prompt]
+        if self.dangerously_skip_permissions:
+            argv.append("--dangerously-skip-permissions")
+        elif self.permission_mode:
+            argv += ["--permission-mode", self.permission_mode]
+        if self.model:
+            argv += ["--model", self.model]
+        argv.extend(self.extra_args)
+        return argv
 
     def run(self, *, workspace: Path, context: Dict[str, Any]
             ) -> AgentRunResult:
         import json as _json
         import time as _time
         prompt = context.get("prompt") or self._default_prompt(context)
-        argv = [self.claude_path, "-p", prompt, "--output-format", self.print_format]
-        argv.extend(self.extra_args)
+        argv = self._build_argv(prompt)
         started = _time.monotonic()
         try:
             proc = subprocess.run(

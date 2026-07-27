@@ -60,6 +60,7 @@ class HLIterationController:
         evaluator_factory: Optional[EvaluatorFactory] = None,
         probe_factory: Optional[ProbeFactory] = None,
         stage_root: Optional[Path] = None,
+        context_builder: Optional[Callable[..., Dict[str, Any]]] = None,
     ):
         self.codebase = codebase
         self.runner = runner
@@ -70,6 +71,7 @@ class HLIterationController:
         self._evaluator_factory = evaluator_factory
         self._probe_factory = probe_factory or ReferenceProbe
         self._stage_root = Path(stage_root) if stage_root else codebase.root.parent / "stage"
+        self._context_builder = context_builder
         self._events = HLEventWriter(run_id=run_id, path=events_path)
         self._act_counter = 0
         self._budget = {
@@ -97,7 +99,17 @@ class HLIterationController:
         )
 
         # 2. run the coding agent against the workspace
-        context = {"act_id": act_id, "spec_id": self.spec.spec_id}
+        context: Dict[str, Any] = {"act_id": act_id, "spec_id": self.spec.spec_id}
+        if self._context_builder is not None:
+            try:
+                extra = self._context_builder(
+                    version_before=version_before, act_id=act_id,
+                )
+                if extra:
+                    context.update(extra)
+            except Exception:
+                # context is best-effort; never let it break the act loop
+                pass
         run_result = self.runner.run(workspace=self.codebase.root, context=context)
         runner_time = run_result.time_s
 
@@ -181,17 +193,14 @@ class HLIterationController:
     # ---- internals ----
 
     def _run_eval(self, version: VersionHandle):
-        from agentbench_frame.hl.adapter import candidate_command
-        cmd, cwd = candidate_command(version, store=self.codebase.store,
-                                      dest=self._stage_root / version.version_id)
+        """Run the frozen benchmark eval on ``version``.
+
+        The evaluator_factory (supplied by the CLI) captures the real
+        logic command, opponents, and filler — it builds a LostSpaceEvaluator
+        given ``(version, spec, run_id)`` and returns its ``evaluate()`` result.
+        """
         ev = self._evaluator_factory(
-            logic_command=_logic_command_stub(),
-            candidate_name=f"hl-{version.version_id}",
-            candidate_command=_cmd_to_str(cmd, cwd),
-            opponents=[_opponent(o) for o in self.spec.opponents],
-            filler_command=_cmd_to_str(cmd, cwd),
-            pairs=self.spec.pairs, seats=self.spec.seats,
-            timeout=self.spec.timeout,
+            version=version, spec=self.spec, run_id=self.run_id,
         )
         return ev.evaluate()
 
@@ -246,20 +255,3 @@ class HLIterationController:
         reached_new = sum(1 for e in emitted_new if e is not None)
         total = max(1, len(emitted_old))
         return abs(reached_old - reached_new) / total
-
-
-def _logic_command_stub() -> str:
-    # The controller's eval path uses an injected evaluator factory in tests;
-    # in production this is the real lostspace logic command. Placeholder.
-    return "echo"
-
-
-def _opponent(name: str):
-    from agentbench_frame.lostspace.evaluator import Opponent
-    return Opponent(name=name, command="echo")
-
-
-def _cmd_to_str(cmd, cwd) -> str:
-    import shlex
-    parts = [shlex.quote(c) for c in cmd]
-    return " ".join(parts)
