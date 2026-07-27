@@ -131,7 +131,7 @@ def _cmd_data_check(args):
         errs = []
         # Check run.toml
         try:
-            meta = tomllib.loads(run_toml_path.read_text())
+            meta = tomllib.loads(run_toml_path.read_text(encoding="utf-8"))
             for field in ["run_id", "game", "agent", "type", "created"]:
                 val = meta.get("run", {}).get(field, "")
                 if not val:
@@ -145,7 +145,7 @@ def _cmd_data_check(args):
             errs.append("missing summary.json")
         else:
             try:
-                s = json.loads(summary_path.read_text())
+                s = json.loads(summary_path.read_text(encoding="utf-8"))
                 for field in ["run_id", "game", "agent", "wall_hours", "total_steps", "win_rate"]:
                     if field not in s:
                         errs.append(f"summary.json: missing '{field}'")
@@ -176,7 +176,7 @@ def _cmd_data_list(args):
     for run_dir in sorted(runs_root.rglob("summary.json")):
         rel = run_dir.parent.relative_to(data_dir)
         try:
-            s = json.loads(run_dir.read_text())
+            s = json.loads(run_dir.read_text(encoding="utf-8"))
             print(f"  {s.get('game','?')}/{s.get('agent','?')}  "
                   f"type={s.get('run_type','?')}  "
                   f"Elo={s.get('best_elo','-')}  "

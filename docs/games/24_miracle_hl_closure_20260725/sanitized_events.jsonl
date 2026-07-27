@@ -1,0 +1,8 @@
+﻿{"event":"game","game_id":"v0_rank04_00_camp0","version":"v0","opponent":"rank04","split":"train","camp":0,"valid":true,"normalized_result":"win","steps":784,"error_type":null}
+{"event":"game","game_id":"v0_rank04_01_camp1","version":"v0","opponent":"rank04","split":"train","camp":1,"valid":true,"normalized_result":"loss","steps":963,"error_type":null}
+{"event":"game","game_id":"v0_rank09_00_camp0","version":"v0","opponent":"rank09","split":"validation","camp":0,"valid":true,"normalized_result":"win","steps":688,"error_type":null}
+{"event":"game","game_id":"v0_rank09_01_camp1","version":"v0","opponent":"rank09","split":"validation","camp":1,"valid":true,"normalized_result":"loss","steps":729,"error_type":null}
+{"event":"game","game_id":"v1_rank04_00_camp0","version":"v1","opponent":"rank04","split":"train","camp":0,"valid":true,"normalized_result":"win","steps":784,"error_type":null}
+{"event":"game","game_id":"v1_rank04_01_camp1","version":"v1","opponent":"rank04","split":"train","camp":1,"valid":true,"normalized_result":"loss","steps":963,"error_type":null}
+{"event":"game","game_id":"v1_rank09_00_camp0","version":"v1","opponent":"rank09","split":"validation","camp":0,"valid":true,"normalized_result":"win","steps":688,"error_type":null}
+{"event":"game","game_id":"v1_rank09_01_camp1","version":"v1","opponent":"rank09","split":"validation","camp":1,"valid":true,"normalized_result":"loss","steps":729,"error_type":null}

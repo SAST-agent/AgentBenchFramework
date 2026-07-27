@@ -1,0 +1,10 @@
+﻿{
+    "rank04":  {
+                   "role":  "train",
+                   "sha256":  "024536e586604a7ce1b59ac5ba9e78e454d5c5ead0abaa8b3c1980c2ca2799d0"
+               },
+    "rank09":  {
+                   "role":  "validation",
+                   "sha256":  "1929f2e9ae6404da0b240b3b05e7cb3872cbea6d81680fcba11a34633ed349fc"
+               }
+}

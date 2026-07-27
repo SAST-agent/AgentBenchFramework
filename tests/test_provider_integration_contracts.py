@@ -102,26 +102,66 @@ class ProviderParsingContractTests(unittest.TestCase):
             self.assertEqual(events[0]["provider_metadata"]["provider_status"], "success")
 
     def test_codex_provider_captures_process_stream_and_return_status(self):
+        """Codex provider invokes a real subprocess and parses its JSONL stream.
+
+        Cross-platform real subprocess: instead of a ``#!/bin/sh`` script (which
+        the Windows loader rejects with ``WinError 193``), this test runs an
+        argv form ``[sys.executable, path_to_fake_codex.py]``. The fake codex
+        is a real Python script that emits the same two JSONL events. The
+        provider's ``executable`` parameter accepts either a single string
+        (legacy) or a pre-split argv list — this uses argv to exercise the
+        cross-platform path.
+        """
         from agentbench_frame.tracking.providers import CodexProvider
 
         with tempfile.TemporaryDirectory() as tmp:
-            executable = Path(tmp) / "fake-codex"
-            executable.write_text(
-                "#!/bin/sh\n"
-                "printf '%s\\n' '{\"type\":\"thread.started\",\"thread_id\":\"fake\"}'\n"
-                "printf '%s\\n' '{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":2,\"output_tokens\":3}}'\n"
+            fake = Path(tmp) / "fake_codex.py"
+            fake.write_text(
+                # Emit the two codex-JSONL events every real Codex CLI prints:
+                #   1) thread.started
+                #   2) turn.completed with usage (token count)
+                "import json, sys; "
+                "print(json.dumps({'type': 'thread.started', 'thread_id': 'fake'})); "
+                "print(json.dumps({'type': 'turn.completed', "
+                "'usage': {'input_tokens': 2, 'output_tokens': 3}}))",
+                encoding="utf-8",
             )
-            executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
             raw = Path(tmp) / "raw.jsonl"
 
-            result = CodexProvider(executable=str(executable)).invoke({
+            # argv pre-split guaranteed cross-platform;[sys.executable,
+            # script.py] runs a real process on Windows AND POSIX.
+            argv = [sys.executable, str(fake)]
+            result = CodexProvider(executable=argv, sandbox="workspace-write").invoke({
                 "prompt": "do it", "workspace_root": tmp, "raw_output_path": str(raw),
             })
 
             self.assertEqual(result.status, "completed")
             self.assertEqual(result.usage.total_tokens, 5)
+            self.assertEqual(result.usage.prompt_tokens, 2)
+            self.assertEqual(result.usage.completion_tokens, 3)
             self.assertEqual(result.raw_output_ref, str(raw))
-            self.assertIn("turn.completed", raw.read_text())
+            self.assertIn("turn.completed", raw.read_text(encoding="utf-8"))
+            # provider should record return_code 0 (the fake script exits cleanly)
+            self.assertEqual(result.metadata.get("return_code"), 0)
+
+    def test_codex_provider_accepts_legacy_string_executable(self):
+        """Backward compatibility: a plain string ``executable`` continues to
+        be split by shlex and used as the argv[0:] prefix. We exercise this
+        without invoking a shell: route through ``sys.executable`` so the path
+        round-trips even when it contains spaces (Windows Python install path).
+        """
+        from agentbench_frame.tracking.providers import CodexProvider
+
+        p = CodexProvider(executable="codex")
+        # ``executable`` may be stored as either a string or a list; both
+        # backward-compatible forms are accepted. The contract: build_command
+        # prepends whatever we passed.
+        cmd = p.build_command({"prompt": "hi", "workspace_root": "/nowhere"})
+        # first element is the literal "codex" string, then the subcommand
+        # tokens the Codex CLI accepts; the prompt is appended last.
+        self.assertEqual(cmd[0], "codex")
+        self.assertEqual(cmd[1:5], ["exec", "--json", "--sandbox", "workspace-write"])
+        self.assertEqual(cmd[-1], "hi")
 
 
 if __name__ == "__main__":
