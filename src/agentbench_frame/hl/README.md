@@ -114,7 +114,7 @@ BACKEND="E:/HL_Agent/AgentBench/backend_sources/corpus/25_lostspace/logic/gameco
 
 PYTHONPATH=src uv run python -m agentbench_frame.hl \
   --logic "cd /d \"$BACKEND\" && python main.py" \
-  --initial-candidate ./candidates/v1 \
+  --initial-candidate src/agentbench_frame/lostspace/candidates/v1 \
   --name hl-v1 \
   --reference ./agentbench_data/reference/nu-v1.json \
   --ladder-opponent rank=6 \
@@ -130,7 +130,7 @@ $BACKEND = "E:/HL_Agent/AgentBench/backend_sources/corpus/25_lostspace/logic/gam
 
 uv run python -m agentbench_frame.hl `
   --logic "cd /d `"$BACKEND`" && python main.py" `
-  --initial-candidate ./candidates/v1 `
+  --initial-candidate src/agentbench_frame/lostspace/candidates/v1 `
   --name hl-v1 `
   --reference ./agentbench_data/reference/nu-v1.json `
   --ladder-opponent rank=6 `
@@ -319,7 +319,14 @@ Only `status == 0` (Alive) states are decision points.
 ### 6.4 Codebase shape
 
 `--initial-candidate` is a directory copied into the workspace. It **must**
-contain `agent.py`. A `manifest.toml` is optional (single-file default):
+contain `agent.py`. The bundled starting points live at
+`src/agentbench_frame/lostspace/candidates/v{1..4}/` — v1 is the official
+sample AI copy; v2–v4 are iterating candidates. Pick one, e.g.
+`--initial-candidate src/agentbench_frame/lostspace/candidates/v1`.
+
+A `manifest.toml` is optional — with none, the harness defaults the
+entrypoint to `agent.py` (the bundled candidates ship without one and work).
+If you add one (single-file shape):
 
 ```toml
 shape = "single_file"
