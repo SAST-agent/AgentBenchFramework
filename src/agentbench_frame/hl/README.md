@@ -78,10 +78,22 @@ A `claude` CLI must be installed and authenticated (`claude --version` works).
 
 ### 3.1 Produce the frozen ReferenceStateSet ν (once per spec)
 
+Assuming `PYTHONPATH=src` is already set in your shell (§2):
+
 ```bash
-PYTHONPATH=src uv run python -m agentbench_frame.hl.reference_seed \
+# bash
+uv run python -m agentbench_frame.hl.reference_seed \
   --out ./agentbench_data/reference/nu-v1.json --spec-id hl-v1
 ```
+
+```powershell
+# PowerShell
+uv run python -m agentbench_frame.hl.reference_seed `
+  --out ./agentbench_data/reference/nu-v1.json --spec-id hl-v1
+```
+
+(If you skipped §2, set it inline first: bash
+`PYTHONPATH=src uv run ...`; PowerShell `$env:PYTHONPATH="src"` then run.)
 
 Writes 3 hand-authored decision points in the exact
 `get_legal_actions()` shape. This ν is frozen — re-use the same file across
@@ -270,20 +282,34 @@ The bundled sample AI pads empty seats (override with `--filler`).
 
 ### 6.3 Your own ν
 
-Hand-author a JSON file in the seed format (the easiest path):
+Hand-author a JSON file in the seed format (the easiest path). Save this as
+`make_nu.py` (multi-line `python -c` is painful in PowerShell, so use a file):
 
-```bash
-PYTHONPATH=src uv run python -c "
+```python
+# make_nu.py
 from agentbench_frame.hl.reference import ReferenceSample, ReferenceStateSet
-nu = ReferenceStateSet(spec_id='hl-v1', samples=(
-    ReferenceSample(observation={...}, legal_actions={'attack':[],'move':[True]*8,
-                       'detect':True,'interprops':[]},
-                    inventory={'LandMine':0,'Sticky':0,'Transport':0,'Kit':0},
-                    status=0, seat=0, opponent='rank06'),
+
+nu = ReferenceStateSet(spec_id="hl-v1", samples=(
+    ReferenceSample(
+        observation={...},
+        legal_actions={"attack": [], "move": [True] * 8,
+                       "detect": True, "interprops": []},
+        inventory={"LandMine": 0, "Sticky": 0, "Transport": 0, "Kit": 0},
+        status=0, seat=0, opponent="rank06"),
     # ... more decision points
 ))
-nu.save('nu-v1.json')
-"
+nu.save("nu-v1.json")
+```
+
+Then run it (both shells, with `PYTHONPATH=src` set per §2):
+
+```bash
+# bash
+PYTHONPATH=src uv run python make_nu.py
+```
+```powershell
+# PowerShell
+$env:PYTHONPATH="src"; uv run python make_nu.py
 ```
 
 `legal_actions` must match `Player.get_legal_actions()` exactly:
