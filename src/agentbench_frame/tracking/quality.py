@@ -19,6 +19,10 @@ KNOWN_EVENT_TYPES = frozenset({
     "dense_episode_summary", "dense_metric_error", "lineage_import",
     "behavior_change_episode",
     "provider_retry",
+    "learning_validation",
+    "decision_class_summary",
+    "behavior_gate",
+    "behavior_measurement_error",
 })
 
 

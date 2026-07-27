@@ -376,6 +376,80 @@ class LocalResearchReportTests(unittest.TestCase):
             for pair in pairs
         ))
 
+    def test_round3_preserves_failed_act_gap_gate_and_decision_classes(self):
+        from agentbench_frame.report.builder import ReportBuilder
+
+        research = ReportBuilder._derive_research(
+            {
+                "benchmark_score": 0.35,
+                "raw_score": 0.0,
+                "evo_score_1": 0.1,
+                "evo_score_2": 0.2,
+                "evo_score_3": 0.35,
+                "gain_3": 0.35,
+                "score_history": [0.0, 0.1, None, 0.2, 0.35],
+                "behavior_gate": {
+                    "passed": True,
+                    "conditions": {"behavior_changed": True},
+                },
+                "budget": {"learning_coding_agent_acts": 1},
+            },
+            [
+                {
+                    "event_type": "decision_class_summary",
+                    "version": "v2",
+                    "total": 100,
+                    "counts": {"main_army_move": 97},
+                    "rates": {"main_army_move": 0.97},
+                },
+                {
+                    "event_type": "decision_class_summary",
+                    "version": "v3",
+                    "total": 100,
+                    "counts": {"non_main_army_move": 30},
+                    "rates": {"non_main_army_move": 0.3},
+                },
+                {
+                    "event_type": "behavior_gate",
+                    "passed": True,
+                    "conditions": {"behavior_changed": True},
+                    "dense_deltas": {
+                        "terminal_territory_share": 0.05,
+                    },
+                },
+            ],
+            "/missing/events.jsonl",
+        )
+
+        self.assertEqual(research["evo_score"], 0.35)
+        self.assertEqual(research["gain"], 0.35)
+        self.assertEqual(
+            [point["x"] for point in research["score_history"]],
+            [0, 1, 2, 3, 4],
+        )
+        self.assertEqual(
+            [point["score"] for point in research["score_history"]],
+            [0.0, 0.1, None, 0.2, 0.35],
+        )
+        self.assertEqual(
+            research["score_history"][2]["status"],
+            "missing",
+        )
+        self.assertTrue(research["behavior_gate"]["passed"])
+        self.assertEqual(
+            [
+                item["version"]
+                for item in research["decision_class_history"]
+            ],
+            ["v2", "v3"],
+        )
+        self.assertEqual(
+            research["decision_class_history"][1]["counts"][
+                "non_main_army_move"
+            ],
+            30,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

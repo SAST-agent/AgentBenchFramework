@@ -383,7 +383,18 @@ class ReportBuilder:
                 "time_s": event.get("time_s"),
                 "score": score,
             })
-        if "evo_score_1" in summary or "evo_score_2" in summary:
+        declared_score_history = summary.get("score_history")
+        if isinstance(declared_score_history, list):
+            score_history = [
+                {
+                    "x": index,
+                    "score": score,
+                    "act_id": None,
+                    **({"status": "missing"} if score is None else {}),
+                }
+                for index, score in enumerate(declared_score_history)
+            ]
+        elif "evo_score_1" in summary or "evo_score_2" in summary:
             score_history = [
                 {"x": 0, "score": summary.get("raw_score"), "act_id": None},
                 {"x": 1, "score": summary.get("evo_score_1"), "act_id": None},
@@ -408,6 +419,8 @@ class ReportBuilder:
         action_disagreement_history = []
         behavior_episode_history = []
         dense_history = []
+        decision_class_history = []
+        behavior_gate_event = None
         for index, event in enumerate(events, start=1):
             event_type = event.get("event_type", event.get("event"))
             if event_type == "policy_kl_trace":
@@ -468,6 +481,26 @@ class ReportBuilder:
                     ),
                     "artifact_ref": event.get("artifact_ref"),
                 })
+            elif event_type == "decision_class_summary":
+                decision_class_history.append({
+                    "version": event.get("version"),
+                    "learning_id": event.get("learning_id"),
+                    "total": event.get("total"),
+                    "counts": event.get("counts", {}),
+                    "rates": event.get("rates", {}),
+                })
+            elif event_type == "behavior_gate":
+                behavior_gate_event = {
+                    "passed": event.get("passed"),
+                    "conditions": event.get("conditions", {}),
+                    "improved_dense_metrics": event.get(
+                        "improved_dense_metrics", []
+                    ),
+                    "dense_deltas": event.get("dense_deltas", {}),
+                    "action_disagreement": event.get(
+                        "action_disagreement"
+                    ),
+                }
         for aggregate in action_disagreement_history:
             episodes = [
                 item
@@ -495,10 +528,19 @@ class ReportBuilder:
                 )
         raw_score = summary.get("raw_score")
         evo_score = summary.get(
-            "evo_score_2",
-            summary.get("evo_score", summary.get("benchmark_score")),
+            "evo_score_3",
+            summary.get(
+                "evo_score_2",
+                summary.get(
+                    "evo_score",
+                    summary.get("benchmark_score"),
+                ),
+            ),
         )
-        gain = summary.get("gain_2", summary.get("gain"))
+        gain = summary.get(
+            "gain_3",
+            summary.get("gain_2", summary.get("gain")),
+        )
         if gain is None and raw_score is not None and evo_score is not None:
             gain = float(evo_score) - float(raw_score)
         quality = inspect_event_file(events_path).to_dict() if os.path.exists(events_path) else {
@@ -542,6 +584,12 @@ class ReportBuilder:
             "calibration": calibration,
             "dense_history": dense_history,
             "dense_pairs": ReportBuilder._pair_dense_history(dense_history),
+            "decision_class_history": decision_class_history,
+            "behavior_gate": (
+                behavior_gate_event
+                if behavior_gate_event is not None
+                else summary.get("behavior_gate")
+            ),
             "cumulative_learning_budget": summary.get(
                 "cumulative_learning_budget"
             ),

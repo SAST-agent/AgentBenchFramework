@@ -97,6 +97,29 @@ class ResearchBoundaryTests(unittest.TestCase):
         self.assertEqual(report.valid_events, 8)
         self.assertEqual(report.unknown_event_types, 1)
 
+    def test_round3_diagnostics_are_known_event_types(self):
+        from agentbench_frame.tracking.quality import inspect_event_lines
+
+        lines = [
+            json.dumps({
+                "event_type": event_type,
+                "event_id": f"event-{index}",
+                "run_id": "run-v3",
+            })
+            for index, event_type in enumerate(
+                (
+                    "learning_validation",
+                    "decision_class_summary",
+                    "behavior_gate",
+                    "behavior_measurement_error",
+                )
+            )
+        ]
+
+        report = inspect_event_lines(lines)
+
+        self.assertEqual(report.unknown_event_types, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -22,6 +22,7 @@ from .pipeline_v2 import (
     GeneralsHLRound2Pipeline,
     calibrate_development,
 )
+from .pipeline_v3 import GeneralsHLRound3Pipeline
 
 
 def register_parser(subparsers) -> argparse.ArgumentParser:
@@ -45,6 +46,10 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
             "recover-v2",
             "Retry a pre-thread provider failure without reopening held-out",
         ),
+        (
+            "iterate-v3",
+            "Run strongest-human v2 learning → one gated Codex act → v3",
+        ),
     ):
         command = commands.add_parser(name, help=help_text)
         command.add_argument("--agentbench-root", type=Path, required=True)
@@ -53,12 +58,20 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
             command.add_argument("--data-dir", type=Path, required=True)
         if name == "eval":
             command.add_argument("--version", choices=("v0",), default="v0")
-        if name in {"iterate", "iterate-v2", "recover-v2"}:
+        if name in {"iterate", "iterate-v2", "recover-v2", "iterate-v3"}:
             command.add_argument("--codex-executable", default="codex")
             command.add_argument("--provider-timeout", type=float, default=1800)
         if name in {"calibrate-dev", "iterate-v2", "recover-v2"}:
             command.add_argument(
                 "--calibration-manifest", type=Path, required=True
+            )
+            command.add_argument("--parent-run", type=Path, required=True)
+            command.add_argument("--expected-parent-hash", required=True)
+        if name == "iterate-v3":
+            command.add_argument(
+                "--learning-manifest",
+                type=Path,
+                required=True,
             )
             command.add_argument("--parent-run", type=Path, required=True)
             command.add_argument("--expected-parent-hash", required=True)
@@ -159,6 +172,29 @@ def handle(args) -> int:
                 "calibration_score": result.calibration_score,
                 "global_act_count": result.global_act_count,
                 "round_act_count": result.round_act_count,
+            }, sort_keys=True))
+            return 0 if result.status == "complete" else 1
+        if args.generals_command == "iterate-v3":
+            result = GeneralsHLRound3Pipeline.from_paths(
+                agentbench_root=args.agentbench_root,
+                manifest_path=args.manifest,
+                learning_manifest_path=args.learning_manifest,
+                parent_run_dir=args.parent_run,
+                expected_parent_hash=args.expected_parent_hash,
+                data_dir=args.data_dir,
+                provider=provider,
+            ).run()
+            print(json.dumps({
+                "status": result.status,
+                "run_dir": str(result.run_dir),
+                "raw_score": result.raw_score,
+                "evo_score_1": result.evo_score_1,
+                "evo_score_2": result.evo_score_2,
+                "evo_score_3": result.evo_score_3,
+                "gain_3": result.gain_3,
+                "global_act_count": result.global_act_count,
+                "round_act_count": result.round_act_count,
+                "behavior_gate_passed": result.gate_passed,
             }, sort_keys=True))
             return 0 if result.status == "complete" else 1
         result = GeneralsHLPipeline(
