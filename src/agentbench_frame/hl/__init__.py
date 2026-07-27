@@ -41,6 +41,14 @@ from agentbench_frame.hl.resources import (
     ReplayView,
     VersionDiffView,
 )
+from agentbench_frame.hl.probe import ReferenceProbe, EmittedAction
+from agentbench_frame.hl.runner import (
+    CodingAgentRunner,
+    FakeRunner,
+    ClaudeCodeRunner,
+    AgentRunResult,
+)
+from agentbench_frame.hl.controller import HLIterationController
 
 __all__ = [
     "HLEventWriter",
@@ -67,4 +75,11 @@ __all__ = [
     "MatchHistoryView",
     "ReplayView",
     "VersionDiffView",
+    "ReferenceProbe",
+    "EmittedAction",
+    "CodingAgentRunner",
+    "FakeRunner",
+    "ClaudeCodeRunner",
+    "AgentRunResult",
+    "HLIterationController",
 ]

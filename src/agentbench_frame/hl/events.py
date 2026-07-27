@@ -97,6 +97,10 @@ class HLEventWriter:
             self._fh.flush()
             self._fh.close()
 
+    def flush(self):
+        if not self._fh.closed:
+            self._fh.flush()
+
     def __enter__(self):
         return self
 
