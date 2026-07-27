@@ -45,6 +45,7 @@ def _cli_env(tmp_path: Path, endpoint: str, mode: str = "responses") -> dict[str
         "PR_REVIEW_ENDPOINT": endpoint,
         "PR_REVIEW_MODEL": "review-model",
         "PR_REVIEW_API_MODE": mode,
+        "PR_REVIEW_RETRY_BACKOFF_S": "0",
         "PR_REVIEW_INPUT_JSON": str(_input_file(tmp_path)),
     }
 
@@ -243,13 +244,13 @@ def test_cli_falls_back_to_legacy_json_when_structured_output_is_rejected(tmp_pa
     assert "reasoning" not in seen[1]
 
 
-def test_cli_retries_strict_schema_without_reasoning_after_gateway_timeout(tmp_path):
+def test_cli_falls_back_after_same_request_gateway_retries(tmp_path):
     seen = []
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):  # noqa: N802
             seen.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
-            if len(seen) <= 2:
+            if len(seen) <= 3:
                 self.send_response(504)
                 self.end_headers()
                 return
@@ -268,13 +269,61 @@ def test_cli_retries_strict_schema_without_reasoning_after_gateway_timeout(tmp_p
         result = _run_cli(_cli_env(tmp_path, endpoint))
 
     assert result.returncode == 0
-    assert len(seen) == 3
+    assert len(seen) == 4
     assert seen[0]["text"]["format"]["type"] == "json_schema"
     assert seen[0]["reasoning"] == {"effort": "high"}
-    assert seen[1]["text"]["format"]["type"] == "json_schema"
-    assert "reasoning" not in seen[1]
-    assert seen[2]["text"]["format"] == {"type": "json_object"}
-    assert "reasoning" not in seen[2]
+    assert seen[1] == seen[0]
+    assert seen[2] == seen[0]
+    assert seen[3]["text"]["format"]["type"] == "json_schema"
+    assert "reasoning" not in seen[3]
+
+
+def test_cli_retries_same_request_after_gateway_timeout(tmp_path):
+    seen = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            seen.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            if len(seen) == 1:
+                self.send_response(504)
+                self.end_headers()
+                return
+            body = {"output_text": json.dumps({
+                "decision": "pass", "summary": "ok", "findings": [],
+            })}
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(body).encode())
+
+        def log_message(self, *_args):
+            return
+
+    with serve(Handler) as endpoint:
+        result = _run_cli(_cli_env(tmp_path, endpoint))
+
+    assert result.returncode == 0
+    assert len(seen) == 2
+    assert seen[0] == seen[1]
+
+
+def test_cli_does_not_retry_non_gateway_http_error(tmp_path):
+    seen = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            seen.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            self.send_response(401)
+            self.end_headers()
+
+        def log_message(self, *_args):
+            return
+
+    with serve(Handler) as endpoint:
+        result = _run_cli(_cli_env(tmp_path, endpoint))
+
+    assert result.returncode != 0
+    assert len(seen) == 1
 
 
 @pytest.mark.parametrize("env_name", [
