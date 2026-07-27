@@ -18,6 +18,7 @@ from .models import (
     OpponentSpec,
     PilotConfig,
     ProcessLimits,
+    Round3LearningConfig,
 )
 
 
@@ -27,6 +28,14 @@ CALIBRATION_MODES = ("passive", "local-expander", "resource-greedy")
 CALIBRATION_SELECTION_RULE = "closest_to_0.4_then_manifest_order"
 FROZEN_LIMITS = ProcessLimits(10.0, 2.0, 600.0, 65_536, 10_485_760)
 EXPECTED_TIERS = ("high", "medium", "low")
+ROUND3_LEARNING_ID = "generals-hl-v3-strongest-v1"
+PREVIOUSLY_FROZEN_GENERALS_SEEDS = frozenset({
+    280101, 280202, 280303,
+    281101, 281202, 281303,
+    282101, 282202, 282303, 282404, 282505,
+    282601, 282702, 282803, 282904, 283005,
+    283101, 283202, 283303,
+})
 
 
 class AssetValidationError(ValueError):
@@ -102,6 +111,47 @@ def load_calibration_config(path: Path) -> CalibrationConfig:
     except (OSError, tomllib.TOMLDecodeError, KeyError, TypeError, ValueError) as exc:
         raise AssetValidationError(f"invalid calibration manifest: {exc}") from exc
     validate_calibration_config(config)
+    return config
+
+
+def load_round3_learning_config(
+    path: Path,
+    pilot: PilotConfig,
+) -> Round3LearningConfig:
+    """Parse the frozen strongest-human learning matrix for the v3 rescue."""
+    try:
+        raw = tomllib.loads(path.read_text(encoding="utf-8"))
+        config = Round3LearningConfig(
+            learning_id=str(raw["learning_id"]),
+            opponent_id=str(raw["opponent_id"]),
+            seeds=tuple(int(item) for item in raw["seeds"]),
+            seats=tuple(int(item) for item in raw["seats"]),
+        )
+    except (OSError, tomllib.TOMLDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise AssetValidationError(
+            f"invalid round-3 learning manifest: {exc}"
+        ) from exc
+    if config.learning_id != ROUND3_LEARNING_ID:
+        raise AssetValidationError(
+            f"round-3 learning_id must be {ROUND3_LEARNING_ID}"
+        )
+    if len(config.seeds) != 3 or len(set(config.seeds)) != 3:
+        raise AssetValidationError(
+            "round-3 learning seeds must contain exactly three unique values"
+        )
+    if set(config.seeds) & PREVIOUSLY_FROZEN_GENERALS_SEEDS:
+        raise AssetValidationError(
+            "round-3 learning seeds overlap a previously frozen seed set"
+        )
+    if config.seats != (0, 1):
+        raise AssetValidationError(
+            "round-3 learning seats must be ordered [0, 1]"
+        )
+    highest = pilot.opponents[0]
+    if highest.tier != "high" or config.opponent_id != highest.opponent_id:
+        raise AssetValidationError(
+            "round-3 learning opponent must be the frozen highest-tier opponent"
+        )
     return config
 
 

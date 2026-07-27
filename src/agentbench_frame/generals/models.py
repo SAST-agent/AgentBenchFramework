@@ -45,6 +45,14 @@ class PilotConfig:
 
 
 @dataclass(frozen=True)
+class Round3LearningConfig:
+    learning_id: str
+    opponent_id: str
+    seeds: tuple[int, ...]
+    seats: tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class CalibrationConfig:
     benchmark_id: str
     source: Path

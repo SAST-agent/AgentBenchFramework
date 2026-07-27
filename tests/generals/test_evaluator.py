@@ -1,17 +1,24 @@
 from pathlib import Path
 import json
 
-from agentbench_frame.generals.assets import load_pilot_config
+from agentbench_frame.generals.assets import (
+    load_pilot_config,
+    load_round3_learning_config,
+)
 from agentbench_frame.generals.evaluator import (
     GeneralsEvaluator,
     build_evaluation_spec,
     build_learning_cases,
+    build_round3_learning_cases,
 )
 from agentbench_frame.generals.models import MatchResult
 from agentbench_frame.tracking.run import Run
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "pilot-v1.toml"
+ROUND3_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "v3-strongest-learning-v1.toml"
+)
 
 
 def test_evaluation_matrix_is_exactly_three_by_three_by_two():
@@ -33,6 +40,23 @@ def test_learning_cases_exclude_high_and_evaluation_seeds():
         "popular-rank16-xiaoaojianghu-v1",
     }
     assert {case.seed for case in cases}.isdisjoint({280101, 280202, 280303})
+
+
+def test_round3_learning_cases_use_only_strongest_human_both_seats():
+    config = load_pilot_config(FIXTURE)
+    learning = load_round3_learning_config(ROUND3_FIXTURE, config)
+
+    cases = build_round3_learning_cases(config, learning)
+
+    assert len(cases) == 6
+    assert len({case.case_id for case in cases}) == 6
+    assert {case.opponent for case in cases} == {
+        "advanced-rank02-robinliu-v18"
+    }
+    assert {case.metadata["tier"] for case in cases} == {"high"}
+    assert {case.seed for case in cases} == {284101, 284202, 284303}
+    assert {case.first_player for case in cases} == {0, 1}
+    assert all(case.case_id.startswith("learn3-high-") for case in cases)
 
 
 class FakeMatches:

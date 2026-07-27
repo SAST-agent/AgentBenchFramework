@@ -14,7 +14,7 @@ from agentbench_frame.eval.benchmark import (
 )
 from agentbench_frame.tracking.run import Run
 
-from .models import MatchResult, PilotConfig
+from .models import MatchResult, PilotConfig, Round3LearningConfig
 from .dense import persist_dense_diagnostics
 
 
@@ -69,6 +69,23 @@ def build_round2_learning_cases(config: PilotConfig) -> tuple[BenchmarkCase, ...
         for opponent in config.learning_opponents
         for seed in seeds
         for seat in (0, 1)
+    )
+
+
+def build_round3_learning_cases(
+    config: PilotConfig,
+    learning: Round3LearningConfig,
+) -> tuple[BenchmarkCase, ...]:
+    """Build the frozen v3 strongest-human matrix on learning-only seeds."""
+    opponent = next(
+        item
+        for item in config.opponents
+        if item.opponent_id == learning.opponent_id
+    )
+    return tuple(
+        _case(opponent, seed, seat, "learn3")
+        for seed in learning.seeds
+        for seat in learning.seats
     )
 
 
