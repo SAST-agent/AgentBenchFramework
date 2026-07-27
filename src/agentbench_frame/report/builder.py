@@ -133,6 +133,210 @@ class ReportBuilder:
 
         # Sort by started_at (newest first)
         self.runs.sort(key=lambda r: r.get("started_at", 0), reverse=True)
+        self._link_round2_learning_budgets()
+
+    @staticmethod
+    def _pair_dense_history(
+        dense_history: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        metrics = (
+            "territory_share",
+            "target_army",
+            "army_margin",
+            "coin_share",
+            "net_main_pressure",
+        )
+        statistics = ("terminal", "time_average", "auc")
+        grouped: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+        for item in dense_history:
+            if (
+                item.get("phase") != "evaluation"
+                or item.get("version") not in {"v1", "v2"}
+                or not item.get("case_id")
+            ):
+                continue
+            grouped.setdefault(
+                str(item["case_id"]), {"v1": [], "v2": []}
+            )[str(item["version"])].append(item)
+        pairs = []
+        for case_id in sorted(grouped):
+            versions = grouped[case_id]
+            v1_items = versions["v1"]
+            v2_items = versions["v2"]
+            v1 = v1_items[0] if len(v1_items) == 1 else None
+            v2 = v2_items[0] if len(v2_items) == 1 else None
+            if len(v1_items) > 1 or len(v2_items) > 1:
+                status = "duplicate_version"
+            elif v1 is None:
+                status = "missing_v1"
+            elif v2 is None:
+                status = "missing_v2"
+            else:
+                status = "complete"
+            survival_delta = None
+            if status == "complete":
+                before = v1.get("completed_rounds_survived")
+                after = v2.get("completed_rounds_survived")
+                if before is not None and after is not None:
+                    survival_delta = float(after) - float(before)
+            deltas: Dict[str, Dict[str, float | None]] = {}
+            for metric in metrics:
+                deltas[metric] = {}
+                for statistic in statistics:
+                    value = None
+                    if status == "complete":
+                        before = (v1.get(metric) or {}).get(statistic)
+                        after = (v2.get(metric) or {}).get(statistic)
+                        if before is not None and after is not None:
+                            value = float(after) - float(before)
+                    deltas[metric][statistic] = value
+            pairs.append({
+                "case_id": case_id,
+                "status": status,
+                "v1": v1,
+                "v2": v2,
+                "completed_rounds_survived_delta": survival_delta,
+                "deltas": deltas,
+            })
+        return pairs
+
+    @staticmethod
+    def _sum_learning_budgets(
+        budgets: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        keys = (
+            "learning_coding_agent_acts",
+            "learning_episodes",
+            "learning_env_steps",
+            "learning_game_agent_decision_steps",
+            "learning_primitive_commands",
+            "learning_prompt_tokens",
+            "learning_completion_tokens",
+            "learning_total_tokens",
+            "learning_time_s",
+        )
+        result = {}
+        for key in keys:
+            values = [budget.get(key) for budget in budgets]
+            result[key] = (
+                sum(values)
+                if values and all(value is not None for value in values)
+                else None
+            )
+        return result
+
+    def _link_round2_learning_budgets(self) -> None:
+        """Resolve cumulative global-curve coordinates across recovery runs."""
+        by_id = {run.get("run_id"): run for run in self.runs}
+        axis_keys = {
+            "episode": "learning_episodes",
+            "env_step": "learning_env_steps",
+            "token": "learning_total_tokens",
+            "time_s": "learning_time_s",
+        }
+        for run in self.runs:
+            research = run.get("research", {})
+            parent = run.get("parent_learning_budget")
+            cumulative = run.get("cumulative_learning_budget")
+            recovery_from = run.get("recovery_from_run_id")
+            source = by_id.get(recovery_from, {}) if recovery_from else {}
+            if recovery_from:
+                parent = source.get("parent_learning_budget") or {}
+                source_budget = dict(
+                    run.get("source_learning_budget")
+                    or source.get("budget")
+                    or {}
+                )
+                cumulative = self._sum_learning_budgets(
+                    [dict(parent), source_budget, dict(run.get("budget") or {})]
+                )
+                source_dense = [
+                    {
+                        **item,
+                        "reused_from_run_id": recovery_from,
+                    }
+                    for item in source.get("research", {}).get(
+                        "dense_history", []
+                    )
+                    if item.get("version") == "v1"
+                    and item.get("phase") == "evaluation"
+                ]
+                current_dense = research.get("dense_history", [])
+                current_keys = {
+                    (item.get("case_id"), item.get("version"))
+                    for item in current_dense
+                }
+                research["dense_history"] = [
+                    item
+                    for item in source_dense
+                    if (item.get("case_id"), item.get("version"))
+                    not in current_keys
+                ] + current_dense
+                research["dense_pairs"] = self._pair_dense_history(
+                    research["dense_history"]
+                )
+                global_acts = cumulative.get(
+                    "learning_coding_agent_acts"
+                )
+                if global_acts is not None:
+                    failed_act = int(global_acts) - 1
+                    research["score_history"] = [
+                        {
+                            "x": 0,
+                            "score": run.get("raw_score"),
+                            "act_id": None,
+                        },
+                        {
+                            "x": 1,
+                            "score": run.get("evo_score_1"),
+                            "act_id": None,
+                        },
+                        {
+                            "x": failed_act,
+                            "score": None,
+                            "act_id": None,
+                            "status": "provider_failed",
+                        },
+                        {
+                            "x": int(global_acts),
+                            "score": run.get("evo_score_2"),
+                            "act_id": None,
+                        },
+                    ]
+            elif cumulative is None and parent:
+                cumulative = self._sum_learning_budgets(
+                    [dict(parent), dict(run.get("budget") or {})]
+                )
+            if cumulative is None:
+                continue
+            research["cumulative_learning_budget"] = cumulative
+            scores = (
+                run.get("raw_score"),
+                run.get("evo_score_1"),
+                run.get("evo_score_2"),
+            )
+            for axis, key in axis_keys.items():
+                before = parent.get(key) if isinstance(parent, dict) else None
+                after = cumulative.get(key)
+                value = None
+                if (
+                    all(score is not None for score in scores)
+                    and before is not None
+                    and after is not None
+                ):
+                    raw, evo1, evo2 = (float(score) for score in scores)
+                    if not recovery_from:
+                        x1 = float(before)
+                        x2 = float(after)
+                        value = (
+                            0.5 * (raw + evo1) * x1
+                            + 0.5 * (evo1 + evo2) * (x2 - x1)
+                        )
+                research.setdefault("auc", {})[f"auc_{axis}"] = value
+            if recovery_from:
+                research.setdefault("auc", {})[
+                    "auc_coding_agent_act"
+                ] = None
 
     @staticmethod
     def _derive_research(summary: Dict[str, Any], events: List[Dict[str, Any]], events_path: str) -> Dict[str, Any]:
@@ -169,7 +373,10 @@ class ReportBuilder:
                 "act_id": event.get("act_id"),
             })
             auc_points.append({
-                "coding_agent_act": event.get("coding_agent_act", act_x),
+                "coding_agent_act": event.get(
+                    "global_coding_agent_act",
+                    event.get("coding_agent_act", act_x),
+                ),
                 "episode": event.get("episode"),
                 "env_step": event.get("env_step"),
                 "token": event.get("token"),
@@ -199,6 +406,7 @@ class ReportBuilder:
         ig_history = []
         occupancy_history = []
         action_disagreement_history = []
+        behavior_episode_history = []
         dense_history = []
         for index, event in enumerate(events, start=1):
             event_type = event.get("event_type", event.get("event"))
@@ -224,6 +432,20 @@ class ReportBuilder:
                     "trace": event.get("action_disagreement_trace", []),
                     "policy_kl_status": event.get("policy_kl_status"),
                     "occupancy_shift": event.get("occupancy_shift"),
+                    "episode_balanced_action_disagreement": event.get(
+                        "episode_balanced_action_disagreement"
+                    ),
+                    "decision_balanced_action_disagreement": event.get(
+                        "decision_balanced_action_disagreement",
+                        event.get("action_disagreement"),
+                    ),
+                })
+            elif event_type == "behavior_change_episode":
+                behavior_episode_history.append({
+                    "version_before": event.get("version_before"),
+                    "version_after": event.get("version_after"),
+                    "mean": event.get("action_disagreement"),
+                    "trace": event.get("action_disagreement_trace", []),
                 })
             elif event_type == "dense_episode_summary":
                 dense_history.append({
@@ -237,6 +459,8 @@ class ReportBuilder:
                         "completed_rounds_survived"
                     ),
                     "territory_share": event.get("territory_share", {}),
+                    "target_army": event.get("target_army", {}),
+                    "army_margin": event.get("army_margin", {}),
                     "army_share": event.get("army_share", {}),
                     "coin_share": event.get("coin_share", {}),
                     "net_main_pressure": event.get(
@@ -244,6 +468,31 @@ class ReportBuilder:
                     ),
                     "artifact_ref": event.get("artifact_ref"),
                 })
+        for aggregate in action_disagreement_history:
+            episodes = [
+                item
+                for item in behavior_episode_history
+                if item["version_before"] == aggregate["version_before"]
+                and item["version_after"] == aggregate["version_after"]
+            ]
+            means = [
+                float(item["mean"])
+                for item in episodes
+                if item["mean"] is not None
+            ]
+            decisions = [
+                float(value)
+                for item in episodes
+                for value in item["trace"]
+            ]
+            if aggregate["episode_balanced_action_disagreement"] is None:
+                aggregate["episode_balanced_action_disagreement"] = (
+                    sum(means) / len(means) if means else None
+                )
+            if aggregate["decision_balanced_action_disagreement"] is None:
+                aggregate["decision_balanced_action_disagreement"] = (
+                    sum(decisions) / len(decisions) if decisions else None
+                )
         raw_score = summary.get("raw_score")
         evo_score = summary.get(
             "evo_score_2",
@@ -280,8 +529,9 @@ class ReportBuilder:
             "evo_score": evo_score,
             "gain": gain,
             "evaluation_status": summary.get(
-                "evaluation_status",
-                summary.get("status", "complete" if evo_score is not None else "unknown"),
+                "evaluation_status"
+            ) or summary.get(
+                "status", "complete" if evo_score is not None else "unknown"
             ),
             "budget": budget,
             "score_history": score_history,
@@ -291,6 +541,10 @@ class ReportBuilder:
             "action_disagreement_history": action_disagreement_history,
             "calibration": calibration,
             "dense_history": dense_history,
+            "dense_pairs": ReportBuilder._pair_dense_history(dense_history),
+            "cumulative_learning_budget": summary.get(
+                "cumulative_learning_budget"
+            ),
             "benchmark_results": summary.get("benchmark_results", []),
             "event_counts": dict(Counter(event.get("event_type", event.get("event", "unknown")) for event in events)),
             "raw_event_count": len(events),

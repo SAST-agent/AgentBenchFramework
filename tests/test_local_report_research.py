@@ -86,6 +86,12 @@ class LocalResearchReportTests(unittest.TestCase):
                     "global_coding_agent_act": 2,
                 },
                 {
+                    "event_type": "act_evaluation",
+                    "score": 0.3,
+                    "coding_agent_act": 1,
+                    "global_coding_agent_act": 2,
+                },
+                {
                     "event_type": "calibration_result",
                     "split": "heldout",
                     "score": 0.4,
@@ -97,9 +103,31 @@ class LocalResearchReportTests(unittest.TestCase):
                     "phase": "evaluation",
                     "completed_rounds_survived": 9,
                     "territory_share": {"terminal": 0.6, "auc": 4.2},
+                    "target_army": {"terminal": 19, "auc": 120},
+                    "army_margin": {"terminal": -31, "auc": -240},
                     "army_share": {"terminal": 0.55, "auc": 3.8},
                     "coin_share": {"terminal": None, "auc": None},
                     "net_main_pressure": {"terminal": 2.0, "auc": 8.0},
+                },
+                {
+                    "event_type": "behavior_change_episode",
+                    "version_before": "v1",
+                    "version_after": "v2",
+                    "action_disagreement": 1.0,
+                    "action_disagreement_trace": [1.0],
+                },
+                {
+                    "event_type": "behavior_change_episode",
+                    "version_before": "v1",
+                    "version_after": "v2",
+                    "action_disagreement": 0.0,
+                    "action_disagreement_trace": [0.0, 0.0, 0.0],
+                },
+                {
+                    "event_type": "behavior_change",
+                    "version_before": "v1",
+                    "version_after": "v2",
+                    "action_disagreement": 0.25,
                 },
             ],
             "/missing/events.jsonl",
@@ -117,8 +145,21 @@ class LocalResearchReportTests(unittest.TestCase):
         self.assertIsNone(
             research["dense_history"][0]["coin_share"]["terminal"]
         )
+        self.assertEqual(
+            research["dense_history"][0]["target_army"]["terminal"], 19
+        )
+        self.assertEqual(
+            research["dense_history"][0]["army_margin"]["terminal"], -31
+        )
         self.assertNotIn(
             0.4, [point["score"] for point in research["score_history"]]
+        )
+        behavior = research["action_disagreement_history"][0]
+        self.assertEqual(
+            behavior["episode_balanced_action_disagreement"], 0.5
+        )
+        self.assertEqual(
+            behavior["decision_balanced_action_disagreement"], 0.25
         )
 
     def test_round2_panels_render_missing_dense_values_without_interpolation(self):
@@ -167,6 +208,173 @@ class LocalResearchReportTests(unittest.TestCase):
         self.assertIn("generals-hl-calibration-v1", html)
         self.assertIn("case-1", html)
         self.assertIn("missing", html)
+
+    def test_recovery_report_links_cumulative_learning_budget_and_auc(self):
+        from agentbench_frame.report.builder import ReportBuilder
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            def write_run(run_id, summary, events=()):
+                run_dir = root / "runs" / "game" / "agent" / run_id
+                run_dir.mkdir(parents=True)
+                (run_dir / "summary.json").write_text(json.dumps({
+                    "run_id": run_id,
+                    "game": "game",
+                    "agent": "agent",
+                    "run_type": "rule_iter",
+                    **summary,
+                }))
+                (run_dir / "events.jsonl").write_text(
+                    "".join(json.dumps(event) + "\n" for event in events)
+                )
+
+            parent_budget = {
+                "learning_coding_agent_acts": 1,
+                "learning_episodes": 12,
+                "learning_env_steps": 100,
+                "learning_total_tokens": 1000,
+                "learning_time_s": 10.0,
+            }
+            source_budget = {
+                "learning_coding_agent_acts": 1,
+                "learning_episodes": 22,
+                "learning_env_steps": 200,
+                "learning_total_tokens": None,
+                "learning_time_s": 20.0,
+            }
+            recovery_budget = {
+                "learning_coding_agent_acts": 1,
+                "learning_episodes": 0,
+                "learning_env_steps": 0,
+                "learning_total_tokens": 500,
+                "learning_time_s": 5.0,
+            }
+            write_run("parent", {"status": "complete", "budget": parent_budget})
+            write_run(
+                "failed",
+                {
+                    "status": "provider_failed",
+                    "budget": source_budget,
+                    "parent_learning_budget": parent_budget,
+                },
+                [{
+                    "event_type": "dense_episode_summary",
+                    "case_id": "case-1",
+                    "version": "v1",
+                    "phase": "evaluation",
+                    "completed_rounds_survived": 8,
+                    "territory_share": {"terminal": 0.2},
+                    "target_army": {"terminal": 10},
+                    "army_margin": {"terminal": -5},
+                    "coin_share": {"terminal": 0.3},
+                    "net_main_pressure": {"terminal": -2},
+                }],
+            )
+            write_run(
+                "recovered",
+                {
+                    "status": "complete",
+                    "evaluation_status": None,
+                    "raw_score": 0.1,
+                    "evo_score_1": 0.2,
+                    "evo_score_2": 0.3,
+                    "benchmark_score": 0.3,
+                    "act_count": 3,
+                    "round_act_count": 2,
+                    "recovery_from_run_id": "failed",
+                    "reused_heldout_calibration": True,
+                    "source_learning_budget": source_budget,
+                    "budget": recovery_budget,
+                    "started_at": 3,
+                },
+                [{
+                    "event_type": "dense_episode_summary",
+                    "case_id": "case-1",
+                    "version": "v2",
+                    "phase": "evaluation",
+                    "completed_rounds_survived": 9,
+                    "territory_share": {"terminal": 0.25},
+                    "target_army": {"terminal": 12},
+                    "army_margin": {"terminal": -3},
+                    "coin_share": {"terminal": 0.35},
+                    "net_main_pressure": {"terminal": -1},
+                }],
+            )
+
+            builder = ReportBuilder(
+                data_dir=str(root), output_dir=str(root / "site")
+            )
+            builder.build()
+            recovered = next(
+                run for run in builder.runs if run["run_id"] == "recovered"
+            )
+
+        cumulative = recovered["research"]["cumulative_learning_budget"]
+        self.assertEqual(cumulative["learning_coding_agent_acts"], 3)
+        self.assertEqual(cumulative["learning_episodes"], 34)
+        self.assertEqual(cumulative["learning_env_steps"], 300)
+        self.assertIsNone(cumulative["learning_total_tokens"])
+        self.assertEqual(cumulative["learning_time_s"], 35.0)
+        self.assertIsNone(recovered["research"]["auc"]["auc_episode"])
+        self.assertIsNone(
+            recovered["research"]["auc"]["auc_coding_agent_act"]
+        )
+        self.assertEqual(
+            [point["x"] for point in recovered["research"]["score_history"]],
+            [0, 1, 2, 3],
+        )
+        self.assertEqual(
+            [point["score"] for point in recovered["research"]["score_history"]],
+            [0.1, 0.2, None, 0.3],
+        )
+        self.assertEqual(
+            {
+                item["version"]
+                for item in recovered["research"]["dense_history"]
+            },
+            {"v1", "v2"},
+        )
+        pair = recovered["research"]["dense_pairs"][0]
+        self.assertEqual(pair["case_id"], "case-1")
+        self.assertEqual(pair["status"], "complete")
+        self.assertEqual(pair["completed_rounds_survived_delta"], 1)
+        self.assertAlmostEqual(
+            pair["deltas"]["territory_share"]["terminal"], 0.05
+        )
+        self.assertEqual(
+            pair["deltas"]["target_army"]["terminal"], 2
+        )
+        self.assertEqual(
+            recovered["research"]["evaluation_status"], "complete"
+        )
+
+    def test_dense_pairing_keeps_mismatched_case_sets_missing(self):
+        from agentbench_frame.report.builder import ReportBuilder
+
+        pairs = ReportBuilder._pair_dense_history([
+            {
+                "case_id": "only-v1",
+                "version": "v1",
+                "phase": "evaluation",
+                "completed_rounds_survived": 8,
+            },
+            {
+                "case_id": "only-v2",
+                "version": "v2",
+                "phase": "evaluation",
+                "completed_rounds_survived": 9,
+            },
+        ])
+
+        self.assertEqual(
+            {pair["status"] for pair in pairs},
+            {"missing_v1", "missing_v2"},
+        )
+        self.assertTrue(all(
+            pair["completed_rounds_survived_delta"] is None
+            for pair in pairs
+        ))
 
 
 if __name__ == "__main__":

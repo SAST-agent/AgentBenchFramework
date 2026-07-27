@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
+import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -48,7 +49,7 @@ from .models import (
 )
 from .pipeline import GeneralsHLPipeline, _load_match_result
 from .process import build_baseline_process, build_calibration_process
-from .prompt import build_round2_prompt
+from .prompt import _reject_leaks, build_round2_prompt
 from .replay import build_compact_evidence, build_learning_replay
 
 
@@ -72,6 +73,80 @@ class CalibrationDevelopmentResult:
     selected_mode: str | None
     development_scores: dict[str, float | None]
     status: str
+
+
+_LEARNING_AUC_AXES = {
+    "episode": "learning_episodes",
+    "env_step": "learning_env_steps",
+    "token": "learning_total_tokens",
+    "time": "learning_time_s",
+}
+
+
+def _combine_learning_budgets(
+    *budgets: dict[str, object],
+) -> dict[str, float | int | None]:
+    keys = {
+        "learning_coding_agent_acts",
+        "learning_episodes",
+        "learning_env_steps",
+        "learning_game_agent_decision_steps",
+        "learning_primitive_commands",
+        "learning_prompt_tokens",
+        "learning_completion_tokens",
+        "learning_total_tokens",
+        "learning_time_s",
+    }
+    combined: dict[str, float | int | None] = {}
+    for key in keys:
+        values = [budget.get(key) for budget in budgets]
+        if any(value is None for value in values):
+            combined[key] = None
+        else:
+            total = sum(float(value) for value in values)
+            combined[key] = (
+                int(total)
+                if key != "learning_time_s"
+                else total
+            )
+    return combined
+
+
+def _learning_auc_fields(
+    raw_score: float | None,
+    evo_score_1: float | None,
+    evo_score_2: float | None,
+    parent_budget: dict[str, object],
+    round2_budget: dict[str, object],
+    *,
+    interrupted: bool = False,
+) -> tuple[dict[str, float | int | None], dict[str, float | None]]:
+    cumulative = _combine_learning_budgets(parent_budget, round2_budget)
+    aucs: dict[str, float | None] = {}
+    for output, key in _LEARNING_AUC_AXES.items():
+        if interrupted:
+            # A failed coding-agent act has no score. The global curve breaks
+            # there, so the full-axis AUC is unavailable (not a partial AUC).
+            aucs[f"AUC_{output}"] = None
+            continue
+        before = parent_budget.get(key)
+        after = cumulative.get(key)
+        if (
+            raw_score is None
+            or evo_score_1 is None
+            or evo_score_2 is None
+            or before is None
+            or after is None
+        ):
+            aucs[f"AUC_{output}"] = None
+            continue
+        x1 = float(before)
+        x2 = float(after)
+        aucs[f"AUC_{output}"] = (
+            0.5 * (raw_score + evo_score_1) * x1
+            + 0.5 * (evo_score_1 + evo_score_2) * (x2 - x1)
+        )
+    return cumulative, aucs
 
 
 def _production_calibration_evaluator(
@@ -401,6 +476,77 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
             CalibrationEvaluator(self.calibration_config, execute_calibration),
         )
 
+    def _acquire_heldout_receipt(self, run: Run) -> Path:
+        """Atomically consume a frozen calibration held-out suite once."""
+        parent = self.parent_run_dir.resolve()
+        study_root = next(
+            (
+                ancestor.parent
+                for ancestor in parent.parents
+                if ancestor.name == "runs"
+            ),
+            parent.parent,
+        )
+        receipt_dir = study_root / "calibration-heldout"
+        receipt = receipt_dir / (
+            f"{self.calibration_config.benchmark_id}-"
+            f"{self.calibration_selection.source_hash}.json"
+        )
+        if receipt.exists():
+            raise ValueError("held-out calibration was already opened")
+        run_roots = {
+            study_root / "runs",
+            self.data_dir.resolve() / "runs",
+        }
+        for runs_root in run_roots:
+            if not runs_root.is_dir():
+                continue
+            for events_path in runs_root.rglob("events.jsonl"):
+                events = []
+                try:
+                    lines = events_path.read_text(
+                        encoding="utf-8"
+                    ).splitlines()
+                except OSError:
+                    continue
+                for line in lines:
+                    if not line.strip():
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(event, dict):
+                        events.append(event)
+                matching_spec = any(
+                    event.get("event_type") == "calibration_spec"
+                    and event.get("source_hash")
+                    == self.calibration_selection.source_hash
+                    for event in events
+                )
+                opened = any(
+                    event.get("event_type") == "calibration_result"
+                    and event.get("split") == "heldout"
+                    for event in events
+                )
+                if matching_spec and opened:
+                    raise ValueError("held-out calibration was already opened")
+        receipt_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "benchmark_id": self.calibration_config.benchmark_id,
+            "source_hash": self.calibration_selection.source_hash,
+            "selected_mode": self.calibration_selection.selected_mode,
+            "run_id": run.run_id,
+        }
+        try:
+            with receipt.open("x", encoding="utf-8") as handle:
+                json.dump(payload, handle, indent=2, sort_keys=True)
+        except FileExistsError as exc:
+            raise ValueError(
+                "held-out calibration was already opened"
+            ) from exc
+        return receipt
+
     @staticmethod
     def _write_json(path: Path, payload: object) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -410,6 +556,264 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
             encoding="utf-8",
         )
         temporary.replace(path)
+
+    def _write_benchmark_artifacts(self, run_dir: Path) -> None:
+        benchmark_dir = run_dir / "benchmark"
+        self._write_json(
+            benchmark_dir / "formal-spec.json",
+            {
+                "benchmark_id": self.config.benchmark_id,
+                "engine_hash": self.assets.engine_hash,
+                "evaluation_cases": [
+                    asdict(case)
+                    for case in build_evaluation_spec(self.config).cases
+                ],
+                "learning_cases": [
+                    asdict(case)
+                    for case in build_round2_learning_cases(self.config)
+                ],
+            },
+        )
+        self._write_json(
+            benchmark_dir / "calibration-spec.json",
+            {
+                "benchmark_id": self.calibration_config.benchmark_id,
+                "development_seeds": list(
+                    self.calibration_config.development_seeds
+                ),
+                "heldout_seeds": list(
+                    self.calibration_config.heldout_seeds
+                ),
+                "target_range": [
+                    self.calibration_config.target_min,
+                    self.calibration_config.target_max,
+                ],
+                "target_midpoint": self.calibration_config.target_midpoint,
+            },
+        )
+        self._write_json(
+            benchmark_dir / "calibration-opponent-manifest.json",
+            {
+                "benchmark_id": self.calibration_selection.benchmark_id,
+                "selected_mode": self.calibration_selection.selected_mode,
+                "source_hash": self.calibration_selection.source_hash,
+                "selection_rule": self.calibration_selection.selection_rule,
+                "development_scores": dict(
+                    self.calibration_selection.development_scores
+                ),
+            },
+        )
+
+    def _validate_recovery_source(
+        self,
+        source_summary: dict[str, object],
+        source_events: list[dict[str, object]],
+        source_prompt: Path,
+        source_prompt_manifest: Path,
+        lineage,
+        failed_act: dict[str, object],
+    ) -> dict[str, float | int | None]:
+        config = source_summary.get("config")
+        if not isinstance(config, dict):
+            raise ValueError("recovery source config is missing")
+        if source_summary.get("benchmark_id") != self.config.benchmark_id:
+            raise ValueError("recovery source benchmark ID does not match")
+        if (
+            source_summary.get("calibration_benchmark_id")
+            != self.calibration_config.benchmark_id
+        ):
+            raise ValueError(
+                "recovery source calibration benchmark ID does not match"
+            )
+        if config.get("engine_hash") != self.assets.engine_hash:
+            raise ValueError("recovery source engine hash does not match")
+        if source_summary.get("parent_run_id") != lineage.parent_run_id:
+            raise ValueError("recovery source parent run does not match")
+        if (
+            source_summary.get("raw_score") != lineage.raw_score
+            or source_summary.get("evo_score_1") != lineage.evo_score_1
+        ):
+            raise ValueError("recovery source lineage scores do not match")
+        if (
+            failed_act.get("snapshot_content_hash")
+            != lineage.v1_manifest.content_hash
+        ):
+            raise ValueError("recovery source v1 snapshot hash does not match")
+        if any(
+            failed_act.get(key) is not None
+            for key in (
+                "prompt_tokens",
+                "completion_tokens",
+                "total_tokens",
+            )
+        ):
+            raise ValueError(
+                "recovery source pre-thread token usage must be unknown"
+            )
+        source_run_id = source_summary.get("run_id")
+        if not source_run_id or any(
+            event.get("run_id") != source_run_id
+            for event in source_events
+        ):
+            raise ValueError("recovery source event lineage does not match")
+
+        benchmark_specs = [
+            event
+            for event in source_events
+            if event.get("event_type") == "benchmark_spec"
+        ]
+        if len(benchmark_specs) != 1:
+            raise ValueError("recovery source benchmark spec is ambiguous")
+        benchmark_spec = benchmark_specs[0]
+        if (
+            benchmark_spec.get("benchmark_id") != self.config.benchmark_id
+            or benchmark_spec.get("engine_hash") != self.assets.engine_hash
+            or benchmark_spec.get("evaluation_cases")
+            != [
+                asdict(case)
+                for case in build_evaluation_spec(self.config).cases
+            ]
+            or benchmark_spec.get("learning_cases")
+            != [
+                asdict(case)
+                for case in build_round2_learning_cases(self.config)
+            ]
+        ):
+            raise ValueError("recovery source benchmark spec does not match")
+
+        calibration_specs = [
+            event
+            for event in source_events
+            if event.get("event_type") == "calibration_spec"
+            and event.get("split") == "heldout"
+        ]
+        if len(calibration_specs) != 1:
+            raise ValueError("recovery source held-out spec is ambiguous")
+        calibration_spec = calibration_specs[0]
+        if (
+            calibration_spec.get("calibration_benchmark_id")
+            != self.calibration_config.benchmark_id
+            or calibration_spec.get("selected_mode")
+            != self.calibration_selection.selected_mode
+            or calibration_spec.get("source_hash")
+            != self.calibration_selection.source_hash
+            or calibration_spec.get("seeds")
+            != list(self.calibration_config.heldout_seeds)
+            or calibration_spec.get("target_range")
+            != [
+                self.calibration_config.target_min,
+                self.calibration_config.target_max,
+            ]
+        ):
+            raise ValueError("recovery source calibration spec does not match")
+        heldout_results = [
+            event
+            for event in source_events
+            if event.get("event_type") == "calibration_result"
+            and event.get("split") == "heldout"
+        ]
+        if len(heldout_results) != 1:
+            raise ValueError("recovery source held-out result is ambiguous")
+        heldout = heldout_results[0]
+        if (
+            heldout.get("calibration_benchmark_id")
+            != self.calibration_config.benchmark_id
+            or heldout.get("mode")
+            != self.calibration_selection.selected_mode
+            or heldout.get("status") != "complete"
+            or heldout.get("score")
+            != source_summary.get("calibration_score")
+            or heldout.get("in_target_range") is not True
+        ):
+            raise ValueError("recovery source held-out result does not match")
+
+        try:
+            prompt_manifest = json.loads(
+                source_prompt_manifest.read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                f"recovery source prompt manifest is invalid: {exc}"
+            ) from exc
+        prompt_text = source_prompt.read_text(encoding="utf-8")
+        prompt_bytes = len(prompt_text.encode("utf-8"))
+        if (
+            prompt_manifest.get("prompt_bytes") != prompt_bytes
+            or prompt_bytes > 262_144
+        ):
+            raise ValueError("recovery source prompt size does not match")
+        embedded = prompt_manifest.get("prompt")
+        if embedded is not None and embedded != prompt_text:
+            raise ValueError("recovery source prompt manifest does not match")
+        actual_sha256 = hashlib.sha256(
+            prompt_text.encode("utf-8")
+        ).hexdigest()
+        declared_sha256 = prompt_manifest.get("prompt_sha256")
+        if declared_sha256 is not None:
+            if declared_sha256 != actual_sha256:
+                raise ValueError(
+                    "recovery source prompt SHA-256 does not match"
+                )
+        elif embedded is None:
+            raise ValueError(
+                "recovery source prompt lacks a SHA-256 binding"
+            )
+        _reject_leaks(prompt_text)
+
+        parent_acts = lineage.learning_budget.get(
+            "learning_coding_agent_acts"
+        )
+        if not isinstance(parent_acts, int):
+            raise ValueError("parent coding-agent act count is unavailable")
+        expected_global_acts = parent_acts + 1
+        if source_summary.get("act_count") != expected_global_acts:
+            raise ValueError("recovery source act count does not match events")
+        if source_summary.get("round_act_count") != 1:
+            raise ValueError(
+                "recovery source round act count does not match events"
+            )
+
+        budget_events = [
+            event
+            for event in source_events
+            if event.get("event_type") == "budget"
+            and event.get("phase") == "learning"
+        ]
+        if not budget_events:
+            raise ValueError("recovery source learning budget events are missing")
+        last_budget = budget_events[-1]
+        keys = (
+            "learning_episodes",
+            "learning_env_steps",
+            "learning_game_agent_decision_steps",
+            "learning_primitive_commands",
+        )
+        derived_budget: dict[str, float | int | None] = {
+            key: last_budget.get(key) for key in keys
+        }
+        derived_budget["learning_coding_agent_acts"] = 1
+        for output in (
+            "prompt_tokens",
+            "completion_tokens",
+            "total_tokens",
+        ):
+            derived_budget[f"learning_{output}"] = failed_act.get(output)
+        base_time = last_budget.get("learning_time_s")
+        act_time = failed_act.get("elapsed_time_s")
+        derived_budget["learning_time_s"] = (
+            float(base_time) + float(act_time)
+            if base_time is not None and act_time is not None
+            else None
+        )
+        declared_budget = source_summary.get("budget")
+        if not isinstance(declared_budget, dict) or any(
+            declared_budget.get(key) != value
+            for key, value in derived_budget.items()
+        ):
+            raise ValueError(
+                "recovery source learning budget does not match events"
+            )
+        return derived_budget
 
     @staticmethod
     def _result_rows(
@@ -489,6 +893,7 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
             evo_score_1 = lineage.evo_score_1
             imported = import_parent_v1(lineage, run_dir, self.snapshotter)
             workspace = run_dir / "workspace"
+            self._write_benchmark_artifacts(run_dir)
             run.write(
                 "lineage_import",
                 parent_run_id=lineage.parent_run_id,
@@ -536,6 +941,14 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
                 evaluator = self.evaluator
                 calibration_evaluator = self.calibration_evaluator
 
+            receipt = self._acquire_heldout_receipt(run)
+            run.write(
+                "calibration_spec",
+                calibration_benchmark_id=self.calibration_config.benchmark_id,
+                split="heldout_receipt",
+                source_hash=self.calibration_selection.source_hash,
+                receipt_ref=str(receipt),
+            )
             heldout = calibration_evaluator.evaluate(
                 lineage.v0_source,
                 "v0",
@@ -627,12 +1040,26 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
                 )
                 provider_dir = run_dir / "provider"
                 provider_dir.mkdir(parents=True, exist_ok=True)
-                (provider_dir / "prompt.txt").write_text(
+                canonical_prompt = provider_dir / "codex-act-2.prompt.md"
+                canonical_prompt.write_text(
                     prompt.prompt, encoding="utf-8"
+                )
+                shutil.copy2(canonical_prompt, provider_dir / "prompt.txt")
+                prompt_manifest = {
+                    key: value
+                    for key, value in asdict(prompt).items()
+                    if key != "prompt"
+                }
+                prompt_manifest["prompt_sha256"] = hashlib.sha256(
+                    prompt.prompt.encode("utf-8")
+                ).hexdigest()
+                self._write_json(
+                    provider_dir / "codex-act-2.prompt.json",
+                    prompt_manifest,
                 )
                 self._write_json(
                     provider_dir / "prompt-manifest.json",
-                    asdict(prompt),
+                    prompt_manifest,
                 )
                 controller = run.create_coding_agent_controller(
                     self.provider,
@@ -644,10 +1071,10 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
                         "prompt": prompt.prompt,
                         "workspace_root": str(workspace),
                         "raw_output_path": str(
-                            provider_dir / "codex.raw.jsonl"
+                            provider_dir / "codex-act-2.raw.jsonl"
                         ),
                         "stderr_output_path": str(
-                            provider_dir / "codex.stderr.log"
+                            provider_dir / "codex-act-2.stderr.log"
                         ),
                         "max_artifact_bytes": self.config.limits.max_artifact_bytes,
                     },
@@ -698,6 +1125,7 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
                     )
                 else:
                     all_trace = []
+                    episode_means = []
                     for episode_index, (case_id, probes) in enumerate(
                         episode_probes, start=1
                     ):
@@ -707,6 +1135,7 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
                             probes, self._probe_actions(workspace, probes)
                         )
                         all_trace.extend(behavior.trace)
+                        episode_means.append(behavior.mean)
                         run.write(
                             "behavior_change_episode",
                             episode=episode_index,
@@ -724,6 +1153,16 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
                         version_after="v2",
                         episode_count=len(episode_probes),
                         decision_count=len(all_trace),
+                        episode_balanced_action_disagreement=(
+                            sum(episode_means) / len(episode_means)
+                            if episode_means
+                            else None
+                        ),
+                        decision_balanced_action_disagreement=(
+                            sum(all_trace) / len(all_trace)
+                            if all_trace
+                            else None
+                        ),
                         action_disagreement=(
                             sum(all_trace) / len(all_trace)
                             if all_trace
@@ -810,6 +1249,16 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
                 else None
             )
             parent_budget = dict(lineage.learning_budget) if lineage else {}
+            round2_budget = run.budget_snapshot()
+            cumulative_learning_budget, learning_aucs = (
+                _learning_auc_fields(
+                    raw_score,
+                    evo_score_1,
+                    evo_score_2,
+                    parent_budget,
+                    round2_budget,
+                )
+            )
             summary = {
                 "status": status,
                 "benchmark_id": self.config.benchmark_id,
@@ -850,6 +1299,13 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
                     heldout.in_target_range if heldout else None
                 ),
                 "parent_learning_budget": parent_budget,
+                "round2_learning_budget": {
+                    key: value
+                    for key, value in round2_budget.items()
+                    if key.startswith("learning_")
+                },
+                "cumulative_learning_budget": cumulative_learning_budget,
+                **learning_aucs,
                 "error": error,
                 "benchmark_results": self._result_rows(
                     (v1_formal, v2_formal)
@@ -913,6 +1369,19 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
         lineage = load_parent_lineage(
             self.parent_run_dir, self.expected_parent_hash
         )
+        source_round2_budget = self._validate_recovery_source(
+            source_summary,
+            source_events,
+            source_prompt,
+            source_prompt_manifest,
+            lineage,
+            failed_acts[0],
+        )
+        parent_act_count = int(
+            lineage.learning_budget["learning_coding_agent_acts"]
+        )
+        global_act_count = parent_act_count + len(failed_acts) + 1
+        round_act_count = len(failed_acts) + 1
         run = Run.start(
             game="28_generals",
             agent="generals-hl",
@@ -941,6 +1410,7 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
         try:
             imported = import_parent_v1(lineage, run_dir, self.snapshotter)
             workspace = run_dir / "workspace"
+            self._write_benchmark_artifacts(run_dir)
             run.write(
                 "lineage_import",
                 parent_run_id=lineage.parent_run_id,
@@ -983,7 +1453,14 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
             )
             provider_dir = run_dir / "provider"
             provider_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(
+                source_prompt, provider_dir / "codex-act-2.prompt.md"
+            )
             shutil.copy2(source_prompt, provider_dir / "prompt.txt")
+            shutil.copy2(
+                source_prompt_manifest,
+                provider_dir / "codex-act-2.prompt.json",
+            )
             shutil.copy2(
                 source_prompt_manifest,
                 provider_dir / "prompt-manifest.json",
@@ -999,10 +1476,10 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
                     "prompt": prompt_text,
                     "workspace_root": str(workspace),
                     "raw_output_path": str(
-                        provider_dir / "codex.raw.jsonl"
+                        provider_dir / "codex-act-2.raw.jsonl"
                     ),
                     "stderr_output_path": str(
-                        provider_dir / "codex.stderr.log"
+                        provider_dir / "codex-act-2.stderr.log"
                     ),
                     "max_artifact_bytes": self.config.limits.max_artifact_bytes,
                 },
@@ -1078,6 +1555,7 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
                         )
                         episode_probes.append((match.case_id, probes))
                 all_trace = []
+                episode_means = []
                 for episode_index, (case_id, probes) in enumerate(
                     episode_probes, start=1
                 ):
@@ -1087,6 +1565,7 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
                         probes, self._probe_actions(workspace, probes)
                     )
                     all_trace.extend(behavior.trace)
+                    episode_means.append(behavior.mean)
                     run.write(
                         "behavior_change_episode",
                         episode=episode_index,
@@ -1105,6 +1584,16 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
                     version_after="v2",
                     episode_count=len(episode_probes),
                     decision_count=len(all_trace),
+                    episode_balanced_action_disagreement=(
+                        sum(episode_means) / len(episode_means)
+                        if episode_means
+                        else None
+                    ),
+                    decision_balanced_action_disagreement=(
+                        sum(all_trace) / len(all_trace)
+                        if all_trace
+                        else None
+                    ),
                     action_disagreement=(
                         sum(all_trace) / len(all_trace)
                         if all_trace
@@ -1165,7 +1654,7 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
                     status=v2_formal.status,
                     score=v2_formal.score,
                     gain=gain_2,
-                    global_coding_agent_act=2,
+                    global_coding_agent_act=global_act_count,
                     per_tier=dict(v2_formal.per_tier),
                     seat_gap=v2_formal.seat_gap,
                 )
@@ -1176,7 +1665,7 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
                         "version": "v2",
                         "score": v2_formal.score,
                         "gain": gain_2,
-                        "global_coding_agent_act": 2,
+                        "global_coding_agent_act": global_act_count,
                     },
                 )
                 status = (
@@ -1193,16 +1682,7 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
                 run_dir / "quality.json",
                 inspect_event_file(run_dir / "events.jsonl").to_dict(),
             )
-            auc = (
-                0.5 * (raw_score + evo_score_1)
-                + 0.5 * (evo_score_1 + evo_score_2)
-                if (
-                    raw_score is not None
-                    and evo_score_1 is not None
-                    and evo_score_2 is not None
-                )
-                else None
-            )
+            auc = None
             benchmark_results = [
                 item
                 for item in source_summary.get("benchmark_results", [])
@@ -1210,6 +1690,27 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
             ]
             benchmark_results.extend(
                 self._result_rows((v2_formal,))
+            )
+            parent_learning_budget = dict(
+                source_summary.get("parent_learning_budget") or {}
+            )
+            recovery_budget = {
+                key: value
+                for key, value in run.budget_snapshot().items()
+                if key.startswith("learning_")
+            }
+            round2_learning_budget = _combine_learning_budgets(
+                source_round2_budget, recovery_budget
+            )
+            cumulative_learning_budget, learning_aucs = (
+                _learning_auc_fields(
+                    raw_score,
+                    evo_score_1,
+                    evo_score_2,
+                    parent_learning_budget,
+                    round2_learning_budget,
+                    interrupted=True,
+                )
             )
             run.finish(
                 {
@@ -1231,13 +1732,19 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
                         v2_formal.status if v2_formal is not None else None
                     ),
                     "AUC_coding_agent_act": auc,
-                    "act_count": 2,
-                    "round_act_count": 1,
+                    "act_count": global_act_count,
+                    "round_act_count": round_act_count,
                     "parent_run_id": lineage.parent_run_id,
                     "parent_version": "v1",
                     "recovery_from_run_id": source_summary.get("run_id"),
                     "reused_heldout_calibration": True,
-                    "source_learning_budget": source_summary.get("budget"),
+                    "source_learning_budget": source_round2_budget,
+                    "parent_learning_budget": parent_learning_budget,
+                    "round2_learning_budget": round2_learning_budget,
+                    "cumulative_learning_budget": (
+                        cumulative_learning_budget
+                    ),
+                    **learning_aucs,
                     "calibration_benchmark_id": (
                         self.calibration_config.benchmark_id
                     ),
@@ -1272,8 +1779,8 @@ class GeneralsHLRound2Pipeline(GeneralsHLPipeline):
             evo_score_2,
             gain_2,
             calibration_score,
-            2,
-            1,
+            global_act_count,
+            round_act_count,
             status,
         )
 

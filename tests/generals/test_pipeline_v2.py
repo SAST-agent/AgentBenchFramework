@@ -98,6 +98,7 @@ class FakeProvider:
             status="completed",
             usage=ProviderUsage(11, 7, 18, "exact"),
             tool_call_count=1,
+            elapsed_time_s=0.1,
             raw_output_ref=str(raw),
         )
 
@@ -112,6 +113,7 @@ class FakeProviderInitFailure:
         self.calls += 1
         return ProviderInvocation(
             status="failed",
+            elapsed_time_s=0.01,
             error="failed to initialize app-server client",
             metadata={
                 "thread_id": None,
@@ -253,10 +255,16 @@ def _parent(tmp_path):
     return parent, manifests["v1"]
 
 
-def _pipeline(tmp_path, provider, calibration_evaluator):
-    parent, manifest = _parent(tmp_path)
+def _pipeline(
+    tmp_path,
+    provider,
+    calibration_evaluator,
+    *,
+    parent_fixture=None,
+):
+    parent, manifest = parent_fixture or _parent(tmp_path)
     root = tmp_path / "assets"
-    root.mkdir()
+    root.mkdir(parents=True)
     layout = AssetLayout(
         root=root,
         engine_root=root,
@@ -308,16 +316,37 @@ def test_round2_pipeline_preserves_lineage_and_runs_one_new_act(tmp_path):
     assert (result.run_dir / "versions" / "v1" / "lineage.json").is_file()
     assert (result.run_dir / "versions" / "v2" / "manifest.json").is_file()
     assert (result.run_dir / "versions" / "v1-to-v2.patch").is_file()
+    assert (result.run_dir / "benchmark" / "formal-spec.json").is_file()
+    assert (result.run_dir / "benchmark" / "calibration-spec.json").is_file()
+    assert (
+        result.run_dir
+        / "benchmark"
+        / "calibration-opponent-manifest.json"
+    ).is_file()
     prompt_manifest = json.loads(
         (result.run_dir / "provider" / "prompt-manifest.json").read_text()
     )
+    assert (result.run_dir / "provider" / "codex-act-2.prompt.md").is_file()
+    assert (result.run_dir / "provider" / "codex-act-2.prompt.json").is_file()
+    assert (result.run_dir / "provider" / "codex-act-2.raw.jsonl").is_file()
     assert prompt_manifest["prompt_bytes"] <= 262_144
+    assert len(prompt_manifest["prompt_sha256"]) == 64
     summary = json.loads((result.run_dir / "summary.json").read_text())
     assert summary["benchmark_id"] == "generals-hl-pilot-v1"
     assert summary["calibration_benchmark_id"] == "generals-hl-calibration-v1"
     assert summary["benchmark_score"] == 0.5
     assert summary["calibration_score"] == 0.4
     assert summary["budget"]["learning_coding_agent_acts"] == 1
+    assert summary["AUC_episode"] is not None
+    assert summary["AUC_env_step"] is not None
+    assert summary["AUC_token"] is not None
+    assert summary["AUC_time"] is not None
+    assert (
+        summary["cumulative_learning_budget"][
+            "learning_coding_agent_acts"
+        ]
+        == 2
+    )
     events = [
         json.loads(line)
         for line in (result.run_dir / "events.jsonl").read_text().splitlines()
@@ -325,6 +354,11 @@ def test_round2_pipeline_preserves_lineage_and_runs_one_new_act(tmp_path):
     assert sum(event["event_type"] == "coding_agent_act" for event in events) == 1
     assert any(event["event_type"] == "lineage_import" for event in events)
     assert any(event["event_type"] == "behavior_change_episode" for event in events)
+    aggregate = next(
+        event for event in events if event["event_type"] == "behavior_change"
+    )
+    assert aggregate["episode_balanced_action_disagreement"] is not None
+    assert aggregate["decision_balanced_action_disagreement"] is not None
 
 
 def test_round2_stops_before_codex_when_heldout_calibration_misses_target(tmp_path):
@@ -338,6 +372,48 @@ def test_round2_stops_before_codex_when_heldout_calibration_misses_target(tmp_pa
     assert result.round_act_count == 0
     assert provider.calls == 0
     assert not (result.run_dir / "versions" / "v2").exists()
+
+
+def test_heldout_calibration_cannot_be_opened_twice(tmp_path):
+    provider = FakeProvider()
+    pipeline = _pipeline(
+        tmp_path, provider, FakeCalibrationEvaluator()
+    )
+
+    first = pipeline.run()
+    second = pipeline.run()
+
+    assert first.status == "complete"
+    assert second.status == "failed"
+    assert provider.calls == 1
+    summary = json.loads((second.run_dir / "summary.json").read_text())
+    assert "held-out calibration was already opened" in summary["error"]
+
+
+def test_heldout_calibration_cannot_be_reopened_via_another_data_dir(tmp_path):
+    parent_fixture = _parent(tmp_path)
+    first_provider = FakeProvider()
+    second_provider = FakeProvider()
+
+    first = _pipeline(
+        tmp_path / "first",
+        first_provider,
+        FakeCalibrationEvaluator(),
+        parent_fixture=parent_fixture,
+    ).run()
+    second = _pipeline(
+        tmp_path / "second",
+        second_provider,
+        FakeCalibrationEvaluator(),
+        parent_fixture=parent_fixture,
+    ).run()
+
+    assert first.status == "complete"
+    assert second.status == "failed"
+    assert first_provider.calls == 1
+    assert second_provider.calls == 0
+    summary = json.loads((second.run_dir / "summary.json").read_text())
+    assert "held-out calibration was already opened" in summary["error"]
 
 
 def test_development_calibration_freezes_selection_without_heldout_games(tmp_path):
@@ -430,14 +506,113 @@ def test_pre_thread_provider_failure_recovers_without_reopening_heldout(tmp_path
     assert recovered.status == "complete"
     assert recovered.calibration_score == 0.4
     assert recovered.evo_score_2 == 0.5
-    assert recovered.round_act_count == 1
+    assert recovered.global_act_count == 3
+    assert recovered.round_act_count == 2
     assert retry_provider.calls == 1
     summary = json.loads((recovered.run_dir / "summary.json").read_text())
     assert summary["recovery_from_run_id"]
     assert summary["reused_heldout_calibration"] is True
+    assert summary["act_count"] == 3
+    assert summary["round_act_count"] == 2
+    assert summary["AUC_coding_agent_act"] is None
+    assert summary["AUC_episode"] is None
+    assert summary["AUC_env_step"] is None
+    assert summary["AUC_token"] is None
+    assert summary["AUC_time"] is None
+    assert (
+        summary["cumulative_learning_budget"][
+            "learning_coding_agent_acts"
+        ]
+        == 3
+    )
+    assert (
+        summary["cumulative_learning_budget"]["learning_total_tokens"]
+        is None
+    )
     events = [
         json.loads(line)
         for line in (recovered.run_dir / "events.jsonl").read_text().splitlines()
     ]
     assert sum(event["event_type"] == "coding_agent_act" for event in events) == 1
     assert any(event["event_type"] == "provider_retry" for event in events)
+    evolved = next(
+        event
+        for event in events
+        if event["event_type"] == "evaluation"
+        and event.get("phase") == "evolved_2"
+    )
+    assert evolved["global_coding_agent_act"] == 3
+
+
+def test_recovery_rejects_mismatched_source_contract_before_provider(tmp_path):
+    failed_provider = FakeProviderInitFailure()
+    calibration = FakeCalibrationEvaluator()
+    failed = _pipeline(tmp_path, failed_provider, calibration).run()
+    summary_path = failed.run_dir / "summary.json"
+    summary = json.loads(summary_path.read_text())
+    summary["config"]["engine_hash"] = "tampered-engine"
+    summary_path.write_text(json.dumps(summary))
+
+    retry_provider = FakeProvider()
+    recovery_pipeline = _pipeline(
+        tmp_path / "recovery-fixture",
+        retry_provider,
+        FakeCalibrationEvaluator(),
+    )
+
+    try:
+        recovery_pipeline.recover_provider_init_failure(failed.run_dir)
+    except ValueError as exc:
+        assert "engine hash" in str(exc)
+    else:
+        raise AssertionError("tampered recovery source was accepted")
+    assert retry_provider.calls == 0
+
+
+def test_recovery_rejects_tampered_act_counters_before_provider(tmp_path):
+    failed = _pipeline(
+        tmp_path,
+        FakeProviderInitFailure(),
+        FakeCalibrationEvaluator(),
+    ).run()
+    summary_path = failed.run_dir / "summary.json"
+    summary = json.loads(summary_path.read_text())
+    summary["act_count"] = 99
+    summary_path.write_text(json.dumps(summary))
+    retry_provider = FakeProvider()
+
+    try:
+        _pipeline(
+            tmp_path / "recovery-fixture",
+            retry_provider,
+            FakeCalibrationEvaluator(),
+        ).recover_provider_init_failure(failed.run_dir)
+    except ValueError as exc:
+        assert "act count" in str(exc)
+    else:
+        raise AssertionError("tampered recovery act count was accepted")
+    assert retry_provider.calls == 0
+
+
+def test_recovery_rejects_same_length_prompt_tampering(tmp_path):
+    failed = _pipeline(
+        tmp_path,
+        FakeProviderInitFailure(),
+        FakeCalibrationEvaluator(),
+    ).run()
+    prompt_path = failed.run_dir / "provider" / "prompt.txt"
+    prompt = prompt_path.read_text()
+    prompt_path.write_text(("X" if prompt[0] != "X" else "Y") + prompt[1:])
+    retry_provider = FakeProvider()
+
+    try:
+        _pipeline(
+            tmp_path / "recovery-fixture",
+            retry_provider,
+            FakeCalibrationEvaluator(),
+        ).recover_provider_init_failure(failed.run_dir)
+    except ValueError as exc:
+        assert "SHA-256" in str(exc)
+    else:
+        raise AssertionError("same-length prompt tampering was accepted")
+    assert retry_provider.calls == 0
