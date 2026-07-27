@@ -36,6 +36,11 @@ from agentbench_frame.hl.reference import (
     ReferenceSample,
     ReferenceStateSet,
 )
+from agentbench_frame.hl.resources import (
+    MatchHistoryView,
+    ReplayView,
+    VersionDiffView,
+)
 
 __all__ = [
     "HLEventWriter",
@@ -59,4 +64,7 @@ __all__ = [
     "BenchmarkSpec",
     "ReferenceSample",
     "ReferenceStateSet",
+    "MatchHistoryView",
+    "ReplayView",
+    "VersionDiffView",
 ]
