@@ -10,6 +10,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 from typing import Any
@@ -21,6 +22,8 @@ _FENCED_JSON = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL | re.IGNORE
 DEFAULT_API_MODE = "responses"
 DEFAULT_REASONING_EFFORT = "high"
 DEFAULT_TIMEOUT_S = 90.0
+DEFAULT_RETRY_ATTEMPTS = 3
+DEFAULT_RETRY_BACKOFF_S = 2.0
 MAX_INPUT_BYTES = 400_000
 CAPABILITY_FALLBACK_STATUS_CODES = frozenset({400, 422})
 GATEWAY_RETRY_STATUS_CODES = frozenset({502, 503, 504})
@@ -295,6 +298,40 @@ def _post_review_request(
         return json.loads(response.read().decode("utf-8"))
 
 
+def _post_review_with_retry(
+    endpoint: str,
+    api_key: str,
+    request_body: dict[str, Any],
+    timeout: float,
+) -> dict[str, Any]:
+    """Retry the unchanged request for transient upstream failures."""
+    try:
+        backoff_s = float(os.environ.get(
+            "PR_REVIEW_RETRY_BACKOFF_S", str(DEFAULT_RETRY_BACKOFF_S)
+        ))
+    except ValueError as exc:
+        raise ValueError("PR_REVIEW_RETRY_BACKOFF_S must be a number") from exc
+    if backoff_s < 0:
+        raise ValueError("PR_REVIEW_RETRY_BACKOFF_S must be non-negative")
+
+    for attempt in range(DEFAULT_RETRY_ATTEMPTS):
+        try:
+            return _post_review_request(endpoint, api_key, request_body, timeout)
+        except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
+            retryable = (
+                isinstance(exc, urllib.error.HTTPError)
+                and exc.code in GATEWAY_RETRY_STATUS_CODES
+            ) or not isinstance(exc, urllib.error.HTTPError)
+            if not retryable or attempt == DEFAULT_RETRY_ATTEMPTS - 1:
+                raise
+            delay = backoff_s * (2 ** attempt)
+            print(
+                f"Transient PR review upstream error ({exc}); retrying in {delay:g}s",
+                file=sys.stderr,
+            )
+            time.sleep(delay)
+
+
 def _emit_review(review: dict[str, Any], secret: str) -> None:
     print(f"PR review decision={review['decision']} findings={len(review['findings'])}")
     print(_redact(review["summary"], secret))
@@ -331,7 +368,9 @@ def run_review() -> int:
         timeout = float(os.environ.get("PR_REVIEW_TIMEOUT_S", DEFAULT_TIMEOUT_S))
         request_body = build_api_request(api_mode, model, REVIEW_INSTRUCTIONS, payload)
         try:
-            response_data = _post_review_request(endpoint, api_key, request_body, timeout)
+            response_data = _post_review_with_retry(
+                endpoint, api_key, request_body, timeout
+            )
         except urllib.error.HTTPError as exc:
             if exc.code in GATEWAY_RETRY_STATUS_CODES:
                 retry_request = build_api_request(
