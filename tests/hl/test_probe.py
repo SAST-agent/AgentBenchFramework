@@ -27,9 +27,13 @@ from agentbench_frame.hl.distribution import (
 )
 from agentbench_frame.hl.probe import ReferenceProbe, EmittedAction
 
-# A minimal echo candidate: reads one length-prefixed frame, and if it's a
-# roundbegin for player 0 who is Alive, emits a finish action. This exercises
-# the real wire protocol (4-byte big-endian length header + JSON body).
+# A minimal echo candidate speaking the REAL LostSpace wire format: reads
+# 4 ASCII digits + JSON (judger->AI, ``convert_byte_str_for_ai`` — same
+# ``int(str(read(4), "utf-8"))`` decode the bundled candidates use) and writes
+# 4-byte big-endian length + JSON (AI->judger, ``convert_to_bytes``). On a
+# roundbegin for player 0 who is Alive it emits a finish action. NOTE: keep the
+# input framing as ASCII digits — a binary header here would mask the exact bug
+# this suite guards against (the probe must send ASCII-digit headers).
 ECHO_CANDIDATE = r'''
 import json, sys
 
@@ -37,7 +41,7 @@ def read_frame():
     hdr = sys.stdin.buffer.read(4)
     if len(hdr) < 4:
         return None
-    n = int.from_bytes(hdr, "big", signed=True)
+    n = int(hdr.decode("utf-8"))   # 4 ASCII digits (judger->AI framing)
     body = sys.stdin.buffer.read(n)
     return json.loads(body.decode("utf-8"))
 
@@ -176,7 +180,7 @@ import json, sys, time
 def read_frame():
     hdr = sys.stdin.buffer.read(4)
     if len(hdr) < 4: return None
-    n = int.from_bytes(hdr, "big", signed=True)
+    n = int(hdr.decode("utf-8"))   # 4 ASCII digits (judger->AI framing)
     sys.stdin.buffer.read(n)
     return {}
 while True:
@@ -197,3 +201,37 @@ while True:
     emitted = probe.probe_one(_alive_sample())
     probe.close()
     assert emitted is None  # missing, not coerced
+
+
+def test_probe_drives_real_bundled_baseline():
+    """Regression for three real-protocol bugs the echo mock could not catch:
+
+    1. probe -> AI framing must be 4 ASCII digits (``convert_byte_str_for_ai``),
+       not a binary length header — the bundled agents decode it with
+       ``int(str(read(4), "utf-8"))`` and ValueError/exit on a binary header.
+    2. the roundbegin turn fields (``inturn`` etc.) must be TOP-LEVEL, not
+       nested under ``"state"`` — the candidate reads ``msg["inturn"]``.
+    3. a candidate that does NOT reply to the ``id`` frame must not starve the
+       later action read — the single owning reader (no per-read thread leak)
+       ensures the move frame reaches ``probe_one``.
+
+    Drives the actual bundled ``random_agent`` baseline (reads the same ASCII
+    decode as ``candidates/v1`` and does not ack ``id``) and asserts it emits a
+    move on its turn. This is the production code path that crashed at act 2.
+    """
+    import agentbench_frame.lostspace.baselines.random_agent as _ra
+    ra_path = Path(_ra.__file__)
+    probe = ReferenceProbe(
+        cmd=[sys.executable, str(ra_path)], cwd=str(ra_path.parent),
+        timeout=2.0)
+    sample = ReferenceSample(
+        observation={"round": 1, "inturn": 0},
+        legal_actions={"attack": [], "move": [True] * 8, "detect": False,
+                       "interprops": []},
+        inventory={"LandMine": 0, "Sticky": 0, "Transport": 0, "Kit": 0},
+        status=0, seat=0, opponent="rank01",
+    )
+    emitted = probe.probe_one(sample)
+    probe.close()
+    assert isinstance(emitted, EmittedAction)
+    assert emitted.primitive[0] == "move"   # random_agent's on-turn action
