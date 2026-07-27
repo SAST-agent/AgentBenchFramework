@@ -34,7 +34,7 @@ def test_trusted_review_workflow_uses_trusted_pull_request_target_context():
     assert "name: Run blocking AI review" in text
     assert "PR_REVIEW_API_KEY: ${{ secrets.PR_REVIEW_API_KEY }}" in text
     assert "PR_REVIEW_ENDPOINT: ${{ secrets.PR_REVIEW_ENDPOINT }}" in text
-    assert "ref: ${{ github.event.pull_request.base.sha }}" in text
+    assert "ref: ${{ github.event.repository.default_branch }}" in text
     assert "github.event.pull_request.head.sha" not in text
     assert "Fork PRs cannot receive the credentialed blocking review" not in text
 

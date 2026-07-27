@@ -3,7 +3,7 @@
 该仓库的 PR 检查包含两个 check：
 
 - `Framework PR checks / framework-tests`：在 PR 合并引用上运行完整 pytest。
-- `Framework PR trusted review / ai-pr-review`：在 trusted base 上读取 PR diff，调用外部审查 endpoint。
+- `Framework PR trusted review / ai-pr-review`：在 trusted default branch 上读取 PR diff，调用外部审查 endpoint。
 
 两个 check 任意失败时都会返回失败；只有在仓库保护规则中将它们设为 required 后，失败才会阻止合并。测试 workflow 监听所有 PR 目标分支；trusted review workflow 使用 `pull_request_target`，其定义从目标分支的 trusted base 加载。长期接收 PR 的分支需要同步两份 workflow 文件。
 
@@ -56,9 +56,9 @@ Responses 模式优先发送 `model`、`instructions`、`input`、`reasoning.eff
 
 ## 安全边界
 
-两个 workflow 有意分开：`pr-review.yml` 运行在普通 `pull_request` 上，只 checkout 和执行 PR 合并引用中的测试代码，但不接触任何审查 Secret；`pr-review-trusted.yml` 运行在 `pull_request_target` 上，workflow 定义从目标分支的 trusted base 加载，并只 checkout `github.event.pull_request.base.sha`。
+两个 workflow 有意分开：`pr-review.yml` 运行在普通 `pull_request` 上，只 checkout 和执行 PR 合并引用中的测试代码，但不接触任何审查 Secret；`pr-review-trusted.yml` 运行在 `pull_request_target` 上，workflow 定义从 base repository 的 trusted default branch 加载，并只 checkout 该分支的审查代码。
 
-模型审查 job 通过 GitHub API 读取 PR 元数据和 diff，把它们作为 JSON 数据传给 trusted base 中的 `tools/pr_review.py`；它不会 checkout、导入或执行 PR head 中的代码。`persist-credentials: false` 也会关闭 trusted checkout 中不必要的 Git 凭据持久化。
+模型审查 job 通过 GitHub API 读取 PR 元数据和 diff，把它们作为 JSON 数据传给 trusted default branch 中的 `tools/pr_review.py`；它不会 checkout、导入或执行 PR head 中的代码。PR 的真实 `base_sha` 仍作为 metadata 传给模型；审查脚本本身使用当前 trusted default branch，以兼容历史 PR 的旧 base。`persist-credentials: false` 也会关闭 trusted checkout 中不必要的 Git 凭据持久化。
 
 PR diff 最大允许 350,000 字节，且最多允许 300 个 changed files；任一上限超出时在调用模型前直接失败，不发送任何前缀，也不允许模型对不完整 diff 给出通过结论。审查结果只写入 Actions Summary 和 workflow annotations，不自动修改 PR 或提交代码。
 
