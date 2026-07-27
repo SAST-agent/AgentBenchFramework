@@ -42,10 +42,29 @@ Two things make the measurement rigorous:
 cd E:/HL_Agent/AgentBenchFramework
 uv sync                              # core env (zero hard runtime deps)
 # optional, if you build RL comparisons:  uv sync --extra rl
-
-export PYTHONPATH=src                # ALWAYS — package lives under src/
-export AGENTBENCH_DATA="./agentbench_data"   # run output root
 ```
+
+Set two env vars. **Pick the block for your shell** — `export` is bash (Git
+Bash / WSL / Linux / macOS), `$env:` is PowerShell:
+
+```bash
+# bash / Git Bash / WSL / Linux / macOS
+export PYTHONPATH=src
+export AGENTBENCH_DATA="./agentbench_data"
+```
+
+```powershell
+# PowerShell (Windows)
+$env:PYTHONPATH = "src"
+$env:AGENTBENCH_DATA = ".\agentbench_data"
+```
+
+`PYTHONPATH=src` is **always required** (the package lives under `src/`).
+`AGENTBENCH_DATA` is the run-output root.
+
+> To make them permanent: bash → add to `~/.bashrc`; PowerShell →
+> `[Environment]::SetEnvironmentVariable("PYTHONPATH","src","User")`
+> (then restart the shell). Or use a `.env` file / direnv if you prefer.
 
 The official LostSpace backend needs `antlr4-python3-runtime==4.9.*` for its
 `python.exe` (3.10) child. The harness already scrubs `uv`'s poison
@@ -76,6 +95,8 @@ all versions you want comparable. Expand it later (see §6.3).
 
 ### 3.2 Run the loop
 
+**bash / Git Bash:**
+
 ```bash
 BACKEND="E:/HL_Agent/AgentBench/backend_sources/corpus/25_lostspace/logic/gamecode_logic"
 
@@ -89,6 +110,26 @@ PYTHONPATH=src uv run python -m agentbench_frame.hl \
   --acts 5 --pairs 3 --seats 0 --timeout 15 \
   --dangerously-skip-permissions
 ```
+
+**PowerShell:**
+
+```powershell
+$BACKEND = "E:/HL_Agent/AgentBench/backend_sources/corpus/25_lostspace/logic/gamecode_logic"
+
+uv run python -m agentbench_frame.hl `
+  --logic "cd /d `"$BACKEND`" && python main.py" `
+  --initial-candidate ./candidates/v1 `
+  --name hl-v1 `
+  --reference ./agentbench_data/reference/nu-v1.json `
+  --ladder-opponent rank=6 `
+  --ladder-opponent rank=12 `
+  --acts 5 --pairs 3 --seats 0 --timeout 15 `
+  --dangerously-skip-permissions
+```
+
+(PowerShell line continuation is the backtick `` ` `` at end of line; nested
+double-quotes are escaped as `` `" ``. `PYTHONPATH`/`AGENTBENCH_DATA` are set
+once per shell session per §2.)
 
 **Critical:** the `--logic` cwd **must** be `gamecode_logic/` (it loads
 `src/mapconf2.map` relatively and does `from src import main`).
@@ -170,12 +211,23 @@ Don't parse 20 KB of replay JSON by hand. Use
 `AgentBenchResults/skills/lostspace-playback/SKILL.md`:
 
 ```bash
+# bash
 cd AgentBenchFramework && PYTHONPATH=src
-# human-readable turn log of one game:
 python -m agentbench_frame.lostspace.replay_view \
-  $AGENTBENCH_DATA/runs/25_lostspace/hl-v1/<run_id>/artifacts/<opp>-pair000-seat0.json
+  "$AGENTBENCH_DATA/runs/25_lostspace/hl-v1/<run_id>/artifacts/<opp>-pair000-seat0.json"
+```
 
-# quick "did I win + standings" across all an agent's runs:
+```powershell
+# PowerShell
+cd AgentBenchFramework; $env:PYTHONPATH="src"
+python -m agentbench_frame.lostspace.replay_view `
+  "$env:AGENTBENCH_DATA/runs/25_lostspace/hl-v1/<run_id>/artifacts/<opp>-pair000-seat0.json"
+```
+
+Renders a human-readable turn log so you don't parse JSON by hand. Quick
+"did I win + standings" one-liner:
+
+```bash
 python -c "import json;print(json.load(open('REPLAY'))[-1])"
 ```
 
@@ -354,7 +406,14 @@ Before pointing the loop at the real CLI, sanity-check the wiring end-to-end
 with stubs (the test suite does this):
 
 ```bash
+# bash
 cd AgentBenchFramework && PYTHONPATH=src
+uv run pytest tests/hl/test_cli.py::test_main_runs_acts_with_stubbed_runner_and_eval -q
+```
+
+```powershell
+# PowerShell
+cd AgentBenchFramework; $env:PYTHONPATH="src"
 uv run pytest tests/hl/test_cli.py::test_main_runs_acts_with_stubbed_runner_and_eval -q
 ```
 
