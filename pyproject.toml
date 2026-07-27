@@ -19,7 +19,7 @@ agentbench = "agentbench_frame.cli:main"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest>=9.1.1",
 ]
