@@ -28,6 +28,7 @@ KNOWN_EVENT_TYPES = frozenset({
     "critical_window_selection",
     "behavior_diagnostics",
     "prior_attempt_import",
+    "version_rollback",
 })
 
 

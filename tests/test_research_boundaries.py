@@ -142,6 +142,19 @@ class ResearchBoundaryTests(unittest.TestCase):
 
         self.assertEqual(report.unknown_event_types, 0)
 
+    def test_round5_rollback_is_a_known_event_type(self):
+        from agentbench_frame.tracking.quality import inspect_event_lines
+
+        report = inspect_event_lines([
+            json.dumps({
+                "event_type": "version_rollback",
+                "event_id": "event-v5-rollback",
+                "run_id": "run-v5",
+            })
+        ])
+
+        self.assertEqual(report.unknown_event_types, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
