@@ -3,6 +3,10 @@ __pycache__/
 agentbench_data/
 _e2e_data/
 
+# HL run data — versioned workspace, snapshot store, event stream, staging.
+# This is run output (like agentbench_data/), not source. Never commit.
+.hl_codebase/
+
 # debug scratch — never commit (HL/lostspace debugging)
 _dbg/
 _dbg*/
