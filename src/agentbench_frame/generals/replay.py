@@ -254,12 +254,13 @@ def _state_features(
         state,
         opponent_main.get("position") if opponent_main else None,
     )
-    cells = [
-        item
-        for item in state.get("cells", {}).values()
+    cell_items = [
+        (str(key), item)
+        for key, item in state.get("cells", {}).items()
         if isinstance(item, Mapping)
         and int(item.get("type", 2)) != 2
     ]
+    cells = [item for _, item in cell_items]
     target_cells = [
         item for item in cells
         if int(item.get("player", -1)) == seat
@@ -289,11 +290,71 @@ def _state_features(
         ):
             kind = str(general.get("type", "unknown"))
             own_generals[kind] = own_generals.get(kind, 0) + 1
+    movable_records = sorted(
+        (
+            {
+                "position": [
+                    int(value)
+                    for value in key.split(",", 1)
+                ],
+                "army": int(item.get("army", 0)),
+                "movable_army": max(
+                    int(item.get("army", 0)) - 1,
+                    0,
+                ),
+                "terrain_type": int(item.get("type", 0)),
+                "general_id": item.get("general_id"),
+            }
+            for key, item in cell_items
+            if int(item.get("player", -1)) == seat
+            and int(item.get("army", 0)) > 1
+        ),
+        key=lambda item: (
+            -int(item["movable_army"]),
+            item["position"],
+        ),
+    )
     movable = [
-        max(int(item.get("army", 0)) - 1, 0)
-        for item in target_cells
-        if int(item.get("army", 0)) > 1
+        int(item["movable_army"])
+        for item in movable_records
     ]
+    visible_generals = []
+    for general in sorted(
+        (
+            item
+            for item in state.get("generals", {}).values()
+            if isinstance(item, Mapping)
+        ),
+        key=lambda item: int(item.get("id", 0)),
+    ):
+        position = general.get("position")
+        cell = _cell_at(state, position)
+        visible_generals.append({
+            "id": int(general.get("id", 0)),
+            "player": int(general.get("player", -1)),
+            "type": str(general.get("type", "unknown")),
+            "position": (
+                [int(position[0]), int(position[1])]
+                if isinstance(position, Sequence)
+                and not isinstance(position, (str, bytes))
+                and len(position) == 2
+                else None
+            ),
+            "cell_army": (
+                int(cell.get("army", 0))
+                if cell is not None
+                else None
+            ),
+            "produce_level": int(
+                general.get("produce_level", 0)
+            ),
+            "defense_level": int(
+                general.get("defense_level", 0)
+            ),
+            "mobility_level": int(
+                general.get("mobility_level", 0)
+            ),
+        })
     adjacent_pressure = _adjacent_enemy_pressure(state, seat)
     return {
         "own_main_position": (
@@ -329,6 +390,8 @@ def _state_features(
         "owned_general_counts": dict(sorted(own_generals.items())),
         "movable_stack_count": len(movable),
         "largest_movable_stack": max(movable, default=0),
+        "largest_movable_stacks": movable_records[:8],
+        "visible_generals": visible_generals,
     }
 
 

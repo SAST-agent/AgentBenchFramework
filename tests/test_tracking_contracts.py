@@ -92,6 +92,25 @@ class TrackingContractTests(unittest.TestCase):
         self.assertIsNone(snapshot["total_tokens"])
         self.assertAlmostEqual(snapshot["total_time_s"], 3.5)
 
+    def test_validation_is_a_first_class_budget_phase(self):
+        from agentbench_frame.tracking.budget import BudgetLedger
+
+        ledger = BudgetLedger()
+        ledger.add(
+            "validation",
+            episodes=6,
+            env_steps=120,
+            game_agent_decision_steps=60,
+            primitive_commands=240,
+            time_s=1.5,
+        )
+
+        snapshot = ledger.snapshot()
+        self.assertEqual(snapshot["validation_episodes"], 6)
+        self.assertEqual(snapshot["validation_env_steps"], 120)
+        self.assertEqual(snapshot["total_episodes"], 6)
+        self.assertEqual(snapshot["total_time_s"], 1.5)
+
     def test_budget_ledger_separates_calibration_without_polluting_learning(self):
         from agentbench_frame.tracking.budget import BudgetLedger
 
