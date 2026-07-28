@@ -550,6 +550,144 @@ class LocalResearchReportTests(unittest.TestCase):
         self.assertIn("64.5%", html)
         self.assertIn("passed", html)
 
+    def test_round4_reports_feedback_validation_and_nonblocking_diagnostics(self):
+        from agentbench_frame.report.builder import ReportBuilder
+
+        summary = {
+            "benchmark_score": 0.5,
+            "raw_score": 0.0,
+            "evo_score_1": 0.0,
+            "evo_score_2": 0.0,
+            "evo_score_3": 7 / 18,
+            "evo_score_4": 0.5,
+            "gain_4": 0.5,
+            "score_history": [0.0, 0.0, None, 0.0, 7 / 18, 0.5],
+            "AUC_coding_agent_act": None,
+            "feedback_read": {
+                "episodes": 6,
+                "decision_records": 42,
+                "serialized_bytes": 12000,
+            },
+            "behavior_diagnostics": {
+                "action_disagreement": 0.25,
+                "validation_complete": True,
+                "formal_evaluation_blocking": False,
+                "dense_deltas": {
+                    "terminal_army_margin": 10.0,
+                },
+            },
+            "budget": {
+                "learning_episodes": 6,
+                "validation_episodes": 6,
+                "evaluation_episodes": 18,
+            },
+        }
+        events = [
+            {
+                "event_type": "feedback_read",
+                "episodes": 6,
+                "decision_records": 42,
+                "serialized_bytes": 12000,
+            },
+            {
+                "event_type": "behavior_diagnostics",
+                "action_disagreement": 0.25,
+                "validation_complete": True,
+                "formal_evaluation_blocking": False,
+                "dense_deltas": {
+                    "terminal_army_margin": 10.0,
+                },
+            },
+        ]
+
+        research = ReportBuilder._derive_research(
+            summary,
+            events,
+            "/missing/events.jsonl",
+        )
+
+        self.assertEqual(research["evo_score"], 0.5)
+        self.assertEqual(research["gain"], 0.5)
+        self.assertEqual(research["feedback_read"]["episodes"], 6)
+        self.assertTrue(
+            research["behavior_diagnostics"]["validation_complete"]
+        )
+        self.assertFalse(
+            research["behavior_diagnostics"][
+                "formal_evaluation_blocking"
+            ]
+        )
+        self.assertIsNone(
+            research["auc"]["auc_coding_agent_act"]
+        )
+
+    def test_round4_nonblocking_diagnostics_render_in_dashboard(self):
+        from agentbench_frame.report.builder import ReportBuilder
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = (
+                root / "runs" / "28_generals"
+                / "generals-hl" / "v4-run"
+            )
+            run_dir.mkdir(parents=True)
+            (run_dir / "summary.json").write_text(json.dumps({
+                "run_id": "v4-run",
+                "game": "28_generals",
+                "agent": "generals-hl",
+                "run_type": "rule_iter",
+                "status": "complete",
+                "evaluation_status": "complete",
+                "benchmark_score": 0.5,
+                "raw_score": 0.0,
+                "evo_score_4": 0.5,
+                "gain_4": 0.5,
+                "score_history": [
+                    0.0, 0.0, None, 0.0, 7 / 18, 0.5,
+                ],
+                "AUC_coding_agent_act": None,
+                "budget": {
+                    "learning_episodes": 6,
+                    "validation_episodes": 6,
+                    "evaluation_episodes": 18,
+                },
+            }))
+            (run_dir / "events.jsonl").write_text(
+                "\n".join([
+                    json.dumps({
+                        "event_type": "feedback_read",
+                        "episodes": 6,
+                        "decision_records": 42,
+                        "serialized_bytes": 12000,
+                    }),
+                    json.dumps({
+                        "event_type": "behavior_diagnostics",
+                        "action_disagreement": 0.25,
+                        "validation_complete": True,
+                        "valid_validation_case_count": 6,
+                        "validation_case_count": 6,
+                        "formal_evaluation_blocking": False,
+                        "dense_deltas": {
+                            "terminal_army_margin": 10.0,
+                        },
+                    }),
+                ]) + "\n"
+            )
+
+            output = root / "site"
+            ReportBuilder(
+                data_dir=str(root),
+                output_dir=str(output),
+            ).build()
+            html = (output / "index.html").read_text()
+
+        self.assertIn("Behavior diagnostics", html)
+        self.assertIn("does not block formal evaluation", html)
+        self.assertIn("Feedback episodes read", html)
+        self.assertIn(">42<", html)
+        self.assertIn("terminal army margin", html)
+        self.assertIn("Validation episodes", html)
+
 
 if __name__ == "__main__":
     unittest.main()

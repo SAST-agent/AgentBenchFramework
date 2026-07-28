@@ -421,6 +421,9 @@ class ReportBuilder:
         dense_history = []
         decision_class_history = []
         behavior_gate_event = None
+        behavior_diagnostics_event = None
+        feedback_read_event = None
+        critical_window_selections = []
         for index, event in enumerate(events, start=1):
             event_type = event.get("event_type", event.get("event"))
             if event_type == "policy_kl_trace":
@@ -501,6 +504,73 @@ class ReportBuilder:
                         "action_disagreement"
                     ),
                 }
+            elif event_type == "behavior_diagnostics":
+                behavior_diagnostics_event = {
+                    "action_disagreement": event.get(
+                        "action_disagreement"
+                    ),
+                    "decision_count": event.get("decision_count"),
+                    "validation_complete": event.get(
+                        "validation_complete"
+                    ),
+                    "valid_validation_case_count": event.get(
+                        "valid_validation_case_count"
+                    ),
+                    "validation_case_count": event.get(
+                        "validation_case_count"
+                    ),
+                    "dense_deltas": event.get("dense_deltas", {}),
+                    "formal_evaluation_blocking": event.get(
+                        "formal_evaluation_blocking"
+                    ),
+                    "policy_kl": event.get("policy_kl"),
+                    "policy_kl_status": event.get(
+                        "policy_kl_status"
+                    ),
+                    "epistemic_information_gain": event.get(
+                        "epistemic_information_gain"
+                    ),
+                    "information_gain_status": event.get(
+                        "information_gain_status"
+                    ),
+                }
+            elif event_type == "feedback_read":
+                feedback_read_event = {
+                    "episodes": event.get("episodes"),
+                    "decision_records": event.get(
+                        "decision_records"
+                    ),
+                    "serialized_bytes": event.get(
+                        "serialized_bytes"
+                    ),
+                    "prompt_bytes": event.get("prompt_bytes"),
+                    "estimated_tokens": event.get(
+                        "estimated_tokens"
+                    ),
+                    "included_episode_ids": event.get(
+                        "included_episode_ids", []
+                    ),
+                    "omitted_episode_ids": event.get(
+                        "omitted_episode_ids", []
+                    ),
+                    "selection_policy": event.get(
+                        "selection_policy"
+                    ),
+                }
+            elif event_type == "critical_window_selection":
+                critical_window_selections.append({
+                    "replay_id": event.get("replay_id"),
+                    "total_decision_count": event.get(
+                        "total_decision_count"
+                    ),
+                    "selected_state_ids": event.get(
+                        "selected_state_ids", []
+                    ),
+                    "omitted_decision_count": event.get(
+                        "omitted_decision_count"
+                    ),
+                    "reasons": event.get("reasons", {}),
+                })
         for aggregate in action_disagreement_history:
             episodes = [
                 item
@@ -528,18 +598,24 @@ class ReportBuilder:
                 )
         raw_score = summary.get("raw_score")
         evo_score = summary.get(
-            "evo_score_3",
+            "evo_score_4",
             summary.get(
-                "evo_score_2",
+                "evo_score_3",
                 summary.get(
-                    "evo_score",
-                    summary.get("benchmark_score"),
+                    "evo_score_2",
+                    summary.get(
+                        "evo_score",
+                        summary.get("benchmark_score"),
+                    ),
                 ),
             ),
         )
         gain = summary.get(
-            "gain_3",
-            summary.get("gain_2", summary.get("gain")),
+            "gain_4",
+            summary.get(
+                "gain_3",
+                summary.get("gain_2", summary.get("gain")),
+            ),
         )
         if gain is None and raw_score is not None and evo_score is not None:
             gain = float(evo_score) - float(raw_score)
@@ -598,6 +674,19 @@ class ReportBuilder:
                 behavior_gate_event
                 if behavior_gate_event is not None
                 else summary.get("behavior_gate")
+            ),
+            "behavior_diagnostics": (
+                behavior_diagnostics_event
+                if behavior_diagnostics_event is not None
+                else summary.get("behavior_diagnostics")
+            ),
+            "feedback_read": (
+                feedback_read_event
+                if feedback_read_event is not None
+                else summary.get("feedback_read")
+            ),
+            "critical_window_selections": (
+                critical_window_selections
             ),
             "cumulative_learning_budget": summary.get(
                 "cumulative_learning_budget"

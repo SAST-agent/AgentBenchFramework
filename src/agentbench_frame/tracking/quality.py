@@ -24,6 +24,9 @@ KNOWN_EVENT_TYPES = frozenset({
     "behavior_gate",
     "behavior_measurement_error",
     "lineage_budget_audit",
+    "feedback_read",
+    "critical_window_selection",
+    "behavior_diagnostics",
 })
 
 

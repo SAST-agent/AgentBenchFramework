@@ -19,6 +19,7 @@ def test_generals_help_is_registered(capsys):
     assert "calibrate-dev" in output
     assert "iterate-v2" in output
     assert "recover-v2" in output
+    assert "iterate-v4" in output
 
 
 def test_calibrate_dev_help_exposes_frozen_selection_inputs(capsys):
@@ -51,3 +52,15 @@ def test_recover_v2_help_requires_failed_run(capsys):
     assert "--failed-run" in output
     assert "--calibration-selection" in output
     assert "--parent-run" in output
+
+
+def test_iterate_v4_help_exposes_replay_skill_and_parent(capsys):
+    with pytest.raises(SystemExit) as exc:
+        main(["generals", "iterate-v4", "--help"])
+    assert exc.value.code == 0
+    output = capsys.readouterr().out
+    assert "--learning-manifest" in output
+    assert "--replay-skill" in output
+    assert "--parent-run" in output
+    assert "--expected-parent-hash" in output
+    assert "--codex-executable" in output

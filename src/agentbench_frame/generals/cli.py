@@ -23,6 +23,7 @@ from .pipeline_v2 import (
     calibrate_development,
 )
 from .pipeline_v3 import GeneralsHLRound3Pipeline
+from .pipeline_v4 import GeneralsHLRound4Pipeline
 
 
 def register_parser(subparsers) -> argparse.ArgumentParser:
@@ -50,6 +51,10 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
             "iterate-v3",
             "Run strongest-human v2 learning → one gated Codex act → v3",
         ),
+        (
+            "iterate-v4",
+            "Run replay-guided v3 learning → one non-gated Codex act → v4",
+        ),
     ):
         command = commands.add_parser(name, help=help_text)
         command.add_argument("--agentbench-root", type=Path, required=True)
@@ -58,7 +63,13 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
             command.add_argument("--data-dir", type=Path, required=True)
         if name == "eval":
             command.add_argument("--version", choices=("v0",), default="v0")
-        if name in {"iterate", "iterate-v2", "recover-v2", "iterate-v3"}:
+        if name in {
+            "iterate",
+            "iterate-v2",
+            "recover-v2",
+            "iterate-v3",
+            "iterate-v4",
+        }:
             command.add_argument("--codex-executable", default="codex")
             command.add_argument("--provider-timeout", type=float, default=1800)
         if name in {"calibrate-dev", "iterate-v2", "recover-v2"}:
@@ -67,7 +78,7 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
             )
             command.add_argument("--parent-run", type=Path, required=True)
             command.add_argument("--expected-parent-hash", required=True)
-        if name == "iterate-v3":
+        if name in {"iterate-v3", "iterate-v4"}:
             command.add_argument(
                 "--learning-manifest",
                 type=Path,
@@ -75,6 +86,13 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
             )
             command.add_argument("--parent-run", type=Path, required=True)
             command.add_argument("--expected-parent-hash", required=True)
+        if name == "iterate-v4":
+            command.add_argument(
+                "--replay-skill",
+                type=Path,
+                required=True,
+                help="Path relative to --agentbench-root",
+            )
         if name == "calibrate-dev":
             command.add_argument("--selection-output", type=Path, required=True)
         if name in {"iterate-v2", "recover-v2"}:
@@ -195,6 +213,31 @@ def handle(args) -> int:
                 "global_act_count": result.global_act_count,
                 "round_act_count": result.round_act_count,
                 "behavior_gate_passed": result.gate_passed,
+            }, sort_keys=True))
+            return 0 if result.status == "complete" else 1
+        if args.generals_command == "iterate-v4":
+            result = GeneralsHLRound4Pipeline.from_paths(
+                agentbench_root=args.agentbench_root,
+                manifest_path=args.manifest,
+                learning_manifest_path=args.learning_manifest,
+                replay_skill_path=args.replay_skill,
+                parent_run_dir=args.parent_run,
+                expected_parent_hash=args.expected_parent_hash,
+                data_dir=args.data_dir,
+                provider=provider,
+            ).run()
+            print(json.dumps({
+                "status": result.status,
+                "run_dir": str(result.run_dir),
+                "raw_score": result.raw_score,
+                "evo_score_1": result.evo_score_1,
+                "evo_score_2": result.evo_score_2,
+                "evo_score_3": result.evo_score_3,
+                "evo_score_4": result.evo_score_4,
+                "gain_4": result.gain_4,
+                "global_act_count": result.global_act_count,
+                "round_act_count": result.round_act_count,
+                "runnable": result.runnable,
             }, sort_keys=True))
             return 0 if result.status == "complete" else 1
         result = GeneralsHLPipeline(
