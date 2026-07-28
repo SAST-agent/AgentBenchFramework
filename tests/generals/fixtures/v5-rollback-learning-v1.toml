@@ -1,0 +1,4 @@
+learning_id = "generals-hl-v5-rollback-strongest-v1"
+opponent_id = "advanced-rank02-robinliu-v18"
+seeds = [286101, 286202, 286303]
+seats = [0, 1]

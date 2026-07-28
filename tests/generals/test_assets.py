@@ -9,6 +9,7 @@ from agentbench_frame.generals.assets import (
     load_pilot_config,
     load_round3_learning_config,
     load_round4_learning_config,
+    load_round5_learning_config,
     resolve_assets,
     resolve_replay_skill,
 )
@@ -20,6 +21,9 @@ ROUND3_FIXTURE = (
 )
 ROUND4_FIXTURE = (
     Path(__file__).parent / "fixtures" / "v4-strongest-learning-v1.toml"
+)
+ROUND5_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "v5-rollback-learning-v1.toml"
 )
 
 
@@ -138,6 +142,36 @@ def test_round4_learning_rejects_every_previously_used_seed(
 
     with pytest.raises(AssetValidationError, match="previously frozen"):
         load_round4_learning_config(manifest, pilot)
+
+
+def test_round5_learning_manifest_freezes_rollback_strongest_matrix():
+    pilot = load_pilot_config(FIXTURE)
+
+    learning = load_round5_learning_config(ROUND5_FIXTURE, pilot)
+
+    assert learning.learning_id == "generals-hl-v5-rollback-strongest-v1"
+    assert learning.opponent_id == "advanced-rank02-robinliu-v18"
+    assert learning.seeds == (286101, 286202, 286303)
+    assert learning.seats == (0, 1)
+
+
+@pytest.mark.parametrize(
+    "used_seed",
+    ["280101", "281101", "284101", "285101"],
+)
+def test_round5_learning_rejects_every_previously_used_seed(
+    tmp_path,
+    used_seed,
+):
+    pilot = load_pilot_config(FIXTURE)
+    manifest = tmp_path / "learning.toml"
+    manifest.write_text(
+        ROUND5_FIXTURE.read_text().replace("286101", used_seed),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AssetValidationError, match="previously frozen"):
+        load_round5_learning_config(manifest, pilot)
 
 
 def test_replay_skill_is_resolved_below_root_with_stable_digest(tmp_path):
