@@ -18,7 +18,9 @@ from .models import (
     OpponentSpec,
     PilotConfig,
     ProcessLimits,
+    ReplaySkillAsset,
     Round3LearningConfig,
+    Round4LearningConfig,
 )
 
 
@@ -29,6 +31,8 @@ CALIBRATION_SELECTION_RULE = "closest_to_0.4_then_manifest_order"
 FROZEN_LIMITS = ProcessLimits(10.0, 2.0, 600.0, 65_536, 10_485_760)
 EXPECTED_TIERS = ("high", "medium", "low")
 ROUND3_LEARNING_ID = "generals-hl-v3-strongest-v1"
+ROUND4_LEARNING_ID = "generals-hl-v4-strongest-v1"
+ROUND3_LEARNING_SEEDS = frozenset({284101, 284202, 284303})
 PREVIOUSLY_FROZEN_GENERALS_SEEDS = frozenset({
     280101, 280202, 280303,
     281101, 281202, 281303,
@@ -36,6 +40,9 @@ PREVIOUSLY_FROZEN_GENERALS_SEEDS = frozenset({
     282601, 282702, 282803, 282904, 283005,
     283101, 283202, 283303,
 })
+FROZEN_BEFORE_ROUND4 = (
+    PREVIOUSLY_FROZEN_GENERALS_SEEDS | ROUND3_LEARNING_SEEDS
+)
 
 
 class AssetValidationError(ValueError):
@@ -151,6 +158,47 @@ def load_round3_learning_config(
     if highest.tier != "high" or config.opponent_id != highest.opponent_id:
         raise AssetValidationError(
             "round-3 learning opponent must be the frozen highest-tier opponent"
+        )
+    return config
+
+
+def load_round4_learning_config(
+    path: Path,
+    pilot: PilotConfig,
+) -> Round4LearningConfig:
+    """Parse the frozen strongest-human learning matrix for v4."""
+    try:
+        raw = tomllib.loads(path.read_text(encoding="utf-8"))
+        config = Round4LearningConfig(
+            learning_id=str(raw["learning_id"]),
+            opponent_id=str(raw["opponent_id"]),
+            seeds=tuple(int(item) for item in raw["seeds"]),
+            seats=tuple(int(item) for item in raw["seats"]),
+        )
+    except (OSError, tomllib.TOMLDecodeError, KeyError, TypeError, ValueError) as exc:
+        raise AssetValidationError(
+            f"invalid round-4 learning manifest: {exc}"
+        ) from exc
+    if config.learning_id != ROUND4_LEARNING_ID:
+        raise AssetValidationError(
+            f"round-4 learning_id must be {ROUND4_LEARNING_ID}"
+        )
+    if len(config.seeds) != 3 or len(set(config.seeds)) != 3:
+        raise AssetValidationError(
+            "round-4 learning seeds must contain exactly three unique values"
+        )
+    if set(config.seeds) & FROZEN_BEFORE_ROUND4:
+        raise AssetValidationError(
+            "round-4 learning seeds overlap a previously frozen seed set"
+        )
+    if config.seats != (0, 1):
+        raise AssetValidationError(
+            "round-4 learning seats must be ordered [0, 1]"
+        )
+    highest = pilot.opponents[0]
+    if highest.tier != "high" or config.opponent_id != highest.opponent_id:
+        raise AssetValidationError(
+            "round-4 learning opponent must be the frozen highest-tier opponent"
         )
     return config
 
@@ -293,6 +341,32 @@ def _resolve_below(root: Path, relative: Path, field: str) -> Path:
     if not resolved.is_relative_to(root):
         raise AssetValidationError(f"{field} escapes AgentBench root: {relative}")
     return resolved
+
+
+def resolve_replay_skill(
+    agentbench_root: Path,
+    relative_path: Path,
+) -> ReplaySkillAsset:
+    """Resolve and hash a frozen human-authored replay-analysis skill."""
+    path = _resolve_below(
+        agentbench_root,
+        relative_path,
+        "replay skill",
+    )
+    if not path.is_file():
+        raise AssetValidationError("replay skill must be a readable file")
+    try:
+        raw = path.read_bytes()
+        text = raw.decode("utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise AssetValidationError(
+            f"cannot read replay skill: {exc}"
+        ) from exc
+    return ReplaySkillAsset(
+        path=path,
+        text=text,
+        sha256=hashlib.sha256(raw).hexdigest(),
+    )
 
 
 def _stable_tree_hash(root: Path) -> str:
