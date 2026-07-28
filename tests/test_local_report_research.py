@@ -714,6 +714,146 @@ class LocalResearchReportTests(unittest.TestCase):
         self.assertIn(">58<", html)
         self.assertIn("derived campaign budget", html)
 
+    def test_round5_rollback_and_dual_comparisons_are_preserved(self):
+        from agentbench_frame.report.builder import ReportBuilder
+
+        research = ReportBuilder._derive_research(
+            {
+                "benchmark_score": 0.5,
+                "raw_score": 0.0,
+                "evo_score_5": 0.5,
+                "gain_5": 0.5,
+                "parent_run_id": "v4-run",
+                "parent_version": "v4",
+                "parent_content_hash": "4" * 64,
+                "starting_version": "v3",
+                "rollback_source_version": "v3",
+                "rollback_content_hash": "3" * 64,
+                "budget": {"learning_coding_agent_acts": 1},
+            },
+            [
+                {
+                    "event_type": "version_rollback",
+                    "parent_run_id": "v4-run",
+                    "parent_version": "v4",
+                    "parent_content_hash": "4" * 64,
+                    "starting_version": "v3",
+                    "rollback_source_version": "v3",
+                    "rollback_content_hash": "3" * 64,
+                },
+                {
+                    "event_type": "behavior_diagnostics",
+                    "action_disagreement_vs_v3": 0.25,
+                    "action_disagreement_vs_v4": 0.5,
+                    "v3_probe_decision_count": 42,
+                    "v4_probe_decision_count": 43,
+                    "validation_complete": True,
+                    "valid_validation_case_count": 6,
+                    "validation_case_count": 6,
+                    "dense_deltas_vs_v3": {
+                        "terminal_army_margin": 10.0,
+                    },
+                    "dense_deltas_vs_v4": {
+                        "terminal_army_margin": 20.0,
+                    },
+                    "formal_evaluation_blocking": False,
+                },
+            ],
+            "/missing/events.jsonl",
+        )
+
+        self.assertEqual(research["evo_score"], 0.5)
+        self.assertEqual(research["gain"], 0.5)
+        self.assertEqual(
+            research["version_rollback"]["starting_version"],
+            "v3",
+        )
+        diagnostics = research["behavior_diagnostics"]
+        self.assertEqual(
+            diagnostics["action_disagreement_vs_v3"],
+            0.25,
+        )
+        self.assertEqual(
+            diagnostics["action_disagreement_vs_v4"],
+            0.5,
+        )
+        self.assertEqual(
+            diagnostics["dense_deltas_vs_v4"][
+                "terminal_army_margin"
+            ],
+            20.0,
+        )
+
+    def test_round5_rollback_and_dual_comparisons_render(self):
+        from agentbench_frame.report.builder import ReportBuilder
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = (
+                root / "runs" / "28_generals"
+                / "generals-hl" / "v5-run"
+            )
+            run_dir.mkdir(parents=True)
+            (run_dir / "summary.json").write_text(json.dumps({
+                "run_id": "v5-run",
+                "game": "28_generals",
+                "agent": "generals-hl",
+                "status": "complete",
+                "benchmark_score": 0.5,
+                "raw_score": 0.0,
+                "evo_score_5": 0.5,
+                "gain_5": 0.5,
+                "parent_run_id": "v4-run",
+                "parent_version": "v4",
+                "parent_content_hash": "4" * 64,
+                "starting_version": "v3",
+                "rollback_source_version": "v3",
+                "rollback_content_hash": "3" * 64,
+                "budget": {"learning_coding_agent_acts": 1},
+            }))
+            (run_dir / "events.jsonl").write_text(
+                "\n".join([
+                    json.dumps({
+                        "event_type": "version_rollback",
+                        "parent_run_id": "v4-run",
+                        "parent_version": "v4",
+                        "parent_content_hash": "4" * 64,
+                        "starting_version": "v3",
+                        "rollback_source_version": "v3",
+                        "rollback_content_hash": "3" * 64,
+                    }),
+                    json.dumps({
+                        "event_type": "behavior_diagnostics",
+                        "action_disagreement_vs_v3": 0.25,
+                        "action_disagreement_vs_v4": 0.5,
+                        "validation_complete": True,
+                        "valid_validation_case_count": 6,
+                        "validation_case_count": 6,
+                        "dense_deltas_vs_v3": {
+                            "terminal_army_margin": 10.0,
+                        },
+                        "dense_deltas_vs_v4": {
+                            "terminal_army_margin": 20.0,
+                        },
+                        "formal_evaluation_blocking": False,
+                    }),
+                ]) + "\n"
+            )
+
+            output = root / "site"
+            ReportBuilder(
+                data_dir=str(root),
+                output_dir=str(output),
+            ).build()
+            html = (output / "index.html").read_text()
+
+        self.assertIn("Rollback lineage", html)
+        self.assertIn("v4 → v3", html)
+        self.assertIn("Action disagreement vs v3", html)
+        self.assertIn("Action disagreement vs v4", html)
+        self.assertIn("v5 − v3", html)
+        self.assertIn("v5 − v4", html)
+
 
 if __name__ == "__main__":
     unittest.main()

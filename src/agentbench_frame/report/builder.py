@@ -466,6 +466,7 @@ class ReportBuilder:
         behavior_gate_event = None
         behavior_diagnostics_event = None
         feedback_read_event = None
+        version_rollback_event = None
         critical_window_selections = []
         for index, event in enumerate(events, start=1):
             event_type = event.get("event_type", event.get("event"))
@@ -552,7 +553,19 @@ class ReportBuilder:
                     "action_disagreement": event.get(
                         "action_disagreement"
                     ),
+                    "action_disagreement_vs_v3": event.get(
+                        "action_disagreement_vs_v3"
+                    ),
+                    "action_disagreement_vs_v4": event.get(
+                        "action_disagreement_vs_v4"
+                    ),
                     "decision_count": event.get("decision_count"),
+                    "v3_probe_decision_count": event.get(
+                        "v3_probe_decision_count"
+                    ),
+                    "v4_probe_decision_count": event.get(
+                        "v4_probe_decision_count"
+                    ),
                     "validation_complete": event.get(
                         "validation_complete"
                     ),
@@ -563,6 +576,12 @@ class ReportBuilder:
                         "validation_case_count"
                     ),
                     "dense_deltas": event.get("dense_deltas", {}),
+                    "dense_deltas_vs_v3": event.get(
+                        "dense_deltas_vs_v3", {}
+                    ),
+                    "dense_deltas_vs_v4": event.get(
+                        "dense_deltas_vs_v4", {}
+                    ),
                     "formal_evaluation_blocking": event.get(
                         "formal_evaluation_blocking"
                     ),
@@ -598,6 +617,23 @@ class ReportBuilder:
                     ),
                     "selection_policy": event.get(
                         "selection_policy"
+                    ),
+                }
+            elif event_type == "version_rollback":
+                version_rollback_event = {
+                    "parent_run_id": event.get("parent_run_id"),
+                    "parent_version": event.get("parent_version"),
+                    "parent_content_hash": event.get(
+                        "parent_content_hash"
+                    ),
+                    "starting_version": event.get(
+                        "starting_version"
+                    ),
+                    "rollback_source_version": event.get(
+                        "rollback_source_version"
+                    ),
+                    "rollback_content_hash": event.get(
+                        "rollback_content_hash"
                     ),
                 }
             elif event_type == "critical_window_selection":
@@ -641,23 +677,29 @@ class ReportBuilder:
                 )
         raw_score = summary.get("raw_score")
         evo_score = summary.get(
-            "evo_score_4",
+            "evo_score_5",
             summary.get(
-                "evo_score_3",
+                "evo_score_4",
                 summary.get(
-                    "evo_score_2",
+                    "evo_score_3",
                     summary.get(
-                        "evo_score",
-                        summary.get("benchmark_score"),
+                        "evo_score_2",
+                        summary.get(
+                            "evo_score",
+                            summary.get("benchmark_score"),
+                        ),
                     ),
                 ),
             ),
         )
         gain = summary.get(
-            "gain_4",
+            "gain_5",
             summary.get(
-                "gain_3",
-                summary.get("gain_2", summary.get("gain")),
+                "gain_4",
+                summary.get(
+                    "gain_3",
+                    summary.get("gain_2", summary.get("gain")),
+                ),
             ),
         )
         if gain is None and raw_score is not None and evo_score is not None:
@@ -727,6 +769,34 @@ class ReportBuilder:
                 feedback_read_event
                 if feedback_read_event is not None
                 else summary.get("feedback_read")
+            ),
+            "version_rollback": (
+                version_rollback_event
+                if version_rollback_event is not None
+                else (
+                    {
+                        "parent_run_id": summary.get(
+                            "parent_run_id"
+                        ),
+                        "parent_version": summary.get(
+                            "parent_version"
+                        ),
+                        "parent_content_hash": summary.get(
+                            "parent_content_hash"
+                        ),
+                        "starting_version": summary.get(
+                            "starting_version"
+                        ),
+                        "rollback_source_version": summary.get(
+                            "rollback_source_version"
+                        ),
+                        "rollback_content_hash": summary.get(
+                            "rollback_content_hash"
+                        ),
+                    }
+                    if summary.get("rollback_source_version")
+                    else None
+                )
             ),
             "critical_window_selections": (
                 critical_window_selections
