@@ -4,20 +4,14 @@ import json
 import copy
 from enum import Enum
 
-# Center capsule (escape) position.
-ESCAPE_POS = (3, 3, 0)
-# Material-point (type 1) grid coords, used for opportunistic looting.
-MAT_POSITIONS = {
-    (3, 6, 1), (3, 0, 1), (2, 3, 1), (4, 3, 1),
-    (3, 6, 2), (3, 0, 2), (2, 4, 2), (2, 3, 2), (2, 2, 2),
-    (4, 4, 2), (4, 3, 2), (4, 2, 2),
-}
-
 class STATUS(Enum):
     ALIVE = 0
     DEAD = 1
     ESCAPED = 2
     SKIPPED = 3
+    IN_CAPSULE = 4  # 逃生倒计时中：裁判在交互逃生舱后将状态置为 4。
+                    # 此状态下每回合只需 finish 让倒计时自动走，
+                    # 绝不能再 interact("EscapeCapsule") —— 否则会重置/暂停倒计时。
 
 import random
 class Node:
@@ -241,12 +235,7 @@ class Map:
                 return False
             if y != y1:
                 return False
-            # 注意：上面的 x,y=y,x 交换后，局部 x/y 已是交换后的值，
-            # 真实候选格是 node[z][原x][原y] = node[z][y][x]。早期写法用了
-            # node[z][x][y]，会把真实电梯 (3,5)/(0,3)/(6,3) 检测成 False，
-            # 反而把幻影电梯 (5,3)/(3,0) 当成可跨层——这是集齐3把钥匙后
-            # 卡死在第4把的根因（跨层移动被裁判判失败→原地空转70回合）。
-            if self.node[z][y][x].type == 3:
+            if self.node[z][x][y].type == 3:
                 return True
             else:
                 return False
@@ -341,9 +330,6 @@ class AIClient:
         self.view = View()  # 玩家视野
         self.root = {}  #接收通信消息
         self.map = Map()
-        # KeyMachine cells we have already drained (per-key pair dedup, so we
-        # don't shuttle back to a machine whose key we already hold).
-        self.visited_km = set()
 
     def receive_data(self):
         """
@@ -411,6 +397,14 @@ class AIClient:
             self.play()         #选手进行操作
             self.end_turn()
         elif self.player.status == STATUS.ESCAPED.value:
+            self.end_turn()
+        elif self.player.status == STATUS.IN_CAPSULE.value:
+            # 逃生倒计时进行中：什么都不做，只结束回合让倒计时自动走。
+            # 关键：不能再调 interact("EscapeCapsule")，否则会重置/暂停倒计时，
+            # 永远逃不出去 —— 这是此前 0% 胜率的根因（进入倒计时后每回合 TLE）。
+            self.end_turn()
+        else:
+            # DEAD / SKIPPED / 未知状态：直接结束回合，避免不发 finish 导致 TLE 死锁。
             self.end_turn()
     
     def in_turn(self):
@@ -569,7 +563,7 @@ class AIClient:
                 self.in_turn()
             else:
                 if self.root["success"]:
-                    self.others[self.player_id_to_player_index(player_id)].hp -= 40
+                    self.others[self.player_id_to_player_index(player_id)].hp -= 70
                 return copy.deepcopy(self.root)
 
     def interact(self, tool_type, capsule=False):
@@ -684,51 +678,13 @@ class AIClient:
             return [6,6,1]
         elif x == 3:
             return [0,6,1]
-
+        
 
     def get_escape_pos(self):
         """
         获得撤离点位置坐标，返回值为三元组
         """
         return [3,3,0]
-
-    def get_km_positions(self, k):
-        """
-        返回产出钥匙 k 的两个 KeyMachine 坐标（layer-1 与 layer-2 同一角）。
-        """
-        sp = self.get_spawn_pos(k)
-        return [(sp[0], sp[1], sp[2]), (sp[0], sp[1], sp[2] + 1)]
-
-    def all_km_positions(self):
-        pos = []
-        for k in range(4):
-            pos.extend(self.get_km_positions(k))
-        return pos
-
-    def step_toward(self, target):
-        """
-        选择一个让本玩家到 target 的 BFS 距离最小的相邻节点（含自身）。
-        优先严格靠近的邻居；实在无法更近时退而求其次选一个非自身的邻居，
-        避免原地空转。
-        """
-        t = (target[0], target[1], target[2])
-        dist = self.bfs_move(t, 1, -1)  # dist[node] = BFS distance to target
-        my_pos = self.get_my_pos()
-        my_tuple = (my_pos[0], my_pos[1], my_pos[2])
-        cur_d = dist.get(my_tuple, 1 << 30)
-        closer, lateral = [], []
-        for n in self.get_neighbors(my_pos):
-            d = dist.get(n)
-            if d is None:
-                continue
-            if n == my_tuple:
-                continue
-            (closer if d < cur_d else lateral).append((d, n))
-        if closer:
-            return min(closer)[1]
-        if lateral:
-            return min(lateral)[1]
-        return None
 
     def get_landmine_pos(self):
         """
@@ -799,137 +755,115 @@ class AIClient:
             else:
                 a[i] = b[i]
 
+    def bfs_dist(self, src):
+        """BFS shortest-path distances from src over the get_neighbors graph.
+        Returns {pos_tuple: dist}. pos may be list or tuple; keys are tuples."""
+        src = tuple(src)
+        dist = {src: 0}
+        queue = [src]
+        head = 0
+        while head < len(queue):
+            cur = queue[head]
+            head += 1
+            for n in self.get_neighbors(cur):
+                n = tuple(n)
+                if n not in dist:
+                    dist[n] = dist[cur] + 1
+                    queue.append(n)
+        return dist
+
+    def goal_targets(self):
+        """Cells worth walking toward.
+        Key machines sit on BOTH layer-1 and layer-2 corners (sp[2] and sp[2]+1);
+        layer-0 corners are not machines. Once we hold 4 keys, head for the capsule."""
+        my_keys = set(self.get_keys())
+        if len(my_keys) >= 4:
+            return [tuple(self.get_escape_pos())]
+        targets = []
+        for k in range(4):
+            if k in my_keys:
+                continue
+            sp = self.get_spawn_pos(k)
+            for dz in (0, 1):  # layer-1 and layer-2 copies of this corner's machine
+                targets.append((sp[0], sp[1], sp[2] + dz))
+        return targets
+
     def test_move(self):
-        """
-        目标导向的移动：集齐4把钥匙后走向逃生舱；否则走向最近的、尚未取过的
-        KeyMachine。用 step_toward 取得到目标 BFS 距离最小的下一步，修掉了原
-        test_move 里 node[z][y][x] 转置索引与对已取钥匙机器反复回头的毛病。
-        """
+        # Goal-directed movement: step along a shortest path toward the nearest
+        # uncollected key machine, or the escape capsule once we hold 4 keys.
         my_pos = self.get_my_pos()
-        my_tuple = (my_pos[0], my_pos[1], my_pos[2])
-
-        if len(self.get_keys()) >= 4:
-            target = ESCAPE_POS
-        else:
-            held = set(self.get_keys())
-            dist_from_me = self.bfs_move(my_tuple, 1, -1)
-            target = None
-            best_d = None
-            # 只挑“尚未持有该钥匙”的 KeyMachine，避免去我已经拿过钥匙的
-            # 另一层机器空跑一趟（visited_km 按格子去重，无法表达“这把钥匙
-            # 已拿”）。这样集齐3把后会直奔缺的那把，而不是被幻影电梯路径
-            # 误导到卡死。
-            for k in range(4):
-                if k in held:
-                    continue
-                for km in self.get_km_positions(k):
-                    if km in self.visited_km:
-                        continue
-                    d = dist_from_me.get(km)
-                    if d is None:
-                        continue
-                    if best_d is None or d < best_d:
-                        best_d = d
-                        target = km
-            if target is None:
-                target = ESCAPE_POS
-
-        step = self.step_toward(target)
-        if step is not None and tuple(step) != my_tuple:
-            self.move(step)
-        elif tuple(target) == my_tuple:
-            # 已在目标格上（理论上 play() 会先处理交互），原地待命，不远离目标
-            return None
-        else:
-            nbrs = [n for n in self.get_neighbors(my_pos) if tuple(n) != my_tuple]
-            if nbrs:
-                self.move(nbrs[0])
+        my_t = tuple(my_pos)
+        from_me = self.bfs_dist(my_pos)
+        targets = self.goal_targets()
+        best_t, best_d = None, None
+        for t in targets:
+            d = from_me.get(t)
+            if d is None:
+                continue
+            if best_d is None or d < best_d:
+                best_d, best_t = d, t
+        if best_t is None:
+            return  # no reachable target this turn; let end_turn() finish
+        if best_t == my_t:
+            return  # already on target; a collect/escape interact fires next turn
+        to_target = self.bfs_dist(best_t)
+        best_step, best_sd = None, None
+        for n in self.get_neighbors(my_pos):
+            d = to_target.get(n)
+            if d is None:
+                continue
+            if best_sd is None or d < best_sd:
+                best_sd, best_step = d, n
+            elif d == best_sd and best_step == my_t and n != my_t:
+                # tie-break: prefer an actual step over staying put
+                best_step = n
+        if best_step is None:
+            return
+        self.move(best_step)
         return None
 
     def play(self):
         """
-        选手编写函数。每回合只做一次动作（move/attack/interact/use_tool），
-        之后由 end_turn 发送 finish。
+        选手编写函数
         """
         pos = self.get_my_pos()
-        my_pos = (pos[0], pos[1], pos[2])
-        my_hp = self.get_my_hp()
-        keys = self.get_keys()
-
-        # 1) 集齐4钥匙并站在逃生舱上 → 启动撤离倒计时
-        if len(keys) >= 4 and my_pos == ESCAPE_POS:
-            self.interact("EscapeCapsule", 1)
-            return
-
-        # 2) 站在尚未取过的 KeyMachine 上 → 取钥匙
-        #    仅当该机器对应钥匙尚未持有时才交互，否则会空耗一回合。
-        if my_pos in self.all_km_positions() and my_pos not in self.visited_km:
-            if my_pos in self._km_cells_for_missing_keys():
-                res = self.interact("KeyMachine")
-                if res["success"] or res.get("success") is False:
-                    self.visited_km.add(my_pos)
-                return
-            else:
-                self.visited_km.add(my_pos)  # 已持有该钥匙，标记不再回头
-
-        # 3) 低血量且有医疗包 → 治疗
-        if my_hp <= 130 and self.player.tools.kit > 0:
-            self.use_tool("Kit")
-            return
-
-        # 4) 站在掉落箱上 → 拾取钥匙（死后掉落的钥匙很值钱，省一趟机器）
-        if "Box" in self._cell_interprops():
-            if self.view_box("Box", "Key")["success"]:
-                return
-
-        # 5) 站在物资点上 → 拾取医疗包（顺手补给）
-        if my_pos in MAT_POSITIONS:
-            if self.view_box("Materials", "Kit")["success"]:
-                return
-
-        # 6) 相邻有能打赢的敌人 → 攻击最弱的那个
+        # neighbor is a list of (x,y,z) tuples; keep it as a set for membership
+        # tests. NOTE: get_other_pos returns a list, and list == tuple is always
+        # False in Python, so we must compare tuple(opos) against the tuples.
         neighbor = set(self.get_neighbors(self.get_my_pos()))
-        neighbor.add(my_pos)
+        cnt = 0
         atk = -1
-        atk_hp = None
         for i in range(4):
             if i == self.get_my_num():
                 continue
             opos = self.get_other_pos(i)
-            if opos[0] < 0:      # unknown / out-of-view position
+            # skip enemies not currently in view (pos reset to [-1,-1,-1])
+            if opos[0] == -1:
                 continue
-            o_pos = (opos[0], opos[1], opos[2])
-            if o_pos in neighbor:
-                o_hp = self.get_other_hp(i)
-                if atk == -1 or o_hp < atk_hp:
-                    atk = i
-                    atk_hp = o_hp
-        if atk != -1 and my_hp >= atk_hp:
+            if pos == opos or tuple(opos) in neighbor:
+                cnt += 1
+                atk = i
+        if atk != -1 and cnt == 1 and (
+            self.get_other_hp(atk) <= 70 or self.get_my_hp() >= self.get_other_hp(atk)
+        ):
+            # attacking is this turn's one action; do not also heal/move
+            # (other_hp <= 70 => one-shot kill, no retaliation regardless of my hp)
             self.attack(self.get_other_pos(atk), atk)
             return
-
-        # 7) 否则朝当前目标移动
+        if self.get_my_hp() <= 130 and self.player.tools.kit > 0:
+            # healing is this turn's one action; do not also move/interact
+            self.use_tool("Kit")
+            return
+        if self.view_box("Box","Key")["success"]:
+            return
+        if self.view_box("Materials","Kit")["success"]:
+            return
+        if self.interact("KeyMachine")["success"]:
+            return
+        if self.interact("EscapeCapsule",1)["success"]:
+            return
         self.test_move()
         return
-
-    def _cell_interprops(self):
-        """返回本玩家所在格子的 interprops 列表（视野未刷新时为空）。"""
-        mp = tuple(self.get_my_pos())
-        for n in self.view.nodes:
-            if tuple(n.pos) == mp:
-                return getattr(n, "interprops", []) or []
-        return []
-
-    def _km_cells_for_missing_keys(self):
-        """返回“当前尚未持有的钥匙”对应的所有 KeyMachine 格子集合。"""
-        held = set(self.get_keys())
-        cells = set()
-        for k in range(4):
-            if k in held:
-                continue
-            for km in self.get_km_positions(k):
-                cells.add(km)
-        return cells
 
     def run(self):
         while True:
