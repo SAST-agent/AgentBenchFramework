@@ -240,6 +240,38 @@ def _parent(tmp_path):
         "second diff",
         encoding="utf-8",
     )
+    failed_budget = {
+        "learning_coding_agent_acts": 1,
+        "learning_episodes": 12,
+        "learning_env_steps": 24,
+        "learning_game_agent_decision_steps": 12,
+        "learning_primitive_commands": 24,
+        "learning_prompt_tokens": None,
+        "learning_completion_tokens": None,
+        "learning_total_tokens": None,
+        "learning_time_s": 1.0,
+    }
+    failed = tmp_path / "failed-act"
+    failed.mkdir()
+    (failed / "summary.json").write_text(
+        json.dumps({
+            "run_id": "failed-act",
+            "status": "provider_failed",
+            "budget": failed_budget,
+            "parent_learning_budget": {
+                "learning_coding_agent_acts": 1,
+                "learning_episodes": 12,
+                "learning_env_steps": 24,
+                "learning_game_agent_decision_steps": 12,
+                "learning_primitive_commands": 24,
+                "learning_prompt_tokens": 100,
+                "learning_completion_tokens": 50,
+                "learning_total_tokens": 150,
+                "learning_time_s": 1.0,
+            },
+        }),
+        encoding="utf-8",
+    )
     (parent / "summary.json").write_text(
         json.dumps(
             {
@@ -250,16 +282,17 @@ def _parent(tmp_path):
                 "evo_score_2": 0.0,
                 "act_count": 2,
                 "recovery_from_run_id": "failed-act",
+                "source_learning_budget": failed_budget,
                 "budget": {
-                    "learning_coding_agent_acts": 2,
-                    "learning_episodes": 24,
-                    "learning_env_steps": 48,
-                    "learning_game_agent_decision_steps": 24,
-                    "learning_primitive_commands": 48,
-                    "learning_prompt_tokens": 100,
-                    "learning_completion_tokens": 50,
-                    "learning_total_tokens": 150,
-                    "learning_time_s": 2.0,
+                    "learning_coding_agent_acts": 1,
+                    "learning_episodes": 0,
+                    "learning_env_steps": 0,
+                    "learning_game_agent_decision_steps": 0,
+                    "learning_primitive_commands": 0,
+                    "learning_prompt_tokens": 20,
+                    "learning_completion_tokens": 10,
+                    "learning_total_tokens": 30,
+                    "learning_time_s": 1.0,
                 },
             }
         ),
@@ -333,6 +366,15 @@ def test_round3_pipeline_gates_then_adds_one_formal_score_point(tmp_path):
     summary = json.loads((result.run_dir / "summary.json").read_text())
     assert summary["score_history"] == [0.0, 0.0, None, 0.0, 0.5]
     assert summary["behavior_gate"]["passed"] is True
+    assert summary["cumulative_learning_budget"][
+        "learning_coding_agent_acts"
+    ] == 4
+    assert summary["cumulative_learning_budget"][
+        "learning_episodes"
+    ] == 36
+    assert summary["cumulative_learning_budget"][
+        "learning_total_tokens"
+    ] is None
     gate = next(
         item for item in _events(result.run_dir)
         if item["event_type"] == "behavior_gate"

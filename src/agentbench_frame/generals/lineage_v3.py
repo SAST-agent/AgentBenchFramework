@@ -49,6 +49,66 @@ def _read_manifest(path: Path) -> WorkspaceManifest:
         raise ValueError(f"cannot read parent v2 manifest: {exc}") from exc
 
 
+def _learning_only(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        return {}
+    return {
+        str(key): item
+        for key, item in value.items()
+        if str(key).startswith("learning_")
+    }
+
+
+def _sum_learning_budgets(
+    *budgets: Mapping[str, object],
+) -> dict[str, float | int | None]:
+    keys = {
+        key
+        for budget in budgets
+        for key in budget
+        if key.startswith("learning_")
+    }
+    result: dict[str, float | int | None] = {}
+    for key in sorted(keys):
+        values = [budget.get(key, 0) for budget in budgets]
+        if any(value is None for value in values):
+            result[key] = None
+            continue
+        total = sum(float(value) for value in values)
+        result[key] = total if key.endswith("_time_s") else int(total)
+    return result
+
+
+def _recovered_learning_budget(
+    parent: Path,
+    summary: Mapping[str, object],
+    recovery_run_id: str,
+) -> dict[str, float | int | None]:
+    source_path = parent.parent / recovery_run_id / "summary.json"
+    try:
+        source_summary = json.loads(source_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(
+            f"cannot reconstruct recovered learning budget: {exc}"
+        ) from exc
+    if source_summary.get("run_id") != recovery_run_id:
+        raise ValueError(
+            "recovery source run ID does not match parent lineage"
+        )
+    prior = _learning_only(
+        source_summary.get("parent_learning_budget")
+    )
+    source = _learning_only(summary.get("source_learning_budget"))
+    if not source:
+        source = _learning_only(source_summary.get("budget"))
+    current = _learning_only(summary.get("budget"))
+    if not prior or not source or not current:
+        raise ValueError(
+            "recovered learning budget lineage is incomplete"
+        )
+    return _sum_learning_budgets(prior, source, current)
+
+
 def load_round3_parent(
     parent_run_dir: Path,
     expected_hash: str,
@@ -87,7 +147,8 @@ def load_round3_parent(
         )
     except OSError as exc:
         raise ValueError(f"parent v1-to-v2 diff is missing: {exc}") from exc
-    recovery = bool(summary.get("recovery_from_run_id"))
+    recovery_run_id = summary.get("recovery_from_run_id")
+    recovery = bool(recovery_run_id)
     declared_acts = int(summary.get("act_count", 2))
     global_acts = max(declared_acts, 3) if recovery else declared_acts
     raw = float(summary["raw_score"])
@@ -98,18 +159,22 @@ def load_round3_parent(
         if recovery
         else (raw, evo_1, evo_2)
     )
-    preferred_budget = summary.get("cumulative_learning_budget")
-    if not isinstance(preferred_budget, dict):
-        preferred_budget = summary.get("budget")
-    learning_budget = {
-        str(key): value
-        for key, value in (
-            preferred_budget.items()
-            if isinstance(preferred_budget, dict)
-            else ()
+    if recovery:
+        learning_budget = _recovered_learning_budget(
+            parent,
+            summary,
+            str(recovery_run_id),
         )
-        if str(key).startswith("learning_")
-    }
+    else:
+        preferred_budget = summary.get("cumulative_learning_budget")
+        if not isinstance(preferred_budget, dict):
+            preferred_budget = summary.get("budget")
+        learning_budget = _learning_only(preferred_budget)
+    recorded_acts = learning_budget.get("learning_coding_agent_acts")
+    if recorded_acts is not None and int(recorded_acts) != global_acts:
+        raise ValueError(
+            "reconstructed learning act count does not match score lineage"
+        )
     return Round3ParentLineage(
         parent_run_dir=parent,
         parent_run_id=str(summary.get("run_id", parent.name)),
