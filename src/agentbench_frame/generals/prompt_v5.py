@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 import json
 from collections.abc import Mapping, Sequence
 
@@ -41,14 +41,112 @@ class VersionedCriticalEvidence:
         return f"{self.version}:{self.evidence.replay_id}"
 
     def to_json(self) -> str:
+        evidence = self.evidence
         return json.dumps(
             {
                 "version": self.version,
-                **asdict(self.evidence),
+                "replay_id": evidence.replay_id,
+                "seed": evidence.seed,
+                "evaluated_seat": evidence.evaluated_seat,
+                "opponent_tier": evidence.opponent_tier,
+                "termination_type": evidence.termination_type,
+                "outcome": evidence.outcome,
+                "dense": _compact_dense(evidence.dense),
+                "total_decision_count": evidence.total_decision_count,
+                "omitted_decision_count": evidence.omitted_decision_count,
+                "decisions": [
+                    {
+                        "state_id": decision.state_id,
+                        "round_number": decision.round_number,
+                        "seat": decision.seat,
+                        "selection_reasons": list(
+                            decision.selection_reasons
+                        ),
+                        "action": [
+                            list(command)
+                            for command in decision.action
+                        ],
+                        "decision_class": decision.decision_class,
+                        "features": _compact_features(
+                            decision.features
+                        ),
+                    }
+                    for decision in evidence.decisions
+                ],
             },
             ensure_ascii=False,
             sort_keys=True,
+            separators=(",", ":"),
         )
+
+
+def _compact_dense(
+    dense: Mapping[str, object],
+) -> dict[str, object]:
+    """Keep terminal, average, and AUC evidence without repeated extrema."""
+    result: dict[str, object] = {}
+    for name, value in dense.items():
+        if isinstance(value, Mapping):
+            result[name] = {
+                key: value[key]
+                for key in ("terminal", "time_average", "auc")
+                if key in value
+            }
+        else:
+            result[name] = value
+    return result
+
+
+def _compact_features(
+    features: Mapping[str, object],
+) -> dict[str, object]:
+    """Project each selected state to bounded, explainable prompt features."""
+    result = dict(features)
+    if (
+        result.get("one_step_reachable_enemy_pressure")
+        == result.get("adjacent_enemy_pressure")
+    ):
+        result.pop("one_step_reachable_enemy_pressure", None)
+    stacks = result.get("largest_movable_stacks")
+    if isinstance(stacks, Sequence) and not isinstance(
+        stacks, (str, bytes)
+    ):
+        result["largest_movable_stacks"] = [
+            {
+                key: stack[key]
+                for key in (
+                    "position",
+                    "army",
+                    "movable_army",
+                    "general_id",
+                )
+                if key in stack
+            }
+            for stack in stacks[:2]
+            if isinstance(stack, Mapping)
+        ]
+    targets = result.get("strategic_general_targets")
+    if isinstance(targets, Sequence) and not isinstance(
+        targets, (str, bytes)
+    ):
+        result["strategic_general_targets"] = [
+            {
+                key: target[key]
+                for key in (
+                    "id",
+                    "player",
+                    "type",
+                    "position",
+                    "distance_from_own_main",
+                    "cell_army",
+                    "produce_level",
+                )
+                if key in target
+            }
+            for target in targets[:3]
+            if isinstance(target, Mapping)
+        ]
+    return result
 
 
 def _class_payload(summary: DecisionClassSummary) -> dict[str, object]:
