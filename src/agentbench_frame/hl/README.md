@@ -111,9 +111,14 @@ all versions you want comparable. Expand it later (see §6.3).
 
 ```bash
 BACKEND="E:/HL_Agent/AgentBench/backend_sources/corpus/25_lostspace/logic/gamecode_logic"
+# A Python interpreter that has antlr4-python3-runtime==4.9.* installed
+# (the logic imports antlr4 at startup; a bare 'python' without it dies
+# and every eval match errors with "logic exited while reading 4 bytes").
+LOGIC_PY="C:/Users/27364/.conda/envs/torchy/python.exe"
 
 PYTHONPATH=src uv run python -m agentbench_frame.hl \
   --logic "cd /d \"$BACKEND\" && python main.py" \
+  --logic-python "$LOGIC_PY" \
   --initial-candidate src/agentbench_frame/lostspace/candidates/v1 \
   --name hl-v1 \
   --reference ./agentbench_data/reference/nu-v1.json \
@@ -127,9 +132,11 @@ PYTHONPATH=src uv run python -m agentbench_frame.hl \
 
 ```powershell
 $BACKEND = "E:/HL_Agent/AgentBench/backend_sources/corpus/25_lostspace/logic/gamecode_logic"
+$LOGIC_PY = "C:/Users/27364/.conda/envs/torchy/python.exe"
 
 uv run python -m agentbench_frame.hl `
   --logic "cd /d `"$BACKEND`" && python main.py" `
+  --logic-python $LOGIC_PY `
   --initial-candidate src/agentbench_frame/lostspace/candidates/v1 `
   --name hl-v1 `
   --reference ./agentbench_data/reference/nu-v1.json `
@@ -138,6 +145,14 @@ uv run python -m agentbench_frame.hl `
   --acts 5 --pairs 3 --seats 0 --timeout 15 `
   --dangerously-skip-permissions
 ```
+
+`--logic-python` rewrites the bare `python` token in `--logic` to the
+given interpreter, so the logic subprocess runs under a Python that has
+`antlr4-python3-runtime==4.9.*`. Before any act runs, the CLI probes that
+this interpreter can `import antlr4` and fails fast with an actionable
+message if not — instead of producing a silent all-error eval. If your
+`--logic` already names an absolute interpreter with antlr4, you can omit
+`--logic-python` (the probe still runs and validates it).
 
 (PowerShell line continuation is the backtick `` ` `` at end of line; nested
 double-quotes are escaped as `` `" ``. `PYTHONPATH`/`AGENTBENCH_DATA` are set
@@ -199,11 +214,19 @@ Every record carries the public schema: `schema_version`, `event_id`,
 | event_type        | key fields |
 |-------------------|------------|
 | `agent_act`       | act_id, version_before, edit_policy_mode, budget_before |
-| `version`         | version_id, content_hash, parent_version_id, edit_type, files_touched |
+| `version`         | version_id, content_hash, parent_version_id, edit_type, files_touched, **failure_reason** (null on success) |
 | `eval`            | act_id, spec_id, version_after, evaluation_status, win_rate |
 | `policy_kl`       | version_before/after, **local_policy_kl_trace** (raw per-decision list), epsilon |
 | `occupancy_shift` | version_before/after, shift |
-| `budget`          | scope=learning, act_id, coding_agent_acts, prompt/completion/total_tokens (None=unknown), runner_time_s, act_time_s |
+| `budget`          | scope=learning, act_id, coding_agent_acts, prompt/completion/total_tokens (None=unknown), runner_time_s, act_time_s, **failure_reason** |
+
+`failure_reason` distinguishes a *clean* no-op (agent chose not to edit,
+`edit_type="noop"`, `failure_reason=null`) from a *failed* run (timeout,
+CLI not found, non-zero exit — `edit_type="noop"`,
+`failure_reason="<stable reason string>"`). Stable reason strings:
+`"claude CLI timed out"`, `"claude CLI not found: <path>"`,
+`"claude exited <N>: <stderr>"`. A silent all-error eval that previously
+masqueraded as a clean `noop` is now visible here.
 
 ```python
 from agentbench_frame.hl.events import read_events
@@ -402,7 +425,16 @@ python -m agentbench_frame.hl.reference_seed --out nu.json --spec-id hl-v1
 ## 9. Gotchas (read before debugging)
 
 - **`--logic` cwd must be `gamecode_logic/`.** It loads `src/mapconf2.map`
-  relatively. Needs `antlr4-python3-runtime==4.9.*`.
+  relatively. Needs `antlr4-python3-runtime==4.9.*`. Use `--logic-python`
+  to point at an interpreter that has it (e.g. a conda env); the CLI
+  probes `import antlr4` at startup and fails fast if missing, instead of
+  silently producing all-error evals.
+- **An all-error eval (`win_rate=null`) is a harness problem, not a
+  strategy problem.** The per-act prompt tells the coding agent not to
+  debug the harness in that case — but if you see it persisting, check
+  the `failure_reason` field on the `version`/`budget` events: it
+  distinguishes a clean no-op from a timed-out / CLI-not-found / non-zero
+  exit run (stable reason strings documented in §5.1).
 - **Never use the official `saiblo-local-judger` (PyPI 0.0.2)** as the runner —
   it stalls (its TLE timer is commented out). The harness's own
   `_ACTION_REQUEST_TYPES` handling is more correct.

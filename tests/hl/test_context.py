@@ -84,3 +84,34 @@ def test_prompt_contains_inline_playback_recipe(tmp_path):
     assert "birthplaces" in prompt
     assert "score_dic" in prompt
     assert "ai_error" in prompt
+
+
+def test_prompt_has_anti_derail_clause_unconditional(tmp_path):
+    """The STAY ON MISSION clause is present on every act, including the
+    first act with no history — so the agent never abandons editing to
+    debug the harness when it sees an all-error history."""
+    cb = _codebase(tmp_path)
+    builder = ContextBuilder(codebase=cb, data_root=tmp_path, game="25_lostspace",
+                             agent_name="hl-v1", spec=_spec())
+    prompt = builder.build(version_before=None, act_id="r-act0001")["prompt"]
+    assert "STAY ON MISSION" in prompt
+    # explicit direction not to debug the harness on all-error histories
+    assert "error" in prompt.lower()
+    assert "harness" in prompt.lower()
+    # bounds: don't read outside the workspace
+    assert "outside this workspace" in prompt
+
+
+def test_prompt_has_anti_derail_clause_with_history(tmp_path):
+    """Clause is present even when a real (non-error) history exists."""
+    cb = _codebase(tmp_path)
+    run_dir = tmp_path / "runs" / "25_lostspace" / "hl-v1" / "run-001"
+    run_dir.mkdir(parents=True)
+    (run_dir / "matches.jsonl").write_text(
+        '{"opponent":"rank06","candidate_result":"win",'
+        '"candidate_rank":1,"candidate_score":4,"turns":35,"pair":0,'
+        '"candidate_seat":0}\n', encoding="utf-8")
+    builder = ContextBuilder(codebase=cb, data_root=tmp_path, game="25_lostspace",
+                             agent_name="hl-v1", spec=_spec())
+    prompt = builder.build(version_before=None, act_id="r-act0001")["prompt"]
+    assert "STAY ON MISSION" in prompt

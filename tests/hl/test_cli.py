@@ -134,3 +134,64 @@ def test_main_runs_acts_with_stubbed_runner_and_eval(monkeypatch, tmp_path):
     assert types.count("version") == 2
     assert types.count("eval") == 2
     assert "policy_kl" in types  # second act compares against first
+
+
+# ---- logic interpreter probe (D1) ----
+
+def test_rewrite_logic_python_swaps_bare_python():
+    from agentbench_frame.hl.cli import _rewrite_logic_python
+    cmd = 'cd /d "E:/x/gamecode_logic" && python main.py'
+    out = _rewrite_logic_python(cmd, "C:/torch/python.exe")
+    assert "C:/torch/python.exe" in out
+    assert "python main.py" not in out  # bare python replaced
+
+
+def test_rewrite_logic_python_noop_when_unset():
+    from agentbench_frame.hl.cli import _rewrite_logic_python
+    cmd = 'cd /d X && python main.py'
+    assert _rewrite_logic_python(cmd, None) == cmd
+
+
+def test_probe_logic_antlr4_skips_when_no_python_token():
+    """A logic command with no python token (e.g. 'echo') is not probed."""
+    from agentbench_frame.hl.cli import _probe_logic_antlr4
+    # Should not raise (no python token to probe).
+    _probe_logic_antlr4("echo hello")
+
+
+def test_probe_logic_antlr4_fails_fast_on_missing_dep(tmp_path):
+    """An interpreter that can't import antlr4 -> SystemExit with a named msg.
+
+    We simulate the interpreter with a batch file named ``python.bat`` (Windows
+    PATHEXT resolves a bare ``python`` token to it) that exits non-zero with
+    the antlr4 message — exactly what a real interpreter without
+    antlr4-python3-runtime would do.
+    """
+    from agentbench_frame.hl.cli import _probe_logic_antlr4
+    bat = tmp_path / "python_interpreter.bat"
+    bat.write_text(
+        "@echo off\r\necho No module named antlr4 1>&2\r\nexit /b 1\r\n",
+        encoding="utf-8")
+    cmd = f'cd /d "{tmp_path}" && "{bat}" main.py'
+    with pytest.raises(SystemExit) as ei:
+        _probe_logic_antlr4(cmd)
+    msg = str(ei.value)
+    assert "antlr4" in msg.lower()
+    assert "antlr4-python3-runtime" in msg or "--logic-python" in msg
+
+
+def test_probe_logic_antlr4_passes_when_importable(tmp_path):
+    """An interpreter that imports antlr4 (we stub the probe target) passes.
+
+    Uses an absolute python.exe-named batch so the probe runs *our* stub,
+    not the system python.
+    """
+    from agentbench_frame.hl.cli import _probe_logic_antlr4
+    bat = tmp_path / "python.exe"
+    # A .exe-named batch won't run as a batch; instead use an absolute path
+    # to a batch named python_interpreter.bat whose basename starts with 'python'.
+    bat = tmp_path / "python_interpreter.bat"
+    bat.write_text("@echo off\r\nexit /b 0\r\n", encoding="utf-8")
+    cmd = f'cd /d "{tmp_path}" && "{bat}" main.py'
+    # Should not raise.
+    _probe_logic_antlr4(cmd)

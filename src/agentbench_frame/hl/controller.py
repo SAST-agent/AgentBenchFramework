@@ -122,7 +122,12 @@ class HLIterationController:
         except Exception:
             version_after = None
 
-        # 4. classify edit_type is already on the handle; emit version event
+        # 4. classify edit_type is already on the handle; emit version event.
+        # failure_reason is the run classification: None on success, a stable
+        # string (timeout/not-found/non-zero-exit) on failure. Written so a
+        # silent timeout is never mistaken for a clean no-op (doc: failures
+        # must be visible in the research stream).
+        failure_reason = run_result.failure_reason or run_result.error
         if version_after is not None:
             self._events.write(
                 "version",
@@ -131,6 +136,20 @@ class HLIterationController:
                 parent_version_id=version_after.parent_version_id,
                 edit_type=version_after.edit_type,
                 files_touched=run_result.files_touched,
+                failure_reason=failure_reason,
+            )
+        else:
+            # Workspace unreadable: still record the failure reason so the
+            # act isn't a silent black box.
+            self._events.write(
+                "version",
+                version_id=None,
+                content_hash=None,
+                parent_version_id=(version_before.version_id
+                                   if version_before else None),
+                edit_type="noop",
+                files_touched=[],
+                failure_reason=failure_reason or "workspace unreadable after run",
             )
 
         # 5. eval on the frozen BenchmarkSpec (only if we have a runnable version)
@@ -186,6 +205,7 @@ class HLIterationController:
             total_tokens=run_result.total_tokens,
             runner_time_s=runner_time,
             act_time_s=time.monotonic() - t0,
+            failure_reason=failure_reason,
         )
         self._events.flush()
         return version_after

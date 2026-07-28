@@ -28,14 +28,25 @@ from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checka
 
 @dataclass
 class AgentRunResult:
-    """What a coding-agent run produced."""
+    """What a coding-agent run produced.
+
+    ``failure_reason`` is the run-classification failure: it is set when the
+    coding agent could not complete its edit (timeout, CLI not found,
+    non-zero exit). ``edit_type`` stays ``"noop"`` on those paths — the edit
+    classification is "no change" — but ``failure_reason`` distinguishes a
+    *clean* no-op (agent chose not to edit) from a *failed* run. The
+    controller writes ``failure_reason`` into the ``version`` and ``budget``
+    events so a silent timeout is never mistaken for a clean no-op in the
+    research stream. ``None`` (unknown/none) on success.
+    """
     edit_type: str                       # add_rule | reorder | parametrize | refactor | replace | noop
     files_touched: List[str] = field(default_factory=list)
     prompt_tokens: Optional[int] = None      # None = unknown, not 0
     completion_tokens: Optional[int] = None
     total_tokens: Optional[int] = None
     time_s: Optional[float] = None
-    error: Optional[str] = None               # set if the run failed
+    error: Optional[str] = None               # legacy alias of failure_reason
+    failure_reason: Optional[str] = None      # set if the run failed (timeout/not-found/non-zero)
 
 
 @runtime_checkable
@@ -150,10 +161,13 @@ class ClaudeCodeRunner:
                 capture_output=True, text=True, timeout=context.get("timeout", 300),
             )
         except FileNotFoundError:
+            reason = f"claude CLI not found: {self.claude_path}"
             return AgentRunResult(edit_type="noop",
-                                  error=f"claude CLI not found: {self.claude_path}")
+                                  error=reason, failure_reason=reason)
         except subprocess.TimeoutExpired:
-            return AgentRunResult(edit_type="noop", error="claude CLI timed out")
+            reason = "claude CLI timed out"
+            return AgentRunResult(edit_type="noop",
+                                  error=reason, failure_reason=reason)
         elapsed = _time.monotonic() - started
 
         # The --output-format json stream yields one JSON object per line.
@@ -174,9 +188,11 @@ class ClaudeCodeRunner:
             pass
 
         if proc.returncode != 0:
+            reason = f"claude exited {proc.returncode}: {proc.stderr[:500]}"
             return AgentRunResult(
                 edit_type="noop",
-                error=f"claude exited {proc.returncode}: {proc.stderr[:500]}",
+                error=reason,
+                failure_reason=reason,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 total_tokens=total_tokens,

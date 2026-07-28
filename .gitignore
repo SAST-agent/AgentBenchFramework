@@ -1,7 +1,14 @@
 __pycache__/
 .cache/
-_scratch_out/
 agentbench_data/
 _e2e_data/
-_rank01_stderr.log
+
+# debug scratch — never commit (HL/lostspace debugging)
+_dbg/
+_dbg*/
+_dbg_agent.py
+_dbg_stderr/
+_scratch_dbg/
+_scratch_out/
 _scratch_realmatch.py
+_rank01_stderr.log

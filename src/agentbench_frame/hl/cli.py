@@ -26,6 +26,7 @@ data layout, customizing opponents/ν/acts, gotchas).
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -54,6 +55,86 @@ def _default_filler_command() -> str:
     if sys.platform.startswith("win"):
         return subprocess.list2cmdline(parts)
     return " ".join(shlex.quote(p) for p in parts)
+
+
+def _rewrite_logic_python(logic_command: str, logic_python: str) -> str:
+    """Rewrite the ``python`` token in a logic command to ``logic_python``.
+
+    The ``--logic`` string is typically ``cd /d "$BACKEND/gamecode_logic" &&
+    python main.py``. We swap the bare ``python`` (which may resolve to an
+    interpreter without ``antlr4``) for an explicit interpreter path. Only
+    a bare ``python``/``pythonw`` token is rewritten — a quoted/absolute
+    path is left untouched (the user already chose an interpreter).
+
+    No-op if ``logic_python`` is falsy.
+    """
+    if not logic_python:
+        return logic_command
+    import re
+    # Replace a bare 'python' or 'python.exe' word boundary that is the
+    # command to run (not inside a path). Conservative: only the first
+    # bare-python token after any 'cd ... && ' prefix.
+    pattern = re.compile(r"(?<![\w./\\])python(?:\.exe)?\b")
+    new = pattern.sub(lambda m: logic_python, logic_command, count=1)
+    return new
+
+
+def _probe_logic_antlr4(logic_command: str) -> None:
+    """Fail fast if the logic interpreter can't ``import antlr4``.
+
+    The LostSpace logic (``gamecode_logic``) imports ``antlr4`` at startup;
+    if the interpreter the ``--logic`` command resolves to lacks
+    ``antlr4-python3-runtime==4.9.*``, the logic subprocess dies on import
+    and every eval match errors with "logic exited while reading 4 bytes" —
+    a silent all-error run. This probe turns that into a fast, named failure
+    before any act runs.
+
+    Extracts the python interpreter from the ``--logic`` command (the first
+    ``python``-like token after stripping any ``cd ... &&`` prefix) and runs
+    ``<python> -c "import antlr4"``. Exits non-zero with an actionable
+    message on failure.
+    """
+    import shlex, subprocess
+    from agentbench_frame.lostspace.match import _split_cwd, _to_argv
+
+    rest, cwd = _split_cwd(logic_command)
+    argv = _to_argv(rest) if sys.platform.startswith("win") else shlex.split(rest)
+    if not argv:
+        return  # nothing to probe
+    # The interpreter is the first token of the command (after the cd prefix).
+    # Common cases: ``python``, ``python.exe``, ``C:/.../python.exe``. We
+    # only probe when it looks like a python interpreter — a bare ``main`` or
+    # ``echo`` is not python and probing it would be meaningless.
+    py_token = argv[0]
+    base = os.path.basename(py_token).lower()
+    is_python = (
+        base in ("python", "python.exe", "pythonw", "pythonw.exe")
+        or base.startswith("python")             # python3, python3.10, ...
+        or base.startswith("python3")             # explicit guard
+        or base.endswith("python.exe")            # absolute conda/venv path
+        or base.endswith("python")
+    )
+    if not is_python:
+        # Not a python-launched logic (e.g. a compiled binary); skip the probe.
+        return
+    try:
+        proc = subprocess.run(
+            [py_token, "-c", "import antlr4; print('antlr4 ok')"],
+            cwd=cwd, capture_output=True, text=True, timeout=30,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+        raise SystemExit(
+            f"[hl] logic interpreter probe failed: could not run "
+            f"{py_token!r}: {e}"
+        )
+    if proc.returncode != 0:
+        raise SystemExit(
+            f"[hl] logic interpreter {py_token!r} cannot import antlr4.\n"
+            f"  The LostSpace logic needs antlr4-python3-runtime==4.9.*.\n"
+            f"  Install it in that interpreter, or pass --logic-python PATH "
+            f"pointing at an interpreter that has it.\n"
+            f"  probe stderr: {proc.stderr.strip()[:300]}"
+        )
 
 
 def _resolve_opponents(args) -> List[Opponent]:
@@ -143,7 +224,14 @@ def build_parser() -> argparse.ArgumentParser:
                     "coding agent (Claude Code).",
     )
     p.add_argument("--logic", required=True,
-                   help="official logic command; cwd must be gamecode_logic/")
+                   help="official logic command; cwd must be gamecode_logic/. "
+                        "Use a python interpreter that has "
+                        "antlr4-python3-runtime==4.9.*, or pass "
+                        "--logic-python to rewrite the python token.")
+    p.add_argument("--logic-python", default=None,
+                   help="rewrite the bare 'python' in --logic to this "
+                        "interpreter (must have antlr4-python3-runtime==4.9.*). "
+                        "Example: C:/Users/.../.conda/envs/torchy/python.exe")
     p.add_argument("--initial-candidate", required=True, type=Path,
                    help="dir seeded into the codebase (must contain agent.py)")
     p.add_argument("--name", required=True,
@@ -204,6 +292,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     opponents = _resolve_opponents(args)
     filler = args.filler or _default_filler_command()
+
+    # Resolve the logic interpreter BEFORE seeding/running: rewrite the bare
+    # 'python' token to --logic-python if given, then probe antlr4 so a
+    # missing dep fails fast instead of producing a silent all-error eval.
+    logic_command = _rewrite_logic_python(args.logic, args.logic_python)
+    if logic_command != args.logic:
+        print(f"[hl] logic_python   = {args.logic_python} (rewrote python token)",
+              file=sys.stderr)
+    _probe_logic_antlr4(logic_command)
+    print(f"[hl] logic antlr4    = OK", file=sys.stderr)
+
     _seed_codebase(args.initial_candidate, workspace)
 
     codebase = HLCodebase(root=workspace, store=store)
@@ -229,7 +328,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         system_prompt=_system_prompt(),
     )
     eval_factory = _evaluator_factory(
-        args.logic, opponents, filler,
+        logic_command, opponents, filler,
         codebase=codebase, stage_root=stage_root, data_root=data_root,
     )
 

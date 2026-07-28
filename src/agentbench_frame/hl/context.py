@@ -140,6 +140,23 @@ class ContextBuilder:
             "3. Make a targeted improvement. Prefer small, reasoned edits.\n"
             "4. Leave the agent runnable (valid Python, protocol intact).\n"
         )
+        lines.append(
+            "## STAY ON MISSION — read this before acting\n"
+            "Your job is to edit `agent.py`, not to debug the harness.\n"
+            "- If the match history shows EVERY match as an `error` "
+            "(win_rate is null / '-' across all opponents), that is a "
+            "harness or environment problem — NOT a strategy problem. "
+            "Do NOT try to fix the eval, the logic, or the judger. Do NOT "
+            "read files outside this workspace (no grepping the backend "
+            "logic, no inspecting `agentbench_data/` internals).\n"
+            "- Even with no usable eval signal, make ONE small, reasoned "
+            "edit to `agent.py` based on reading the current strategy, then "
+            "stop. If you genuinely believe the agent is already optimal, "
+            "say so explicitly and make no edit — but do not spend your "
+            "budget investigating the harness.\n"
+            "- You have a strict per-act time budget. Do not exhaust it on "
+            "exploration. Edit, then finish.\n"
+        )
         return "\n".join(lines)
 
     def _history_section(self) -> str:

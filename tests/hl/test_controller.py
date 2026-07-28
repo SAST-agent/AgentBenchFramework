@@ -245,3 +245,57 @@ def test_act_emits_occupancy_shift(tmp_path):
     os_ev = next(e for e in events if e["event_type"] == "occupancy_shift")
     assert "shift" in os_ev
     assert os_ev["version_before"] == v0.version_id
+
+
+# ---- failure visibility (D2) ----
+
+class _FailingRunner:
+    """A runner that simulates a coding-agent failure (e.g. timeout).
+
+    Returns edit_type='noop' with failure_reason set, like ClaudeCodeRunner
+    does on TimeoutExpired / FileNotFoundError / non-zero exit. Does NOT
+    mutate the workspace, so the snapshot is identical to v0.
+    """
+    def __init__(self, *, failure_reason):
+        self._reason = failure_reason
+    def run(self, *, workspace, context):
+        from agentbench_frame.hl.runner import AgentRunResult
+        return AgentRunResult(
+            edit_type="noop", failure_reason=self._reason,
+            error=self._reason, time_s=0.0,
+        )
+
+
+def test_failed_run_records_failure_reason_in_version_and_budget(tmp_path):
+    """A timed-out/failed run must NOT be silently recorded as a clean noop.
+
+    The version and budget events carry failure_reason so the silent-timeout
+    failure mode is visible in the research stream.
+    """
+    ctrl, v0 = _two_act_controller(
+        tmp_path,
+        runner=_FailingRunner(failure_reason="claude CLI timed out"),
+        eval_results=[_stub_result(0.5, "complete")],
+        probe_emissions=[[("finish",)], [("finish",)]],
+    )
+    ctrl.act(version_before=v0)
+    events = read_events(tmp_path / "e.jsonl")
+    v_ev = next(e for e in events if e["event_type"] == "version")
+    b_ev = next(e for e in events if e["event_type"] == "budget")
+    assert v_ev["edit_type"] == "noop"
+    assert v_ev["failure_reason"] == "claude CLI timed out"
+    assert b_ev["failure_reason"] == "claude CLI timed out"
+
+
+def test_successful_run_has_no_failure_reason(tmp_path):
+    """A clean run (FakeRunner, no failure_reason) omits/nulls the field."""
+    ctrl, v0 = _two_act_controller(
+        tmp_path,
+        runner=FakeRunner(transform=lambda w: None, edit_type="noop"),
+        eval_results=[_stub_result(0.5, "complete")],
+        probe_emissions=[[("finish",)], [("finish",)]],
+    )
+    ctrl.act(version_before=v0)
+    events = read_events(tmp_path / "e.jsonl")
+    v_ev = next(e for e in events if e["event_type"] == "version")
+    assert v_ev.get("failure_reason") is None
