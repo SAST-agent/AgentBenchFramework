@@ -199,6 +199,7 @@ def build_api_request(
             "model": model,
             "instructions": instructions,
             "input": payload,
+            "stream": True,
             "text": {
                 "format": (
                     {
@@ -282,25 +283,93 @@ def _write_summary(review: dict[str, Any] | None, error: str | None, secret: str
 def _post_review_request(
     endpoint: str,
     api_key: str,
+    api_mode: str,
     request_body: dict[str, Any],
     timeout: float,
 ) -> dict[str, Any]:
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    if api_mode == "responses":
+        headers["Accept"] = "text/event-stream"
     request = urllib.request.Request(
         endpoint,
         data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
+        headers=headers,
         method="POST",
     )
     with urllib.request.urlopen(request, timeout=timeout) as response:
+        if api_mode == "responses":
+            return _read_responses_stream(response)
         return json.loads(response.read().decode("utf-8"))
+
+
+def _read_responses_stream(response: Any) -> dict[str, Any]:
+    """Read a Responses SSE stream and require its successful terminal event."""
+    output_text_parts: list[str] = []
+    data_lines: list[str] = []
+
+    def consume_event() -> dict[str, Any] | None:
+        if not data_lines:
+            return None
+        data = "\n".join(data_lines)
+        data_lines.clear()
+        if data == "[DONE]":
+            return None
+        try:
+            event = json.loads(data)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"invalid JSON in Responses SSE event: {exc}") from exc
+        if not isinstance(event, dict):
+            raise ValueError("Responses SSE event must be a JSON object")
+        event_type = event.get("type")
+        if not isinstance(event_type, str):
+            raise ValueError("Responses SSE event is missing a string type")
+        if event_type == "response.output_text.delta":
+            delta = event.get("delta")
+            if not isinstance(delta, str):
+                raise ValueError("response.output_text.delta is missing a string delta")
+            output_text_parts.append(delta)
+            return None
+        if event_type == "response.completed":
+            if output_text_parts:
+                return {"output_text": "".join(output_text_parts)}
+            completed_response = event.get("response")
+            if not isinstance(completed_response, dict):
+                raise ValueError(
+                    "response.completed has neither output text nor a response object"
+                )
+            return completed_response
+        if event_type in {"response.failed", "response.incomplete", "error"}:
+            raise ValueError(f"Responses SSE terminated with {event_type}")
+        return None
+
+    for raw_line in response:
+        try:
+            line = raw_line.decode("utf-8").rstrip("\r\n")
+        except UnicodeDecodeError as exc:
+            raise ValueError("Responses SSE stream is not valid UTF-8") from exc
+        if not line:
+            completed = consume_event()
+            if completed is not None:
+                return completed
+        elif line.startswith("data:"):
+            data = line[5:]
+            data_lines.append(data[1:] if data.startswith(" ") else data)
+        elif line.startswith(":"):
+            continue
+
+    completed = consume_event()
+    if completed is not None:
+        return completed
+    raise ValueError("Responses SSE stream ended without response.completed")
 
 
 def _post_review_with_retry(
     endpoint: str,
     api_key: str,
+    api_mode: str,
     request_body: dict[str, Any],
     timeout: float,
 ) -> dict[str, Any]:
@@ -316,7 +385,9 @@ def _post_review_with_retry(
 
     for attempt in range(DEFAULT_RETRY_ATTEMPTS):
         try:
-            return _post_review_request(endpoint, api_key, request_body, timeout)
+            return _post_review_request(
+                endpoint, api_key, api_mode, request_body, timeout
+            )
         except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
             retryable = (
                 isinstance(exc, urllib.error.HTTPError)
@@ -369,7 +440,7 @@ def run_review() -> int:
         request_body = build_api_request(api_mode, model, REVIEW_INSTRUCTIONS, payload)
         try:
             response_data = _post_review_with_retry(
-                endpoint, api_key, request_body, timeout
+                endpoint, api_key, api_mode, request_body, timeout
             )
         except urllib.error.HTTPError as exc:
             if exc.code in GATEWAY_RETRY_STATUS_CODES:
@@ -382,7 +453,7 @@ def run_review() -> int:
                 )
                 try:
                     response_data = _post_review_request(
-                        endpoint, api_key, retry_request, timeout
+                        endpoint, api_key, api_mode, retry_request, timeout
                     )
                 except urllib.error.HTTPError as retry_exc:
                     if retry_exc.code not in GATEWAY_RETRY_STATUS_CODES:
@@ -396,7 +467,7 @@ def run_review() -> int:
                         structured_outputs=False,
                     )
                     response_data = _post_review_request(
-                        endpoint, api_key, legacy_request, timeout
+                        endpoint, api_key, api_mode, legacy_request, timeout
                     )
             elif exc.code in CAPABILITY_FALLBACK_STATUS_CODES:
                 legacy_request = build_api_request(
@@ -407,7 +478,9 @@ def run_review() -> int:
                     reasoning_effort=None,
                     structured_outputs=False,
                 )
-                response_data = _post_review_request(endpoint, api_key, legacy_request, timeout)
+                response_data = _post_review_request(
+                    endpoint, api_key, api_mode, legacy_request, timeout
+                )
             else:
                 raise
         if isinstance(response_data, dict) and {"decision", "summary", "findings"} <= response_data.keys():

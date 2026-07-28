@@ -31,7 +31,7 @@ API key 不应写入 workflow、代码、PR 描述或普通变量。workflow 只
 
 ## Endpoint 请求与响应
 
-Responses 模式优先发送 `model`、`instructions`、`input`、`reasoning.effort=high` 和 strict JSON Schema text format；Chat Completions 模式优先发送 `model`、`messages`、`reasoning_effort=high` 和 strict JSON Schema response format。两种响应都会被转换为同一审查文档：
+Responses 模式优先发送 `model`、`instructions`、`input`、`reasoning.effort=high`、`stream=true` 和 strict JSON Schema text format，并以 `Accept: text/event-stream` 增量读取 SSE；Chat Completions 模式保持普通 JSON 请求，优先发送 `model`、`messages`、`reasoning_effort=high` 和 strict JSON Schema response format。两种响应都会被转换为同一审查文档：
 
 ```json
 {
@@ -50,6 +50,13 @@ Responses 模式优先发送 `model`、`instructions`、`input`、`reasoning.eff
 ```
 
 结构化输出要求 `decision`、`summary` 和 `findings` 始终存在；没有可行动问题时必须返回 `findings: []`。每个 finding 都必须包含 `severity`、`path`、`line`、`message` 和 `suggestion`，其中不适用的可选值使用 `null`，`message` 必须是具体的非空说明。框架仍会在解析后再次校验这些约束，并对非法或不完整响应 fail-closed。
+
+Responses SSE 客户端拼接 `response.output_text.delta` 的文本，并且只把
+`response.completed` 视为成功终止；没有 delta 时可从完成事件携带的完整
+`response` 对象读取输出。`response.failed`、`response.incomplete`、`error`、
+非法事件或未收到 `response.completed` 就断流都会 fail-closed。流式传输的目的
+是让长时间 high-reasoning 审查持续产生 HTTP 数据，避免代理把无响应字节的连接
+误判为超时；这要求 endpoint 和中间代理实时转发 SSE，不能缓存到生成结束。
 
 如果 endpoint 以 HTTP 400 或 422 明确拒绝 reasoning 或 Structured Outputs 参数，框架会对同一请求自动回退一次历史兼容格式：`json_object`，且不发送 reasoning 参数。如果 endpoint 返回 502、503 或 504 网关错误，或发生网络超时，框架会先保持原模型、reasoning 和 strict JSON Schema 请求不变，按默认 `2s`、`4s` 间隔重试两次；重试仍失败后，再回退到不带 reasoning 的 strict JSON Schema，最后回退到不带 reasoning 的 `json_object`。所有回退响应都经过同一严格解析器；其他 HTTP 错误不会回退，仍然 fail-closed。
 
