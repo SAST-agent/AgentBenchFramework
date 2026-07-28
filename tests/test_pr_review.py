@@ -59,6 +59,26 @@ def _run_cli(env: dict[str, str]):
     )
 
 
+def _write_sse(handler: BaseHTTPRequestHandler, events: list[dict]) -> None:
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/event-stream")
+    handler.end_headers()
+    for event in events:
+        event_type = event["type"]
+        handler.wfile.write(f"event: {event_type}\n".encode())
+        handler.wfile.write(
+            f"data: {json.dumps(event, separators=(',', ':'))}\n\n".encode()
+        )
+        handler.wfile.flush()
+
+
+def _write_completed_stream(handler: BaseHTTPRequestHandler, output_text: str) -> None:
+    _write_sse(handler, [{
+        "type": "response.completed",
+        "response": {"status": "completed", "output_text": output_text},
+    }])
+
+
 def test_extracts_responses_output_text_and_validates_review():
     response = {
         "output": [{
@@ -143,7 +163,9 @@ def test_builds_protocol_specific_json_requests():
     assert message_schema["type"] == "string"
     assert "non-empty" in message_schema["description"]
     assert responses["reasoning"] == {"effort": "high"}
+    assert responses["stream"] is True
     assert chat["model"] == "review-model"
+    assert "stream" not in chat
     assert chat["messages"] == [
         {"role": "system", "content": "system"},
         {"role": "user", "content": "diff"},
@@ -167,14 +189,22 @@ def test_cli_sends_auth_and_passes_without_printing_secret(tmp_path):
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):  # noqa: N802
             seen["authorization"] = self.headers.get("Authorization")
+            seen["accept"] = self.headers.get("Accept")
             seen["body"] = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-            body = {"output_text": json.dumps({
-                "decision": "pass", "summary": "ok", "findings": [],
-            })}
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps(body).encode())
+            _write_sse(self, [
+                {
+                    "type": "response.output_text.delta",
+                    "delta": '{"decision":"pass","summary":',
+                },
+                {
+                    "type": "response.output_text.delta",
+                    "delta": '"ok","findings":[]}',
+                },
+                {
+                    "type": "response.completed",
+                    "response": {"status": "completed"},
+                },
+            ])
 
         def log_message(self, *_args):
             return
@@ -184,7 +214,9 @@ def test_cli_sends_auth_and_passes_without_printing_secret(tmp_path):
 
     assert result.returncode == 0
     assert seen["authorization"] == "Bearer secret-value"
+    assert seen["accept"] == "text/event-stream"
     assert seen["body"]["model"] == "review-model"
+    assert seen["body"]["stream"] is True
     assert "secret-value" not in result.stdout + result.stderr
 
 
@@ -222,13 +254,10 @@ def test_cli_falls_back_to_legacy_json_when_structured_output_is_rejected(tmp_pa
                 self.send_response(400)
                 self.end_headers()
                 return
-            body = {"output_text": json.dumps({
+            body = json.dumps({
                 "decision": "pass", "summary": "ok", "findings": [],
-            })}
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps(body).encode())
+            })
+            _write_completed_stream(self, body)
 
         def log_message(self, *_args):
             return
@@ -254,13 +283,10 @@ def test_cli_falls_back_after_same_request_gateway_retries(tmp_path):
                 self.send_response(504)
                 self.end_headers()
                 return
-            body = {"output_text": json.dumps({
+            body = json.dumps({
                 "decision": "pass", "summary": "ok", "findings": [],
-            })}
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps(body).encode())
+            })
+            _write_completed_stream(self, body)
 
         def log_message(self, *_args):
             return
@@ -288,13 +314,10 @@ def test_cli_retries_same_request_after_gateway_timeout(tmp_path):
                 self.send_response(504)
                 self.end_headers()
                 return
-            body = {"output_text": json.dumps({
+            body = json.dumps({
                 "decision": "pass", "summary": "ok", "findings": [],
-            })}
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps(body).encode())
+            })
+            _write_completed_stream(self, body)
 
         def log_message(self, *_args):
             return
@@ -355,6 +378,44 @@ def test_cli_fails_closed_on_http_error(tmp_path):
     assert result.returncode != 0
 
 
+def test_cli_fails_closed_when_responses_stream_ends_without_completed(tmp_path):
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            _write_sse(self, [{
+                "type": "response.output_text.delta",
+                "delta": '{"decision":"pass","summary":"ok","findings":[]}',
+            }])
+
+        def log_message(self, *_args):
+            return
+
+    with serve(Handler) as endpoint:
+        result = _run_cli(_cli_env(tmp_path, endpoint))
+
+    assert result.returncode != 0
+    assert "response.completed" in result.stderr
+
+
+@pytest.mark.parametrize("terminal_type", ["response.failed", "response.incomplete", "error"])
+def test_cli_fails_closed_on_responses_failure_event(tmp_path, terminal_type):
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):  # noqa: N802
+            _write_sse(self, [{
+                "type": terminal_type,
+                "response": {"status": "failed"},
+                "error": {"message": "upstream failed"},
+            }])
+
+        def log_message(self, *_args):
+            return
+
+    with serve(Handler) as endpoint:
+        result = _run_cli(_cli_env(tmp_path, endpoint))
+
+    assert result.returncode != 0
+    assert terminal_type in result.stderr
+
+
 @pytest.mark.parametrize("review_body", [
     {"output_text": "not json"},
     {"output_text": json.dumps({
@@ -366,10 +427,7 @@ def test_cli_fails_closed_on_http_error(tmp_path):
 def test_cli_fails_closed_on_invalid_or_blocking_review(tmp_path, review_body):
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):  # noqa: N802
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps(review_body).encode())
+            _write_completed_stream(self, review_body["output_text"])
 
         def log_message(self, *_args):
             return
