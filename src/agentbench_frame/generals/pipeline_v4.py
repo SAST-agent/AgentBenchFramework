@@ -80,6 +80,66 @@ class _Round4Abort(RuntimeError):
         self.status = status
 
 
+@dataclass(frozen=True)
+class PriorRound4Attempt:
+    run_dir: Path
+    run_id: str
+    learning_budget: Mapping[str, object]
+
+
+def _load_prior_attempt(
+    run_dir: Path,
+    lineage: Round4ParentLineage,
+    learning_id: str,
+) -> PriorRound4Attempt:
+    target = Path(run_dir).resolve()
+    try:
+        summary = json.loads(
+            (target / "summary.json").read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read prior v4 attempt: {exc}") from exc
+    if summary.get("status") != "prompt_incomplete":
+        raise ValueError(
+            "prior v4 attempt must have status prompt_incomplete"
+        )
+    if (
+        summary.get("parent_run_id") != lineage.parent_run_id
+        or summary.get("parent_version") != "v3"
+    ):
+        raise ValueError("prior v4 attempt parent does not match")
+    if summary.get("learning_id") != learning_id:
+        raise ValueError("prior v4 attempt learning suite does not match")
+    if (
+        int(summary.get("act_count", -1)) != lineage.global_act_count
+        or int(summary.get("round_act_count", -1)) != 0
+    ):
+        raise ValueError(
+            "prior v4 prompt attempt must not contain a coding-agent act"
+        )
+    raw_budget = summary.get("budget")
+    if not isinstance(raw_budget, dict):
+        raise ValueError("prior v4 attempt budget is missing")
+    learning_budget = {
+        str(key): value
+        for key, value in raw_budget.items()
+        if str(key).startswith("learning_")
+    }
+    if not learning_budget:
+        raise ValueError("prior v4 attempt learning budget is missing")
+    if int(
+        learning_budget.get("learning_coding_agent_acts", -1)
+    ) != 0:
+        raise ValueError(
+            "prior v4 prompt attempt budget contains a coding-agent act"
+        )
+    return PriorRound4Attempt(
+        run_dir=target,
+        run_id=str(summary.get("run_id", target.name)),
+        learning_budget=learning_budget,
+    )
+
+
 def _combine_learning_budgets(
     parent: Mapping[str, object],
     current: Mapping[str, object],
@@ -117,6 +177,7 @@ class GeneralsHLRound4Pipeline(GeneralsHLPipeline):
         provider: ProviderAdapter,
         evaluator: GeneralsEvaluator | Any | None = None,
         rules_path: Path | None = None,
+        prior_attempt_run_dir: Path | None = None,
     ):
         super().__init__(
             config,
@@ -130,6 +191,11 @@ class GeneralsHLRound4Pipeline(GeneralsHLPipeline):
         self.replay_skill = replay_skill
         self.parent_run_dir = Path(parent_run_dir)
         self.expected_parent_hash = expected_parent_hash
+        self.prior_attempt_run_dir = (
+            Path(prior_attempt_run_dir)
+            if prior_attempt_run_dir is not None
+            else None
+        )
 
     @classmethod
     def from_paths(
@@ -142,6 +208,7 @@ class GeneralsHLRound4Pipeline(GeneralsHLPipeline):
         expected_parent_hash: str,
         data_dir: Path,
         provider: ProviderAdapter,
+        prior_attempt_run_dir: Path | None = None,
     ) -> "GeneralsHLRound4Pipeline":
         config = load_pilot_config(manifest_path)
         learning = load_round4_learning_config(
@@ -163,6 +230,7 @@ class GeneralsHLRound4Pipeline(GeneralsHLPipeline):
             expected_parent_hash=expected_parent_hash,
             data_dir=data_dir,
             provider=provider,
+            prior_attempt_run_dir=prior_attempt_run_dir,
         )
 
     @staticmethod
@@ -350,6 +418,7 @@ class GeneralsHLRound4Pipeline(GeneralsHLPipeline):
         prompt: PromptBuildResult | None = None
         diagnostics: dict[str, object] | None = None
         act = None
+        prior_attempt: PriorRound4Attempt | None = None
         try:
             lineage = load_round4_parent(
                 self.parent_run_dir,
@@ -360,6 +429,18 @@ class GeneralsHLRound4Pipeline(GeneralsHLPipeline):
             evo_score_2 = lineage.evo_score_2
             evo_score_3 = lineage.evo_score_3
             global_act_count = lineage.global_act_count
+            if self.prior_attempt_run_dir is not None:
+                prior_attempt = _load_prior_attempt(
+                    self.prior_attempt_run_dir,
+                    lineage,
+                    self.learning_config.learning_id,
+                )
+                run.write(
+                    "prior_attempt_import",
+                    prior_attempt_run_id=prior_attempt.run_id,
+                    prior_attempt_status="prompt_incomplete",
+                    **dict(prior_attempt.learning_budget),
+                )
             imported = import_parent_v3(
                 lineage,
                 run_dir,
@@ -826,8 +907,16 @@ class GeneralsHLRound4Pipeline(GeneralsHLPipeline):
                 else []
             )
             current_budget = run.budget_snapshot()
-            cumulative_budget = _combine_learning_budgets(
+            prior_cumulative = _combine_learning_budgets(
                 lineage.learning_budget if lineage else {},
+                (
+                    prior_attempt.learning_budget
+                    if prior_attempt is not None
+                    else {}
+                ),
+            )
+            cumulative_budget = _combine_learning_budgets(
+                prior_cumulative,
                 current_budget,
             )
             feedback_summary = (
@@ -904,6 +993,11 @@ class GeneralsHLRound4Pipeline(GeneralsHLPipeline):
                         lineage.parent_run_id if lineage else None
                     ),
                     "parent_version": "v3" if lineage else None,
+                    "prior_attempt_run_id": (
+                        prior_attempt.run_id
+                        if prior_attempt is not None
+                        else None
+                    ),
                     "runnable": runnable,
                     "feedback_read": feedback_summary,
                     "behavior_diagnostics": diagnostics,

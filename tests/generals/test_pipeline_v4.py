@@ -303,6 +303,7 @@ def _pipeline(
     *,
     improved=False,
     incomplete_validation=False,
+    prior_attempt=False,
 ):
     parent, manifest = _parent(tmp_path)
     root = tmp_path / "assets"
@@ -327,6 +328,33 @@ def _pipeline(
         improved=improved,
         incomplete_validation=incomplete_validation,
     )
+    prior_attempt_run_dir = None
+    if prior_attempt:
+        prior_attempt_run_dir = tmp_path / "prior-prompt-attempt"
+        prior_attempt_run_dir.mkdir()
+        (prior_attempt_run_dir / "summary.json").write_text(
+            json.dumps({
+                "run_id": "prior-prompt-attempt",
+                "status": "prompt_incomplete",
+                "parent_run_id": "parent-v3",
+                "parent_version": "v3",
+                "learning_id": LEARNING.learning_id,
+                "act_count": 4,
+                "round_act_count": 0,
+                "budget": {
+                    "learning_coding_agent_acts": 0,
+                    "learning_episodes": 6,
+                    "learning_env_steps": 12,
+                    "learning_game_agent_decision_steps": 6,
+                    "learning_primitive_commands": 12,
+                    "learning_prompt_tokens": None,
+                    "learning_completion_tokens": None,
+                    "learning_total_tokens": None,
+                    "learning_time_s": 1.0,
+                },
+            }),
+            encoding="utf-8",
+        )
     pipeline = GeneralsHLRound4Pipeline(
         config=CONFIG,
         learning_config=LEARNING,
@@ -338,6 +366,7 @@ def _pipeline(
         provider=provider,
         evaluator=evaluator,
         rules_path=rules,
+        prior_attempt_run_dir=prior_attempt_run_dir,
     )
     return pipeline, evaluator
 
@@ -435,3 +464,27 @@ def test_round4_provider_or_protected_file_failure_retains_missing_score(
     summary = json.loads((result.run_dir / "summary.json").read_text())
     assert summary["score_history"][-1] is None
     assert summary["evaluation_status"] == "not_run"
+
+
+def test_round4_cumulative_budget_includes_prior_pre_act_attempt(tmp_path):
+    provider = RewritingProvider()
+    pipeline, _ = _pipeline(
+        tmp_path,
+        provider,
+        prior_attempt=True,
+    )
+
+    result = pipeline.run()
+
+    assert result.status == "complete"
+    summary = json.loads((result.run_dir / "summary.json").read_text())
+    assert summary["prior_attempt_run_id"] == "prior-prompt-attempt"
+    assert summary["cumulative_learning_budget"]["learning_episodes"] == 58
+    assert summary["cumulative_learning_budget"][
+        "learning_coding_agent_acts"
+    ] == 5
+    receipt = next(
+        event for event in _events(result.run_dir)
+        if event["event_type"] == "prior_attempt_import"
+    )
+    assert receipt["learning_episodes"] == 6

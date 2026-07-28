@@ -215,9 +215,16 @@ def test_critical_window_features_are_state_derived_and_explainable():
     assert pressure.features["movable_stack_count"] >= 1
     assert pressure.features["largest_movable_stack"] >= 4
     assert pressure.features["largest_movable_stacks"][0]["position"] == [0, 0]
+    assert "visible_generals" not in pressure.features
+    opportunity = next(
+        item for item in evidence.decisions
+        if item.state_id == "state-7"
+    )
+    assert len(opportunity.features["strategic_general_targets"]) <= 6
     assert {
-        item["type"] for item in pressure.features["visible_generals"]
-    } == {"main"}
+        item["type"]
+        for item in opportunity.features["strategic_general_targets"]
+    } == {"resource"}
 
 
 def test_critical_windows_deduplicate_when_criteria_select_same_state():

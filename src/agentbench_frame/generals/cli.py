@@ -93,6 +93,14 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
                 required=True,
                 help="Path relative to --agentbench-root",
             )
+            command.add_argument(
+                "--prior-attempt-run",
+                type=Path,
+                help=(
+                    "Optional finalized prompt_incomplete v4 run whose "
+                    "pre-act learning budget must remain cumulative"
+                ),
+            )
         if name == "calibrate-dev":
             command.add_argument("--selection-output", type=Path, required=True)
         if name in {"iterate-v2", "recover-v2"}:
@@ -201,6 +209,7 @@ def handle(args) -> int:
                 expected_parent_hash=args.expected_parent_hash,
                 data_dir=args.data_dir,
                 provider=provider,
+                prior_attempt_run_dir=args.prior_attempt_run,
             ).run()
             print(json.dumps({
                 "status": result.status,

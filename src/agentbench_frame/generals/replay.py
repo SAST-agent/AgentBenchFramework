@@ -240,6 +240,8 @@ def _adjacent_enemy_pressure(
 
 def _state_features(
     decision: DecisionRecord,
+    *,
+    include_strategic_targets: bool = False,
 ) -> dict[str, Any]:
     state = decision.state
     seat = decision.seat
@@ -318,43 +320,77 @@ def _state_features(
         int(item["movable_army"])
         for item in movable_records
     ]
-    visible_generals = []
-    for general in sorted(
-        (
-            item
-            for item in state.get("generals", {}).values()
-            if isinstance(item, Mapping)
-        ),
-        key=lambda item: int(item.get("id", 0)),
-    ):
-        position = general.get("position")
-        cell = _cell_at(state, position)
-        visible_generals.append({
-            "id": int(general.get("id", 0)),
-            "player": int(general.get("player", -1)),
-            "type": str(general.get("type", "unknown")),
-            "position": (
-                [int(position[0]), int(position[1])]
-                if isinstance(position, Sequence)
-                and not isinstance(position, (str, bytes))
-                and len(position) == 2
+    strategic_targets = []
+    if include_strategic_targets:
+        own_main_position = (
+            target_main.get("position")
+            if target_main is not None
+            else None
+        )
+        candidates = []
+        for general in state.get("generals", {}).values():
+            if (
+                not isinstance(general, Mapping)
+                or int(general.get("player", -1)) == seat
+                or general.get("type") not in {"resource", "sub"}
+            ):
+                continue
+            position = general.get("position")
+            if (
+                not isinstance(position, Sequence)
+                or isinstance(position, (str, bytes))
+                or len(position) != 2
+            ):
+                continue
+            normalized_position = [
+                int(position[0]),
+                int(position[1]),
+            ]
+            distance = (
+                abs(normalized_position[0] - int(own_main_position[0]))
+                + abs(
+                    normalized_position[1]
+                    - int(own_main_position[1])
+                )
+                if isinstance(own_main_position, Sequence)
+                and not isinstance(
+                    own_main_position,
+                    (str, bytes),
+                )
+                and len(own_main_position) == 2
                 else None
+            )
+            cell = _cell_at(state, position)
+            candidates.append({
+                "id": int(general.get("id", 0)),
+                "player": int(general.get("player", -1)),
+                "type": str(general.get("type", "unknown")),
+                "position": normalized_position,
+                "distance_from_own_main": distance,
+                "cell_army": (
+                    int(cell.get("army", 0))
+                    if cell is not None
+                    else None
+                ),
+                "produce_level": int(
+                    general.get("produce_level", 0)
+                ),
+                "defense_level": int(
+                    general.get("defense_level", 0)
+                ),
+                "mobility_level": int(
+                    general.get("mobility_level", 0)
+                ),
+            })
+        strategic_targets = sorted(
+            candidates,
+            key=lambda item: (
+                item["distance_from_own_main"]
+                if item["distance_from_own_main"] is not None
+                else 10**9,
+                item["id"],
             ),
-            "cell_army": (
-                int(cell.get("army", 0))
-                if cell is not None
-                else None
-            ),
-            "produce_level": int(
-                general.get("produce_level", 0)
-            ),
-            "defense_level": int(
-                general.get("defense_level", 0)
-            ),
-            "mobility_level": int(
-                general.get("mobility_level", 0)
-            ),
-        })
+        )[:6]
     adjacent_pressure = _adjacent_enemy_pressure(state, seat)
     return {
         "own_main_position": (
@@ -390,8 +426,12 @@ def _state_features(
         "owned_general_counts": dict(sorted(own_generals.items())),
         "movable_stack_count": len(movable),
         "largest_movable_stack": max(movable, default=0),
-        "largest_movable_stacks": movable_records[:8],
-        "visible_generals": visible_generals,
+        "largest_movable_stacks": movable_records[:4],
+        **(
+            {"strategic_general_targets": strategic_targets}
+            if include_strategic_targets
+            else {}
+        ),
     }
 
 
@@ -556,7 +596,13 @@ def build_critical_learning_evidence(
                 decisions[index].seat,
                 decisions[index].action,
             ),
-            features=_state_features(decisions[index]),
+            features=_state_features(
+                decisions[index],
+                include_strategic_targets=(
+                    "first_strategic_opportunity"
+                    in reasons_by_index[index]
+                ),
+            ),
         )
         for index in selected_indices
     )
