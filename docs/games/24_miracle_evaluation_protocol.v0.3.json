@@ -1,0 +1,112 @@
+{
+  "protocol_version": "0.3-pre-registered",
+  "status": "PRE_REGISTERED_NOT_AUTHORIZED",
+  "_doc": "24_miracle 正式评测协议预注册草案。状态 DRAFT_NOT_AUTHORIZED：未冻结、未执行、未创建正式矩阵目录或 progress 文件。仅当局人明确授权后冻结并启动。",
+  "_generated": "2026-07-21",
+
+  "matrix_meaning": {
+    "status": "USER_DECIDED_PLAN_A",
+    "chosen": "A_ifelse_vs_16（用户正式选择：if-else 对 rank01–16，每对手换阵营各 1 局，共 32 局）",
+    "evidence": "高翔 historical lessons 明确研究目标为 'if-else bot vs 每位人类决赛选手'（'Test against unchanged human finalists'）；战力记录均为 if-else vs rankNN。16×16 round-robin 在 SKILL.md 中被列为与 '完整16人矩阵' 不同的独立禁项。但精确协议（每对手局数/批量结构/timeout）材料未唯一确定。",
+    "options": [
+      {"id": "A_ifelse_vs_16", "desc": "if-else Agent 分别对 16 个决赛策略，双方换 camp（最符合历史研究目标）", "estimated_games": "16 对手 × 2 camp × m 局/配置；m=1→32 局，m=5→160 局"},
+      {"id": "B_round_robin_16x16", "desc": "16 策略间完整 round-robin（与 A 不同，规模大得多）", "estimated_games": "16×15=240 配对 × 换 camp × m 局；m=1→480 局，m=5→2400 局"},
+      {"id": "C_other", "desc": "其他用户指定矩阵"}
+    ],
+    "do_not_conflate": true,
+    "total_attempts": 32,
+    "games_per_opponent": 2,
+    "camps_per_opponent": [0, 1],
+    "games_per_opponent_per_camp": 1
+  },
+
+  "frozen_identities": {
+    "evaluated_agent": {"name": "miracle_ifelse", "source": "高翔 ifelse_bot/main.py", "sha256": "98199fae8875de63b41d2eacd92ad5c58b4d5aa95b01b05aeacedd0b55402f4b", "modifiable": false},
+    "judge": {"source": "external_asset:judge_dev_logic", "main_py_sha256": "104f77bf4ec59b96b46ffc05e20482319f40fc83401a9becd785d0be98a7fc09", "modifiable": false},
+    "opponents": "见 docs/games/24_miracle_roster_manifest.json（16 策略 archive_sha256）",
+    "build_artifacts_win64_mingw": {
+      "_note": "阶段9A 预检隔离编译产物 SHA256（g++ 15.2.0 MinGW, GNU Make 4.4.1，策略自带 makefile 原样编译）",
+      "rank01": "b451d4f99b694c4ac446749d904901b1235a1f8b7a52d4b06e738ceecc4b0347",
+      "rank02": "5c731a794eb8282f242defee099685fb20fbd7f2d7644046b5fba0385ad555f4",
+      "rank03": "84cdb1344104060e6341efea691077d0e3962ef60ad523e25126b18365d581eb",
+      "rank06": "b10de17f886ca930a8bad9a4136c1643780f26916018715486f6195332c3e704",
+      "rank08": "249b9c6f7bcea4b384089a0093eebed29fb67530a078fbf217cb7c274e8c6c4f",
+      "rank09": "3c7c822cec8cf613ff32210f61faa95b157225c51069e450d54ca1e39178be0f",
+      "rank10": "ae0c24618b1fdc3e88f64a3b5b61ab0edfd144fd5259f26aa2c40ef5d6467287",
+      "rank11": "6c8c169c1f23dc876969ac7f50f17aa05f3932bd51f7142d56c06f0757242037",
+      "rank12": "e92fe57054968b7b35f8e61a7fb2ac591e801b92f447e2043f9f0fa793c4c2ab",
+      "rank13": "d2e8ff65eaed3c979d1a5c2deb5a9e2cfafa7a3a8105690908bd4e08d4d647e9",
+      "rank14": "bb0f1b171251edc39a9b424c50207b529bb318dc0e82186551d899f24a26cc01",
+      "rank15": "c570d1807402b9fcfe9db841d88420c3cac8a5bbf1f9a2ec9e3a2b51cb7a6fb3",
+      "rank16": "ed92b36ba411cd52c1408762bbb6cedfc54a7a62ecb16f7d2d98cb95458372db",
+      "rank04_rank05_rank07": "Python，无需编译（main.py）",
+      "rank16_blocker": "已解除（阶段9B）：rank16 隔离构建副本内创建空 build/（构建环境准备，非策略修复；源码/Makefile 哈希编译前后一致），原 Makefile 编译成功。rank16 main.exe SHA256 已补入。编译警告 'control reaches end of non-void function' 保留为运行风险（不修复/不隐瞒，见 known_runtime_risks）。",
+      "rank03_note": "编译+启动成功，但保留历史运行时崩溃风险（invalid_now）；编译/启动成功 ≠ 比赛可用。"
+    }
+  },
+
+  "seed_policy": {
+    "requested_seed": null,
+    "effective_seed": null,
+    "deterministic_seed_supported": false,
+    "reproducible_from_seed": false,
+    "recorded_only": "realized_randomization={map_type, day_time}（Replay 头读出，不表述为 seed）",
+    "rationale": "Judge 用 random.randint 选 map_type/day_time，不读外部 seed；不修改 Judge"
+  },
+
+  "timeouts": {
+    "per_ai_operation_s": 8.0,
+    "wrapper_per_game_s": 120.0,
+    "note": "MAX_ROUND=100；最坏单局≈ wrapper_per_game_s；if-else 局可更长（smoke g2_01=630 steps 仍在限内）"
+  },
+
+  "validity": {
+    "valid_game": "合法 end_info + result-json 与 trace 分数一致 + raw_winner 符合 Judge 规则 + end_info 前无 ai_error/ai_timeout + Judge 未在 end_info 前崩溃 + Replay 存在且合法 + cleanup 完成",
+    "invalid_game": "AI crash / AI timeout / Judge crash / wrapper timeout / evidence_mismatch / replay_missing / replay_corrupt / result_json_missing / result_json_corrupt",
+    "rank03": "invalid_now（对手程序崩溃），不计入有效胜率"
+  },
+
+  "classification": {
+    "ai_crash": "AI 在 end_info 前自然异常退出，或 trace 出现 ai_error",
+    "ai_timeout": "trace 出现 ai_timeout，或对应 AI 在动作期限内未响应",
+    "runner_cleanup_nonzero": "end_info 后 runner 主动终止 AI 产生的非零 returncode —— 视为正常 cleanup，不判 AI 崩溃",
+    "judge_crash": "Judge 在 end_info 前异常退出，或无合法 end_info 且 Judge 非正常退出",
+    "wrapper_timeout": "vendor 及 Judge/AI 树未在 wrapper_per_game_s 内结束",
+    "infra_failure": "result-json 缺失/损坏、证据三向矛盾、Replay 损坏等基础设施层失败"
+  },
+
+  "scoring": {
+    "raw_winner_rule": "end_info={'0':s0,'1':s1}; winner = 0 if s0>s1 else 1",
+    "tie": "score0==score1 时 Judge 判 player1 获胜（judge_tiebreak_applied=true），记为 win/loss 而非 draw",
+    "win_rate": "wins / valid_games（分母仅 valid games）；valid_games==0 时 win_rate=null, evaluation_status=NO_VALID_GAMES（不报 0%）",
+    "draw": "仅用于异常输入/未来协议防御；当前 Judge 不产生 draw"
+  },
+
+  "execution": {
+    "no_rerun_successful": true,
+    "recovery": "失败恢复必须使用新 game_id 并注明 recovery_of=<原 game_id>；本轮不自动恢复",
+    "batching": "分批执行；每批设停止门槛（残留进程/证据矛盾/winner 映射不一致/数据损坏即停，不进入下一批）",
+    "camp_swap": "每对手双方各占 camp0/camp1（换边）",
+    "pid_createtime_residual_check": "每局后按精确 PID + psutil create_time 独立核验 judge/ai0/ai1 无残留；PID 复用不杀",
+    "cross_validation": "Replay 头/哈希、trace、result-json、events、summary、网页六处可相互追溯；任一权威字段冲突即 evidence_mismatch",
+    "failure_evidence_permanent": true,
+    "smoke_not_competitiveness": "4 局 smoke 仅为基础设施验证，不作为 if-else 竞争力结论"
+  },
+
+  "estimate": {
+    "time": "取决于 matrix_meaning 选择与 m：A 方案 32 局≈0.5–1.5h，160 局≈2.5–7h；B 方案 480 局≈4–12h，2400 局≈1–2 天（含 C++ 编译）",
+    "storage": "每局≈ trace+replay+result-json+stdout+stderr（KB–数十 KB 级）；A 方案<50MB，B 方案可达 GB 级",
+    "worst_case": "每局逼近 wrapper_per_game_s；总时间≈总局数×wrapper_per_game_s"
+  },
+
+  "known_runtime_risks": [
+    {"id": "rank03_crash", "strategy": "rank03", "risk": "历史运行时崩溃（SKILL.md 记载当前环境对手程序崩溃）", "handling": "保持原策略不变；正式对局若在 end_info 前崩溃则记 invalid 并保留原始证据；不补跑；不计入 Agent 有效胜率（不进 win_rate 分母）", "not_an_infra_blocker": true},
+    {"id": "rank16_compiler_warning", "strategy": "rank16", "risk": "编译警告 control reaches end of non-void function（ai-sample.cpp 等）", "handling": "属运行风险，不修复、不隐瞒、不改源码；正式对局异常按 invalid 处理并保留证据"},
+    {"id": "general_cpp_warnings", "risk": "多个 C++ 策略编译产生 -Wreturn-type 等警告（非错误）", "handling": "未修改任何策略源码/Makefile/优化；警告仅记录，运行时异常按分类规则处理"}
+  ],
+  "blockers_before_matrix": [
+    "FORMAL_32_GAME_MATRIX_NOT_AUTHORIZED"
+  ],
+
+  "not_authorized": ["完整16人矩阵执行", "16×16 round-robin", "RL/Round81/hidden eval", "修改 if-else 策略", "push/PR/上传 Results/合并 main", "删除或重跑 smoke 证据"]
+}
