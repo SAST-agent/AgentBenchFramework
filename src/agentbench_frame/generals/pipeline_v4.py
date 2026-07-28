@@ -162,6 +162,104 @@ def _combine_learning_budgets(
     return combined
 
 
+def derive_round4_campaign_budget(
+    success_run_dir: Path,
+    prior_attempt_run_dir: Path,
+    output_path: Path,
+) -> dict[str, object]:
+    """Write a separate budget correction receipt without mutating runs."""
+    success_dir = Path(success_run_dir).resolve()
+    prior_dir = Path(prior_attempt_run_dir).resolve()
+    target = Path(output_path).resolve()
+    if target.is_relative_to(success_dir) or target.is_relative_to(prior_dir):
+        raise ValueError(
+            "campaign budget receipt must live outside finalized runs"
+        )
+    success_path = success_dir / "summary.json"
+    prior_path = prior_dir / "summary.json"
+    try:
+        success_raw = success_path.read_bytes()
+        prior_raw = prior_path.read_bytes()
+        success = json.loads(success_raw)
+        prior = json.loads(prior_raw)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read v4 campaign summaries: {exc}") from exc
+    if success.get("status") != "complete":
+        raise ValueError("v4 campaign success run must be complete")
+    if prior.get("status") != "prompt_incomplete":
+        raise ValueError(
+            "v4 campaign prior run must be prompt_incomplete"
+        )
+    for key in ("parent_run_id", "parent_version", "learning_id"):
+        if success.get(key) != prior.get(key):
+            raise ValueError(
+                f"v4 campaign summaries disagree on {key}"
+            )
+    if success.get("prior_attempt_run_id") not in {
+        None,
+        "",
+    }:
+        raise ValueError(
+            "v4 success summary already declares a prior attempt"
+        )
+    if int(prior.get("round_act_count", -1)) != 0:
+        raise ValueError(
+            "v4 prior prompt attempt must not contain a coding-agent act"
+        )
+    before = success.get("cumulative_learning_budget")
+    prior_budget_raw = prior.get("budget")
+    if not isinstance(before, dict) or not isinstance(
+        prior_budget_raw,
+        dict,
+    ):
+        raise ValueError("v4 campaign learning budgets are missing")
+    prior_budget = {
+        str(key): value
+        for key, value in prior_budget_raw.items()
+        if str(key).startswith("learning_")
+    }
+    if int(
+        prior_budget.get("learning_coding_agent_acts", -1)
+    ) != 0:
+        raise ValueError(
+            "v4 prior prompt attempt budget contains an act"
+        )
+    after = _combine_learning_budgets(before, prior_budget)
+    receipt: dict[str, object] = {
+        "schema_version": "1.0",
+        "status": "derived_prior_attempt_added",
+        "success_run_id": success.get("run_id", success_dir.name),
+        "prior_attempt_run_id": prior.get("run_id", prior_dir.name),
+        "parent_run_id": success.get("parent_run_id"),
+        "learning_id": success.get("learning_id"),
+        "success_summary_sha256": hashlib.sha256(
+            success_raw
+        ).hexdigest(),
+        "prior_summary_sha256": hashlib.sha256(prior_raw).hexdigest(),
+        "success_summary_ref": str(success_path),
+        "prior_summary_ref": str(prior_path),
+        "before": dict(before),
+        "prior_attempt": prior_budget,
+        "after": after,
+        "mutation_policy": (
+            "inputs_immutable_separate_derived_receipt"
+        ),
+    }
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_suffix(target.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(
+            receipt,
+            indent=2,
+            sort_keys=True,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    temporary.replace(target)
+    return receipt
+
+
 class GeneralsHLRound4Pipeline(GeneralsHLPipeline):
     """Run one v4 coding act and formally evaluate every runnable candidate."""
 

@@ -134,6 +134,49 @@ class ReportBuilder:
         # Sort by started_at (newest first)
         self.runs.sort(key=lambda r: r.get("started_at", 0), reverse=True)
         self._link_round2_learning_budgets()
+        self._apply_derived_budget_receipts()
+
+    def _apply_derived_budget_receipts(self) -> None:
+        """Overlay audited campaign budgets without changing run summaries."""
+        derived_dir = os.path.join(self.data_dir, "derived")
+        if not os.path.isdir(derived_dir):
+            return
+
+        by_id = {
+            str(run.get("run_id")): run
+            for run in self.runs
+            if run.get("run_id")
+        }
+        for dirpath, dirnames, filenames in os.walk(derived_dir):
+            dirnames.sort()
+            for fname in sorted(filenames):
+                if not fname.endswith(".json"):
+                    continue
+                path = os.path.join(dirpath, fname)
+                try:
+                    with open(path, encoding="utf-8") as receipt_file:
+                        receipt = json.load(receipt_file)
+                except (json.JSONDecodeError, IOError):
+                    continue
+                if (
+                    not isinstance(receipt, dict)
+                    or receipt.get("status")
+                    != "derived_prior_attempt_added"
+                    or receipt.get("mutation_policy")
+                    != "inputs_immutable_separate_derived_receipt"
+                    or not isinstance(receipt.get("after"), dict)
+                ):
+                    continue
+                run = by_id.get(str(receipt.get("success_run_id")))
+                if run is None:
+                    continue
+                audited_receipt = dict(receipt)
+                audited_receipt["_path"] = path
+                research = run.setdefault("research", {})
+                research["cumulative_learning_budget"] = dict(
+                    receipt["after"]
+                )
+                research["campaign_budget_receipt"] = audited_receipt
 
     @staticmethod
     def _pair_dense_history(

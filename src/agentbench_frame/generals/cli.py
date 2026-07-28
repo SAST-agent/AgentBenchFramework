@@ -209,7 +209,6 @@ def handle(args) -> int:
                 expected_parent_hash=args.expected_parent_hash,
                 data_dir=args.data_dir,
                 provider=provider,
-                prior_attempt_run_dir=args.prior_attempt_run,
             ).run()
             print(json.dumps({
                 "status": result.status,
@@ -234,6 +233,7 @@ def handle(args) -> int:
                 expected_parent_hash=args.expected_parent_hash,
                 data_dir=args.data_dir,
                 provider=provider,
+                prior_attempt_run_dir=args.prior_attempt_run,
             ).run()
             print(json.dumps({
                 "status": result.status,

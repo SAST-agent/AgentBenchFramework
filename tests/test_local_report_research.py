@@ -536,7 +536,6 @@ class LocalResearchReportTests(unittest.TestCase):
                     }),
                 ]) + "\n"
             )
-
             output = root / "site"
             ReportBuilder(
                 data_dir=str(root),
@@ -673,6 +672,31 @@ class LocalResearchReportTests(unittest.TestCase):
                     }),
                 ]) + "\n"
             )
+            receipt = (
+                root / "derived" / "28_generals"
+                / "generals-hl" / "campaign-budget.json"
+            )
+            receipt.parent.mkdir(parents=True)
+            receipt.write_text(json.dumps({
+                "schema_version": "1.0",
+                "status": "derived_prior_attempt_added",
+                "success_run_id": "v4-run",
+                "prior_attempt_run_id": "v4-prompt-failed",
+                "mutation_policy": (
+                    "inputs_immutable_separate_derived_receipt"
+                ),
+                "after": {
+                    "learning_coding_agent_acts": 5,
+                    "learning_episodes": 58,
+                    "learning_env_steps": 30882,
+                    "learning_game_agent_decision_steps": 12091,
+                    "learning_primitive_commands": 50465,
+                    "learning_prompt_tokens": None,
+                    "learning_completion_tokens": None,
+                    "learning_total_tokens": None,
+                    "learning_time_s": 779.9,
+                },
+            }))
 
             output = root / "site"
             ReportBuilder(
@@ -687,6 +711,8 @@ class LocalResearchReportTests(unittest.TestCase):
         self.assertIn(">42<", html)
         self.assertIn("terminal army margin", html)
         self.assertIn("Validation episodes", html)
+        self.assertIn(">58<", html)
+        self.assertIn("derived campaign budget", html)
 
 
 if __name__ == "__main__":
