@@ -241,7 +241,12 @@ class Map:
                 return False
             if y != y1:
                 return False
-            if self.node[z][x][y].type == 3:
+            # 注意：上面的 x,y=y,x 交换后，局部 x/y 已是交换后的值，
+            # 真实候选格是 node[z][原x][原y] = node[z][y][x]。早期写法用了
+            # node[z][x][y]，会把真实电梯 (3,5)/(0,3)/(6,3) 检测成 False，
+            # 反而把幻影电梯 (5,3)/(3,0) 当成可跨层——这是集齐3把钥匙后
+            # 卡死在第4把的根因（跨层移动被裁判判失败→原地空转70回合）。
+            if self.node[z][y][x].type == 3:
                 return True
             else:
                 return False
@@ -806,18 +811,26 @@ class AIClient:
         if len(self.get_keys()) >= 4:
             target = ESCAPE_POS
         else:
+            held = set(self.get_keys())
             dist_from_me = self.bfs_move(my_tuple, 1, -1)
             target = None
             best_d = None
-            for km in self.all_km_positions():
-                if km in self.visited_km:
+            # 只挑“尚未持有该钥匙”的 KeyMachine，避免去我已经拿过钥匙的
+            # 另一层机器空跑一趟（visited_km 按格子去重，无法表达“这把钥匙
+            # 已拿”）。这样集齐3把后会直奔缺的那把，而不是被幻影电梯路径
+            # 误导到卡死。
+            for k in range(4):
+                if k in held:
                     continue
-                d = dist_from_me.get(km)
-                if d is None:
-                    continue
-                if best_d is None or d < best_d:
-                    best_d = d
-                    target = km
+                for km in self.get_km_positions(k):
+                    if km in self.visited_km:
+                        continue
+                    d = dist_from_me.get(km)
+                    if d is None:
+                        continue
+                    if best_d is None or d < best_d:
+                        best_d = d
+                        target = km
             if target is None:
                 target = ESCAPE_POS
 
@@ -849,12 +862,15 @@ class AIClient:
             return
 
         # 2) 站在尚未取过的 KeyMachine 上 → 取钥匙
+        #    仅当该机器对应钥匙尚未持有时才交互，否则会空耗一回合。
         if my_pos in self.all_km_positions() and my_pos not in self.visited_km:
-            res = self.interact("KeyMachine")
-            # 成功取到或已持有该钥匙（机器已被自己取过），都标记不再回头
-            if res["success"] or res.get("success") is False:
-                self.visited_km.add(my_pos)
-            return
+            if my_pos in self._km_cells_for_missing_keys():
+                res = self.interact("KeyMachine")
+                if res["success"] or res.get("success") is False:
+                    self.visited_km.add(my_pos)
+                return
+            else:
+                self.visited_km.add(my_pos)  # 已持有该钥匙，标记不再回头
 
         # 3) 低血量且有医疗包 → 治疗
         if my_hp <= 130 and self.player.tools.kit > 0:
@@ -903,6 +919,17 @@ class AIClient:
             if tuple(n.pos) == mp:
                 return getattr(n, "interprops", []) or []
         return []
+
+    def _km_cells_for_missing_keys(self):
+        """返回“当前尚未持有的钥匙”对应的所有 KeyMachine 格子集合。"""
+        held = set(self.get_keys())
+        cells = set()
+        for k in range(4):
+            if k in held:
+                continue
+            for km in self.get_km_positions(k):
+                cells.add(km)
+        return cells
 
     def run(self):
         while True:
