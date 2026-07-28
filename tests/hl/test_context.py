@@ -115,3 +115,24 @@ def test_prompt_has_anti_derail_clause_with_history(tmp_path):
                              agent_name="hl-v1", spec=_spec())
     prompt = builder.build(version_before=None, act_id="r-act0001")["prompt"]
     assert "STAY ON MISSION" in prompt
+
+
+def test_prompt_anti_derail_clause_on_all_error_history(tmp_path):
+    """Spec scenario: when the match history is 100% errors, the prompt
+    still contains the anti-derail clause directing the agent to make a
+    small edit to agent.py and not debug the harness."""
+    cb = _codebase(tmp_path)
+    run_dir = tmp_path / "runs" / "25_lostspace" / "hl-v1" / "run-001"
+    run_dir.mkdir(parents=True)
+    (run_dir / "matches.jsonl").write_text(
+        '{"opponent":"rank06","candidate_result":"error",'
+        '"candidate_seat":0,"pair":0,"error":"logic exited"}\n'
+        '{"opponent":"rank12","candidate_result":"error",'
+        '"candidate_seat":0,"pair":1,"error":"logic exited"}\n',
+        encoding="utf-8")
+    builder = ContextBuilder(codebase=cb, data_root=tmp_path, game="25_lostspace",
+                             agent_name="hl-v1", spec=_spec())
+    prompt = builder.build(version_before=None, act_id="r-act0001")["prompt"]
+    assert "STAY ON MISSION" in prompt
+    assert "harness" in prompt.lower()
+

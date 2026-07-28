@@ -88,6 +88,9 @@ def test_missing_binary_returns_error_result(monkeypatch, tmp_path):
     assert res.error is not None
     assert "claude-missing" in res.error
     assert res.edit_type == "noop"
+    # failure_reason is what the controller writes to events; it must mirror
+    # error on this failure path so a missing CLI is visible in the stream.
+    assert res.failure_reason == res.error
 
 
 def test_nonzero_exit_with_stderr(monkeypatch, tmp_path):
@@ -98,6 +101,20 @@ def test_nonzero_exit_with_stderr(monkeypatch, tmp_path):
     res = r.run(workspace=tmp_path, context={"prompt": "go"})
     assert res.error is not None
     assert "2" in res.error
+    assert res.failure_reason == res.error
+
+
+def test_timeout_sets_failure_reason(monkeypatch, tmp_path):
+    """The TimeoutExpired path sets failure_reason so a silent timeout is
+    visible in the event stream (spec scenario: claude CLI times out)."""
+    import subprocess as _subprocess
+    def boom(argv, **kwargs):
+        raise _subprocess.TimeoutExpired(cmd=argv, timeout=1)
+    monkeypatch.setattr("agentbench_frame.hl.runner.subprocess.run", boom)
+    r = ClaudeCodeRunner()
+    res = r.run(workspace=tmp_path, context={"prompt": "go", "timeout": 1})
+    assert res.edit_type == "noop"
+    assert res.failure_reason == "claude CLI timed out"
 
 
 def test_default_prompt_used_when_context_omits_prompt(monkeypatch, tmp_path):
