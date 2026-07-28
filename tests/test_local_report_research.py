@@ -388,6 +388,12 @@ class LocalResearchReportTests(unittest.TestCase):
                 "evo_score_3": 0.35,
                 "gain_3": 0.35,
                 "score_history": [0.0, 0.1, None, 0.2, 0.35],
+                "AUC_coding_agent_act": None,
+                "AUC_episode": None,
+                "AUC_env_step": None,
+                "AUC_token": None,
+                "AUC_time": None,
+                "auc_status": "unavailable_missing_score_point",
                 "behavior_gate": {
                     "passed": True,
                     "conditions": {"behavior_changed": True},
@@ -423,6 +429,10 @@ class LocalResearchReportTests(unittest.TestCase):
 
         self.assertEqual(research["evo_score"], 0.35)
         self.assertEqual(research["gain"], 0.35)
+        self.assertIsNone(
+            research["auc"]["auc_coding_agent_act"]
+        )
+        self.assertIsNone(research["auc"]["auc_episode"])
         self.assertEqual(
             [point["x"] for point in research["score_history"]],
             [0, 1, 2, 3, 4],

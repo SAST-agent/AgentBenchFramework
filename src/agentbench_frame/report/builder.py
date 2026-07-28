@@ -547,8 +547,17 @@ class ReportBuilder:
             "total_lines": 0, "valid_events": 0, "warnings": []
         }
         auc = multi_axis_auc(auc_points) if auc_points else {}
-        if summary.get("AUC_coding_agent_act") is not None:
-            auc["auc_coding_agent_act"] = summary["AUC_coding_agent_act"]
+        for summary_key, research_key in {
+            "AUC_coding_agent_act": "auc_coding_agent_act",
+            "AUC_episode": "auc_episode",
+            "AUC_env_step": "auc_env_step",
+            "AUC_token": "auc_token",
+            "AUC_time": "auc_time_s",
+        }.items():
+            if summary_key in summary:
+                # An explicit null is first-hand missingness, not permission
+                # to derive a partial AUC across an interrupted score curve.
+                auc[research_key] = summary[summary_key]
         benchmark_score = summary.get("benchmark_score")
         if benchmark_score is None:
             benchmark_score = evo_score
