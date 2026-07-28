@@ -3,6 +3,7 @@ import json
 import pytest
 
 from agentbench_frame.generals.lineage_v3 import (
+    audit_round3_summary_budget,
     import_parent_v2,
     load_round3_parent,
 )
@@ -165,3 +166,88 @@ def test_round3_parent_rejects_tampered_v2_source(tmp_path):
 
     with pytest.raises(ValueError, match="manifest does not match"):
         load_round3_parent(parent, manifest.content_hash)
+
+
+def test_budget_audit_repairs_finalized_summary_with_backup_and_receipt(
+    tmp_path,
+):
+    parent, manifest = parent_run(tmp_path)
+    run_dir = tmp_path / "successful-v3"
+    run_dir.mkdir()
+    original = {
+        "run_id": "successful-v3",
+        "status": "complete",
+        "parent_run_id": "parent-v2",
+        "act_count": 4,
+        "budget": {
+            "learning_coding_agent_acts": 1,
+            "learning_episodes": 12,
+            "learning_env_steps": 24,
+            "learning_game_agent_decision_steps": 12,
+            "learning_primitive_commands": 24,
+            "learning_total_tokens": 125,
+            "learning_time_s": 3.0,
+        },
+        "cumulative_learning_budget": {
+            "learning_coding_agent_acts": 2,
+        },
+    }
+    (run_dir / "summary.json").write_text(
+        json.dumps(original),
+        encoding="utf-8",
+    )
+    (run_dir / "events.jsonl").write_text("", encoding="utf-8")
+
+    repaired = audit_round3_summary_budget(
+        run_dir,
+        parent,
+        manifest.content_hash,
+    )
+
+    assert repaired["cumulative_learning_budget"][
+        "learning_coding_agent_acts"
+    ] == 4
+    assert repaired["cumulative_learning_budget"][
+        "learning_episodes"
+    ] == 34
+    assert repaired["cumulative_learning_budget"][
+        "learning_total_tokens"
+    ] is None
+    assert repaired["lineage_budget_status"] == (
+        "audited_reconstructed_from_recovery_chain"
+    )
+    assert json.loads(
+        (run_dir / "summary.pre-budget-audit.json").read_text()
+    ) == original
+    receipt = json.loads((run_dir / "budget-audit.json").read_text())
+    assert receipt["before"] == {"learning_coding_agent_acts": 2}
+    assert receipt["after"] == repaired["cumulative_learning_budget"]
+    event = json.loads((run_dir / "events.jsonl").read_text())
+    assert event["event_type"] == "lineage_budget_audit"
+    assert repaired["event_quality"]["unknown_event_types"] == 0
+
+
+def test_budget_audit_is_not_silently_repeatable(tmp_path):
+    parent, manifest = parent_run(tmp_path)
+    run_dir = tmp_path / "successful-v3"
+    run_dir.mkdir()
+    (run_dir / "summary.json").write_text(json.dumps({
+        "run_id": "successful-v3",
+        "status": "complete",
+        "parent_run_id": "parent-v2",
+        "act_count": 4,
+        "budget": {"learning_coding_agent_acts": 1},
+    }))
+    (run_dir / "events.jsonl").write_text("")
+    audit_round3_summary_budget(
+        run_dir,
+        parent,
+        manifest.content_hash,
+    )
+
+    with pytest.raises(ValueError, match="already exists"):
+        audit_round3_summary_budget(
+            run_dir,
+            parent,
+            manifest.content_hash,
+        )

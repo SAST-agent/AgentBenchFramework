@@ -23,6 +23,7 @@ KNOWN_EVENT_TYPES = frozenset({
     "decision_class_summary",
     "behavior_gate",
     "behavior_measurement_error",
+    "lineage_budget_audit",
 })
 
 

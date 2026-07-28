@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import shutil
 import subprocess
+import time
 from typing import Mapping
+from uuid import uuid4
 
+from agentbench_frame.tracking.quality import inspect_event_file
 from agentbench_frame.tracking.snapshot import (
     LocalWorkspaceSnapshotter,
     WorkspaceManifest,
@@ -240,3 +244,98 @@ def import_parent_v2(
         encoding="utf-8",
     )
     return preserved
+
+
+def _write_json_atomic(path: Path, payload: object) -> None:
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(
+            payload,
+            indent=2,
+            sort_keys=True,
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    temporary.replace(path)
+
+
+def audit_round3_summary_budget(
+    run_dir: Path,
+    parent_run_dir: Path,
+    expected_parent_hash: str,
+) -> dict[str, object]:
+    """Repair one finalized v3 cumulative budget with an auditable backup."""
+    target = Path(run_dir).resolve()
+    summary_path = target / "summary.json"
+    events_path = target / "events.jsonl"
+    backup_path = target / "summary.pre-budget-audit.json"
+    receipt_path = target / "budget-audit.json"
+    if backup_path.exists() or receipt_path.exists():
+        raise ValueError("round-3 budget audit already exists")
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read round-3 summary for audit: {exc}") from exc
+    if summary.get("status") != "complete":
+        raise ValueError("budget audit requires a complete round-3 run")
+    if not events_path.is_file():
+        raise ValueError("budget audit requires the original event stream")
+    lineage = load_round3_parent(
+        parent_run_dir,
+        expected_parent_hash,
+    )
+    if summary.get("parent_run_id") != lineage.parent_run_id:
+        raise ValueError("round-3 audit parent run does not match")
+    if int(summary.get("act_count", -1)) != lineage.global_act_count + 1:
+        raise ValueError("round-3 audit act count does not match lineage")
+    current = _learning_only(summary.get("budget"))
+    if not current:
+        raise ValueError("round-3 current learning budget is missing")
+    corrected = _sum_learning_budgets(
+        lineage.learning_budget,
+        current,
+    )
+    expected_acts = lineage.global_act_count + 1
+    if corrected.get("learning_coding_agent_acts") != expected_acts:
+        raise ValueError(
+            "audited cumulative coding-agent act count is inconsistent"
+        )
+
+    shutil.copy2(summary_path, backup_path)
+    audit_id = f"audit_{uuid4().hex}"
+    receipt = {
+        "audit_id": audit_id,
+        "run_id": summary.get("run_id"),
+        "parent_run_id": lineage.parent_run_id,
+        "parent_v2_hash": lineage.v2_manifest.content_hash,
+        "status": "audited_reconstructed_from_recovery_chain",
+        "before": summary.get("cumulative_learning_budget"),
+        "after": corrected,
+        "backup_ref": str(backup_path),
+    }
+    _write_json_atomic(receipt_path, receipt)
+    event = {
+        "schema_version": "1.0",
+        "event_id": audit_id,
+        "event_type": "lineage_budget_audit",
+        "event": "lineage_budget_audit",
+        "run_id": summary.get("run_id"),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "timestamp": time.time(),
+        "parent_run_id": lineage.parent_run_id,
+        "parent_v2_hash": lineage.v2_manifest.content_hash,
+        "before": summary.get("cumulative_learning_budget"),
+        "after": corrected,
+        "receipt_ref": str(receipt_path),
+    }
+    with events_path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(event, sort_keys=True, ensure_ascii=False) + "\n"
+        )
+    summary["cumulative_learning_budget"] = corrected
+    summary["lineage_budget_status"] = receipt["status"]
+    summary["lineage_budget_audit_ref"] = str(receipt_path)
+    summary["event_quality"] = inspect_event_file(events_path).to_dict()
+    _write_json_atomic(summary_path, summary)
+    return summary
