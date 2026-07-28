@@ -113,7 +113,7 @@ class LocalResearchReportTests(unittest.TestCase):
             ig_history = builder.runs[0]["research"]["ig_history"]
             ig_chart = builder.runs[0]["research"]["ig_chart"]
             quality = builder.runs[0]["research"]["quality"]
-            html = (output / "index.html").read_text()
+            html = (output / "index.html").read_text(encoding="utf-8")
 
         self.assertAlmostEqual(ig_history[0]["trajectory_kl_episode"], 0.4)
         self.assertAlmostEqual(ig_history[0]["mean_local_policy_kl"], 0.2)

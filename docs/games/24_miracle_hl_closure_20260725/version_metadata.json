@@ -1,0 +1,18 @@
+﻿{
+    "v0":  {
+               "version_id":  "miracle_ifelse/v0",
+               "parent":  null,
+               "source_sha256":  "209f182637e1abaee4ff50de6b1a37777fbba9fbab5f611aae58a06a109c0a3b",
+               "workspace_sha256":  "209f182637e1abaee4ff50de6b1a37777fbba9fbab5f611aae58a06a109c0a3b",
+               "immutable":  true
+           },
+    "v1":  {
+               "version_id":  "miracle_ifelse/v1",
+               "parent":  "miracle_ifelse/v0",
+               "source_sha256":  "64d8496a3d20b3357bec86d831c4511306c4e5421ac16a3fa8e0c744897a7087",
+               "workspace_sha256":  "64d8496a3d20b3357bec86d831c4511306c4e5421ac16a3fa8e0c744897a7087",
+               "diff_sha256":  "a2be0cfd65a6dd86072fa3e2cc391834a94ac5c2df927326581191fb89577a58",
+               "immutable":  true,
+               "change":  "camp1 default opening FF to SF"
+           }
+}

@@ -1,0 +1,1 @@
+﻿# Provider evidence boundary`n`nRaw Provider JSONL is local-only and excluded from this payload. Its logical reference and SHA256 appear only in the local posthoc manifest. The public audit contains no credentials, raw model stream, local workspace path, or source code.
