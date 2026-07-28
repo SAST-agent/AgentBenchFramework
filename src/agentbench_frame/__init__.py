@@ -20,7 +20,7 @@ __author__ = "AgentBench Team"
 # Environment
 from agentbench_frame.env import (
     BaseEnv, EnvMode, ActionSpace, Observation,
-    StdioProtocol, GeneralsEnv,
+    StdioProtocol, GeneralsEnv, AntWar2Env,
     ENV_REGISTRY, make_env, register_env,
 )
 
@@ -81,7 +81,7 @@ __all__ = [
     "__version__",
     # Environment
     "BaseEnv", "EnvMode", "ActionSpace", "Observation",
-    "StdioProtocol", "GeneralsEnv",
+    "StdioProtocol", "GeneralsEnv", "AntWar2Env",
     "ENV_REGISTRY", "make_env", "register_env",
     # Agent
     "BaseAgent", "RandomAgent",
