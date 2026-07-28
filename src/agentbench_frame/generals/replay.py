@@ -499,10 +499,31 @@ def build_critical_learning_evidence(
     replay: LearningReplay,
     dense_summary: DenseEpisodeSummary,
     dense_trace: Sequence[DenseStateSample],
+    *,
+    max_decisions: int | None = None,
+    selection_reasons: Sequence[str] | None = None,
 ) -> tuple[CriticalLearningEvidence, CriticalWindowSelection]:
     """Select deterministic high-signal v4 decision windows."""
     decisions = replay.decisions
     reasons_by_index: dict[int, list[str]] = {}
+    default_reasons = (
+        "first_decision",
+        "first_non_end_action",
+        "first_main_pressure",
+        "before_steepest_territory_drop",
+        "before_steepest_army_drop",
+        "first_strategic_opportunity",
+        "penultimate_decision",
+        "final_decision",
+    )
+    requested = tuple(selection_reasons or default_reasons)
+    unknown = set(requested) - set(default_reasons)
+    if unknown:
+        raise ValueError(
+            f"unknown critical-window selection reasons: {sorted(unknown)}"
+        )
+    if max_decisions is not None and max_decisions <= 0:
+        raise ValueError("max_decisions must be positive")
 
     def add(index: int | None, reason: str) -> None:
         if index is None or not 0 <= index < len(decisions):
@@ -582,6 +603,38 @@ def build_critical_learning_evidence(
         )
         add(len(decisions) - 2, "penultimate_decision")
         add(len(decisions) - 1, "final_decision")
+
+    requested_set = set(requested)
+    reasons_by_index = {
+        index: [
+            reason for reason in reasons
+            if reason in requested_set
+        ]
+        for index, reasons in reasons_by_index.items()
+        if any(reason in requested_set for reason in reasons)
+    }
+    if (
+        max_decisions is not None
+        and len(reasons_by_index) > max_decisions
+    ):
+        prioritized: list[int] = []
+        for reason in requested:
+            for index in sorted(reasons_by_index):
+                if (
+                    reason in reasons_by_index[index]
+                    and index not in prioritized
+                ):
+                    prioritized.append(index)
+                    if len(prioritized) == max_decisions:
+                        break
+            if len(prioritized) == max_decisions:
+                break
+        selected_set = set(prioritized)
+        reasons_by_index = {
+            index: reasons
+            for index, reasons in reasons_by_index.items()
+            if index in selected_set
+        }
 
     selected_indices = tuple(sorted(reasons_by_index))
     selected = tuple(

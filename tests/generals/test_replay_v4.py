@@ -246,3 +246,35 @@ def test_critical_windows_deduplicate_when_criteria_select_same_state():
     assert selection.selected_state_ids == ("state-0", "state-1")
     assert len(evidence.decisions) == 2
     assert selection.omitted_decision_count == 0
+
+
+def test_v5_windows_keep_only_six_requested_critical_reasons():
+    evidence, selection = build_critical_learning_evidence(
+        _replay(),
+        _summary(),
+        (),
+        max_decisions=6,
+        selection_reasons=(
+            "first_decision",
+            "first_non_end_action",
+            "first_main_pressure",
+            "before_steepest_territory_drop",
+            "before_steepest_army_drop",
+            "final_decision",
+        ),
+    )
+
+    assert selection.selected_state_ids == (
+        "state-0",
+        "state-1",
+        "state-2",
+        "state-3",
+        "state-5",
+        "state-9",
+    )
+    assert len(evidence.decisions) == 6
+    assert "first_strategic_opportunity" not in {
+        reason
+        for reasons in selection.reasons.values()
+        for reason in reasons
+    }
