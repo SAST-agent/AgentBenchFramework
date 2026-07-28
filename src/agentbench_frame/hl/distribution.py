@@ -85,8 +85,23 @@ class LegalActionSet:
 
 
 def _canonical(token: ActionToken) -> ActionToken:
-    """Freeze a token for hashing/sets."""
-    return tuple(token)
+    """Freeze a token for hashing/sets.
+
+    Recursively freezes nested lists into tuples, so a token like
+    ``("attack", [1, 2])`` becomes ``("attack", (1, 2))`` and is hashable.
+    The coding agent's emitted actions can carry list-valued fields
+    (e.g. attack target ids), and without this the policy-KL measurement
+    crashes with ``TypeError: unhashable type: 'list'`` when it tries
+    ``chosen in dist``.
+    """
+    return _freeze(token)
+
+
+def _freeze(obj):
+    """Recursively freeze lists/tuples of lists into tuples of tuples."""
+    if isinstance(obj, (list, tuple)):
+        return tuple(_freeze(x) for x in obj)
+    return obj
 
 
 def _state_id(tokens: Tuple[ActionToken, ...]) -> str:

@@ -143,6 +143,23 @@ def test_epsilon_distribution_out_of_support_flagged_uniform():
         assert math.isclose(v, 1.0 / n, abs_tol=1e-9)  # uniform
 
 
+def test_epsilon_distribution_chosen_with_nested_list_is_hashable():
+    """A coding agent may emit an action carrying a list-valued field
+    (e.g. ``("attack", [1, 2])``). _canonical must recursively freeze it so
+    ``chosen in dist`` doesn't raise TypeError: unhashable type: 'list'."""
+    las = enumerate_legal_actions(_legal(attack=[1, 2]), status=0, inventory={})
+    # chosen carries a nested list; must not crash, must be treated as
+    # out_of_support (canonicalized form unlikely to match the token set).
+    dist, out_of_support = epsilon_smoothed_distribution(
+        chosen=("attack", [1, 2]), legal=las, epsilon=0.1, return_flag=True,
+    )
+    # No exception; distribution is well-formed and sums to ~1.
+    assert sum(dist.values()) == pytest.approx(1.0, abs=1e-9)
+
+
+
+
+
 def test_policy_kl_identical_is_zero():
     las = enumerate_legal_actions(_legal(attack=[1], move=[2]), status=0, inventory={})
     p = epsilon_smoothed_distribution(("move", 2), las, 0.1)

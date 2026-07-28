@@ -95,7 +95,7 @@ def _probe_logic_antlr4(logic_command: str) -> None:
     message on failure.
     """
     import shlex, subprocess
-    from agentbench_frame.lostspace.match import _split_cwd, _to_argv
+    from agentbench_frame.lostspace.match import _split_cwd, _to_argv, _child_env
 
     rest, cwd = _split_cwd(logic_command)
     argv = _to_argv(rest) if sys.platform.startswith("win") else shlex.split(rest)
@@ -118,9 +118,13 @@ def _probe_logic_antlr4(logic_command: str) -> None:
         # Not a python-launched logic (e.g. a compiled binary); skip the probe.
         return
     try:
+        # Use the harness's own child env: it scrubs PYTHONHOME/PYTHONPATH
+        # that ``uv run`` poisons, which would otherwise break the logic
+        # interpreter's importlib (false-negative probe under uv).
         proc = subprocess.run(
             [py_token, "-c", "import antlr4; print('antlr4 ok')"],
             cwd=cwd, capture_output=True, text=True, timeout=30,
+            env=_child_env(),
         )
     except (FileNotFoundError, subprocess.TimeoutExpired) as e:
         raise SystemExit(
