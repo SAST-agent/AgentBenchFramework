@@ -63,6 +63,28 @@ agentbench report --data-dir ./agentbench_data --output-dir ./_site
 action disagreement 与 occupancy shift 分开记录。真实 act 需要本机已安装并认证
 Codex CLI。
 
+在已有、已冻结的 v3 pilot 上执行 replay-guided v4：
+
+```bash
+agentbench generals iterate-v4 \
+  --agentbench-root "$ASSET_ROOT" \
+  --manifest "$MANIFEST" \
+  --learning-manifest \
+    "$ASSET_ROOT/backend_sources/corpus/28_generals/benchmark/v4-strongest-learning-v1.toml" \
+  --replay-skill \
+    backend_sources/corpus/28_generals/skills/replay-analysis-v1/SKILL.md \
+  --parent-run ./agentbench_data/runs/28_generals/generals-hl/PARENT_RUN_ID \
+  --expected-parent-hash PARENT_VERSION_CONTENT_HASH \
+  --data-dir ./agentbench_data \
+  --codex-executable "$(command -v codex)"
+```
+
+v4 用三个新 seed、双座位对最强人类算法生成 6 局学习回放，从每局确定性抽取
+关键决策窗口，并把人工编写的 replay skill 和实际读取计数送入一次 Codex act。
+只要新策略可运行且测试通过，就一定执行 6 局配对诊断和原 18 局正式评测；
+行为变化或稠密指标不作为隐藏版本的 gate。失败和退步版本同样保存，严格 policy
+KL/信息增益以及跨历史缺失点的 AUC 保持缺失。
+
 ### 5 行跑一场对战
 
 ```python
