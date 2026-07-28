@@ -460,6 +460,96 @@ class LocalResearchReportTests(unittest.TestCase):
             30,
         )
 
+    def test_round3_gate_and_decision_classes_render_in_dashboard(self):
+        from agentbench_frame.report.builder import ReportBuilder
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = (
+                root / "runs" / "28_generals" / "generals-hl" / "v3-run"
+            )
+            run_dir.mkdir(parents=True)
+            (run_dir / "summary.json").write_text(json.dumps({
+                "run_id": "v3-run",
+                "game": "28_generals",
+                "agent": "generals-hl",
+                "run_type": "rule_iter",
+                "status": "complete",
+                "evaluation_status": "complete",
+                "benchmark_score": 0.3888888888888889,
+                "raw_score": 0.0,
+                "evo_score_3": 0.3888888888888889,
+                "gain_3": 0.3888888888888889,
+                "score_history": [0.0, 0.0, None, 0.0, 0.3888888888888889],
+                "AUC_coding_agent_act": None,
+                "budget": {"learning_coding_agent_acts": 1},
+            }))
+            (run_dir / "events.jsonl").write_text(
+                "\n".join([
+                    json.dumps({
+                        "event_type": "decision_class_summary",
+                        "version": "v2",
+                        "total": 1072,
+                        "counts": {
+                            "main_army_move": 1000,
+                            "non_main_army_move": 2,
+                            "general_upgrade": 0,
+                            "end_only": 70,
+                        },
+                        "rates": {
+                            "main_army_move": 1000 / 1072,
+                            "non_main_army_move": 2 / 1072,
+                            "general_upgrade": 0.0,
+                            "end_only": 70 / 1072,
+                        },
+                    }),
+                    json.dumps({
+                        "event_type": "decision_class_summary",
+                        "version": "v3",
+                        "total": 1072,
+                        "counts": {
+                            "main_army_move": 186,
+                            "non_main_army_move": 691,
+                            "general_upgrade": 125,
+                            "end_only": 70,
+                        },
+                        "rates": {
+                            "main_army_move": 186 / 1072,
+                            "non_main_army_move": 691 / 1072,
+                            "general_upgrade": 125 / 1072,
+                            "end_only": 70 / 1072,
+                        },
+                    }),
+                    json.dumps({
+                        "event_type": "behavior_gate",
+                        "passed": True,
+                        "conditions": {
+                            "behavior_changed": True,
+                            "validation_complete": True,
+                        },
+                        "improved_dense_metrics": [
+                            "terminal_territory_share"
+                        ],
+                        "dense_deltas": {
+                            "terminal_territory_share": 0.255,
+                        },
+                    }),
+                ]) + "\n"
+            )
+
+            output = root / "site"
+            ReportBuilder(
+                data_dir=str(root),
+                output_dir=str(output),
+            ).build()
+            html = (output / "index.html").read_text()
+
+        self.assertIn("Behavior gate", html)
+        self.assertIn("Decision classes", html)
+        self.assertIn("terminal territory share", html)
+        self.assertIn("64.5%", html)
+        self.assertIn("passed", html)
+
 
 if __name__ == "__main__":
     unittest.main()
