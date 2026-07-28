@@ -1,0 +1,53 @@
+--- /c/Users/gongh/Desktop/AgentBenchResults-main/AgentBenchResults-main/scripts/aggregate.py	2026-07-21 11:55:22.279762000 +0800
++++ vendor/results_local/aggregate.py	2026-07-21 13:39:14.866698200 +0800
+@@ -1,10 +1,28 @@
+ #!/usr/bin/env python3
+-"""Scan runs/ directory and generate registry.toml.
++"""LOCAL VERIFICATION COPY of AgentBenchResults `scripts/aggregate.py`.
+ 
+-Reads run.toml + summary.json from each run, writes registry.toml
+-for CI visualization.
++This is a faithful copy of the upstream aggregator with ONE minimal cross-platform
++patch. It is used only for local schema/aggregate/web verification
++(SKILL.md 阶段7) on Windows; the upstream script in the AgentBenchResults repo
++remains the authoritative implementation. On Linux (production CI) the upstream
++script is correct and this copy is unnecessary.
++
++UPSTREAM BUG (confirmed 2026-07-21 on Windows):
++    Upstream writes `path = str(run_dir.relative_to(data_dir))`, which on Windows
++    yields backslash separators (`runs\\24_miracle\\...`). Backslashes are illegal
++    inside a TOML basic string, so the emitted `registry.toml` fails to parse and
++    `report_builder.load_registry` aborts. The bug is invisible on Linux CI where
++    paths use forward slashes.
++
++PATCH (single line, zero semantic change):
++    `str(run_dir.relative_to(data_dir))` -> `run_dir.relative_to(data_dir).as_posix()`
++    i.e. serialize the run's relative path with forward slashes so registry.toml
++    is valid TOML on every platform. Path semantics are unchanged.
+ 
+-Usage: python scripts/aggregate.py --data-dir ./ --output registry.toml
++Everything else is byte-identical to upstream. See
++docs/games/24_miracle_adapter_status.md ("Framework / Results 缺陷" section).
++
++Usage: python vendor/results_local/aggregate.py --data-dir ./ --output registry.toml
+ """
+ 
+ import argparse, json, sys, tomllib
+@@ -47,13 +65,15 @@
+                     except Exception:
+                         pass
+ 
+-                # Merge: summary.json fields override, fallback to run.toml
++                # Merge: summary.json fields override, fallback to run.toml.
++                # PATCH (as_posix): forward-slash path so registry.toml is valid TOML
++                # on Windows too; upstream uses str(...) which emits backslashes here.
+                 runs.append({
+                     "run_id": run_dir.name,
+                     "game": game_dir.name,
+                     "agent": agent_dir.name,
+                     "type": s.get("run_type") or _get_meta_field(raw, "type", "eval"),
+-                    "path": str(run_dir.relative_to(data_dir)),
++                    "path": run_dir.relative_to(data_dir).as_posix(),
+                     "created": s.get("created") or _get_meta_field(raw, "created", ""),
+                     "git_commit": s.get("git_commit") or _get_meta_field(raw, "git_commit", ""),
+                     "summary": {

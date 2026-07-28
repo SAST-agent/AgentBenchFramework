@@ -1,0 +1,22 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.5, pytest-9.1.1, pluggy-1.6.0 -- C:\Users\gongh\AppData\Local\Programs\Python\Python313\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\gongh\Documents\AgentBenchFramework
+configfile: pyproject.toml
+collecting ... collected 0 items / 1 error
+
+=================================== ERRORS ====================================
+_____________ ERROR collecting tests/miracle/test_match_runner.py _____________
+ImportError while importing test module 'C:\Users\gongh\Documents\AgentBenchFramework\tests\miracle\test_match_runner.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\AppData\Local\Programs\Python\Python313\Lib\importlib\__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+tests\miracle\test_match_runner.py:28: in <module>
+    from agentbench_frame.games.miracle import match_runner
+E   ImportError: cannot import name 'match_runner' from 'agentbench_frame.games.miracle' (C:\Users\gongh\Documents\AgentBenchFramework\src\agentbench_frame\games\miracle\__init__.py)
+=========================== short test summary info ===========================
+ERROR tests/miracle/test_match_runner.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+============================== 1 error in 0.38s ===============================

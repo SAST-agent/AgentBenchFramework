@@ -1,0 +1,197 @@
+{
+  "run_id": "20260722-001929_52bd14",
+  "game": "24_miracle",
+  "agent": "miracle_ifelse",
+  "run_type": "eval",
+  "created": "",
+  "git_commit": "",
+  "wall_hours": null,
+  "total_episodes": 20,
+  "total_steps": 18144,
+  "win_rate": 0.1,
+  "best_elo": null,
+  "final_elo": null,
+  "elo_history": [],
+  "h2h": {},
+  "resource_summary": {},
+  "config": {
+    "matrix": "plan_a_32",
+    "total_attempts": 32
+  },
+  "matrix_aggregate": {
+    "total_attempts": 32,
+    "valid_games": 20,
+    "invalid_games": 12,
+    "wins": 2,
+    "losses": 18,
+    "win_rate": 0.1,
+    "per_rank": {
+      "1": {
+        "attempts": 2,
+        "valid": 0,
+        "invalid": 2,
+        "wins": 0,
+        "losses": 0,
+        "win_rate": null
+      },
+      "2": {
+        "attempts": 2,
+        "valid": 2,
+        "invalid": 0,
+        "wins": 0,
+        "losses": 2,
+        "win_rate": 0.0
+      },
+      "3": {
+        "attempts": 2,
+        "valid": 0,
+        "invalid": 2,
+        "wins": 0,
+        "losses": 0,
+        "win_rate": null
+      },
+      "4": {
+        "attempts": 2,
+        "valid": 2,
+        "invalid": 0,
+        "wins": 1,
+        "losses": 1,
+        "win_rate": 0.5
+      },
+      "5": {
+        "attempts": 2,
+        "valid": 2,
+        "invalid": 0,
+        "wins": 0,
+        "losses": 2,
+        "win_rate": 0.0
+      },
+      "6": {
+        "attempts": 2,
+        "valid": 2,
+        "invalid": 0,
+        "wins": 0,
+        "losses": 2,
+        "win_rate": 0.0
+      },
+      "7": {
+        "attempts": 2,
+        "valid": 0,
+        "invalid": 2,
+        "wins": 0,
+        "losses": 0,
+        "win_rate": null
+      },
+      "8": {
+        "attempts": 2,
+        "valid": 0,
+        "invalid": 2,
+        "wins": 0,
+        "losses": 0,
+        "win_rate": null
+      },
+      "9": {
+        "attempts": 2,
+        "valid": 2,
+        "invalid": 0,
+        "wins": 1,
+        "losses": 1,
+        "win_rate": 0.5
+      },
+      "10": {
+        "attempts": 2,
+        "valid": 2,
+        "invalid": 0,
+        "wins": 0,
+        "losses": 2,
+        "win_rate": 0.0
+      },
+      "11": {
+        "attempts": 2,
+        "valid": 0,
+        "invalid": 2,
+        "wins": 0,
+        "losses": 0,
+        "win_rate": null
+      },
+      "12": {
+        "attempts": 2,
+        "valid": 2,
+        "invalid": 0,
+        "wins": 0,
+        "losses": 2,
+        "win_rate": 0.0
+      },
+      "13": {
+        "attempts": 2,
+        "valid": 2,
+        "invalid": 0,
+        "wins": 0,
+        "losses": 2,
+        "win_rate": 0.0
+      },
+      "14": {
+        "attempts": 2,
+        "valid": 2,
+        "invalid": 0,
+        "wins": 0,
+        "losses": 2,
+        "win_rate": 0.0
+      },
+      "15": {
+        "attempts": 2,
+        "valid": 0,
+        "invalid": 2,
+        "wins": 0,
+        "losses": 0,
+        "win_rate": null
+      },
+      "16": {
+        "attempts": 2,
+        "valid": 2,
+        "invalid": 0,
+        "wins": 0,
+        "losses": 2,
+        "win_rate": 0.0
+      }
+    },
+    "camp_split": {
+      "0": {
+        "valid": 10,
+        "wins": 2,
+        "win_rate": 0.2
+      },
+      "1": {
+        "valid": 10,
+        "wins": 0,
+        "win_rate": 0.0
+      }
+    },
+    "score_stats": {
+      "n": 20,
+      "mean_diff": -13978.25,
+      "median_diff": -20996.0
+    },
+    "steps_stats": {
+      "n": 20,
+      "total": 18144,
+      "mean": 907.2,
+      "median": 785.5
+    },
+    "realized_randomization_distribution": {
+      "map_type": {
+        "1": 10,
+        "0": 10
+      },
+      "day_time": {
+        "0": 12,
+        "1": 8
+      }
+    },
+    "invalid_reason_distribution": {
+      "ai_timeout": 10,
+      "ai_crash": 2
+    },
+    "small_sample_note": "32 局为小样本；含 invalid；不把对手崩溃包装为 Agent 胜利；win_rate 分母仅 valid games。"
+  }
+}

@@ -1,0 +1,24 @@
+command: uv run --no-project --python 3.11 --with pytest --with psutil --with jinja2 python -m pytest tests/
+python: Python 3.11.15
+---
+warning: The `tool.uv.dev-dependencies` field (used in `pyproject.toml`) is deprecated and will be removed in a future release; use `dependency-groups.dev` instead
+============================= test session starts =============================
+platform win32 -- Python 3.11.15, pytest-9.1.1, pluggy-1.6.0
+rootdir: C:\Users\gongh\Documents\AgentBenchFramework
+configfile: pyproject.toml
+collected 142 items
+
+tests\miracle\test_dependencies.py ..                                    [  1%]
+tests\miracle\test_driver.py .............                               [ 10%]
+tests\miracle\test_entry.py ............                                 [ 19%]
+tests\miracle\test_match_runner.py ....................                  [ 33%]
+tests\miracle\test_matrix.py ...................                         [ 46%]
+tests\miracle\test_matrix_runner.py .............                        [ 55%]
+tests\miracle\test_proctree.py .........                                 [ 61%]
+tests\miracle\test_result.py .................................           [ 85%]
+tests\miracle\test_results_pipeline.py ...                               [ 87%]
+tests\miracle\test_runner.py ...                                         [ 89%]
+tests\miracle\test_smoke_audit.py ............                           [ 97%]
+tests\miracle\test_vendor_boundary.py ...                                [100%]
+
+============================= 142 passed in 8.47s =============================

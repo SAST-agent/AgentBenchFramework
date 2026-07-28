@@ -1,0 +1,4 @@
+ -V:3.14 *        C:\Users\gongh\AppData\Local\Python\pythoncore-3.14-64\python.exe
+ -V:3.13          C:\Users\gongh\AppData\Local\Programs\Python\Python313\python.exe
+ -V:3.10          C:\Users\gongh\AppData\Local\Programs\Python\Python310\python.exe
+ -V:Astral/CPython3.11.15 C:\Users\gongh\AppData\Roaming\uv\python\cpython-3.11.15-windows-x86_64-none\python.exe

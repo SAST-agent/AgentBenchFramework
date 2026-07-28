@@ -1,0 +1,107 @@
+{
+  "_doc": "24_miracle 接入资产身份冻结清单（frozen asset manifest）。用于检测任何资产漂移。路径为本地约定，身份以 SHA256 为准。生成于 2026-07-21。",
+  "_scope": "仅冻结身份与哈希；不得修改 Judge / 历史选手 / 高翔冻结 if-else / 历史 Replay / 旧报告。",
+  "_how_to_verify": "阶段5 单元测试加载本文件，对每个仍被适配层引用的资产重算 SHA256 并断言一致；不一致即资产漂移，停止。",
+
+  "judge": {
+    "origin_repo": "C:/Users/gongh/Documents/agentbench (受保护, origin Aoraku/AgentBench)",
+    "logic_dir": "backend_sources/corpus/24_miracle/logic/judge_dev_logic",
+    "files": {
+      "main.py":   { "sha256": "104f77bf4ec59b96b46ffc05e20482319f40fc83401a9becd785d0be98a7fc09", "lines": 464 },
+      "Data.json": { "sha256": "585819f67432304585d0d23c2d7e5a12577326a8b38003fcbf3dde9eed63f431", "lines": 156 }
+    },
+    "upstream_archive_sha256": {
+      "judge_dev_logic__miracle.zip": "53804adc92ebafd5e3da8aa1eb56bc35030b3b8f70fb2c6c451cc5271f1f69c9",
+      "_note": "上游 archives/SHA256SUMS 中 gamecode_logic__1.zip 与 judge_dev_logic__miracle.zip 哈希相同，疑似同内容打包。"
+    },
+    "_gaoxiang_copy_note": "高翔工程内另有一份同名 Judge 副本 (Desktop/AgentBench-gaoxiang/.../judge_dev_logic/main.py)。阶段5 须哈希比对，确认与受保护仓库一致；适配层以受保护仓库副本为权威。"
+  },
+
+  "sample_ai": {
+    "origin_repo": "C:/Users/gongh/Documents/agentbench",
+    "logic_dir": "backend_sources/corpus/24_miracle/logic/judge_dev_sample_ai",
+    "files": {
+      "main.py": { "sha256": "241aab6d223db82f0bd685ac99f9b14b65a02ab1981182e518580f2f287f902b", "lines": 312 }
+    },
+    "upstream_archive_sha256": {
+      "judge_dev_sample_ai__miracle_ai.zip": "39bec5c3053b1e9f8ebaa953efc0856be851fb4522730c50eea9ce13fb695b85"
+    }
+  },
+
+  "finalist_strategies": {
+    "_source": "C:/Users/gongh/Documents/agentbench/top_algorithms/corpus/24_miracle_final/archives/*.zip",
+    "_manifest": "MANIFEST.tsv (rank, username, display_name, score, entity, language, version, code_id, archive)",
+    "_status_note": {
+      "rank03": "对手程序当前崩溃，属无效证据，不计入 Agent 有效胜率。",
+      "rank04": "有效战胜。",
+      "rank07_rank12": "接近但未解决。",
+      "rank02_rank05": "较接近的强对手。",
+      "rank13_rank16": "Archer lattice 研究断点；框架接入完成前不恢复策略修改。"
+    },
+    "archives": {
+      "rank01__Bruce__Maiev__v10.zip":            { "sha256": "b4603d7197447a3df9bfff126da9340659ea6977d320814febb79a5df0df4fed", "username": "Bruce", "entity": "Maiev", "language": "make", "version": 10 },
+      "rank02__wiku30__碧海潮生曲__v18.zip":        { "sha256": "6b440894709982433cddbe047bae211e7b45988c3d1cfd2dd0bf4e91c38b7708", "username": "wiku30", "language": "make", "version": 18 },
+      "rank03__nzhtl1477__深浅值藏的第六分块__v1.zip": { "sha256": "6c526e491ccc5090ece014ababde0c5c021acc3c789981cf50cd204262e7547e", "username": "nzhtl1477", "language": "make", "version": 1, "invalid_now": true, "reason": "对手程序崩溃" },
+      "rank04__SuperJasper__K__v1.zip":            { "sha256": "ec7c574c21625736ae38dede760e0cdb796b9cb375216f9086b28c00fe07d2e2", "username": "SuperJasper", "entity": "K", "language": "python_zip", "version": 1 },
+      "rank05__zex18__zex的人工智障__v56.zip":      { "sha256": "363d68c5fbdf1e6d869ca3a3612fd67b76fae8abc051b3ad164a8942bed0ec87", "username": "zex18", "language": "make", "version": 56 },
+      "rank06__robinliu__Mooncell__v78.zip":       { "sha256": "dc25d4357ebee7aa6274f8b54cee885c5387a62e1ec62dcc71446f4309cd4806", "username": "robinliu", "language": "make", "version": 78 },
+      "rank07__blazingBonfire__守护者__v22.zip":    { "sha256": "410269e658407193786328505fb0bdf8b585c295ed5322315d6ac35a8c755ba1", "username": "blazingBonfire", "language": "python_zip", "version": 22 },
+      "rank08__wenyi__yyy__v1.zip":                { "sha256": "81e4d6a21a5790d7384be8cf9c8fe172b7fdc97933186204a05fe28e52914461", "username": "wenyi", "language": "make", "version": 1 },
+      "rank09__hsiachi__na__v8.zip":               { "sha256": "48e2db35e6804ba4e0b8717fd2fd4b50d9ea931dd33a158fbe914838b69a2701", "username": "hsiachi", "language": "make", "version": 8 },
+      "rank10__SD_le__AK__v8.zip":                 { "sha256": "efab49207a2f89509ebf64dc286b31f1147e1af65a4fd0bedca28d66d1539f50", "username": "SD_le", "language": "make", "version": 8 },
+      "rank11__jasonvictoryan__Halcyon__v14.zip":  { "sha256": "656d009766064a096f135a8aca6b6a7d2f695e5c0eed2f3b85aba7b6d3ed812e", "username": "jasonvictoryan", "language": "make", "version": 14 },
+      "rank12__omegafantasy__星之梦__v27.zip":      { "sha256": "ea7be1c136d39404e9e788d609a16f0563762acb1cb542645049d05d1352dc67", "username": "omegafantasy", "language": "make", "version": 27 },
+      "rank13__ZarkLngeW__啥都没改__v1.zip":        { "sha256": "3f0e72b410e1d065414327e1018a973aa98992240442d41466b0adea41c1a976", "username": "ZarkLngeW", "language": "make", "version": 1 },
+      "rank14__ccz181078__sample__v21.zip":        { "sha256": "1b1abdc0c8e619f20688627b6b49d41862dbac72c6ffd1a0671a9acb19abf256", "username": "ccz181078", "language": "make", "version": 21 },
+      "rank15__tshoigyr__a_idoit__v21.zip":        { "sha256": "5170538ce62fbeacd7d837c2b2f3c6f8fe41a373c46ef1f497fa1bb2ac6773de", "username": "tshoigyr", "language": "make", "version": 21 },
+      "rank16__MoebiusMeow__起床大失败__v1.zip":     { "sha256": "5f606babd6f99c8f1fe6b62ad959c233af01b44d6cc4e063510684db8785268a", "username": "MoebiusMeow", "language": "make", "version": 1 }
+    }
+  },
+
+  "gaoxiang_assets": {
+    "_source": "C:/Users/gongh/Desktop/AgentBench-gaoxiang/AgentBench-gaoxiang (无 .git ZIP 副本, 只读)",
+    "files": {
+      "tools/miracle/run_match.py":              { "sha256": "91d5693651402a3579146181ee6ada5586c103f38ba5f321b92c23a17a7a8ae2", "lines": 220, "role": "比赛执行器, 阶段4 复用(将拷贝到工作仓库并最小改动)" },
+      "tools/miracle/ifelse_bot/main.py":        { "sha256": "98199fae8875de63b41d2eacd92ad5c58b4d5aa95b01b05aeacedd0b55402f4b", "lines": 1843, "role": "被评 if-else Agent 入口, 冻结不得修改" },
+      "reports/miracle_historical_lessons.md":    { "sha256": "3bcc1f2d369c6ec1b1b4259d8ab4b1b13a24d2aff14bfa0c09082ff933988e6d", "lines": 397, "role": "策略研究权威汇总, 只读" }
+    }
+  },
+
+  "vendored_copies": {
+    "_note": "仅本地 Windows 验证用的最小补丁副本；上游原件保持权威且冻结。原始/修改哈希与修改摘要见下。",
+    "run_match": {
+      "purpose": "比赛执行器（阶段4 复用）：跨平台进程清理 + 结构化 result-json",
+      "original_path": "C:/Users/gongh/Desktop/AgentBench-gaoxiang/AgentBench-gaoxiang/tools/miracle/run_match.py",
+      "original_sha256": "91d5693651402a3579146181ee6ada5586c103f38ba5f321b92c23a17a7a8ae2",
+      "vendor_path": "vendor/miracle_local/run_match.py",
+      "vendor_sha256": "589c2f8bd5eb51622f428dfd487f5037f4eba0695d8b45f60aabe8faecaeeff2",
+      "protocol_change": false,
+      "modifications": [
+        "MIRACLE_JUDGE_DIR env 覆盖 JUDGE_DIR",
+        "terminate() 改用 proctree（graceful→force 树杀，精确 PID + psutil create_time 身份校验，无名称查杀）",
+        "spawn 平台 flags：POSIX start_new_session / Windows CREATE_NEW_PROCESS_GROUP",
+        "read_ai_operation 改线程+queue 超时读（弃用 selectors；Windows select 不支持管道）",
+        "新增 --result-json：进程元数据/end_info/derived raw_winner/score_tie/judge_tiebreak/timeout/ai_error/trace/replay/cleanup/exception/timings"
+      ]
+    },
+    "aggregate": {
+      "purpose": "Results 聚合器 Windows 路径分隔符补丁（仅本地验证）",
+      "original_path": "C:/Users/gongh/Desktop/AgentBenchResults-main/AgentBenchResults-main/scripts/aggregate.py",
+      "original_sha256": "0ea3492207e244818162cfaec9ade6a686b8258dbdd32b086095ab02e3d0dabf",
+      "vendor_path": "vendor/results_local/aggregate.py",
+      "modifications": ["str(run_dir.relative_to(data_dir)) -> .as_posix()（仅路径分隔符；不改指标/h2h/run 发现逻辑）"],
+      "upstream_windows_bug": "Windows 写反斜杠路径 → registry.toml 非法 TOML → report_builder 崩溃；由 test_upstream_aggregate_emits_invalid_toml_on_windows 钉为证据。Linux CI 用正斜杠不受影响。"
+    }
+  },
+
+  "integration_facts_for_phase4": {
+    "judge_dir_resolution": "run_match.py 硬编码 JUDGE_DIR=Path(__file__).parents[2]/backend_sources/corpus/24_miracle/logic/judge_dev_logic。高翔工程内该路径存在(自带 corpus 副本)。适配层以受保护仓库 Documents/agentbench 的 Judge 为权威；对 run_match.py 的受控拷贝增加 env 覆盖 MIRACLE_JUDGE_DIR(回退原默认)，最小改动并单测覆盖。",
+    "init_protocol": "Judge 启动后读一条初始化: {replay:<path>, player_list:[1,1]} (main.py:368-371)。run_match.py 已正确发送 (run_match.py:162-165)。",
+    "winner_and_score": "终局 end_info = {\"0\": player0_score, \"1\": player1_score} (main.py:457)。winner = 0 if score0>score1 else 1 (main.py:450)。平局强制 player1 胜 (main.py:448-449)，Judge 层面无平局。无独立 winner 字段，适配层由分数派生 raw_winner。",
+    "randomization_source": "Judge 用 random.randint 选 map_type/day_time (main.py:85-86)，不读外部 seed → 默认非确定。不修改 Judge 的前提下无法固定随机。适配层从 Replay 文件头 [0,0,0,map_type,day_time,0,0] (main.py:310-313) 读取并记录已实现的随机环境参数（map_type/day_time，非 seed）；文档明示游戏按设计带地图随机。",
+    "crash_timeout_semantics": "AI 崩溃/超时 → run_match 发 player_error(error=0) → Judge 判该 player 负 (main.py:147-151,166-169)，仍给出 0/1 胜负。Judge 自身崩溃 → run_match 无 end_info 输出且非零退出。适配层据 trace 的 ai_error/ai_timeout 事件、end_info 是否存在、子进程返回码，把任一方崩溃/超时/Replay缺失的局标 normalized_result=error，不计入有效胜率 (rank03 崩溃即此情形)。",
+    "exit_code_gap": "run_match.py 不返回 Judge/AI exit code (仅 drain stderr 末 12000 字符入 trace)。适配层从 trace 事件 + end_info 存在性 + 自身子进程返回码推断异常分类。",
+    "step_counting": "trace 中每条 ai_operation 事件 = 1 个 environment step (Judge 发公开状态 + AI 回动作)。total_steps = Σ 各局 ai_operation 计数。MAX_ROUND=100 (main.py:11)。",
+    "replay": "Judge 按 init 给定 replay 路径写出二进制录像 (4 字节大端有符号整数序列)。适配层赛后计算 Replay 文件 SHA256 并入 events；Replay 缺失即标 invalid。"
+  }
+}

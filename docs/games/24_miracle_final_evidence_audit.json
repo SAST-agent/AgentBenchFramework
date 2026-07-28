@@ -1,0 +1,1043 @@
+{
+  "session_id": "20260722-001929_127b74",
+  "matrix_session_dir": ".smoke\\matrix\\20260722-001929_127b74",
+  "protocol_v0_3_sha256": "866696fd9e094da85e3f2c04dc5ba20d0500faf8461531a242362323c4efe0b3",
+  "state_field_on_disk": "PRE_REGISTERED_NOT_AUTHORIZED",
+  "per_game": [
+    {
+      "game_id": "m_rank01_camp0",
+      "rank": 1,
+      "camp": 0,
+      "valid": false,
+      "normalized_result": "error",
+      "raw_winner": null,
+      "scores": {
+        "0": 3003,
+        "1": 0
+      },
+      "steps": 151,
+      "realized_randomization": {
+        "map_type": 1,
+        "day_time": 1
+      },
+      "error_type": "ai_timeout",
+      "sha256_result": "6516a13f54d41edb96290e2b97909cae4722b8a9dc35c8e8ca5827a53e6ea706",
+      "sha256_replay": "81947e57e8428aa6623e9b10aab80589482400934a21ca55b173824b6911b237",
+      "sha256_jsonl": "6402a571a68f3f6294ecf6fd4e8aeb71b210fa5045c647e947b9b7a21793209f"
+    },
+    {
+      "game_id": "m_rank01_camp1",
+      "rank": 1,
+      "camp": 1,
+      "valid": false,
+      "normalized_result": "error",
+      "raw_winner": null,
+      "scores": {
+        "0": 0,
+        "1": 5
+      },
+      "steps": 131,
+      "realized_randomization": {
+        "map_type": 0,
+        "day_time": 0
+      },
+      "error_type": "ai_timeout",
+      "sha256_result": "adbbff2d95217d5caca1de6dd6d0c62dc0547c4751b4385e63d3f97e725f3d77",
+      "sha256_replay": "db51aea2ac1677e69be34263643f50c1c469e5ec96d55416982c0cdb1bf94c9d",
+      "sha256_jsonl": "e6508ee1a9278bc745302b09a9e5d67fdad7ae3353b81c0fb304448c393b1bc3"
+    },
+    {
+      "game_id": "m_rank02_camp0",
+      "rank": 2,
+      "camp": 0,
+      "valid": true,
+      "normalized_result": "loss",
+      "raw_winner": 1,
+      "scores": {
+        "0": 7163,
+        "1": 18190
+      },
+      "steps": 2136,
+      "realized_randomization": {
+        "map_type": 1,
+        "day_time": 0
+      },
+      "error_type": null,
+      "sha256_result": "f362203f379e350d999470882d8667329b50d4c86e73b2a7eefc49ee1412ce7a",
+      "sha256_replay": "0b94d5117052b02a9759cda2515f7bb103998a1d095b3a62f71a881507a35d1d",
+      "sha256_jsonl": "1f16541cd22b891518f5da5acded756676e85579df538189b167f74b1fb6c5d7"
+    },
+    {
+      "game_id": "m_rank02_camp1",
+      "rank": 2,
+      "camp": 1,
+      "valid": true,
+      "normalized_result": "loss",
+      "raw_winner": 0,
+      "scores": {
+        "0": 30124,
+        "1": 4132
+      },
+      "steps": 1898,
+      "realized_randomization": {
+        "map_type": 0,
+        "day_time": 0
+      },
+      "error_type": null,
+      "sha256_result": "758fbbb0991b0b42e6338365bb056e86cc2a674d708312894c4763d45a856b1b",
+      "sha256_replay": "13c06d3e7ca61f8eba1f269f8c54752e47fc87529cb6d0a3b82036fcfcc33290",
+      "sha256_jsonl": "b19e07baa062c0f01278f05b4d20d57a10be3a3b8cfe28666064071424f05217"
+    },
+    {
+      "game_id": "m_rank03_camp0",
+      "rank": 3,
+      "camp": 0,
+      "valid": false,
+      "normalized_result": "error",
+      "raw_winner": null,
+      "scores": {
+        "0": 1,
+        "1": 0
+      },
+      "steps": 29,
+      "realized_randomization": {
+        "map_type": 1,
+        "day_time": 0
+      },
+      "error_type": "ai_crash",
+      "sha256_result": "1a0a74993995f7daab15d1781cd4c0a14064f920267aab71991d59e26b6f5faa",
+      "sha256_replay": "bff72728b84beee4b4dab2c705d95c1adc3967f0a6e7c7cc2f22a74604cdc9fd",
+      "sha256_jsonl": "e67ecd5818aebb9221f898266ed38dd79032ca10f624713d8fc0c6cd8e4b6846"
+    },
+    {
+      "game_id": "m_rank03_camp1",
+      "rank": 3,
+      "camp": 1,
+      "valid": false,
+      "normalized_result": "error",
+      "raw_winner": null,
+      "scores": {
+        "0": 0,
+        "1": 1
+      },
+      "steps": 23,
+      "realized_randomization": {
+        "map_type": 1,
+        "day_time": 0
+      },
+      "error_type": "ai_crash",
+      "sha256_result": "88f8173746b6e7549662e182aa8d4563b7ef58aa44742c0f00a841b056064f26",
+      "sha256_replay": "bfdd5ce1ae562cbf7049ab62bdaba61f1ace39fcab9984a6c60a55698508bd8f",
+      "sha256_jsonl": "95027e6be225f2ded3c1c622e1c22426e22367c6f106d570c0df347514d4e8d8"
+    },
+    {
+      "game_id": "m_rank04_camp0",
+      "rank": 4,
+      "camp": 0,
+      "valid": true,
+      "normalized_result": "win",
+      "raw_winner": 0,
+      "scores": {
+        "0": 30112,
+        "1": 89
+      },
+      "steps": 784,
+      "realized_randomization": {
+        "map_type": 0,
+        "day_time": 0
+      },
+      "error_type": null,
+      "sha256_result": "e51ec9b44f7f011bd208599718d1299871a022987498ab5ed29ec7e604a01e5e",
+      "sha256_replay": "ec8d79d05cf0cf0013de78776ad4ef8e983f941ed1b423ae5947d56886e350ec",
+      "sha256_jsonl": "2de72f578f99f45bca3cbee5e87cd7f9ecb0dfdc271eee1fc2cbdc0ff37b6cc6"
+    },
+    {
+      "game_id": "m_rank04_camp1",
+      "rank": 4,
+      "camp": 1,
+      "valid": true,
+      "normalized_result": "loss",
+      "raw_winner": 0,
+      "scores": {
+        "0": 71,
+        "1": 30
+      },
+      "steps": 963,
+      "realized_randomization": {
+        "map_type": 0,
+        "day_time": 1
+      },
+      "error_type": null,
+      "sha256_result": "ea3dacefe0794896f9baa697ae0322b912a082e27bdfe6e0d73a096544b9847e",
+      "sha256_replay": "c866b77684bf53cbd1e669519b994aaf2eeaf0ce0c8c20e75c3f8da562f6ebf9",
+      "sha256_jsonl": "49c96f4097e390d62747b128820d6d908545a6caf8307839b96471718404dbf6"
+    },
+    {
+      "game_id": "m_rank05_camp0",
+      "rank": 5,
+      "camp": 0,
+      "valid": true,
+      "normalized_result": "loss",
+      "raw_winner": 1,
+      "scores": {
+        "0": 26033,
+        "1": 30068
+      },
+      "steps": 787,
+      "realized_randomization": {
+        "map_type": 0,
+        "day_time": 0
+      },
+      "error_type": null,
+      "sha256_result": "3af131c2d4dc7b62413a35170d5e13cfe66191de2829d317366c9eb333d3f3fa",
+      "sha256_replay": "0ba1adebe32cedda618cfcb4693967ca164e2d3215fa0bf69f312f416e8aceca",
+      "sha256_jsonl": "54e2dcc623635a63e40a29d6eb86135bbcb356da31b85a9089a8c5502cfbafed"
+    },
+    {
+      "game_id": "m_rank05_camp1",
+      "rank": 5,
+      "camp": 1,
+      "valid": true,
+      "normalized_result": "loss",
+      "raw_winner": 0,
+      "scores": {
+        "0": 26058,
+        "1": 64
+      },
+      "steps": 1626,
+      "realized_randomization": {
+        "map_type": 0,
+        "day_time": 0
+      },
+      "error_type": null,
+      "sha256_result": "ce755b97db599150727d063c99d48ec6267879a813c892cc20924be33b8698f2",
+      "sha256_replay": "3a207f9ea041c91f9de31d0a5798f12ba50770c5135ad3d8d72d069a808584cc",
+      "sha256_jsonl": "ecc3fb0277f4ea16c2239be1fed439e69d7f069645f9a0c9ea992451ac2f3a6d"
+    },
+    {
+      "game_id": "m_rank06_camp0",
+      "rank": 6,
+      "camp": 0,
+      "valid": true,
+      "normalized_result": "loss",
+      "raw_winner": 1,
+      "scores": {
+        "0": 183,
+        "1": 16183
+      },
+      "steps": 906,
+      "realized_randomization": {
+        "map_type": 0,
+        "day_time": 0
+      },
+      "error_type": null,
+      "sha256_result": "720349252e9128d05dac0130f938850d8a36e26dbb6c0fe4484cfabb9712a297",
+      "sha256_replay": "65b1ac71f5fcb465ffdac50dae6c73240797a8329d76194ed50526baabe635fa",
+      "sha256_jsonl": "4ff88a3f11aa727310e32fe73336578f00fcc35da700e76a90e2793e12c73525"
+    },
+    {
+      "game_id": "m_rank06_camp1",
+      "rank": 6,
+      "camp": 1,
+      "valid": true,
+      "normalized_result": "loss",
+      "raw_winner": 0,
+      "scores": {
+        "0": 30060,
+        "1": 87
+      },
+      "steps": 572,
+      "realized_randomization": {
+        "map_type": 0,
+        "day_time": 1
+      },
+      "error_type": null,
+      "sha256_result": "5b1fd5cd389c3e47d1c1d7732db8e5166d5f452ccac1fc070303a1a6819553a2",
+      "sha256_replay": "0a7fa1602ffb6ed417940485a475687d598b0ed004e0f7cd77b1eb2852cb43fd",
+      "sha256_jsonl": "c76f52650a1956ebe10d3b8ba95fef6de8b25101ea199ace1d08e1107c071e8a"
+    },
+    {
+      "game_id": "m_rank07_camp0",
+      "rank": 7,
+      "camp": 0,
+      "valid": false,
+      "normalized_result": "error",
+      "raw_winner": null,
+      "scores": {
+        "0": 5,
+        "1": 0
+      },
+      "steps": 159,
+      "realized_randomization": {
+        "map_type": 0,
+        "day_time": 1
+      },
+      "error_type": "ai_timeout",
+      "sha256_result": "9249ecff9c17ae60bac245e12d5c3c2c356e2caba2e9c29681f6d760386106d8",
+      "sha256_replay": "a63cc95715f6b5d7ef326bea243a588116a182e5bd89120385304c36b7314129",
+      "sha256_jsonl": "af186d90b4cb2a5a0da37675df44d7d3b7cee7ec758295fb889453b022bee3ab"
+    },
+    {
+      "game_id": "m_rank07_camp1",
+      "rank": 7,
+      "camp": 1,
+      "valid": false,
+      "normalized_result": "error",
+      "raw_winner": null,
+      "scores": {
+        "0": 0,
+        "1": 16
+      },
+      "steps": 194,
+      "realized_randomization": {
+        "map_type": 0,
+        "day_time": 0
+      },
+      "error_type": "ai_timeout",
+      "sha256_result": "e6577aa6847aebabd6f57fcb29438e5095a03336e2a9990e190a862899696798",
+      "sha256_replay": "5a8ea54e9609495c8eccb9edb35545a1f4df2601fdf57bea8d7e3d8f47514a51",
+      "sha256_jsonl": "3e570a799021a12e1ab182e6dc999137786220f62d43ceb76f6191eac0f64a5b"
+    },
+    {
+      "game_id": "m_rank08_camp0",
+      "rank": 8,
+      "camp": 0,
+      "valid": false,
+      "normalized_result": "error",
+      "raw_winner": null,
+      "scores": {
+        "0": 1,
+        "1": 0
+      },
+      "steps": 41,
+      "realized_randomization": {
+        "map_type": 0,
+        "day_time": 1
+      },
+      "error_type": "ai_timeout",
+      "sha256_result": "9f9762e3c9cfa1d835a314921ba258b599bed186a5b405e4e2b22a1b5461c780",
+      "sha256_replay": "ecb4a4128f9e546f8dcfa76e367f5ba4324e4be9abf3adb87798c08dfb72e622",
+      "sha256_jsonl": "4af8c3104b27b9121b78728984b06d6c5752f51a7806b3fc6f684606d59decd6"
+    },
+    {
+      "game_id": "m_rank08_camp1",
+      "rank": 8,
+      "camp": 1,
+      "valid": false,
+      "normalized_result": "error",
+      "raw_winner": null,
+      "scores": {
+        "0": 0,
+        "1": 1
+      },
+      "steps": 35,
+      "realized_randomization": {
+        "map_type": 0,
+        "day_time": 0
+      },
+      "error_type": "ai_timeout",
+      "sha256_result": "14ccd0120bde19a8f63249c5bfeee7858b9850bbb59e8a4fd4f43f72dc285f3c",
+      "sha256_replay": "23888761296cfcd4e1b3b075469215ea7c8940d646e06a9f5eade2a1b2423127",
+      "sha256_jsonl": "8e1408dec75182579251d65bbd8c890d8ae21ef266c853b7aa324f80bde8543d"
+    },
+    {
+      "game_id": "m_rank09_camp0",
+      "rank": 9,
+      "camp": 0,
+      "valid": true,
+      "normalized_result": "win",
+      "raw_winner": 0,
+      "scores": {
+        "0": 30072,
+        "1": 4087
+      },
+      "steps": 688,
+      "realized_randomization": {
+        "map_type": 0,
+        "day_time": 1
+      },
+      "error_type": null,
+      "sha256_result": "29870366963302f35a580d3f40df4789e7b3cfc087cf91af129308fd384cae9e",
+      "sha256_replay": "933813646bcb3314fcc2f4908a711aa656187fa9462440afdc00751bda4affc0",
+      "sha256_jsonl": "71b8dee9523fcee5300fb10c9cea86cfbe4b5fb983597978c992226a1914488a"
+    },
+    {
+      "game_id": "m_rank09_camp1",
+      "rank": 9,
+      "camp": 1,
+      "valid": true,
+      "normalized_result": "loss",
+      "raw_winner": 0,
+      "scores": {
+        "0": 30115,
+        "1": 78
+      },
+      "steps": 729,
+      "realized_randomization": {
+        "map_type": 1,
+        "day_time": 0
+      },
+      "error_type": null,
+      "sha256_result": "ba0914f20aa795487db7a1abf1e2a24e9a3d10b27dd0bf03ea24579a9d9693fd",
+      "sha256_replay": "eee3b9e1026ae71c0544181ac6e8b95ebc2b7510ba84c21480cdfdb3a20db251",
+      "sha256_jsonl": "f0f664832f657bb2eab1c7cae1c89716997f4ea8f3b08ad720bc09c9140185bb"
+    },
+    {
+      "game_id": "m_rank10_camp0",
+      "rank": 10,
+      "camp": 0,
+      "valid": true,
+      "normalized_result": "loss",
+      "raw_winner": 1,
+      "scores": {
+        "0": 60,
+        "1": 30129
+      },
+      "steps": 703,
+      "realized_randomization": {
+        "map_type": 1,
+        "day_time": 1
+      },
+      "error_type": null,
+      "sha256_result": "eabe65a60601d9ac11da9e563da988f72d2635018ec1ac12af75fc8d84351b13",
+      "sha256_replay": "43a1295bacca9a2eb62dba02c7a3578be5be37535a43eb2ce278c041b1479692",
+      "sha256_jsonl": "1eec184eed9ffdd7ed949b20f4ee8b7e6abae9a7172f3c70affbce09198ce2ec"
+    },
+    {
+      "game_id": "m_rank10_camp1",
+      "rank": 10,
+      "camp": 1,
+      "valid": true,
+      "normalized_result": "loss",
+      "raw_winner": 0,
+      "scores": {
+        "0": 30031,
+        "1": 22
+      },
+      "steps": 355,
+      "realized_randomization": {
+        "map_type": 0,
+        "day_time": 0
+      },
+      "error_type": null,
+      "sha256_result": "20238467b897a1da5c8fb81d5dc94ebfd53285646dc34bc413d99cecac046775",
+      "sha256_replay": "32a1a536655ee8c90f570efb5982424ae792d593d71867122107f04a6788fe6b",
+      "sha256_jsonl": "394bf91e545a3a7ae170b91da36ea18ee67c81a2f890844a578445288395aa68"
+    },
+    {
+      "game_id": "m_rank11_camp0",
+      "rank": 11,
+      "camp": 0,
+      "valid": false,
+      "normalized_result": "error",
+      "raw_winner": null,
+      "scores": {
+        "0": 2037,
+        "1": 0
+      },
+      "steps": 328,
+      "realized_randomization": {
+        "map_type": 1,
+        "day_time": 1
+      },
+      "error_type": "ai_timeout",
+      "sha256_result": "15b554ea8bc2fc3a3610d35a06819c56d22813ba2cbce3ac29d39187341a11e1",
+      "sha256_replay": "4fde2fdb5383af129109b8b95a21d27847175e04d769934166cf3e8a2041fe3f",
+      "sha256_jsonl": "7663ac385bf59a87e97d5bd1fe49874ca552ff12d2d345162f07222f0baa6492"
+    },
+    {
+      "game_id": "m_rank11_camp1",
+      "rank": 11,
+      "camp": 1,
+      "valid": false,
+      "normalized_result": "error",
+      "raw_winner": null,
+      "scores": {
+        "0": 0,
+        "1": 52
+      },
+      "steps": 306,
+      "realized_randomization": {
+        "map_type": 0,
+        "day_time": 1
+      },
+      "error_type": "ai_timeout",
+      "sha256_result": "bf8e4d7153d22f2224239000b773eda8bdf42beb24255119adda67ab04150673",
+      "sha256_replay": "248518015c318287f1dc60ccf2dd94a20e7bbae52e18a21d6cfd8cd7fb4442b7",
+      "sha256_jsonl": "9075d4f749b26da235b4b1c5c24053b9872cd7d6fc09e813311b9f7c87b9de45"
+    },
+    {
+      "game_id": "m_rank12_camp0",
+      "rank": 12,
+      "camp": 0,
+      "valid": true,
+      "normalized_result": "loss",
+      "raw_winner": 1,
+      "scores": {
+        "0": 91,
+        "1": 188
+      },
+      "steps": 921,
+      "realized_randomization": {
+        "map_type": 1,
+        "day_time": 0
+      },
+      "error_type": null,
+      "sha256_result": "ce818cb121b668193cdcc67218a8ef000b907b6af71fba7aaa965fa90dbf1bdc",
+      "sha256_replay": "dfa0eca1f8226893355a57b747a338e561108b64a46e9369af501607c66c3889",
+      "sha256_jsonl": "24063f2cd502f79a0452c45668b8b1beb4afd39e940e5fa414c417570b519293"
+    },
+    {
+      "game_id": "m_rank12_camp1",
+      "rank": 12,
+      "camp": 1,
+      "valid": true,
+      "normalized_result": "loss",
+      "raw_winner": 0,
+      "scores": {
+        "0": 73,
+        "1": 20
+      },
+      "steps": 797,
+      "realized_randomization": {
+        "map_type": 1,
+        "day_time": 0
+      },
+      "error_type": null,
+      "sha256_result": "1f8aa2a6fe1a5c6d183378875fd84cfe3ddb891f5aaf04ce36ac85a3d112dce7",
+      "sha256_replay": "97d1d1d4495c92bf16e07c68136ffdce090aa877b9b6395bad4cc1e335bcd00f",
+      "sha256_jsonl": "83e14150e7c13f8bb265ca78423039d07728c36c7801e2cfd8338fdcdc3755f5"
+    },
+    {
+      "game_id": "m_rank13_camp0",
+      "rank": 13,
+      "camp": 0,
+      "valid": true,
+      "normalized_result": "loss",
+      "raw_winner": 1,
+      "scores": {
+        "0": 87,
+        "1": 8174
+      },
+      "steps": 1084,
+      "realized_randomization": {
+        "map_type": 1,
+        "day_time": 1
+      },
+      "error_type": null,
+      "sha256_result": "bc233911c40918f3cbf037b6f503a4a0cca3a9756e7bd22acb50e81f8c379b7d",
+      "sha256_replay": "38e71b628f4477ae1aa792be887a47b0f42e7c2c459ba83c194d2461287e742b",
+      "sha256_jsonl": "822e7cab20633e67e009ecefa48f74aba386fd3020ea42ed339ddf18c1d72a5f"
+    },
+    {
+      "game_id": "m_rank13_camp1",
+      "rank": 13,
+      "camp": 1,
+      "valid": true,
+      "normalized_result": "loss",
+      "raw_winner": 0,
+      "scores": {
+        "0": 24132,
+        "1": 18117
+      },
+      "steps": 1116,
+      "realized_randomization": {
+        "map_type": 0,
+        "day_time": 1
+      },
+      "error_type": null,
+      "sha256_result": "6c2f6c8f745b1c2e7b3dd8d4fe3f0040e77e9fdf16f036551f020af367c1d400",
+      "sha256_replay": "10100dfabe7e8e677dbca31c295ab686dee422d04d1553ce9e373ac349df7d0c",
+      "sha256_jsonl": "23db41dc6fcb1405a6e10e8059dc759e7cf0679e82cded67dae1a61014dd705d"
+    },
+    {
+      "game_id": "m_rank14_camp0",
+      "rank": 14,
+      "camp": 0,
+      "valid": true,
+      "normalized_result": "loss",
+      "raw_winner": 1,
+      "scores": {
+        "0": 13,
+        "1": 30037
+      },
+      "steps": 241,
+      "realized_randomization": {
+        "map_type": 1,
+        "day_time": 0
+      },
+      "error_type": null,
+      "sha256_result": "099e31a687bc80f6de4431df491416c3c8c41b40d9d4ef1591ec34fccbba21d7",
+      "sha256_replay": "3b4b728b310947d665b24ad6d01ef6e9e4c6f5750cfaa18edf25fa7a9da966c6",
+      "sha256_jsonl": "142dbea05994cb81396c17dbea009585d468aeceba2ea2d8f75f780a4836fa92"
+    },
+    {
+      "game_id": "m_rank14_camp1",
+      "rank": 14,
+      "camp": 1,
+      "valid": true,
+      "normalized_result": "loss",
+      "raw_winner": 0,
+      "scores": {
+        "0": 30072,
+        "1": 53
+      },
+      "steps": 438,
+      "realized_randomization": {
+        "map_type": 1,
+        "day_time": 1
+      },
+      "error_type": null,
+      "sha256_result": "8e9f89133e32f5f19c7f6e37006344a018affacbcc4452bb27a6c6cba550d8a0",
+      "sha256_replay": "063a4fadab4c4438bcc350c1b95d49712ff5c16d784e25bbecaaa43be4bce2ac",
+      "sha256_jsonl": "bdf6f822c6bbea43c216886f78ceca43e795fd577a2d0c2a65bbf0383ee36f80"
+    },
+    {
+      "game_id": "m_rank15_camp0",
+      "rank": 15,
+      "camp": 0,
+      "valid": false,
+      "normalized_result": "error",
+      "raw_winner": null,
+      "scores": {
+        "0": 1024,
+        "1": 0
+      },
+      "steps": 283,
+      "realized_randomization": {
+        "map_type": 1,
+        "day_time": 1
+      },
+      "error_type": "ai_timeout",
+      "sha256_result": "9ed3ed05bb5f4b8212d4808d7aa855c095cf0bfa7c95e8920557079d16eb6fef",
+      "sha256_replay": "9c7374ff7c446f869f1d81070d280daccf27b6246fa7237943f87fb00ba56ce2",
+      "sha256_jsonl": "0e9f4e845f9f1cd812ed232fa639d7e75b2a10cfcd3c6ddb5b8c983a95283069"
+    },
+    {
+      "game_id": "m_rank15_camp1",
+      "rank": 15,
+      "camp": 1,
+      "valid": false,
+      "normalized_result": "error",
+      "raw_winner": null,
+      "scores": {
+        "0": 0,
+        "1": 26
+      },
+      "steps": 302,
+      "realized_randomization": {
+        "map_type": 1,
+        "day_time": 0
+      },
+      "error_type": "ai_timeout",
+      "sha256_result": "bd198049dd9f908e9152c84527a5996026533fedd9b30af6373e3e3bf70e3e51",
+      "sha256_replay": "3655e0d65aa565341d2eed321bf28654318fd2292569220dd548ca75efd7523a",
+      "sha256_jsonl": "efd0f8604287e7adfc1213cb5870c01e76e8f035cbaf5e3dabe48df7f7d61c11"
+    },
+    {
+      "game_id": "m_rank16_camp0",
+      "rank": 16,
+      "camp": 0,
+      "valid": true,
+      "normalized_result": "loss",
+      "raw_winner": 1,
+      "scores": {
+        "0": 2057,
+        "1": 30131
+      },
+      "steps": 756,
+      "realized_randomization": {
+        "map_type": 1,
+        "day_time": 1
+      },
+      "error_type": null,
+      "sha256_result": "4c4fee0a96462a76233ea0e7fe3bbc36843a98a0be68b4ec17a1848c5a828807",
+      "sha256_replay": "27f892e1d07f35a62baf241fd26aeaf5cb71884d4b22e11d436602d2d01ece89",
+      "sha256_jsonl": "4b4da903a164d267539fb86f73fefd647ec27737afc5107caf354ca07a99ac62"
+    },
+    {
+      "game_id": "m_rank16_camp1",
+      "rank": 16,
+      "camp": 1,
+      "valid": true,
+      "normalized_result": "loss",
+      "raw_winner": 0,
+      "scores": {
+        "0": 30079,
+        "1": 52
+      },
+      "steps": 644,
+      "realized_randomization": {
+        "map_type": 1,
+        "day_time": 0
+      },
+      "error_type": null,
+      "sha256_result": "c255b59a08b6a6ace4d3c57a7c3d611cfb07b49b02e7d355d31ff6a7116fdf97",
+      "sha256_replay": "68dd018372f503a5a612ab2ced5dcb7d75e1b2d2371b1f6a0e2817b6e3be2297",
+      "sha256_jsonl": "f059fe86796c1c4ef5d4406899207c0fcd0f2bb3e485e7a0812dc2fcc68c68dd"
+    }
+  ],
+  "invalid_audit": [
+    {
+      "game_id": "m_rank01_camp0",
+      "rank": 1,
+      "camp": 0,
+      "error_type": "ai_timeout",
+      "anomaly_player_index": 1,
+      "anomaly_side": "OPPONENT",
+      "ifelse_anomaly": false,
+      "judge_end_info_received": true,
+      "judge_raw_winner": "p0",
+      "counted_as_capability_win": false,
+      "reason_excluded": "对手 AI 超时/崩溃→依协议 invalid；Judge 经 player_error 判的胜负不计入有效 W/L",
+      "cleanup_all_succeeded": true
+    },
+    {
+      "game_id": "m_rank01_camp1",
+      "rank": 1,
+      "camp": 1,
+      "error_type": "ai_timeout",
+      "anomaly_player_index": 0,
+      "anomaly_side": "OPPONENT",
+      "ifelse_anomaly": false,
+      "judge_end_info_received": true,
+      "judge_raw_winner": "p1",
+      "counted_as_capability_win": false,
+      "reason_excluded": "对手 AI 超时/崩溃→依协议 invalid；Judge 经 player_error 判的胜负不计入有效 W/L",
+      "cleanup_all_succeeded": true
+    },
+    {
+      "game_id": "m_rank03_camp0",
+      "rank": 3,
+      "camp": 0,
+      "error_type": "ai_crash",
+      "anomaly_player_index": 1,
+      "anomaly_side": "OPPONENT",
+      "ifelse_anomaly": false,
+      "judge_end_info_received": true,
+      "judge_raw_winner": "p0",
+      "counted_as_capability_win": false,
+      "reason_excluded": "对手 AI 超时/崩溃→依协议 invalid；Judge 经 player_error 判的胜负不计入有效 W/L",
+      "cleanup_all_succeeded": true
+    },
+    {
+      "game_id": "m_rank03_camp1",
+      "rank": 3,
+      "camp": 1,
+      "error_type": "ai_crash",
+      "anomaly_player_index": 0,
+      "anomaly_side": "OPPONENT",
+      "ifelse_anomaly": false,
+      "judge_end_info_received": true,
+      "judge_raw_winner": "p1",
+      "counted_as_capability_win": false,
+      "reason_excluded": "对手 AI 超时/崩溃→依协议 invalid；Judge 经 player_error 判的胜负不计入有效 W/L",
+      "cleanup_all_succeeded": true
+    },
+    {
+      "game_id": "m_rank07_camp0",
+      "rank": 7,
+      "camp": 0,
+      "error_type": "ai_timeout",
+      "anomaly_player_index": 1,
+      "anomaly_side": "OPPONENT",
+      "ifelse_anomaly": false,
+      "judge_end_info_received": true,
+      "judge_raw_winner": "p0",
+      "counted_as_capability_win": false,
+      "reason_excluded": "对手 AI 超时/崩溃→依协议 invalid；Judge 经 player_error 判的胜负不计入有效 W/L",
+      "cleanup_all_succeeded": true
+    },
+    {
+      "game_id": "m_rank07_camp1",
+      "rank": 7,
+      "camp": 1,
+      "error_type": "ai_timeout",
+      "anomaly_player_index": 0,
+      "anomaly_side": "OPPONENT",
+      "ifelse_anomaly": false,
+      "judge_end_info_received": true,
+      "judge_raw_winner": "p1",
+      "counted_as_capability_win": false,
+      "reason_excluded": "对手 AI 超时/崩溃→依协议 invalid；Judge 经 player_error 判的胜负不计入有效 W/L",
+      "cleanup_all_succeeded": true
+    },
+    {
+      "game_id": "m_rank08_camp0",
+      "rank": 8,
+      "camp": 0,
+      "error_type": "ai_timeout",
+      "anomaly_player_index": 1,
+      "anomaly_side": "OPPONENT",
+      "ifelse_anomaly": false,
+      "judge_end_info_received": true,
+      "judge_raw_winner": "p0",
+      "counted_as_capability_win": false,
+      "reason_excluded": "对手 AI 超时/崩溃→依协议 invalid；Judge 经 player_error 判的胜负不计入有效 W/L",
+      "cleanup_all_succeeded": true
+    },
+    {
+      "game_id": "m_rank08_camp1",
+      "rank": 8,
+      "camp": 1,
+      "error_type": "ai_timeout",
+      "anomaly_player_index": 0,
+      "anomaly_side": "OPPONENT",
+      "ifelse_anomaly": false,
+      "judge_end_info_received": true,
+      "judge_raw_winner": "p1",
+      "counted_as_capability_win": false,
+      "reason_excluded": "对手 AI 超时/崩溃→依协议 invalid；Judge 经 player_error 判的胜负不计入有效 W/L",
+      "cleanup_all_succeeded": true
+    },
+    {
+      "game_id": "m_rank11_camp0",
+      "rank": 11,
+      "camp": 0,
+      "error_type": "ai_timeout",
+      "anomaly_player_index": 1,
+      "anomaly_side": "OPPONENT",
+      "ifelse_anomaly": false,
+      "judge_end_info_received": true,
+      "judge_raw_winner": "p0",
+      "counted_as_capability_win": false,
+      "reason_excluded": "对手 AI 超时/崩溃→依协议 invalid；Judge 经 player_error 判的胜负不计入有效 W/L",
+      "cleanup_all_succeeded": true
+    },
+    {
+      "game_id": "m_rank11_camp1",
+      "rank": 11,
+      "camp": 1,
+      "error_type": "ai_timeout",
+      "anomaly_player_index": 0,
+      "anomaly_side": "OPPONENT",
+      "ifelse_anomaly": false,
+      "judge_end_info_received": true,
+      "judge_raw_winner": "p1",
+      "counted_as_capability_win": false,
+      "reason_excluded": "对手 AI 超时/崩溃→依协议 invalid；Judge 经 player_error 判的胜负不计入有效 W/L",
+      "cleanup_all_succeeded": true
+    },
+    {
+      "game_id": "m_rank15_camp0",
+      "rank": 15,
+      "camp": 0,
+      "error_type": "ai_timeout",
+      "anomaly_player_index": 1,
+      "anomaly_side": "OPPONENT",
+      "ifelse_anomaly": false,
+      "judge_end_info_received": true,
+      "judge_raw_winner": "p0",
+      "counted_as_capability_win": false,
+      "reason_excluded": "对手 AI 超时/崩溃→依协议 invalid；Judge 经 player_error 判的胜负不计入有效 W/L",
+      "cleanup_all_succeeded": true
+    },
+    {
+      "game_id": "m_rank15_camp1",
+      "rank": 15,
+      "camp": 1,
+      "error_type": "ai_timeout",
+      "anomaly_player_index": 0,
+      "anomaly_side": "OPPONENT",
+      "ifelse_anomaly": false,
+      "judge_end_info_received": true,
+      "judge_raw_winner": "p1",
+      "counted_as_capability_win": false,
+      "reason_excluded": "对手 AI 超时/崩溃→依协议 invalid；Judge 经 player_error 判的胜负不计入有效 W/L",
+      "cleanup_all_succeeded": true
+    }
+  ],
+  "recompute_from_events": {
+    "total_attempts": 32,
+    "valid_games": 20,
+    "invalid_games": 12,
+    "wins": 2,
+    "losses": 18,
+    "win_rate_valid": 0.1,
+    "valid_win_fraction_of_attempts": 0.0625,
+    "camp0": {
+      "valid": 10,
+      "wins": 2
+    },
+    "camp1": {
+      "valid": 10,
+      "wins": 0
+    }
+  },
+  "per_rank": {
+    "1": {
+      "attempts": 2,
+      "valid": 0,
+      "invalid": 2,
+      "wins": 0,
+      "losses": 0,
+      "win_rate": null
+    },
+    "2": {
+      "attempts": 2,
+      "valid": 2,
+      "invalid": 0,
+      "wins": 0,
+      "losses": 2,
+      "win_rate": 0.0
+    },
+    "3": {
+      "attempts": 2,
+      "valid": 0,
+      "invalid": 2,
+      "wins": 0,
+      "losses": 0,
+      "win_rate": null
+    },
+    "4": {
+      "attempts": 2,
+      "valid": 2,
+      "invalid": 0,
+      "wins": 1,
+      "losses": 1,
+      "win_rate": 0.5
+    },
+    "5": {
+      "attempts": 2,
+      "valid": 2,
+      "invalid": 0,
+      "wins": 0,
+      "losses": 2,
+      "win_rate": 0.0
+    },
+    "6": {
+      "attempts": 2,
+      "valid": 2,
+      "invalid": 0,
+      "wins": 0,
+      "losses": 2,
+      "win_rate": 0.0
+    },
+    "7": {
+      "attempts": 2,
+      "valid": 0,
+      "invalid": 2,
+      "wins": 0,
+      "losses": 0,
+      "win_rate": null
+    },
+    "8": {
+      "attempts": 2,
+      "valid": 0,
+      "invalid": 2,
+      "wins": 0,
+      "losses": 0,
+      "win_rate": null
+    },
+    "9": {
+      "attempts": 2,
+      "valid": 2,
+      "invalid": 0,
+      "wins": 1,
+      "losses": 1,
+      "win_rate": 0.5
+    },
+    "10": {
+      "attempts": 2,
+      "valid": 2,
+      "invalid": 0,
+      "wins": 0,
+      "losses": 2,
+      "win_rate": 0.0
+    },
+    "11": {
+      "attempts": 2,
+      "valid": 0,
+      "invalid": 2,
+      "wins": 0,
+      "losses": 0,
+      "win_rate": null
+    },
+    "12": {
+      "attempts": 2,
+      "valid": 2,
+      "invalid": 0,
+      "wins": 0,
+      "losses": 2,
+      "win_rate": 0.0
+    },
+    "13": {
+      "attempts": 2,
+      "valid": 2,
+      "invalid": 0,
+      "wins": 0,
+      "losses": 2,
+      "win_rate": 0.0
+    },
+    "14": {
+      "attempts": 2,
+      "valid": 2,
+      "invalid": 0,
+      "wins": 0,
+      "losses": 2,
+      "win_rate": 0.0
+    },
+    "15": {
+      "attempts": 2,
+      "valid": 0,
+      "invalid": 2,
+      "wins": 0,
+      "losses": 0,
+      "win_rate": null
+    },
+    "16": {
+      "attempts": 2,
+      "valid": 2,
+      "invalid": 0,
+      "wins": 0,
+      "losses": 2,
+      "win_rate": 0.0
+    }
+  },
+  "camp_split": {
+    "0": {
+      "valid": 10,
+      "wins": 2,
+      "win_rate": 0.2
+    },
+    "1": {
+      "valid": 10,
+      "wins": 0,
+      "win_rate": 0.0
+    }
+  },
+  "score_stats": {
+    "n": 20,
+    "mean_diff": -13978.25,
+    "median_diff": -20996.0
+  },
+  "steps_stats": {
+    "n": 20,
+    "total": 18144,
+    "mean": 907.2,
+    "median": 785.5
+  },
+  "realized_randomization_distribution": {
+    "map_type": {
+      "1": 10,
+      "0": 10
+    },
+    "day_time": {
+      "0": 12,
+      "1": 8
+    }
+  },
+  "invalid_reason_distribution": {
+    "ai_timeout": 10,
+    "ai_crash": 2
+  },
+  "assertions": {
+    "all_12_invalid_anomaly_on_opponent": true,
+    "zero_ifelse_anomaly": true,
+    "rank03_crash_is_opponent": true,
+    "timeouts_are_opponent": true,
+    "no_misclassification_no_infra_halt": true,
+    "win_rate_is_2_of_20_not_2_of_32": true
+  },
+  "win_rate_definition": "胜率=valid wins/valid games=2/20=10%。2/32=有效胜局占全部 attempt 比，非胜率。invalid 既非 win 也非 loss。不可写‘2胜30负’。"
+}

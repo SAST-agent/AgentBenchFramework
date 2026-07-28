@@ -194,13 +194,17 @@ class Run:
         }
 
     def _write_toml(self, path: str):
+        def q(s):
+            # escape backslashes and double-quotes so run.toml is always valid
+            # TOML (Windows paths in config would otherwise break parsing)
+            return '"' + str(s).replace("\\", "\\\\").replace('"', '\\"') + '"'
         lines = ["[run]",
-                 f'run_id = "{self.run_id}"',
-                 f'game = "{self.meta.game}"',
-                 f'agent = "{self.meta.agent}"',
-                 f'type = "{self.meta.run_type}"',
-                 f'created = "{self.meta.created}"',
-                 f'git_commit = "{self.meta.git_commit}"',
+                 f"run_id = {q(self.run_id)}",
+                 f"game = {q(self.meta.game)}",
+                 f"agent = {q(self.meta.agent)}",
+                 f"type = {q(self.meta.run_type)}",
+                 f"created = {q(self.meta.created)}",
+                 f"git_commit = {q(self.meta.git_commit)}",
                  f"started_at = {self.meta.started_at}"]
         if self.meta.finished_at:
             lines.append(f"finished_at = {self.meta.finished_at}")
@@ -209,8 +213,8 @@ class Run:
         if self.config:
             lines.append(""); lines.append("[config]")
             for k, v in self.config.items():
-                if isinstance(v, str): lines.append(f'{k} = "{v}"')
-                elif isinstance(v, bool): lines.append(f"{k} = {str(v).lower()}")
+                if isinstance(v, bool): lines.append(f"{k} = {str(v).lower()}")
                 elif isinstance(v, (int, float)): lines.append(f"{k} = {v}")
-        with open(path, "w") as f:
+                else: lines.append(f"{k} = {q(v)}")
+        with open(path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines) + "\n")
