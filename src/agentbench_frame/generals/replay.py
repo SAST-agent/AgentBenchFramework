@@ -502,6 +502,7 @@ def build_critical_learning_evidence(
     *,
     max_decisions: int | None = None,
     selection_reasons: Sequence[str] | None = None,
+    include_strategic_targets: bool = False,
 ) -> tuple[CriticalLearningEvidence, CriticalWindowSelection]:
     """Select deterministic high-signal v4 decision windows."""
     decisions = replay.decisions
@@ -652,7 +653,8 @@ def build_critical_learning_evidence(
             features=_state_features(
                 decisions[index],
                 include_strategic_targets=(
-                    "first_strategic_opportunity"
+                    include_strategic_targets
+                    or "first_strategic_opportunity"
                     in reasons_by_index[index]
                 ),
             ),

@@ -262,6 +262,7 @@ def test_v5_windows_keep_only_six_requested_critical_reasons():
             "before_steepest_army_drop",
             "final_decision",
         ),
+        include_strategic_targets=True,
     )
 
     assert selection.selected_state_ids == (
@@ -273,6 +274,7 @@ def test_v5_windows_keep_only_six_requested_critical_reasons():
         "state-9",
     )
     assert len(evidence.decisions) == 6
+    assert "strategic_general_targets" in evidence.decisions[0].features
     assert "first_strategic_opportunity" not in {
         reason
         for reasons in selection.reasons.values()

@@ -19,6 +19,7 @@ from .models import (
     PilotConfig,
     Round3LearningConfig,
     Round4LearningConfig,
+    Round5LearningConfig,
 )
 from .dense import persist_dense_diagnostics
 
@@ -106,6 +107,23 @@ def build_round4_learning_cases(
     )
     return tuple(
         _case(opponent, seed, seat, "learn4")
+        for seed in learning.seeds
+        for seat in learning.seats
+    )
+
+
+def build_round5_learning_cases(
+    config: PilotConfig,
+    learning: Round5LearningConfig,
+) -> tuple[BenchmarkCase, ...]:
+    """Build the rollback-guided v5 strongest-human learning matrix."""
+    opponent = next(
+        item
+        for item in config.opponents
+        if item.opponent_id == learning.opponent_id
+    )
+    return tuple(
+        _case(opponent, seed, seat, "learn5")
         for seed in learning.seeds
         for seat in learning.seats
     )
