@@ -73,17 +73,22 @@ def _records() -> tuple[CriticalLearningEvidence, ...]:
 def _build(
     records: tuple[CriticalLearningEvidence, ...],
     max_bytes: int = 131_072,
+    **overrides: object,
 ):
+    arguments: dict[str, object] = {
+        "benchmark_id": "generals-hl-pilot-v1",
+        "v5_strategy": "exact editable v5 strategy",
+        "v5_experience": "v5 experience",
+        "rules_text": "official rules",
+        "replay_skill_text": "frozen human replay skill",
+        "replay_skill_sha256": "a" * 64,
+        "evidence": records,
+        "action_profile": {"mean_primitives_per_turn": 1.0},
+        "max_bytes": max_bytes,
+    }
+    arguments.update(overrides)
     return build_round6_prompt(
-        benchmark_id="generals-hl-pilot-v1",
-        v5_strategy="exact editable v5 strategy",
-        v5_experience="v5 experience",
-        rules_text="official rules",
-        replay_skill_text="frozen human replay skill",
-        replay_skill_sha256="a" * 64,
-        evidence=records,
-        action_profile={"mean_primitives_per_turn": 1.0},
-        max_bytes=max_bytes,
+        **arguments,  # type: ignore[arg-type]
     )
 
 
@@ -152,3 +157,21 @@ def test_v6_prompt_rejects_incomplete_or_unexpected_episode_sets():
 def test_v6_prompt_rejects_complete_prompt_over_the_byte_cap():
     with pytest.raises(ValueError, match="exceeds max_bytes"):
         _build(_records(), max_bytes=1)
+
+
+@pytest.mark.parametrize(
+    ("context_name", "payload_marker"),
+    (
+        ("v5_strategy", "FORMAL REPLAY: held-out turn data"),
+        ("v5_experience", "VaLiDaTiOn trajectory: held-out turn data"),
+        ("rules_text", "FORMAL DENSE TRACE: held-out metrics"),
+        ("replay_skill_text", "validation action profile: held-out metrics"),
+        ("action_profile", {"marker": "FORMAL OUTCOME: win"}),
+    ),
+)
+def test_v6_prompt_rejects_formal_or_validation_payload_context(
+    context_name: str,
+    payload_marker: object,
+):
+    with pytest.raises(ValueError, match="formal or validation material"):
+        _build(_records(), **{context_name: payload_marker})

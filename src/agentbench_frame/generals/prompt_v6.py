@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 import json
+import re
 
 from .prompt import (
     FORBIDDEN_EVALUATION_SEEDS,
@@ -52,6 +53,14 @@ FORBIDDEN_ROUND6_EVIDENCE_SEEDS = (
 _ROUND6_EPISODE_PAIRS = frozenset(
     (seed, seat) for seed in ROUND6_EVIDENCE_SEEDS for seat in (0, 1)
 )
+_FORMAL_OR_VALIDATION_MATERIAL = re.compile(
+    r"\b(?:formal|validation)[\s_-]+"
+    r"(?:evaluation[\s_-]+)?"
+    r"(?:replay|trajectory|critical[\s_-]+window|"
+    r"dense[\s_-]+(?:trace|summary)|action[\s_-]+profile|"
+    r"outcome|result|score|case|game|episode|evidence|spec)\b",
+    re.IGNORECASE,
+)
 
 
 def _validate_evidence(
@@ -99,6 +108,8 @@ def _validate_evidence(
 def _reject_round6_leaks(text: str) -> None:
     """Protect the prompt boundary beyond the shared formal-evaluation gate."""
     _reject_leaks(text)
+    if _FORMAL_OR_VALIDATION_MATERIAL.search(text):
+        raise ValueError("forbidden round-6 formal or validation material")
     for seed in FORBIDDEN_ROUND6_EVIDENCE_SEEDS:
         if str(seed) in text:
             raise ValueError(f"forbidden round-6 seed in prompt: {seed}")
