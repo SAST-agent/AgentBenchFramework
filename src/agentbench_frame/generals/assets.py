@@ -15,8 +15,10 @@ from .models import (
     AssetLayout,
     CalibrationConfig,
     CalibrationSelection,
+    HistoricalPolicyConfig,
     OpponentSpec,
     PilotConfig,
+    PolicyKLReferenceConfig,
     ProcessLimits,
     ReplaySkillAsset,
     Round3LearningConfig,
@@ -41,6 +43,49 @@ ROUND4_LEARNING_SEEDS = frozenset({285101, 285202, 285303})
 ROUND5_LEARNING_SEEDS = frozenset({286101, 286202, 286303})
 ROUND6_LEARNING_SEEDS = frozenset({287101, 287202, 287303})
 ROUND6_VALIDATION_SEEDS = (288101, 288202, 288303)
+POLICY_KL_REFERENCE_ID = "generals-policy-kl-reference-v1"
+POLICY_KL_REFERENCE_SEEDS = (289101, 289202, 289303)
+POLICY_KL_REFERENCE_SEATS = (0, 1)
+POLICY_KL_REFERENCE_DECISIONS = (2, 10)
+POLICY_KL_EPSILONS = ("0.001", "0.01", "0.05", "0.1")
+POLICY_KL_PRIMARY_EPSILON = "0.01"
+POLICY_KL_HISTORY = (
+    (
+        "v0",
+        "20260726_1631_f56f789f",
+        "bfab30cdaaa0ad8e0ac6ed1b9ab047417c621cc22dd22fd95b0946c3af4bd5fa",
+    ),
+    (
+        "v1",
+        "20260726_1631_f56f789f",
+        "17356a28682378c4877f7da7aeb8ac90b8891e2685012dec8cdec990cb282e79",
+    ),
+    (
+        "v2",
+        "20260727_0639_89578eec",
+        "1e8a2ce4fa38b4171f6f8d77d42b80d48438f5213b08d543714d8241e292c565",
+    ),
+    (
+        "v3",
+        "20260728_1122_57f647d5",
+        "a9f27eb2a02ba452e9363022d97ffa5556c0f3a02eef120061e73e93c68ce815",
+    ),
+    (
+        "v4",
+        "20260729_0818_e6bcb9b3",
+        "5c12e7c92843cbc18b742ab7be71c684cfa0a0aac8e5dbb5a24fc7b905fe959f",
+    ),
+    (
+        "v5",
+        "20260729_0818_e6bcb9b3",
+        "facd39c8a0c064823da68f3dd3eba4a832c08815f75369407112ca087f1ecd9e",
+    ),
+    (
+        "v6",
+        "20260729_1653_af8eda26",
+        "974050ee1a3d4b4c4f96e61f5af39b4e52e2cfbc50f146f9e8b4ac96c4ac798b",
+    ),
+)
 PREVIOUSLY_FROZEN_GENERALS_SEEDS = frozenset({
     280101, 280202, 280303,
     281101, 281202, 281303,
@@ -53,6 +98,11 @@ FROZEN_BEFORE_ROUND4 = (
 )
 FROZEN_BEFORE_ROUND5 = FROZEN_BEFORE_ROUND4 | ROUND4_LEARNING_SEEDS
 FROZEN_BEFORE_ROUND6 = FROZEN_BEFORE_ROUND5 | ROUND5_LEARNING_SEEDS
+FROZEN_BEFORE_POLICY_KL = (
+    FROZEN_BEFORE_ROUND6
+    | ROUND6_LEARNING_SEEDS
+    | frozenset(ROUND6_VALIDATION_SEEDS)
+)
 
 
 class AssetValidationError(ValueError):
@@ -322,6 +372,125 @@ def load_round6_learning_config(
     if highest.tier != "high" or config.opponent_id != highest.opponent_id:
         raise AssetValidationError(
             "round-6 learning opponent must be the frozen highest-tier opponent"
+        )
+    return config
+
+
+def load_policy_kl_reference_config(
+    path: Path,
+    pilot: PilotConfig,
+) -> PolicyKLReferenceConfig:
+    """Parse the exact controlled-reference state and history contract."""
+
+    try:
+        raw = tomllib.loads(path.read_text(encoding="utf-8"))
+        seeds_raw = raw["seeds"]
+        seats_raw = raw["seats"]
+        decisions_raw = raw["decision_numbers"]
+        history_raw = raw["history"]
+        if not isinstance(seeds_raw, list) or not all(
+            type(item) is int for item in seeds_raw
+        ):
+            raise TypeError("seeds must be an array of integers")
+        if not isinstance(seats_raw, list) or not all(
+            type(item) is int for item in seats_raw
+        ):
+            raise TypeError("seats must be an array of integers")
+        if not isinstance(decisions_raw, list) or not all(
+            type(item) is int for item in decisions_raw
+        ):
+            raise TypeError("decision_numbers must be an array of integers")
+        if not isinstance(history_raw, list):
+            raise TypeError("history must be an array of tables")
+        config = PolicyKLReferenceConfig(
+            measurement_id=str(raw["measurement_id"]),
+            opponent_id=str(raw["opponent_id"]),
+            seeds=tuple(seeds_raw),
+            seats=tuple(seats_raw),
+            decision_numbers=tuple(decisions_raw),
+            epsilons=_tuple_strings(raw["epsilons"], "epsilons"),
+            primary_epsilon=str(raw["primary_epsilon"]),
+            history=tuple(
+                HistoricalPolicyConfig(
+                    version=str(item["version"]),
+                    run_id=str(item["run_id"]),
+                    content_hash=str(item["content_hash"]),
+                )
+                for item in history_raw
+            ),
+        )
+    except (
+        OSError,
+        tomllib.TOMLDecodeError,
+        KeyError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        raise AssetValidationError(
+            f"invalid policy KL reference manifest: {exc}"
+        ) from exc
+
+    if config.measurement_id != POLICY_KL_REFERENCE_ID:
+        raise AssetValidationError(
+            f"measurement_id must be {POLICY_KL_REFERENCE_ID}"
+        )
+    highest = pilot.opponents[0]
+    if highest.tier != "high" or config.opponent_id != highest.opponent_id:
+        raise AssetValidationError(
+            "policy KL opponent must be the frozen highest-tier opponent"
+        )
+    if set(config.seeds) & FROZEN_BEFORE_POLICY_KL:
+        raise AssetValidationError(
+            "policy KL seeds overlap a previously frozen seed set"
+        )
+    if config.seeds != POLICY_KL_REFERENCE_SEEDS:
+        raise AssetValidationError(
+            "policy KL seeds must match the frozen reference seed set"
+        )
+    if config.seats != POLICY_KL_REFERENCE_SEATS:
+        raise AssetValidationError(
+            "policy KL seats must be ordered [0, 1]"
+        )
+    if config.decision_numbers != POLICY_KL_REFERENCE_DECISIONS:
+        raise AssetValidationError(
+            "policy KL decision numbers must be ordered [2, 10]"
+        )
+    if config.epsilons != POLICY_KL_EPSILONS:
+        raise AssetValidationError(
+            "policy KL epsilons must match the frozen sensitivity set"
+        )
+    if (
+        config.primary_epsilon not in config.epsilons
+        or config.primary_epsilon != POLICY_KL_PRIMARY_EPSILON
+    ):
+        raise AssetValidationError(
+            "policy KL primary epsilon must be 0.01 and present in epsilons"
+        )
+
+    versions = tuple(item.version for item in config.history)
+    expected_versions = tuple(item[0] for item in POLICY_KL_HISTORY)
+    if versions != expected_versions:
+        raise AssetValidationError(
+            "policy KL history versions must be ordered v0 through v6"
+        )
+    if any(
+        len(item.content_hash) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in item.content_hash
+        )
+        for item in config.history
+    ):
+        raise AssetValidationError(
+            "policy KL history content hash must be a lowercase SHA-256 digest"
+        )
+    actual_history = tuple(
+        (item.version, item.run_id, item.content_hash)
+        for item in config.history
+    )
+    if actual_history != POLICY_KL_HISTORY:
+        raise AssetValidationError(
+            "policy KL history must match approved run IDs and content hashes"
         )
     return config
 

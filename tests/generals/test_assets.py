@@ -6,6 +6,7 @@ import pytest
 from agentbench_frame.generals.assets import (
     AssetValidationError,
     _stable_tree_hash,
+    load_policy_kl_reference_config,
     load_pilot_config,
     load_round3_learning_config,
     load_round4_learning_config,
@@ -24,6 +25,9 @@ ROUND4_FIXTURE = (
 )
 ROUND5_FIXTURE = (
     Path(__file__).parent / "fixtures" / "v5-rollback-learning-v1.toml"
+)
+POLICY_KL_REFERENCE_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "policy-kl-reference-v1.toml"
 )
 
 
@@ -192,3 +196,76 @@ def test_replay_skill_is_resolved_below_root_with_stable_digest(tmp_path):
 def test_replay_skill_rejects_path_escape(tmp_path):
     with pytest.raises(AssetValidationError, match="escapes AgentBench root"):
         resolve_replay_skill(tmp_path, Path("../outside/SKILL.md"))
+
+
+def test_policy_kl_reference_manifest_freezes_common_history_and_domain():
+    pilot = load_pilot_config(FIXTURE)
+
+    config = load_policy_kl_reference_config(
+        POLICY_KL_REFERENCE_FIXTURE,
+        pilot,
+    )
+
+    assert config.measurement_id == "generals-policy-kl-reference-v1"
+    assert config.opponent_id == "advanced-rank02-robinliu-v18"
+    assert config.seeds == (289101, 289202, 289303)
+    assert config.seats == (0, 1)
+    assert config.decision_numbers == (2, 10)
+    assert config.epsilons == ("0.001", "0.01", "0.05", "0.1")
+    assert config.primary_epsilon == "0.01"
+    assert tuple(item.version for item in config.history) == (
+        "v0",
+        "v1",
+        "v2",
+        "v3",
+        "v4",
+        "v5",
+        "v6",
+    )
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        (
+            "seeds = [289101, 289202, 289303]",
+            "seeds = [288101, 289202, 289303]",
+            "previously frozen",
+        ),
+        ("seats = [0, 1]", "seats = [1, 0]", "seats"),
+        ('version = "v6"', 'version = "v5"', "versions"),
+        (
+            'content_hash = "974050ee1a3d4b4c4f96e61f5af39b4e52e2cfbc50f146f9e8b4ac96c4ac798b"',
+            'content_hash = "not-a-sha256"',
+            "content hash",
+        ),
+        (
+            'opponent_id = "advanced-rank02-robinliu-v18"',
+            'opponent_id = "advanced-rank08-nashjunheng-v20"',
+            "highest-tier",
+        ),
+        (
+            'primary_epsilon = "0.01"',
+            'primary_epsilon = "0.02"',
+            "primary epsilon",
+        ),
+    ],
+)
+def test_policy_kl_reference_manifest_rejects_contract_changes(
+    tmp_path,
+    old,
+    new,
+    message,
+):
+    pilot = load_pilot_config(FIXTURE)
+    manifest = tmp_path / "reference.toml"
+    manifest.write_text(
+        POLICY_KL_REFERENCE_FIXTURE.read_text(encoding="utf-8").replace(
+            old,
+            new,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AssetValidationError, match=message):
+        load_policy_kl_reference_config(manifest, pilot)

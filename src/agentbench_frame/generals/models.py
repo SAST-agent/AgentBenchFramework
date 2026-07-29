@@ -77,6 +77,25 @@ class Round6LearningConfig:
 
 
 @dataclass(frozen=True)
+class HistoricalPolicyConfig:
+    version: str
+    run_id: str
+    content_hash: str
+
+
+@dataclass(frozen=True)
+class PolicyKLReferenceConfig:
+    measurement_id: str
+    opponent_id: str
+    seeds: tuple[int, ...]
+    seats: tuple[int, ...]
+    decision_numbers: tuple[int, ...]
+    epsilons: tuple[str, ...]
+    primary_epsilon: str
+    history: tuple[HistoricalPolicyConfig, ...]
+
+
+@dataclass(frozen=True)
 class ReplaySkillAsset:
     path: Path
     text: str
