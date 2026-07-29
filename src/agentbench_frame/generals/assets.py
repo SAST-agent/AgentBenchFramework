@@ -22,6 +22,7 @@ from .models import (
     Round3LearningConfig,
     Round4LearningConfig,
     Round5LearningConfig,
+    Round6LearningConfig,
 )
 
 
@@ -34,8 +35,12 @@ EXPECTED_TIERS = ("high", "medium", "low")
 ROUND3_LEARNING_ID = "generals-hl-v3-strongest-v1"
 ROUND4_LEARNING_ID = "generals-hl-v4-strongest-v1"
 ROUND5_LEARNING_ID = "generals-hl-v5-rollback-strongest-v1"
+ROUND6_LEARNING_ID = "generals-hl-v6-macro-strongest-v1"
 ROUND3_LEARNING_SEEDS = frozenset({284101, 284202, 284303})
 ROUND4_LEARNING_SEEDS = frozenset({285101, 285202, 285303})
+ROUND5_LEARNING_SEEDS = frozenset({286101, 286202, 286303})
+ROUND6_LEARNING_SEEDS = frozenset({287101, 287202, 287303})
+ROUND6_VALIDATION_SEEDS = (288101, 288202, 288303)
 PREVIOUSLY_FROZEN_GENERALS_SEEDS = frozenset({
     280101, 280202, 280303,
     281101, 281202, 281303,
@@ -47,6 +52,7 @@ FROZEN_BEFORE_ROUND4 = (
     PREVIOUSLY_FROZEN_GENERALS_SEEDS | ROUND3_LEARNING_SEEDS
 )
 FROZEN_BEFORE_ROUND5 = FROZEN_BEFORE_ROUND4 | ROUND4_LEARNING_SEEDS
+FROZEN_BEFORE_ROUND6 = FROZEN_BEFORE_ROUND5 | ROUND5_LEARNING_SEEDS
 
 
 class AssetValidationError(ValueError):
@@ -254,6 +260,68 @@ def load_round5_learning_config(
         raise AssetValidationError(
             "round-5 learning opponent must be the frozen "
             "highest-tier opponent"
+        )
+    return config
+
+
+def load_round6_learning_config(
+    path: Path,
+    pilot: PilotConfig,
+) -> Round6LearningConfig:
+    """Parse the frozen strongest-human macro-planning matrix for v6."""
+    try:
+        raw = tomllib.loads(path.read_text(encoding="utf-8"))
+        seeds = raw["seeds"]
+        seats = raw["seats"]
+        if (
+            not isinstance(seeds, list)
+            or not all(type(item) is int for item in seeds)
+        ):
+            raise TypeError("round-6 learning seeds must be an array of integers")
+        if (
+            not isinstance(seats, list)
+            or not all(type(item) is int for item in seats)
+        ):
+            raise TypeError("round-6 learning seats must be an array of integers")
+        config = Round6LearningConfig(
+            learning_id=str(raw["learning_id"]),
+            opponent_id=str(raw["opponent_id"]),
+            seeds=tuple(seeds),
+            seats=tuple(seats),
+        )
+    except (
+        OSError,
+        tomllib.TOMLDecodeError,
+        KeyError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        raise AssetValidationError(
+            f"invalid round-6 learning manifest: {exc}"
+        ) from exc
+    if config.learning_id != ROUND6_LEARNING_ID:
+        raise AssetValidationError(
+            f"round-6 learning_id must be {ROUND6_LEARNING_ID}"
+        )
+    if (
+        len(config.seeds) != len(ROUND6_LEARNING_SEEDS)
+        or set(config.seeds) != ROUND6_LEARNING_SEEDS
+    ):
+        raise AssetValidationError(
+            "round-6 learning seeds must match the frozen learning seed set"
+        )
+    if set(config.seeds) & FROZEN_BEFORE_ROUND6:
+        raise AssetValidationError(
+            "round-6 learning seeds overlap a previously frozen seed set"
+        )
+    if config.seats != (0, 1):
+        raise AssetValidationError(
+            "round-6 learning seats must be ordered [0, 1]"
+        )
+    highest = pilot.opponents[0]
+    if highest.tier != "high" or config.opponent_id != highest.opponent_id:
+        raise AssetValidationError(
+            "round-6 learning opponent must be the frozen highest-tier opponent"
         )
     return config
 

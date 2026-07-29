@@ -69,6 +69,14 @@ class Round5LearningConfig:
 
 
 @dataclass(frozen=True)
+class Round6LearningConfig:
+    learning_id: str
+    opponent_id: str
+    seeds: tuple[int, ...]
+    seats: tuple[int, ...]
+
+
+@dataclass(frozen=True)
 class ReplaySkillAsset:
     path: Path
     text: str

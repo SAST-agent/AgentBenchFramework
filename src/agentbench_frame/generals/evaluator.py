@@ -20,7 +20,9 @@ from .models import (
     Round3LearningConfig,
     Round4LearningConfig,
     Round5LearningConfig,
+    Round6LearningConfig,
 )
+from .assets import ROUND6_VALIDATION_SEEDS
 from .dense import persist_dense_diagnostics
 
 
@@ -126,6 +128,36 @@ def build_round5_learning_cases(
         _case(opponent, seed, seat, "learn5")
         for seed in learning.seeds
         for seat in learning.seats
+    )
+
+
+def build_round6_learning_cases(
+    config: PilotConfig,
+    learning: Round6LearningConfig,
+) -> tuple[BenchmarkCase, ...]:
+    """Build the frozen v6 strongest-human learning matrix."""
+    opponent = next(
+        item
+        for item in config.opponents
+        if item.opponent_id == learning.opponent_id
+    )
+    return tuple(
+        _case(opponent, seed, seat, "learn6")
+        for seed in learning.seeds
+        for seat in learning.seats
+    )
+
+
+def build_round6_validation_cases(
+    config: PilotConfig,
+) -> tuple[BenchmarkCase, ...]:
+    """Build the v6 high- and medium-tier validation split."""
+    return tuple(
+        _case(opponent, seed, seat, "validate6")
+        for opponent in config.opponents
+        if opponent.tier in {"high", "medium"}
+        for seed in ROUND6_VALIDATION_SEEDS
+        for seat in (0, 1)
     )
 
 
