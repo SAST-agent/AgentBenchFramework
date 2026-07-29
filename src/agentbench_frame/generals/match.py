@@ -24,10 +24,14 @@ class GeneralsMatchRunner:
         case: MatchCase,
         players: tuple[AgentProcessSpec, AgentProcessSpec],
         artifact_dir: Path,
+        capture_measurement_states: bool = False,
     ) -> MatchResult:
         artifact_dir.mkdir(parents=True, exist_ok=True)
         replay_path = artifact_dir / "replay.jsonl"
         replay_path.write_text("", encoding="utf-8")
+        measurement_path = artifact_dir / "measurement-state.jsonl"
+        if capture_measurement_states:
+            measurement_path.write_text("", encoding="utf-8")
         engine = OfficialGeneralsEngine(
             self.assets.engine_root, case.seed, artifact_dir / "official-replay.jsonl"
         )
@@ -52,12 +56,38 @@ class GeneralsMatchRunner:
                 for player in range(2):
                     managed[player].send_initial(engine.initial_observation(player))
                 step = 0
+                seat_decisions = [0, 0]
                 while True:
                     if time.monotonic() - started > self.assets_config_limits.match_timeout_s:
                         termination = "match_timeout"
                         error = "match controller timeout"
                         break
                     for player in (0, 1):
+                        if capture_measurement_states:
+                            seat_decisions[player] += 1
+                            snapshot = engine.measurement_state(player)
+                            measurement_record = {
+                                "global_step": step,
+                                "seat_decision_number": seat_decisions[player],
+                                "round": engine.round_number,
+                                "player": player,
+                                "measurement_state_id": (
+                                    engine.measurement_state_id(player)
+                                ),
+                                "snapshot": snapshot,
+                            }
+                            with measurement_path.open(
+                                "a",
+                                encoding="utf-8",
+                            ) as stream:
+                                stream.write(
+                                    json.dumps(
+                                        measurement_record,
+                                        sort_keys=True,
+                                        ensure_ascii=False,
+                                    )
+                                    + "\n"
+                                )
                         before = engine.normalized_state()
                         before["my_seat"] = player
                         before_id = engine.state_id()

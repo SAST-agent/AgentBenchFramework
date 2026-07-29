@@ -13,12 +13,25 @@ import tempfile
 from typing import Any
 from collections.abc import Sequence
 
+from .measurement_state import (
+    measurement_state_id as canonical_measurement_state_id,
+    reconstruct_measurement_state,
+    serialize_measurement_state,
+)
+
 
 @dataclass(frozen=True)
 class TurnOutcome:
     done: bool
     winner: int | None
     termination_type: str | None
+
+
+@dataclass(frozen=True)
+class PrimitiveOutcome:
+    valid: bool
+    terminal: bool
+    winner: int | None
 
 
 def _primitive(value: Any) -> Any:
@@ -72,6 +85,63 @@ class OfficialGeneralsEngine:
 
     def initial_observation(self, player: int) -> dict:
         return _primitive(self.state.trans_state_to_init_json(player))
+
+    def measurement_state(self, actor: int) -> dict:
+        return serialize_measurement_state(self.state, actor)
+
+    def measurement_state_id(self, actor: int) -> str:
+        return canonical_measurement_state_id(
+            self.measurement_state(actor)
+        )
+
+    @classmethod
+    def from_measurement_state(
+        cls,
+        engine_root: Path,
+        payload: dict,
+        replay_path: Path,
+    ) -> "OfficialGeneralsEngine":
+        instance = cls.__new__(cls)
+        instance.engine_root = Path(engine_root).resolve()
+        instance._main = instance._load_official_main()
+        instance.state = reconstruct_measurement_state(
+            instance._main,
+            payload,
+            replay_path,
+        )
+        return instance
+
+    def apply_primitive(
+        self,
+        player: int,
+        command: Sequence[int],
+    ) -> PrimitiveOutcome:
+        if type(player) is not int or player not in (0, 1):
+            return PrimitiveOutcome(False, False, None)
+        try:
+            normalized = tuple(int(item) for item in command)
+        except (TypeError, ValueError):
+            return PrimitiveOutcome(False, False, None)
+        if not normalized or normalized[0] not in range(1, 8):
+            return PrimitiveOutcome(False, False, None)
+        try:
+            valid = bool(
+                self._main.execute_single_command(
+                    player,
+                    self.state,
+                    normalized[0],
+                    list(normalized[1:]),
+                )
+            )
+        except Exception:
+            valid = False
+        if not valid:
+            return PrimitiveOutcome(False, False, None)
+        winner = int(self._main.is_game_over(self.state))
+        if winner == -1:
+            return PrimitiveOutcome(True, False, None)
+        self.state.winner = winner
+        return PrimitiveOutcome(True, True, winner)
 
     def apply_turn(self, player: int, commands: Sequence[Sequence[int]]) -> TurnOutcome:
         for raw in commands:

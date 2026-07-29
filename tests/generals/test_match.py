@@ -70,3 +70,49 @@ def test_process_exit_is_invalid(real_assets, tmp_path):
     )
     assert result.valid is False
     assert result.termination_type == "process_error"
+
+
+def test_match_optionally_captures_complete_predecision_states(
+    real_assets,
+    tmp_path,
+):
+    runner = GeneralsMatchRunner(real_assets)
+    artifact_dir = tmp_path / "match"
+
+    result = runner.run(
+        MatchCase("capture", 289101, 0),
+        (fake("valid", tmp_path, 0), fake("valid", tmp_path, 1)),
+        artifact_dir,
+        capture_measurement_states=True,
+    )
+
+    records = [
+        json.loads(line)
+        for line in (artifact_dir / "measurement-state.jsonl")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    ]
+    assert result.valid is True
+    assert records[0]["global_step"] == 0
+    assert records[0]["seat_decision_number"] == 1
+    assert records[0]["player"] == 0
+    assert records[0]["snapshot"]["state"]["rest_move_step"] == [2, 2]
+    assert records[1]["seat_decision_number"] == 1
+    assert records[2]["seat_decision_number"] == 2
+    assert len(records[0]["measurement_state_id"]) == 64
+
+
+def test_ordinary_match_does_not_create_measurement_stream(
+    real_assets,
+    tmp_path,
+):
+    runner = GeneralsMatchRunner(real_assets)
+    artifact_dir = tmp_path / "match"
+
+    runner.run(
+        MatchCase("ordinary", 289101, 0),
+        (fake("valid", tmp_path, 0), fake("valid", tmp_path, 1)),
+        artifact_dir,
+    )
+
+    assert not (artifact_dir / "measurement-state.jsonl").exists()
