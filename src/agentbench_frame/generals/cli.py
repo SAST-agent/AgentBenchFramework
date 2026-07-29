@@ -25,6 +25,7 @@ from .pipeline_v2 import (
 from .pipeline_v3 import GeneralsHLRound3Pipeline
 from .pipeline_v4 import GeneralsHLRound4Pipeline
 from .pipeline_v5 import GeneralsHLRound5Pipeline
+from .pipeline_v6 import GeneralsHLRound6Pipeline
 
 
 def register_parser(subparsers) -> argparse.ArgumentParser:
@@ -60,6 +61,14 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
             "iterate-v5",
             "Run paired v3/v4 learning → one rollback-guided Codex act → v5",
         ),
+        (
+            "iterate-v6",
+            "Run strongest-human v5 learning → one macro-planner act → v6",
+        ),
+        (
+            "recover-v6",
+            "Recover an audited v6 prompt, provider, or evaluation failure",
+        ),
     ):
         command = commands.add_parser(name, help=help_text)
         command.add_argument("--agentbench-root", type=Path, required=True)
@@ -75,9 +84,21 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
             "iterate-v3",
             "iterate-v4",
             "iterate-v5",
+            "iterate-v6",
+            "recover-v6",
         }:
-            command.add_argument("--codex-executable", default="codex")
-            command.add_argument("--provider-timeout", type=float, default=1800)
+            explicit_provider = name in {"iterate-v6", "recover-v6"}
+            command.add_argument(
+                "--codex-executable",
+                default="codex",
+                required=explicit_provider,
+            )
+            command.add_argument(
+                "--provider-timeout",
+                type=float,
+                default=1800,
+                required=explicit_provider,
+            )
         if name in {"calibrate-dev", "iterate-v2", "recover-v2"}:
             command.add_argument(
                 "--calibration-manifest", type=Path, required=True
@@ -89,6 +110,20 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
                 "--learning-manifest",
                 type=Path,
                 required=True,
+            )
+            command.add_argument("--parent-run", type=Path, required=True)
+            command.add_argument("--expected-parent-hash", required=True)
+        if name in {"iterate-v6", "recover-v6"}:
+            command.add_argument(
+                "--learning-manifest",
+                type=Path,
+                required=True,
+            )
+            command.add_argument(
+                "--replay-skill",
+                type=Path,
+                required=True,
+                help="Path relative to --agentbench-root",
             )
             command.add_argument("--parent-run", type=Path, required=True)
             command.add_argument("--expected-parent-hash", required=True)
@@ -124,6 +159,8 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
                 "--calibration-selection", type=Path, required=True
             )
         if name == "recover-v2":
+            command.add_argument("--failed-run", type=Path, required=True)
+        if name == "recover-v6":
             command.add_argument("--failed-run", type=Path, required=True)
     return parser
 
@@ -289,6 +326,38 @@ def handle(args) -> int:
                 "evo_score_4": result.evo_score_4,
                 "evo_score_5": result.evo_score_5,
                 "gain_5": result.gain_5,
+                "global_act_count": result.global_act_count,
+                "round_act_count": result.round_act_count,
+                "runnable": result.runnable,
+            }, sort_keys=True))
+            return 0 if result.status == "complete" else 1
+        if args.generals_command in {"iterate-v6", "recover-v6"}:
+            pipeline = GeneralsHLRound6Pipeline.from_paths(
+                agentbench_root=args.agentbench_root,
+                manifest_path=args.manifest,
+                learning_manifest_path=args.learning_manifest,
+                replay_skill_path=args.replay_skill,
+                parent_run_dir=args.parent_run,
+                expected_parent_hash=args.expected_parent_hash,
+                data_dir=args.data_dir,
+                provider=provider,
+            )
+            result = (
+                pipeline.run()
+                if args.generals_command == "iterate-v6"
+                else pipeline.recover(args.failed_run)
+            )
+            print(json.dumps({
+                "status": result.status,
+                "run_dir": str(result.run_dir),
+                "raw_score": result.raw_score,
+                "evo_score_1": result.evo_score_1,
+                "evo_score_2": result.evo_score_2,
+                "evo_score_3": result.evo_score_3,
+                "evo_score_4": result.evo_score_4,
+                "evo_score_5": result.evo_score_5,
+                "evo_score_6": result.evo_score_6,
+                "gain_6": result.gain_6,
                 "global_act_count": result.global_act_count,
                 "round_act_count": result.round_act_count,
                 "runnable": result.runnable,

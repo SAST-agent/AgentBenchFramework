@@ -1,5 +1,6 @@
 import json
 from dataclasses import replace
+import hashlib
 from pathlib import Path
 import subprocess
 
@@ -779,3 +780,419 @@ def test_v6_formal_exception_is_recorded_as_attempted_error(tmp_path):
     assert summary["score_history"][-1] is None
     assert (result.run_dir / "summary.json").is_file()
     assert (result.run_dir / "quality.json").is_file()
+
+
+def test_v6_prompt_incomplete_recovery_rebuilds_and_hashes_prompt_in_new_run(
+    tmp_path,
+):
+    provider = Round6Provider()
+    pipeline, evaluator = _pipeline(
+        tmp_path,
+        provider,
+        prompt_max_bytes=100,
+    )
+    failed = pipeline.run()
+    failed_summary_before = (failed.run_dir / "summary.json").read_bytes()
+    failed_events_before = (failed.run_dir / "events.jsonl").read_bytes()
+    assert failed.status == "prompt_incomplete"
+    assert provider.calls == 0
+
+    pipeline.prompt_max_bytes = 131_072
+    recovered = pipeline.recover(failed.run_dir)
+
+    assert recovered.run_dir != failed.run_dir
+    assert recovered.status == "complete"
+    assert recovered.global_act_count == 7
+    assert recovered.round_act_count == 1
+    assert provider.calls == 1
+    assert evaluator.calls == [
+        ("v5", "learning", 6),
+        ("v5", "learning", 6),
+        ("v6", "validation", 12),
+        ("v6", "evaluation", 18),
+    ]
+    assert (failed.run_dir / "summary.json").read_bytes() == (
+        failed_summary_before
+    )
+    assert (failed.run_dir / "events.jsonl").read_bytes() == (
+        failed_events_before
+    )
+    prompt = (
+        recovered.run_dir / "provider" / "codex-act-v6.prompt.md"
+    ).read_bytes()
+    prompt_manifest = json.loads(
+        (
+            recovered.run_dir / "provider" / "prompt-manifest.json"
+        ).read_text(encoding="utf-8")
+    )
+    assert prompt_manifest["prompt_sha256"] == hashlib.sha256(
+        prompt
+    ).hexdigest()
+    summary = _summary(recovered.run_dir)
+    assert summary["failed_run_id"] == _summary(failed.run_dir)["run_id"]
+    assert summary["recovery_mode"] == "prompt_rebuild"
+    assert summary["source_learning_budget"]["learning_episodes"] == 6
+    assert (
+        summary["cumulative_learning_budget"]["learning_episodes"]
+        == 76
+    )
+    recovery = next(
+        event
+        for event in _events(recovered.run_dir)
+        if event["event_type"] == "recovery_import"
+    )
+    assert recovery["recovery_mode"] == "prompt_rebuild"
+    assert recovery["reused_prompt"] is False
+
+
+def test_v6_provider_failure_recovery_reuses_verified_inputs_as_new_act(
+    tmp_path,
+):
+    failed_provider = Round6Provider(fail=True)
+    pipeline, evaluator = _pipeline(tmp_path, failed_provider)
+    failed = pipeline.run()
+    failed_summary_before = (failed.run_dir / "summary.json").read_bytes()
+    failed_events_before = (failed.run_dir / "events.jsonl").read_bytes()
+    assert failed.status == "provider_failed"
+    source_prompt = (
+        failed.run_dir / "provider" / "codex-act-v6.prompt.md"
+    ).read_bytes()
+
+    retry_provider = Round6Provider(change_state_view=True)
+    pipeline.provider = retry_provider
+    recovered = pipeline.recover(failed.run_dir)
+
+    assert recovered.run_dir != failed.run_dir
+    assert recovered.status == "complete"
+    assert recovered.runnable is True
+    assert recovered.global_act_count == 8
+    assert recovered.round_act_count == 1
+    assert retry_provider.calls == 1
+    assert evaluator.calls == [
+        ("v5", "learning", 6),
+        ("v6", "validation", 12),
+        ("v6", "evaluation", 18),
+    ]
+    assert (
+        recovered.run_dir / "provider" / "codex-act-v6.prompt.md"
+    ).read_bytes() == source_prompt
+    assert (failed.run_dir / "summary.json").read_bytes() == (
+        failed_summary_before
+    )
+    assert (failed.run_dir / "events.jsonl").read_bytes() == (
+        failed_events_before
+    )
+    summary = _summary(recovered.run_dir)
+    assert summary["failed_run_id"] == _summary(failed.run_dir)["run_id"]
+    assert summary["recovery_mode"] == "provider_retry"
+    assert summary["act_count"] == 8
+    assert summary["round_act_count"] == 1
+    assert (
+        summary["cumulative_learning_budget"][
+            "learning_coding_agent_acts"
+        ]
+        == 8
+    )
+    events = _events(recovered.run_dir)
+    assert sum(
+        event["event_type"] == "coding_agent_act" for event in events
+    ) == 1
+    retry = next(
+        event for event in events
+        if event["event_type"] == "provider_retry"
+    )
+    assert retry["reused_prompt"] is True
+    assert retry["reused_learning_evidence"] is True
+
+
+def test_v6_post_act_recovery_uses_verified_frozen_source_and_zero_acts(
+    tmp_path,
+):
+    provider = Round6Provider(change_state_view=True)
+    evaluator = FormalExceptionEvaluator()
+    pipeline, evaluator = _pipeline(
+        tmp_path,
+        provider,
+        evaluator=evaluator,
+    )
+    failed = pipeline.run()
+    failed_summary_before = (failed.run_dir / "summary.json").read_bytes()
+    failed_events_before = (failed.run_dir / "events.jsonl").read_bytes()
+    assert failed.status == "formal_failed"
+    assert failed.runnable is True
+    provider_calls = provider.calls
+    frozen_manifest = json.loads(
+        (
+            failed.run_dir / "versions" / "v6" / "manifest.json"
+        ).read_text(encoding="utf-8")
+    )
+
+    recovered_evaluator = ProvenanceEvaluator()
+    pipeline.evaluator = recovered_evaluator
+    recovered = pipeline.recover(failed.run_dir)
+
+    assert recovered.run_dir != failed.run_dir
+    assert recovered.status == "complete"
+    assert recovered.runnable is True
+    assert recovered.global_act_count == 7
+    assert recovered.round_act_count == 0
+    assert provider.calls == provider_calls
+    assert recovered_evaluator.calls == [
+        ("v6", "validation", 12),
+        ("v6", "evaluation", 18),
+    ]
+    assert (failed.run_dir / "summary.json").read_bytes() == (
+        failed_summary_before
+    )
+    assert (failed.run_dir / "events.jsonl").read_bytes() == (
+        failed_events_before
+    )
+    summary = _summary(recovered.run_dir)
+    assert summary["failed_run_id"] == _summary(failed.run_dir)["run_id"]
+    assert summary["recovery_mode"] == "post_act_evaluation"
+    assert summary["act_count"] == 7
+    assert summary["round_act_count"] == 0
+    assert len(summary["validation_results"]) == 12
+    assert len(summary["formal_results"]) == 18
+    assert not any(
+        event["event_type"] == "coding_agent_act"
+        for event in _events(recovered.run_dir)
+    )
+    expected_hash = frozen_manifest["content_hash"]
+    verification_events = [
+        event
+        for event in _events(recovered.run_dir)
+        if event["event_type"] == "behavior_diagnostics"
+        and event.get("diagnostic") == "frozen_source_verification"
+        and event.get("phase") in {"validation", "formal"}
+    ]
+    assert [event["phase"] for event in verification_events] == [
+        "validation",
+        "formal",
+    ]
+    assert all(
+        event["actual_manifest_hash"] == expected_hash
+        and event["verified"] is True
+        for event in verification_events
+    )
+    assert len({
+        record["path"] for record in recovered_evaluator.v6_workspaces
+    }) == 2
+
+
+@pytest.mark.parametrize(
+    "mismatch",
+    [
+        "parent",
+        "v6",
+        "prompt",
+        "learning_id",
+        "learning",
+        "terminal",
+    ],
+)
+def test_v6_recovery_rejects_mismatched_audited_source_before_side_effects(
+    tmp_path,
+    mismatch,
+):
+    provider = Round6Provider(change_state_view=True)
+    pipeline, _ = _pipeline(
+        tmp_path,
+        provider,
+        evaluator=FormalExceptionEvaluator(),
+    )
+    failed = pipeline.run()
+    assert failed.status == "formal_failed"
+    summary_path = failed.run_dir / "summary.json"
+    summary = _summary(failed.run_dir)
+    if mismatch == "parent":
+        summary["parent_run_id"] = "different-parent"
+        summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    elif mismatch == "v6":
+        (
+            failed.run_dir
+            / "versions"
+            / "v6"
+            / "source"
+            / "strategy.py"
+        ).write_text("tampered recovery source\n", encoding="utf-8")
+    elif mismatch == "prompt":
+        prompt_path = (
+            failed.run_dir / "provider" / "codex-act-v6.prompt.md"
+        )
+        prompt = prompt_path.read_text(encoding="utf-8")
+        prompt_path.write_text(
+            ("X" if prompt[0] != "X" else "Y") + prompt[1:],
+            encoding="utf-8",
+        )
+    elif mismatch == "learning_id":
+        summary["learning_id"] = "different-learning-suite"
+        summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    elif mismatch == "learning":
+        summary["learning_results"][0]["valid"] = False
+        summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    else:
+        summary["status"] = "incomplete"
+        summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    provider_calls = provider.calls
+    pipeline.evaluator = ProvenanceEvaluator()
+
+    with pytest.raises(ValueError, match=mismatch.replace("_", " ")):
+        pipeline.recover(failed.run_dir)
+
+    assert provider.calls == provider_calls
+    assert pipeline.evaluator.calls == []
+
+
+def test_v6_provider_retry_failure_can_be_recovered_as_another_visible_act(
+    tmp_path,
+):
+    first_provider = Round6Provider(fail=True)
+    pipeline, evaluator = _pipeline(tmp_path, first_provider)
+    first = pipeline.run()
+    assert first.status == "provider_failed"
+    assert first.global_act_count == 7
+
+    second_provider = Round6Provider(fail=True)
+    pipeline.provider = second_provider
+    second = pipeline.recover(first.run_dir)
+    assert second.status == "provider_failed"
+    assert second.global_act_count == 8
+    assert second.round_act_count == 1
+
+    third_provider = Round6Provider()
+    pipeline.provider = third_provider
+    third = pipeline.recover(second.run_dir)
+
+    assert third.status == "complete"
+    assert third.global_act_count == 9
+    assert third.round_act_count == 1
+    assert first_provider.calls == 1
+    assert second_provider.calls == 1
+    assert third_provider.calls == 1
+    assert evaluator.calls == [
+        ("v5", "learning", 6),
+        ("v6", "validation", 12),
+        ("v6", "evaluation", 18),
+    ]
+    summary = _summary(third.run_dir)
+    assert summary["failed_run_id"] == _summary(second.run_dir)["run_id"]
+    assert (
+        summary["cumulative_learning_budget"][
+            "learning_coding_agent_acts"
+        ]
+        == 9
+    )
+
+
+def test_v6_post_act_failure_can_be_recovered_again_without_provider(
+    tmp_path,
+):
+    provider = Round6Provider()
+    pipeline, _ = _pipeline(
+        tmp_path,
+        provider,
+        evaluator=FormalExceptionEvaluator(),
+    )
+    first = pipeline.run()
+    assert first.status == "formal_failed"
+    provider_calls = provider.calls
+
+    pipeline.evaluator = FormalExceptionEvaluator()
+    second = pipeline.recover(first.run_dir)
+    assert second.status == "formal_failed"
+    assert second.global_act_count == 7
+    assert second.round_act_count == 0
+
+    final_evaluator = ProvenanceEvaluator()
+    pipeline.evaluator = final_evaluator
+    third = pipeline.recover(second.run_dir)
+
+    assert third.status == "complete"
+    assert third.global_act_count == 7
+    assert third.round_act_count == 0
+    assert provider.calls == provider_calls
+    assert final_evaluator.calls == [
+        ("v6", "validation", 12),
+        ("v6", "evaluation", 18),
+    ]
+    assert not any(
+        event["event_type"] == "coding_agent_act"
+        for event in _events(second.run_dir) + _events(third.run_dir)
+    )
+
+
+def test_v6_repeated_prompt_incomplete_records_zero_new_acts_then_recovers(
+    tmp_path,
+):
+    provider = Round6Provider()
+    pipeline, evaluator = _pipeline(
+        tmp_path,
+        provider,
+        prompt_max_bytes=100,
+    )
+    first = pipeline.run()
+    assert first.status == "prompt_incomplete"
+
+    second = pipeline.recover(first.run_dir)
+    assert second.status == "prompt_incomplete"
+    assert second.global_act_count == 6
+    assert second.round_act_count == 0
+    recovery = next(
+        event
+        for event in _events(second.run_dir)
+        if event["event_type"] == "recovery_import"
+    )
+    assert recovery["new_provider_act"] is False
+
+    pipeline.prompt_max_bytes = 131_072
+    third = pipeline.recover(second.run_dir)
+
+    assert third.status == "complete"
+    assert third.global_act_count == 7
+    assert third.round_act_count == 1
+    assert provider.calls == 1
+    assert evaluator.calls == [
+        ("v5", "learning", 6),
+        ("v5", "learning", 6),
+        ("v5", "learning", 6),
+        ("v6", "validation", 12),
+        ("v6", "evaluation", 18),
+    ]
+    assert (
+        _summary(third.run_dir)["cumulative_learning_budget"][
+            "learning_episodes"
+        ]
+        == 82
+    )
+
+
+def test_v6_recovery_chain_binds_declared_mode_to_failed_run_kind(
+    tmp_path,
+):
+    pipeline, _ = _pipeline(tmp_path, Round6Provider(fail=True))
+    first = pipeline.run()
+    pipeline.provider = Round6Provider(fail=True)
+    second = pipeline.recover(first.run_dir)
+    assert second.status == "provider_failed"
+
+    summary_path = second.run_dir / "summary.json"
+    summary = _summary(second.run_dir)
+    summary["recovery_mode"] = "prompt_rebuild"
+    summary["config"]["recovery_mode"] = "prompt_rebuild"
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    events = _events(second.run_dir)
+    for event in events:
+        if event["event_type"] == "recovery_import":
+            event["recovery_mode"] = "prompt_rebuild"
+    (second.run_dir / "events.jsonl").write_text(
+        "".join(
+            json.dumps(event, separators=(",", ":")) + "\n"
+            for event in events
+        ),
+        encoding="utf-8",
+    )
+    pipeline.provider = Round6Provider()
+
+    with pytest.raises(ValueError, match="recovery mode"):
+        pipeline.recover(second.run_dir)
