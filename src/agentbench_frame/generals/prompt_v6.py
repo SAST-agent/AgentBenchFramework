@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 import json
 import re
 
+from .assets import ROUND5_LEARNING_SEEDS
 from .prompt import (
     FORBIDDEN_EVALUATION_SEEDS,
     PromptBuildResult,
@@ -57,6 +58,7 @@ _EXTERNAL_CONTEXT_PHASE_WORD = re.compile(
     r"\b(?:formal|validation)\b",
     re.IGNORECASE,
 )
+_SIX_DIGIT_SEED = re.compile(r"(?<!\d)\d{6}(?!\d)")
 
 
 def _validate_evidence(
@@ -116,6 +118,17 @@ def _reject_round6_external_context(text: str) -> None:
         raise ValueError("forbidden round-6 formal or validation material")
 
 
+def _reject_round6_parent_experience(text: str) -> None:
+    """Allow only declared round-5 learning citations in parent experience."""
+    _reject_leaks(text)
+    if _EXTERNAL_CONTEXT_PHASE_WORD.search(text):
+        raise ValueError("forbidden round-6 formal or validation material")
+    for match in _SIX_DIGIT_SEED.finditer(text):
+        seed = int(match.group())
+        if seed not in ROUND5_LEARNING_SEEDS:
+            raise ValueError(f"forbidden round-6 v5 experience seed: {seed}")
+
+
 def validate_round6_static_context(
     *,
     v5_strategy: str,
@@ -124,13 +137,9 @@ def validate_round6_static_context(
     replay_skill_text: str,
 ) -> None:
     """Reject contaminated static inputs before learning games are run."""
-    for context in (
-        v5_strategy,
-        v5_experience,
-        rules_text,
-        replay_skill_text,
-    ):
+    for context in (v5_strategy, rules_text, replay_skill_text):
         _reject_round6_external_context(context)
+    _reject_round6_parent_experience(v5_experience)
 
 
 def build_round6_prompt(

@@ -67,6 +67,30 @@ It is independently present in `versions/v5/manifest.json`,
 earlier draft carried `17356a...`, which belongs to the historical v1 source;
 it is superseded and must not be used for this v6 lineage.
 
+### Role-scoped static-context preflight
+
+The exact production static bundle is pinned as follows:
+
+- v5 `strategy.py`:
+  `18b4560ef80d802d06c88acbfe1e790a07085a9a46a8fec0020550b81ffbe975`;
+- v5 `EXPERIENCE.md`:
+  `c9a6d800fcca6f8091bc6221e35b61655715860f5129937ceb898f9cbaf6fc0d`;
+- official rules:
+  `9138bb16a27714b9be2403a28bac3f81d2de5b667a7eec1dbb3198887f516950`;
+- replay-analysis-v2 entry:
+  `0e8f01f8825ad3f351a330d324f2a558613bc98a61ca6adc80d69d3c90690b48`.
+
+After manifest/hash verification and before creating or calling the learning
+evaluator, the pipeline applies one public role-aware static validator. V5
+strategy, official rules, and the replay Skill remain under the strict
+historical/formal/validation denylist. Only the exact V5 experience role may
+retain declared round-5 learning replay/state-ID citations for seeds
+286101/286202/286303. That role still rejects formal seeds, validation seeds,
+current-v6 seeds, undeclared historical seeds, arbitrary six-digit seeds, and
+whole-word formal/validation material. Final prompt construction reuses the
+same public validator. The dynamic learning action profile remains checked
+after learning but before any provider act.
+
 ## Split isolation
 
 Only the following six v5 games are learning evidence:
@@ -81,6 +105,10 @@ critical windows/dense summaries, and the learning action profile. It must not
 contain any validation or formal case, replay, state, outcome, score, dense
 trace, critical window, or action profile.
 
+The inherited V5 experience is not new round-6 candidate evidence. Its
+declared round-5 learning replay/state-ID citations are permitted only in that
+role and do not expand the exact round-6 evidence set below.
+
 Validation is the 12-case high/medium matrix using seeds
 `288101/288202/288303` and both seats. Formal evaluation is the unchanged
 18-case high/medium/low pilot matrix. Both are **post-act only**: create them
@@ -90,6 +118,23 @@ running formal evaluation; every runnable v6 receives all 18 formal cases.
 
 Task 7 replay-skill baseline and forward tests are Skill validation. They
 count as neither a v6 provider act nor v6 provider/gameplay budget.
+
+### Attempt-1 preflight postmortem
+
+Attempt 1 is retained immutably at run `20260729_1555_c23d1075`. It completed
+six learning episodes, made zero provider acts, and failed before creating a
+v6 source, provider output directory, or score. Because the old static bundle
+was ordered strategy, experience, rules, then Skill, the first rejected
+`286101` came from the exact V5 `EXPERIENCE.md`: a context-agnostic gate had
+incorrectly treated its legitimate round-5 learning citation as candidate
+round-6 evidence.
+
+The old replay Skill was independently contaminated by a real forward-test
+opponent/match identity and whole-word held-out phase material. The assets
+cleanup remains required and is retained at commit `5d085bb`; it was not the
+source of the first reported `286101`. The failed run was not modified, and
+neither `iterate-v6` nor `recover-v6` was run during either preflight fix. No
+retry has started.
 
 ## Recovery semantics
 
@@ -149,6 +194,8 @@ Post-act only:
 
 - [ ] Both repositories are clean at their recorded Task 7 commits.
 - [ ] Parent source and manifest match the explicitly reconciled expected hash.
+- [ ] The exact four-file static bundle matches the pinned hashes and passes
+      role-scoped validation before any learning evaluator or gameplay.
 - [ ] V2 skill hash matches the prompt receipt; v1 hash remains unchanged.
 - [ ] Exactly 6 learning, 12 validation, and 18 formal cases are saved.
 - [ ] Learning, validation, and formal seed sets are disjoint.

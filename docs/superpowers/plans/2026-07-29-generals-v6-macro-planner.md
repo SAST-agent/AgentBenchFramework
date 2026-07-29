@@ -224,10 +224,22 @@ assert "You may edit strategy.py, state_view.py" in result.prompt
 assert "formal score" not in result.prompt.lower()
 ```
 
-Parameterized tests must reject every formal seed, every historical learning
-seed from 281101 through 287303 except the exact v6 set, every validation seed
-288101/288202/288303, non-high evidence, duplicate episode IDs, incomplete
-episode sets, and prompts exceeding the byte cap.
+Parameterized candidate-evidence tests must reject every formal seed, every
+historical learning seed from 281101 through 287303 except the exact v6 set,
+every validation seed 288101/288202/288303, non-high evidence, duplicate
+episode IDs, incomplete episode sets, and prompts exceeding the byte cap.
+These restrictions apply to the six `CriticalLearningEvidence` records, not
+indiscriminately to inherited parent documentation.
+
+Static-context tests must also load the exact manifest-verified v5 strategy
+and experience, official rules, and frozen replay-analysis-v2 entry. Only the
+v5 experience role may retain its declared round-5 learning replay/state-ID
+citations for 286101/286202/286303. V5 strategy, rules, and replay Skill remain
+under the strict denylist. The experience role must still reject formal,
+validation, current-v6, undeclared historical, or arbitrary six-digit seeds,
+as well as whole-word formal/validation material. The exact production bundle
+must pass through the public static validator without creating run, gameplay,
+evaluator, or provider artifacts.
 
 - [ ] **Step 2: Run prompt tests and verify failure**
 
@@ -256,9 +268,16 @@ FORBIDDEN_ROUND6_EVIDENCE_SEEDS = (
 )
 ```
 
+`FORBIDDEN_ROUND6_EVIDENCE_SEEDS` governs candidate round-6 evidence. Static
+context uses the role policy from Step 1: strict checks for v5 strategy, rules,
+and replay Skill, and a narrow exception for the declared round-5 learning
+citations already present in the exact v5 experience.
+
 The mandatory prompt must:
 
 - state that v5 is the exact editable parent;
+- include only manifest-verified v5 strategy/experience static inputs, with
+  role-aware preflight completed before learning;
 - permit edits only to `strategy.py`, `state_view.py`, `STRATEGY.md`,
   `EXPERIENCE.md`, `tests/**`, and `policy/**`;
 - prohibit edits to `main.py`;

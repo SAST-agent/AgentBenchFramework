@@ -1,4 +1,7 @@
 from dataclasses import replace
+import hashlib
+import os
+from pathlib import Path
 
 import pytest
 
@@ -40,6 +43,73 @@ HISTORICAL_SEEDS = (
     286303,
 )
 VALIDATION_SEEDS = (288101, 288202, 288303)
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+PARENT_V5_SOURCE = (
+    REPOSITORY_ROOT
+    / "agentbench_data/runs/28_generals/generals-hl"
+    / "20260729_0818_e6bcb9b3/versions/v5/source"
+)
+PRODUCTION_STATIC_SHA256 = {
+    "v5_strategy": (
+        "18b4560ef80d802d06c88acbfe1e790a07085a9a46a8fec0020550b81ffbe975"
+    ),
+    "v5_experience": (
+        "c9a6d800fcca6f8091bc6221e35b61655715860f5129937ceb898f9cbaf6fc0d"
+    ),
+    "rules_text": (
+        "9138bb16a27714b9be2403a28bac3f81d2de5b667a7eec1dbb3198887f516950"
+    ),
+    "replay_skill_text": (
+        "0e8f01f8825ad3f351a330d324f2a558613bc98a61ca6adc80d69d3c90690b48"
+    ),
+}
+
+
+def _production_static_paths() -> dict[str, Path]:
+    assets_override = os.environ.get("AGENTBENCH_GENERALS_ASSETS_ROOT")
+    if assets_override:
+        assets_candidates = [Path(assets_override)]
+    else:
+        assets_candidates = [
+            candidate
+            for ancestor in (REPOSITORY_ROOT, *REPOSITORY_ROOT.parents)
+            for candidate in (
+                ancestor / "AgentBench/.worktrees/generals-assets",
+                ancestor / "generals-assets",
+            )
+        ]
+    assets_root = next(
+        (
+            candidate
+            for candidate in assets_candidates
+            if (
+                candidate
+                / "backend_sources/corpus/28_generals/benchmark/rules.md"
+            ).is_file()
+        ),
+        assets_candidates[0],
+    )
+    paths = {
+        "v5_strategy": PARENT_V5_SOURCE / "strategy.py",
+        "v5_experience": PARENT_V5_SOURCE / "EXPERIENCE.md",
+        "rules_text": (
+            assets_root
+            / "backend_sources/corpus/28_generals/benchmark/rules.md"
+        ),
+        "replay_skill_text": (
+            assets_root
+            / "backend_sources/corpus/28_generals"
+            / "skills/replay-analysis-v2/SKILL.md"
+        ),
+    }
+    missing = [str(path) for path in paths.values() if not path.is_file()]
+    if missing:
+        pytest.skip(
+            "exact production static bundle is unavailable; set "
+            "AGENTBENCH_GENERALS_ASSETS_ROOT for a nonstandard assets checkout; "
+            f"missing: {', '.join(missing)}"
+        )
+    return paths
 
 
 def _evidence(seed: int, seat: int) -> CriticalLearningEvidence:
@@ -110,6 +180,68 @@ def test_v6_exposes_one_static_context_preflight_with_prompt_leak_semantics():
             rules_text="official rules",
             replay_skill_text="validation trajectory from a held-out split",
         )
+
+
+def test_exact_production_static_bundle_passes_without_artifacts(
+    tmp_path,
+    monkeypatch,
+):
+    static_context = {}
+    for role, path in _production_static_paths().items():
+        payload = path.read_bytes()
+        assert hashlib.sha256(payload).hexdigest() == (
+            PRODUCTION_STATIC_SHA256[role]
+        )
+        static_context[role] = payload.decode("utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    prompt_v6.validate_round6_static_context(**static_context)
+
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize(
+    "v5_experience",
+    (
+        "learn1-high-s280101-p0",
+        "learn6-high-s288101-p0",
+        "learn4-high-s285101-p0",
+        "learn6-high-s287101-p0",
+        "unscoped gameplay seed 299999",
+        "formal result without a seed",
+        "validation trace without a seed",
+    ),
+)
+def test_v5_experience_rejects_non_round5_learning_context(v5_experience):
+    with pytest.raises(
+        ValueError,
+        match=r"forbidden (?:round-6|evaluation)",
+    ):
+        prompt_v6.validate_round6_static_context(
+            v5_strategy="editable strategy",
+            v5_experience=v5_experience,
+            rules_text="official rules",
+            replay_skill_text="generic replay schema",
+        )
+
+
+@pytest.mark.parametrize(
+    "context_name",
+    ("v5_strategy", "rules_text", "replay_skill_text"),
+)
+def test_round5_learning_citations_remain_forbidden_outside_experience(
+    context_name,
+):
+    context = {
+        "v5_strategy": "editable strategy",
+        "v5_experience": "retained experience",
+        "rules_text": "official rules",
+        "replay_skill_text": "generic replay schema",
+    }
+    context[context_name] = "learn5-high-s286101-p0"
+
+    with pytest.raises(ValueError, match="forbidden round-6 seed"):
+        prompt_v6.validate_round6_static_context(**context)
 
 
 def test_v6_prompt_isolates_exact_high_only_learning_episodes():
