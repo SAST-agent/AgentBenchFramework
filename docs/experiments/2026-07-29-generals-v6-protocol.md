@@ -2,7 +2,8 @@
 
 Date: 2026-07-29
 
-Status: frozen pre-execution protocol; Task 8 has not started
+Status: frozen protocol, preflight-hardened after a zero-act Task 8 attempt;
+no retry has started
 
 ## Scope and canonical defaults
 
@@ -53,7 +54,7 @@ unchanged; the Task 7 validation hashes are:
 - v1 entry:
   `f6f3a6eadfd092d476e73c034bce9452b1c548d80d3ce0d4ebefdc9865799df4`;
 - v2 entry:
-  `39d84697b0dfd9b707404bd7fea4c03a6298f9f7fb6ebb3b3f69df8c660476af`;
+  `0e8f01f8825ad3f351a330d324f2a558613bc98a61ca6adc80d69d3c90690b48`;
 - v2 schema reference:
   `5ed24116a502de5a8d31d013f9e5ddc14e1686c20eb1d64d42e1858a98180711`.
 

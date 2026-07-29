@@ -2,6 +2,7 @@ from dataclasses import replace
 
 import pytest
 
+from agentbench_frame.generals import prompt_v6
 from agentbench_frame.generals.prompt import FORBIDDEN_EVALUATION_SEEDS
 from agentbench_frame.generals.prompt_v6 import build_round6_prompt
 from agentbench_frame.generals.replay import (
@@ -90,6 +91,25 @@ def _build(
     return build_round6_prompt(
         **arguments,  # type: ignore[arg-type]
     )
+
+
+def test_v6_exposes_one_static_context_preflight_with_prompt_leak_semantics():
+    validator = getattr(prompt_v6, "validate_round6_static_context", None)
+
+    assert callable(validator)
+    validator(
+        v5_strategy="editable strategy",
+        v5_experience="retained experience",
+        rules_text="official rules",
+        replay_skill_text="generic replay schema",
+    )
+    with pytest.raises(ValueError, match="formal or validation material"):
+        validator(
+            v5_strategy="editable strategy",
+            v5_experience="retained experience",
+            rules_text="official rules",
+            replay_skill_text="validation trajectory from a held-out split",
+        )
 
 
 def test_v6_prompt_isolates_exact_high_only_learning_episodes():

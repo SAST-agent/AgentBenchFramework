@@ -48,7 +48,10 @@ from .models import (
 )
 from .pipeline import GeneralsHLPipeline
 from .prompt import PromptBuildResult
-from .prompt_v6 import build_round6_prompt
+from .prompt_v6 import (
+    build_round6_prompt,
+    validate_round6_static_context,
+)
 from .replay import (
     CriticalLearningEvidence,
     CriticalWindowSelection,
@@ -1203,6 +1206,19 @@ class GeneralsHLRound6Pipeline(GeneralsHLPipeline):
             versions_v5_source = (
                 run_dir / "versions" / "v5" / "source"
             )
+            v5_strategy = (workspace / "strategy.py").read_text(
+                encoding="utf-8"
+            )
+            v5_experience = (workspace / "EXPERIENCE.md").read_text(
+                encoding="utf-8"
+            )
+            rules_text = self.rules_path.read_text(encoding="utf-8")
+            validate_round6_static_context(
+                v5_strategy=v5_strategy,
+                v5_experience=v5_experience,
+                rules_text=rules_text,
+                replay_skill_text=self.replay_skill.text,
+            )
             learning_cases = tuple(
                 build_round6_learning_cases(
                     self.config,
@@ -1323,15 +1339,9 @@ class GeneralsHLRound6Pipeline(GeneralsHLPipeline):
             try:
                 prompt = build_round6_prompt(
                     benchmark_id=self.config.benchmark_id,
-                    v5_strategy=(workspace / "strategy.py").read_text(
-                        encoding="utf-8"
-                    ),
-                    v5_experience=(
-                        workspace / "EXPERIENCE.md"
-                    ).read_text(encoding="utf-8"),
-                    rules_text=self.rules_path.read_text(
-                        encoding="utf-8"
-                    ),
+                    v5_strategy=v5_strategy,
+                    v5_experience=v5_experience,
+                    rules_text=rules_text,
                     replay_skill_text=self.replay_skill.text,
                     replay_skill_sha256=self.replay_skill.sha256,
                     evidence=evidence,

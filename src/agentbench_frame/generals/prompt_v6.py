@@ -116,6 +116,23 @@ def _reject_round6_external_context(text: str) -> None:
         raise ValueError("forbidden round-6 formal or validation material")
 
 
+def validate_round6_static_context(
+    *,
+    v5_strategy: str,
+    v5_experience: str,
+    rules_text: str,
+    replay_skill_text: str,
+) -> None:
+    """Reject contaminated static inputs before learning games are run."""
+    for context in (
+        v5_strategy,
+        v5_experience,
+        rules_text,
+        replay_skill_text,
+    ):
+        _reject_round6_external_context(context)
+
+
 def build_round6_prompt(
     *,
     benchmark_id: str,
@@ -150,14 +167,13 @@ def build_round6_prompt(
         raise ValueError(
             "round-6 action profile must be JSON serializable"
         ) from exc
-    for context in (
-        v5_strategy,
-        v5_experience,
-        rules_text,
-        replay_skill_text,
-        action_profile_json,
-    ):
-        _reject_round6_external_context(context)
+    validate_round6_static_context(
+        v5_strategy=v5_strategy,
+        v5_experience=v5_experience,
+        rules_text=rules_text,
+        replay_skill_text=replay_skill_text,
+    )
+    _reject_round6_external_context(action_profile_json)
 
     mandatory = f"""You are performing the v5-to-v6 bounded macro-action planner
 act for {benchmark_id}.

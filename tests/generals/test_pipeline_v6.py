@@ -206,6 +206,39 @@ def _pipeline(
     return pipeline, selected_evaluator
 
 
+def _inject_forbidden_static_context(
+    pipeline: GeneralsHLRound6Pipeline,
+    context_name: str,
+) -> None:
+    marker = "validation trajectory from a held-out split"
+    if context_name == "rules":
+        pipeline.rules_path.write_text(marker, encoding="utf-8")
+        return
+    if context_name == "skill":
+        pipeline.replay_skill = replace(
+            pipeline.replay_skill,
+            text=marker,
+            sha256=hashlib.sha256(marker.encode("utf-8")).hexdigest(),
+        )
+        return
+
+    filename = {
+        "strategy": "strategy.py",
+        "experience": "EXPERIENCE.md",
+    }[context_name]
+    source = (
+        pipeline.parent_run_dir / "versions" / "v5" / "source"
+    )
+    (source / filename).write_text(marker, encoding="utf-8")
+    snapshotter = LocalWorkspaceSnapshotter()
+    manifest = snapshotter.capture(source)
+    snapshotter.write_manifest(
+        manifest,
+        pipeline.parent_run_dir / "versions" / "v5" / "manifest.json",
+    )
+    pipeline.expected_parent_hash = manifest.content_hash
+
+
 def _events(run_dir):
     return [
         json.loads(line)
@@ -431,6 +464,31 @@ def test_v6_prompt_omission_performs_zero_acts(tmp_path):
     assert summary["budget"]["learning_prompt_tokens"] is None
     assert summary["budget"]["learning_completion_tokens"] is None
     _assert_generic_episode_fields_are_missing(summary)
+
+
+@pytest.mark.parametrize(
+    "context_name",
+    ("rules", "skill", "strategy", "experience"),
+)
+def test_v6_rejects_forbidden_static_context_before_learning(
+    tmp_path,
+    context_name,
+):
+    provider = Round6Provider()
+    pipeline, evaluator = _pipeline(tmp_path, provider)
+    _inject_forbidden_static_context(pipeline, context_name)
+
+    result = pipeline.run()
+
+    assert result.status == "failed"
+    assert evaluator.calls == []
+    assert provider.calls == 0
+    assert result.round_act_count == 0
+    summary = _summary(result.run_dir)
+    assert summary["budget"]["learning_episodes"] == 0
+    assert summary["budget"]["learning_coding_agent_acts"] == 0
+    assert summary["learning_results"] == []
+    assert "forbidden round-6 formal or validation material" in summary["error"]
 
 
 def test_v6_main_change_invalidates_candidate(tmp_path):
