@@ -21,7 +21,7 @@ def _state(*, seat=0, destination_player=-1, destination_general=None):
     }
 
 
-def _turn(player, commands, state=None):
+def _turn(player, commands, state=None, state_after=None):
     return TurnRecord(
         step=0,
         round_number=1,
@@ -30,7 +30,7 @@ def _turn(player, commands, state=None):
         state_before=state or _state(seat=player),
         commands=commands,
         state_id_after="after",
-        state_after={},
+        state_after=state_after or {},
     )
 
 
@@ -96,6 +96,35 @@ def test_action_profile_classifies_malformed_moves_as_unknown():
 
     assert profile.move_destination_counts == {"unknown": 1}
     assert profile.neutral_plain_move_ratio is None
+
+
+def test_action_profile_excludes_unknown_moves_from_neutral_plain_ratio():
+    profile = summarize_action_profile(
+        _evaluation(
+            _turn(0, ((1, 0, 0, 9), (1, 0, 0, 4, 2), (8,)))
+        )
+    )
+
+    assert profile.move_destination_counts == {
+        "neutral_plain": 1,
+        "unknown": 1,
+    }
+    assert profile.neutral_plain_move_ratio == 1.0
+
+
+def test_action_profile_classifies_move_from_state_before_not_state_after():
+    profile = summarize_action_profile(
+        _evaluation(
+            _turn(
+                0,
+                ((1, 0, 0, 4, 2), (8,)),
+                _state(seat=0, destination_player=-1),
+                _state(seat=0, destination_player=0),
+            )
+        )
+    )
+
+    assert profile.move_destination_counts == {"neutral_plain": 1}
 
 
 def test_action_profile_has_no_move_ratio_without_classifiable_moves():
