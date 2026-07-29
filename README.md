@@ -291,6 +291,26 @@ agentbench data check --data-dir ./data                  # 验证数据格式
 agentbench data list --data-dir ./data                   # 列出所有 run
 ```
 
+## 游戏逻辑复杂度
+
+框架提供可复算的 AB-Ludi/1 游戏逻辑描述长度，用于比较
+[`Aoraku/AgentBench`](https://github.com/Aoraku/AgentBench) 中公开后端实现的
+相对复杂度：
+
+```bash
+agentbench complexity ludi \
+  --agentbench-repo /path/to/Aoraku/AgentBench \
+  --json-output docs/research/agentbench-ludi-k-v1.json \
+  --markdown-output docs/research/agentbench-ludi-k-v1.md
+```
+
+AB-Ludi/1 将每个游戏表示为由 `source-module` 叶节点组成的无歧义 ludeme
+树，再用固定 zlib-9 配置得到可执行描述长度上界。输出中的
+`k_upper_bits` 是固定参考机和共享语言运行时条件下的 **Kolmogorov
+complexity 上界**，不是不可计算的精确 \(K\)，也不是状态空间大小、策略深度、
+学习难度或信息增益。JSON 会保留输入仓库提交、每个入选文件的路径和 SHA-256，
+便于审计与复算。
+
 ## 环境变量
 
 | 变量 | 说明 | 默认值 |
