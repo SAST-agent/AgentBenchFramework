@@ -104,7 +104,10 @@ class HLIterationController:
         written; version_after is None in that case (doc §12.1).
         """
         self._act_counter += 1
-        act_id = f"{self.run_id}-act{self._act_counter:04d}"
+        # act_id is the per-act name <run_id>-00000<m> (one identifier per
+        # iteration; see hl/naming.py). ``run_id`` is the round name.
+        from agentbench_frame.hl.naming import act_name
+        act_id = act_name(self.run_id, self._act_counter)
         t0 = time.monotonic()
 
         # 1. emit agent_act

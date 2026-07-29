@@ -119,14 +119,16 @@ LOGIC_PY="C:/Users/27364/.conda/envs/torchy/python.exe"
 PYTHONPATH=src uv run python -m agentbench_frame.hl \
   --logic "cd /d \"$BACKEND\" && python main.py" \
   --logic-python "$LOGIC_PY" \
-  --initial-candidate src/agentbench_frame/lostspace/candidates/v1 \
-  --name hl-v1 \
   --reference ./agentbench_data/reference/nu-v1.json \
   --ladder-opponent rank=6 \
   --ladder-opponent rank=12 \
   --acts 5 --pairs 3 --seats 0 --timeout 15 \
   --dangerously-skip-permissions
 ```
+
+> `--name` and `--initial-candidate` are both **optional now**. Omit `--name`
+> and the loop auto-names the round (§3.2.1). Omit `--initial-candidate` and
+> it seeds from `candidates/v1` (official sample). Pass either to override.
 
 **PowerShell:**
 
@@ -137,8 +139,6 @@ $LOGIC_PY = "C:/Users/27364/.conda/envs/torchy/python.exe"
 uv run python -m agentbench_frame.hl `
   --logic "cd /d `"$BACKEND`" && python main.py" `
   --logic-python $LOGIC_PY `
-  --initial-candidate src/agentbench_frame/lostspace/candidates/v1 `
-  --name hl-v1 `
   --reference ./agentbench_data/reference/nu-v1.json `
   --ladder-opponent rank=6 `
   --ladder-opponent rank=12 `
@@ -164,6 +164,35 @@ once per shell session per §2.)
 `--dangerously-skip-permissions` makes `claude` fully autonomous (no prompts).
 Use only in a trusted sandbox. Drop it (it then defaults to
 `--permission-mode acceptEdits`) if you want to keep some control.
+
+### 3.2.1 Auto-naming (when you omit `--name`)
+
+Omit `--name` and the loop names the round itself:
+
+```
+hl-v<YY-MM-DD>-round<n>          <- the round (one CLI run)
+hl-v<YY-MM-DD>-round<n>-00000<m> <- each iteration/act's act_id
+```
+
+- `<YY-MM-DD>` — the date the round ran (2-digit year, `-` separator; `:` is
+  illegal in Windows paths).
+- `round<n>` — a **global monotonic** round number, persisted across runs in
+  `.hl_codebase/hl_state.json` (`{"schema":1,"last_round":N}`). Cannot be
+  derived from `events.jsonl` (that file is per-round). If the state file is
+  missing, `n` recovers from the highest existing `.hl_codebase/hl-v*-round<N>/`
+  dir before incrementing, so a deleted state file never resets to a collision.
+- `00000<m>` — the iteration (act) index within the round, 1-based, 6-digit.
+
+The round scopes the codebase (`.hl_codebase/<round>/` — workspace, store,
+`events.jsonl`, stage) and the eval runs (`runs/25_lostspace/<round>/`); all
+chained acts of the round share them, and each act's `act_id` is its per-act
+name. **Re-running never clobbers a prior round** — each round gets a fresh,
+unique name. Provide `--name` to override (verbatim, skips the counter) and
+keep the legacy single-name layout.
+
+Every round reseeds from the **fixed canonical seed** — `candidates/v1` by
+default — so rounds are independent, comparable attempts. Override with
+`--initial-candidate`.
 
 ### 3.3 What each of the N acts does
 

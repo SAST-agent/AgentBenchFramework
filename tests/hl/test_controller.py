@@ -158,6 +158,28 @@ def test_second_act_emits_full_chain_including_kl(tmp_path):
         assert t in types, f"missing event type {t}"
 
 
+def test_act_id_is_per_act_name(tmp_path):
+    """act_id == <run_id>-00000<m> (the per-act name), not legacy -act<NNNN>."""
+    ws = _make_workspace(tmp_path)
+    cb = HLCodebase(root=ws, store=tmp_path / "store")
+    v0 = cb.snapshot(parent_version_id=None)
+    runner = FakeRunner(transform=lambda w: None, edit_type="noop")
+    ctrl = HLIterationController(
+        codebase=cb, runner=runner, spec=_spec(), reference=_ref_set(),
+        run_id="hl-v26-07-29-round1", events_path=tmp_path / "e.jsonl",
+        evaluator_factory=_stub_evaluator_factory(
+            [_stub_result(0.5, "complete"), _stub_result(0.5, "complete")]),
+        probe_factory=_stub_probe_factory([[("finish",)], [("finish",)]]),
+        stage_root=tmp_path / "stage",
+    )
+    ctrl.act(version_before=None)
+    ctrl.act(version_before=v0)
+    events = read_events(tmp_path / "e.jsonl")
+    act_ids = sorted({e["act_id"] for e in events if "act_id" in e})
+    assert act_ids == ["hl-v26-07-29-round1-000001",
+                       "hl-v26-07-29-round1-000002"]
+
+
 def test_policy_kl_zero_when_identical_primitives(tmp_path):
     ctrl, v0 = _two_act_controller(
         tmp_path,

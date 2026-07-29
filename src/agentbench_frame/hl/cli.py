@@ -247,10 +247,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="rewrite the bare 'python' in --logic to this "
                         "interpreter (must have antlr4-python3-runtime==4.9.*). "
                         "Example: C:/Users/.../.conda/envs/torchy/python.exe")
-    p.add_argument("--initial-candidate", required=True, type=Path,
-                   help="dir seeded into the codebase (must contain agent.py)")
-    p.add_argument("--name", required=True,
-                   help="HL agent name (-> runs/25_lostspace/<name>/)")
+    p.add_argument("--initial-candidate", default=None, type=Path,
+                   help="dir seeded into the codebase (must contain agent.py). "
+                        "Default: lostspace/candidates/v1 (official sample AI).")
+    p.add_argument("--name", default=None,
+                   help="HL agent / round name (-> runs/25_lostspace/<name>/). "
+                        "If omitted, auto-generated as "
+                        "hl-v<YY-MM-DD>-round<n> with a monotonic n persisted "
+                        "in .hl_codebase/hl_state.json.")
     p.add_argument("--reference", required=True, type=Path,
                    help="path to a frozen ReferenceStateSet JSON (nu)")
     p.add_argument("--ladder-opponent", action="append", default=[],
@@ -306,7 +310,26 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     args = build_parser().parse_args(argv)
     data_root = Path(args.data_dir) if args.data_dir else Path(_data_root())
-    codebase_root = args.codebase_root or (Path.cwd() / ".hl_codebase" / args.name)
+
+    # Resolve the round name + codebase root. ``--name`` overrides (manual,
+    # skips the counter); omit -> auto-generate ``hl-v<YY-MM-DD>-round<n>`` with
+    # a global monotonic n persisted in <hl_root>/hl_state.json. Each round
+    # reseeds from the fixed canonical candidate (candidates/v1 by default).
+    from agentbench_frame.hl.naming import round_name, today_date
+    from agentbench_frame.hl.round_state import next_round
+    if args.codebase_root:
+        codebase_root = Path(args.codebase_root)
+        hl_root = codebase_root.parent
+    else:
+        hl_root = Path.cwd() / ".hl_codebase"
+    if args.name:
+        name = args.name
+    else:
+        name = round_name(today_date(), next_round(hl_root))
+    if not args.codebase_root:
+        codebase_root = hl_root / name
+
+    print(f"[hl] name          = {name}", file=sys.stderr)
     workspace = codebase_root / "workspace"
     store = codebase_root / "store"
     stage_root = codebase_root / "stage"
@@ -329,7 +352,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     _probe_logic_antlr4(logic_command)
     print(f"[hl] logic antlr4    = OK", file=sys.stderr)
 
-    _seed_codebase(args.initial_candidate, workspace)
+    # Fixed canonical seed: default to the official sample AI (candidates/v1).
+    initial = args.initial_candidate
+    if initial is None:
+        initial = (Path(__file__).resolve().parent.parent
+                   / "lostspace" / "candidates" / "v1")
+    _seed_codebase(initial, workspace)
 
     codebase = HLCodebase(root=workspace, store=store)
     spec = BenchmarkSpec(
@@ -344,7 +372,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                   else _PLAYBACK_SKILL_FALLBACK)
     context_builder = ContextBuilder(
         codebase=codebase, data_root=data_root, game=GAME,
-        agent_name=args.name, spec=spec,
+        agent_name=name, spec=spec,
         playback_skill_path=skill_path, timeout=args.claude_timeout,
     )
     runner = ClaudeCodeRunner(
@@ -358,7 +386,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         codebase=codebase, stage_root=stage_root, data_root=data_root,
     )
 
-    run_id = args.name
+    run_id = name
     ctrl = HLIterationController(
         codebase=codebase, runner=runner, spec=spec, reference=reference,
         run_id=run_id, events_path=events_path, epsilon=args.epsilon,

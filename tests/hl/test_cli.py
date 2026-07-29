@@ -241,3 +241,112 @@ def test_probe_logic_antlr4_passes_when_importable(tmp_path):
     cmd = f'cd /d "{tmp_path}" && "{bat}" main.py'
     # Should not raise.
     _probe_logic_antlr4(cmd)
+
+
+# ---- auto-naming: --name optional, monotonic round counter, fixed seed ----
+
+def _stub_for_main(monkeypatch, tmp_path):
+    """Stub the heavy pieces (runner, evaluator, opponents, probe) so main()
+    runs end-to-end without spawning claude or the logic subprocess."""
+    class _StubRunner:
+        def __init__(self, **kw):
+            self.kw = kw
+        def run(self, *, workspace, context):
+            (workspace / "agent.py").write_text("# stub edit\n", encoding="utf-8")
+            from agentbench_frame.hl.runner import AgentRunResult
+            return AgentRunResult(edit_type="parametrize",
+                                  files_touched=["agent.py"],
+                                  prompt_tokens=10, completion_tokens=5,
+                                  total_tokens=15, time_s=0.1)
+
+    class _StubEval:
+        def __init__(self, *a, **k):
+            pass
+        def evaluate(self):
+            class R:
+                summary = {"win_rate": 0.5, "evaluation_status": "complete",
+                           "lostspace": {"aggregate": {"win_rate": 0.5}}}
+                matches = []
+                error_count = 0
+                run_dir = tmp_path
+            return R()
+
+    monkeypatch.setattr("agentbench_frame.hl.runner.ClaudeCodeRunner", _StubRunner)
+    monkeypatch.setattr(hl_cli, "LostSpaceEvaluator", lambda *a, **k: _StubEval())
+    monkeypatch.setattr(hl_cli, "_resolve_opponents",
+                        lambda args: [hl_cli.Opponent(name="rank06", command="echo")])
+    monkeypatch.setattr(hl_cli, "_default_filler_command", lambda: "echo")
+    from agentbench_frame.hl import controller as ctrl_mod
+
+    class _StubProbe:
+        def __init__(self, *a, **k):
+            pass
+        def probe_set(self, samples):
+            from agentbench_frame.hl.probe import EmittedAction
+            return [EmittedAction(primitive=("finish",), out_of_support=False,
+                                  sample_index=i) for i in range(len(samples))]
+        def close(self):
+            pass
+    monkeypatch.setattr(ctrl_mod, "ReferenceProbe", _StubProbe)
+
+
+def test_auto_name_round_progresses(monkeypatch, tmp_path):
+    """Omitting --name auto-generates hl-v<date>-round<n>; two runs -> round1
+    then round2, distinct codebases, counter persisted at 2."""
+    _stub_for_main(monkeypatch, tmp_path)
+    ref = _write_reference(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    common = ["--logic", "echo", "--reference", str(ref),
+              "--ladder-opponent", "rank=6",
+              "--acts", "1", "--pairs", "1", "--seats", "0", "--timeout", "5"]
+    assert hl_cli.main(common) == 0
+    assert hl_cli.main(common) == 0
+
+    from agentbench_frame.hl.naming import round_name, today_date
+    r1 = round_name(today_date(), 1)
+    r2 = round_name(today_date(), 2)
+    assert (tmp_path / ".hl_codebase" / r1 / "events.jsonl").exists()
+    assert (tmp_path / ".hl_codebase" / r2 / "events.jsonl").exists()
+    state = json.loads(
+        (tmp_path / ".hl_codebase" / "hl_state.json").read_text(encoding="utf-8"))
+    assert state["last_round"] == 2
+
+
+def test_name_override_skips_counter(monkeypatch, tmp_path):
+    """--name uses the name verbatim and does NOT touch the round counter."""
+    _stub_for_main(monkeypatch, tmp_path)
+    ref = _write_reference(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    code = hl_cli.main([
+        "--logic", "echo", "--reference", str(ref),
+        "--name", "my-exp", "--ladder-opponent", "rank=6",
+        "--acts", "1", "--pairs", "1", "--seats", "0", "--timeout", "5",
+    ])
+    assert code == 0
+    assert (tmp_path / ".hl_codebase" / "my-exp" / "events.jsonl").exists()
+    assert not (tmp_path / ".hl_codebase" / "hl_state.json").exists()
+    lines = [json.loads(l) for l in
+             (tmp_path / ".hl_codebase" / "my-exp" / "events.jsonl")
+             .read_text().splitlines() if l.strip()]
+    act_ids = {e["act_id"] for e in lines if "act_id" in e}
+    assert act_ids == {"my-exp-000001"}
+
+
+def test_default_seed_is_v1(monkeypatch, tmp_path):
+    """Omitting --initial-candidate seeds the workspace from candidates/v1."""
+    _stub_for_main(monkeypatch, tmp_path)
+    ref = _write_reference(tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    code = hl_cli.main([
+        "--logic", "echo", "--reference", str(ref),
+        "--name", "seedtest", "--ladder-opponent", "rank=6",
+        "--acts", "0", "--pairs", "1", "--seats", "0", "--timeout", "5",
+    ])
+    assert code == 0
+    ws_agent = (tmp_path / ".hl_codebase" / "seedtest" / "workspace" / "agent.py")
+    v1_agent = (Path(hl_cli.__file__).resolve().parent.parent
+                / "lostspace" / "candidates" / "v1" / "agent.py")
+    assert ws_agent.read_bytes() == v1_agent.read_bytes()
