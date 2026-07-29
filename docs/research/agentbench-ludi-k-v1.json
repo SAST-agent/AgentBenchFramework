@@ -4,6 +4,7 @@
       "canonical_bits": 330744,
       "canonical_bytes": 41343,
       "compressed_bytes": 9953,
+      "compressed_sha256": "a97b891639f25c871e70dc00aa283cf01f788e7564d8cc4320a766cfc9b6cd4e",
       "compression_ratio": 0.24074208451249304,
       "description_sha256": "150dec0dfe91165da92ff22a8d3556ccddd916b1a7b6c2fde8cf1ba1248d5765",
       "files": [
@@ -66,6 +67,7 @@
       "canonical_bits": 501184,
       "canonical_bytes": 62648,
       "compressed_bytes": 12740,
+      "compressed_sha256": "45e3def42005e999c8045a47c1912f030a695074e7d94fd99de1b69a6b16a1e6",
       "compression_ratio": 0.2033584471970374,
       "description_sha256": "f38ac69f4da683c4c3c918dd75612c48d5b34ee727edafa45a022b52596f17c4",
       "files": [
@@ -123,6 +125,7 @@
       "canonical_bits": 2010392,
       "canonical_bytes": 251299,
       "compressed_bytes": 14173,
+      "compressed_sha256": "61f5731d8df1f8f03263003b8c2a46bf5042e9efa9c616868d113d7c5b791fb4",
       "compression_ratio": 0.05639895105034242,
       "description_sha256": "6ccff7d450cc9ef6792ea99c00849deadf950956807bef61aeb120882b112275",
       "files": [
@@ -175,6 +178,7 @@
       "canonical_bits": 737864,
       "canonical_bytes": 92233,
       "compressed_bytes": 15861,
+      "compressed_sha256": "9476cb39eb4bd828e92c3a54d88dbba096424150cbb0506767f870f7ff85fd26",
       "compression_ratio": 0.17196664968069997,
       "description_sha256": "64745dd8bbe2b0489b3b8aec56493eb03ef8b601cda27e8fab262435a87bff89",
       "files": [
@@ -252,6 +256,7 @@
       "canonical_bits": 798944,
       "canonical_bytes": 99868,
       "compressed_bytes": 18025,
+      "compressed_sha256": "1e677d804e069e3bb849cd0b3d8c431a665ff11ebbd7a021a6d897eabde10d31",
       "compression_ratio": 0.1804882444827172,
       "description_sha256": "9455d3ffc6bf0fd5b03a9c467e6abf0befe82cafadf3031b71cbafb9383f7f19",
       "files": [
@@ -384,6 +389,7 @@
       "canonical_bits": 815680,
       "canonical_bytes": 101960,
       "compressed_bytes": 21316,
+      "compressed_sha256": "7d81636801fee71e76d8ed58e98a535e6e2d5c4b8aecf59c7034c5e6f2f58ee5",
       "compression_ratio": 0.2090623774029031,
       "description_sha256": "405fd3bac5feaeae400d43d78be35962fb29395765af2f3250aa15b27b739a7a",
       "files": [
@@ -511,6 +517,7 @@
       "canonical_bits": 988864,
       "canonical_bytes": 123608,
       "compressed_bytes": 22329,
+      "compressed_sha256": "ceb32c1b7118c8c06a2579d1945bfc3f4a6f36c5a71b3445debad450ab0622b8",
       "compression_ratio": 0.1806436476603456,
       "description_sha256": "3fb0ce50d6dec123ac75d806601ccffa5f42a36dee6781ea80e71df56256e23b",
       "files": [
@@ -583,6 +590,7 @@
       "canonical_bits": 690128,
       "canonical_bytes": 86266,
       "compressed_bytes": 22379,
+      "compressed_sha256": "7e859c52bca78666b94635d615e90fef4e26a558b79ed2f4ea6e772be6fc6083",
       "compression_ratio": 0.25941854264716113,
       "description_sha256": "3ee28108b665556f3dfc00ccc8eb377e372e5c7edb861848bd0bd5d338d0dba5",
       "files": [
@@ -690,6 +698,7 @@
       "canonical_bits": 691096,
       "canonical_bytes": 86387,
       "compressed_bytes": 23687,
+      "compressed_sha256": "47873c26038ecf5ec1933772c9e5d1fe970ac3c96a79b2c1347797ab69e7a1ff",
       "compression_ratio": 0.2741963489876949,
       "description_sha256": "68b1c12c0304950e0750d17dc795c52223de737e772cfa7142f5fc1316aeddee",
       "files": [
@@ -792,6 +801,7 @@
       "canonical_bits": 1521856,
       "canonical_bytes": 190232,
       "compressed_bytes": 37441,
+      "compressed_sha256": "d712974f6ac3748c8d79999e47c6e764036af04e700628d800af312a8d055664",
       "compression_ratio": 0.19681757012490012,
       "description_sha256": "2a46d350620d5e10ecb5edd1696699bc94c35ea874eb9fc25ff68a232c8ef9d2",
       "files": [
@@ -951,7 +961,7 @@
     "catalog_game_count": 10,
     "commit": "b581bca3ba3d2d7d58a2f8c6bbddd060fc7fdc87",
     "manifest_schema": "agentbench.ludi-source-manifest.v1",
-    "manifest_sha256": "fbfd2ddd03faea8365c9c28c3a0131f25af6e715bfe1525b8838829ff97c8055",
+    "manifest_sha256": "87d55ac73109056faf23506ab84bba92de46812879a4e970dee25bc4b2e7db49",
     "repository": "https://github.com/Aoraku/AgentBench"
   }
 }

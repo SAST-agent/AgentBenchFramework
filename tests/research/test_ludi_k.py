@@ -16,6 +16,7 @@ from agentbench_frame.research.ludi_k import (
     decode_ludi_description,
     encode_ludi_description,
     measure_game,
+    validate_game_conformance,
     write_json_report,
     write_markdown_report,
 )
@@ -116,6 +117,7 @@ def test_measure_game_reports_auditable_upper_bound_and_file_manifest():
     assert result["canonical_bytes"] == len(canonical)
     assert result["canonical_bits"] == len(canonical) * 8
     assert result["compressed_bytes"] > 0
+    assert len(result["compressed_sha256"]) == 64
     assert result["k_upper_bits"] == result["compressed_bytes"] * 8
     assert result["description_sha256"] == hashlib.sha256(canonical).hexdigest()
     assert 0 < result["compression_ratio"] < 2
@@ -141,6 +143,21 @@ def test_measure_game_reports_auditable_upper_bound_and_file_manifest():
     )
     assert changed["source_sha256"] != result["source_sha256"]
     assert changed["description_sha256"] != result["description_sha256"]
+
+
+def test_game_conformance_rejects_non_reference_compressed_stream():
+    spec = GameSourceSpec(
+        "g",
+        "Game",
+        "logic/g",
+        expected_description_sha256="0" * 64,
+        expected_compressed_bytes=1,
+        expected_compressed_sha256="1" * 64,
+    )
+    result = measure_game(spec, (SourceModule("rules.py", b"RULE = 1\n"),))
+
+    with pytest.raises(ValueError, match="AB-Ludi/1 conformance mismatch"):
+        validate_game_conformance(spec, result)
 
 
 def test_report_writers_are_stable_and_machine_readable(tmp_path):

@@ -63,6 +63,14 @@ release numbers are intentionally not part of the identity: implementations
 with the exact required behavior are equivalent, while a version with different
 behavior cannot emit an AB-Ludi/1 report.
 
+The finite behavior suite is only an early compatibility gate, not a proof over
+all inputs. The v1 corpus manifest therefore also freezes the canonical
+description SHA-256, complete compressed-stream SHA-256, and compressed byte
+length for each of the ten games. Repository-level generation validates all
+three fields before writing a report. Thus every published v1 game value is
+fully determined even if two compressor implementations collide on the probe
+suite but diverge on a corpus description.
+
 ## Input Boundary
 
 The source repository is fixed to AgentBench commit
@@ -121,6 +129,11 @@ an authoritative blob, or an expected game is missing. Unexpected eligible
 files or additional corpus games are errors rather than silently changing the
 measurement boundary.
 
+The manifest is loaded with `importlib.resources`. Hatch explicitly packages
+the complete `src/agentbench_frame` package in wheels and `src` in sdists; an
+installation smoke test builds a wheel, installs it into an isolated target,
+and imports the catalog from that installed copy.
+
 ### Encoder and Calculator
 
 `agentbench_frame.research.ludi_k` owns lossless framing, deterministic
@@ -162,12 +175,15 @@ Tests must demonstrate:
   inputs while preserving genuine rule source/configuration;
 - the compressor behavior fingerprint is part of the reference-machine
   identity;
+- every canonical corpus description must match its frozen compressed-stream
+  SHA-256 and length;
 - missing or extra games fail closed;
 - the public snapshot contains exactly ten unique game results and every result
   has nonzero file count, hashes, source bits, canonical bits, and upper-bound
   bits;
 - CLI output is parseable and deterministic, and colliding output paths are
   rejected before either report is written.
+- a built and installed wheel can load the packaged source manifest.
 
 The complete existing suite must still pass. Network access is not needed by
 the calculator after the source repository is present.

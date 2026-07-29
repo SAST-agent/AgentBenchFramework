@@ -68,6 +68,9 @@ def test_frozen_agentbench_report_covers_every_game_and_source_file():
         assert game["source_bits"] == game["source_bytes"] * 8
         assert game["canonical_bits"] == game["canonical_bytes"] * 8
         assert game["k_upper_bits"] == game["compressed_bytes"] * 8
+        assert game["compressed_bytes"] == spec.expected_compressed_bytes
+        assert game["description_sha256"] == spec.expected_description_sha256
+        assert game["compressed_sha256"] == spec.expected_compressed_sha256
         assert game["source_bits"] > 0
         assert game["canonical_bits"] > 0
         assert game["k_upper_bits"] > 0

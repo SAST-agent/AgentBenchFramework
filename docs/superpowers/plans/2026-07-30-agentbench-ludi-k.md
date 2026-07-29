@@ -14,7 +14,10 @@
 - The metric is named and documented as an AB-Ludi/1 conditional upper bound, never exact \(K\).
 - The source boundary contains exactly the ten public games at the pinned AgentBench commit.
 - Every included file path and SHA-256 digest is retained in the JSON artifact.
+- Every v1 canonical description and full compressed stream is retained as a
+  hash/length conformance contract.
 - Input drift fails closed; files are never silently added or dropped.
+- The packaged wheel is installed and imported in a smoke test.
 - Production behavior is implemented test-first.
 
 ---

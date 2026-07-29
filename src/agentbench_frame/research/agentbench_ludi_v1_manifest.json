@@ -35,7 +35,10 @@
           "path": "server.py",
           "sha256": "693d76de81844f82b0d14916073d32d7be504ee526809d836ac0f9c84e3c3f59"
         }
-      ]
+      ],
+      "expected_description_sha256": "6ccff7d450cc9ef6792ea99c00849deadf950956807bef61aeb120882b112275",
+      "expected_compressed_bytes": 14173,
+      "expected_compressed_sha256": "61f5731d8df1f8f03263003b8c2a46bf5042e9efa9c616868d113d7c5b791fb4"
     },
     {
       "game_id": "24_miracle",
@@ -134,7 +137,10 @@
           "path": "main.py",
           "sha256": "f508c0fb98282d753a15481ecfc67a29801e4b462c576a5f7c04785691ca752e"
         }
-      ]
+      ],
+      "expected_description_sha256": "9455d3ffc6bf0fd5b03a9c467e6abf0befe82cafadf3031b71cbafb9383f7f19",
+      "expected_compressed_bytes": 18025,
+      "expected_compressed_sha256": "1e677d804e069e3bb849cd0b3d8c431a665ff11ebbd7a021a6d897eabde10d31"
     },
     {
       "game_id": "25_aquawar",
@@ -185,7 +191,10 @@
           "path": "src/timer.h",
           "sha256": "6a28d0908c2f6bb22562b68d73be19b58ab4f776026192b536e87113ee05e992"
         }
-      ]
+      ],
+      "expected_description_sha256": "3fb0ce50d6dec123ac75d806601ccffa5f42a36dee6781ea80e71df56256e23b",
+      "expected_compressed_bytes": 22329,
+      "expected_compressed_sha256": "ceb32c1b7118c8c06a2579d1945bfc3f4a6f36c5a71b3445debad450ab0622b8"
     },
     {
       "game_id": "25_lostspace",
@@ -264,7 +273,10 @@
           "path": "src/traps.py",
           "sha256": "6d8acafd79359029a20b0b51cfb345aa1b3298dbf3a995fe70bd77b399117d79"
         }
-      ]
+      ],
+      "expected_description_sha256": "3ee28108b665556f3dfc00ccc8eb377e372e5c7edb861848bd0bd5d338d0dba5",
+      "expected_compressed_bytes": 22379,
+      "expected_compressed_sha256": "7e859c52bca78666b94635d615e90fef4e26a558b79ed2f4ea6e772be6fc6083"
     },
     {
       "game_id": "26_snakego",
@@ -307,7 +319,10 @@
           "path": "main.py",
           "sha256": "da28761fa595e82c00293b5697e44896185ebad1b2792520dfc79c1dbe55e852"
         }
-      ]
+      ],
+      "expected_description_sha256": "150dec0dfe91165da92ff22a8d3556ccddd916b1a7b6c2fde8cf1ba1248d5765",
+      "expected_compressed_bytes": 9953,
+      "expected_compressed_sha256": "a97b891639f25c871e70dc00aa283cf01f788e7564d8cc4320a766cfc9b6cd4e"
     },
     {
       "game_id": "27_antwar",
@@ -402,7 +417,10 @@
           "path": "src/output.cpp",
           "sha256": "48b18f91e86039621076cc21842ec0638823708c5c9cbc58eafa9086d1a49050"
         }
-      ]
+      ],
+      "expected_description_sha256": "405fd3bac5feaeae400d43d78be35962fb29395765af2f3250aa15b27b739a7a",
+      "expected_compressed_bytes": 21316,
+      "expected_compressed_sha256": "7d81636801fee71e76d8ed58e98a535e6e2d5c4b8aecf59c7034c5e6f2f58ee5"
     },
     {
       "game_id": "28_generals",
@@ -457,7 +475,10 @@
           "path": "main.py",
           "sha256": "2ec6a9adfd0e261ebdca8caab9b65ac26dbd4c1def92b2a65932bf7ad27e5921"
         }
-      ]
+      ],
+      "expected_description_sha256": "64745dd8bbe2b0489b3b8aec56493eb03ef8b601cda27e8fab262435a87bff89",
+      "expected_compressed_bytes": 15861,
+      "expected_compressed_sha256": "9476cb39eb4bd828e92c3a54d88dbba096424150cbb0506767f870f7ff85fd26"
     },
     {
       "game_id": "29_rollman",
@@ -496,7 +517,10 @@
           "path": "main.py",
           "sha256": "0b7c202b7f4608f5118275224d287981fa273c9f015e9d37bde0600beecc6078"
         }
-      ]
+      ],
+      "expected_description_sha256": "f38ac69f4da683c4c3c918dd75612c48d5b34ee727edafa45a022b52596f17c4",
+      "expected_compressed_bytes": 12740,
+      "expected_compressed_sha256": "45e3def42005e999c8045a47c1912f030a695074e7d94fd99de1b69a6b16a1e6"
     },
     {
       "game_id": "30_antwar2",
@@ -591,7 +615,10 @@
           "path": "src/output.cpp",
           "sha256": "91c8de7a203ee8b614ef701f1687f81f031d4de5a9be185cdc3baa0abb6f0545"
         }
-      ]
+      ],
+      "expected_description_sha256": "2a46d350620d5e10ecb5edd1696699bc94c35ea874eb9fc25ff68a232c8ef9d2",
+      "expected_compressed_bytes": 37441,
+      "expected_compressed_sha256": "d712974f6ac3748c8d79999e47c6e764036af04e700628d800af312a8d055664"
     },
     {
       "game_id": "30_deepclue",
@@ -666,7 +693,10 @@
           "path": "main.py",
           "sha256": "7adc6e448e9ce2b997373d85aa83b3e6e9863a471cff22be5aa314fa876e4c2b"
         }
-      ]
+      ],
+      "expected_description_sha256": "68b1c12c0304950e0750d17dc795c52223de737e772cfa7142f5fc1316aeddee",
+      "expected_compressed_bytes": 23687,
+      "expected_compressed_sha256": "47873c26038ecf5ec1933772c9e5d1fe970ac3c96a79b2c1347797ab69e7a1ff"
     }
   ]
 }

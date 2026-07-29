@@ -9,6 +9,7 @@ import hashlib
 import json
 import subprocess
 from dataclasses import dataclass
+from importlib.resources import files
 from pathlib import Path
 
 
@@ -29,6 +30,9 @@ class GameSourceSpec:
     source_root: str
     files: tuple[SourceFileSpec, ...] = ()
     excluded_paths: tuple[str, ...] = ()
+    expected_description_sha256: str | None = None
+    expected_compressed_bytes: int | None = None
+    expected_compressed_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -39,11 +43,13 @@ class SourceModule:
     content: bytes
 
 
-_MANIFEST_PATH = Path(__file__).with_name("agentbench_ludi_v1_manifest.json")
-_MANIFEST_BYTES = _MANIFEST_PATH.read_bytes()
+_MANIFEST_RESOURCE = files(__package__).joinpath(
+    "agentbench_ludi_v1_manifest.json"
+)
+_MANIFEST_BYTES = _MANIFEST_RESOURCE.read_bytes()
 _MANIFEST = json.loads(_MANIFEST_BYTES.decode("utf-8"))
 if _MANIFEST.get("schema_version") != "agentbench.ludi-source-manifest.v1":
-    raise RuntimeError(f"unsupported AB-Ludi source manifest: {_MANIFEST_PATH}")
+    raise RuntimeError("unsupported packaged AB-Ludi source manifest")
 
 AGENTBENCH_SOURCE_COMMIT: str = _MANIFEST["source_commit"]
 
@@ -83,6 +89,9 @@ AGENTBENCH_GAME_SPECS: tuple[GameSourceSpec, ...] = tuple(
             for file in game["files"]
         ),
         excluded_paths=_GAME_EXCLUDED_PATHS.get(game["game_id"], ()),
+        expected_description_sha256=game.get("expected_description_sha256"),
+        expected_compressed_bytes=game.get("expected_compressed_bytes"),
+        expected_compressed_sha256=game.get("expected_compressed_sha256"),
     )
     for game in _MANIFEST["games"]
 )

@@ -98,6 +98,12 @@ def test_catalog_freezes_every_public_game_and_exact_source_file():
     assert set(game_ids) == EXPECTED_GAME_IDS
     assert sum(len(spec.files) for spec in AGENTBENCH_GAME_SPECS) == 149
     assert all(len(file.sha256) == 64 for spec in AGENTBENCH_GAME_SPECS for file in spec.files)
+    assert all(
+        spec.expected_compressed_bytes > 0
+        and len(spec.expected_description_sha256) == 64
+        and len(spec.expected_compressed_sha256) == 64
+        for spec in AGENTBENCH_GAME_SPECS
+    )
 
 
 def test_source_manifest_identity_is_independent_of_checkout_newlines():

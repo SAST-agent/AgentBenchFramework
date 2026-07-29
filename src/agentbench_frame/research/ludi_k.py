@@ -210,6 +210,7 @@ def measure_game(
         "canonical_bytes": canonical_bytes,
         "canonical_bits": canonical_bytes * 8,
         "compressed_bytes": len(compressed),
+        "compressed_sha256": sha256(compressed).hexdigest(),
         "k_upper_bits": len(compressed) * 8,
         "compression_ratio": len(compressed) / canonical_bytes,
         "source_sha256": sha256(module_stream).hexdigest(),
@@ -223,6 +224,33 @@ def measure_game(
             for module in ordered
         ],
     }
+
+
+def validate_game_conformance(
+    spec: GameSourceSpec,
+    result: dict[str, Any],
+) -> None:
+    """Reject any v1 corpus result that differs from its frozen full stream."""
+
+    expected = {
+        "description_sha256": spec.expected_description_sha256,
+        "compressed_bytes": spec.expected_compressed_bytes,
+        "compressed_sha256": spec.expected_compressed_sha256,
+    }
+    missing = [name for name, value in expected.items() if value is None]
+    if missing:
+        raise ValueError(
+            f"{spec.game_id}: missing AB-Ludi/1 conformance fields: "
+            f"{','.join(missing)}"
+        )
+    mismatched = [
+        name for name, value in expected.items() if result[name] != value
+    ]
+    if mismatched:
+        raise ValueError(
+            f"{spec.game_id}: AB-Ludi/1 conformance mismatch: "
+            f"{','.join(mismatched)}"
+        )
 
 
 def measure_agentbench_repository(
@@ -240,10 +268,14 @@ def measure_agentbench_repository(
             f"{AGENTBENCH_SOURCE_COMMIT}, got {source_commit}"
         )
     validate_agentbench_corpus(root, source_commit)
-    games = [
-        measure_game(spec, collect_game_sources(root, spec, source_commit))
-        for spec in AGENTBENCH_GAME_SPECS
-    ]
+    games = []
+    for spec in AGENTBENCH_GAME_SPECS:
+        result = measure_game(
+            spec,
+            collect_game_sources(root, spec, source_commit),
+        )
+        validate_game_conformance(spec, result)
+        games.append(result)
     games.sort(key=lambda game: (game["k_upper_bits"], game["game_id"]))
 
     return {
@@ -337,8 +369,9 @@ def write_markdown_report(
             "`k_upper_bits` is eight times the byte length of the canonical "
             "ludeme tree compressed with the report's fixed zlib-9 profile. "
             "The reference-machine ID binds an enforced multi-vector behavior "
-            "fingerprint. The shared decoder and language runtimes are "
-            "conditioned out."
+            "fingerprint, and each v1 game must match its frozen complete "
+            "compressed-stream SHA-256 and length. The shared decoder and "
+            "language runtimes are conditioned out."
         ),
         "",
         "$$",
