@@ -1,1 +1,5 @@
 __pycache__/
+.smoke/
+.pytest_cache/
+_site/
+docs/games/results_payload/
