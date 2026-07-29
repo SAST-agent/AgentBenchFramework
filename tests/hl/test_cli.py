@@ -136,6 +136,52 @@ def test_main_runs_acts_with_stubbed_runner_and_eval(monkeypatch, tmp_path):
     assert "policy_kl" in types  # second act compares against first
 
 
+# ---- A1: evaluator must write under the stable run name ----
+
+def test_evaluator_factory_uses_stable_run_name_as_candidate(tmp_path, monkeypatch):
+    """A1 regression: the evaluator must write runs under the stable run name
+    (args.name), NOT 'hl-<version_id>', so MatchHistoryView(agent=name) and the
+    prompt's replay pointer resolve to real data.
+
+    The original code used ``f"hl-{version.version_id}"[:40]`` as candidate_name,
+    while ContextBuilder reads under ``args.name`` — the two never matched, so
+    every act's prompt got an empty match-history table and no replay path.
+    """
+    from agentbench_frame.hl.reference import BenchmarkSpec
+    from agentbench_frame.hl.codebase import HLCodebase
+
+    cb = HLCodebase(root=tmp_path / "ws", store=tmp_path / "store")
+    captured = {}
+
+    class _SpyEvaluator:
+        def __init__(self, *a, **kw):
+            captured.update(kw)
+
+    monkeypatch.setattr(hl_cli, "LostSpaceEvaluator", _SpyEvaluator)
+    # Skip real snapshot staging — we only care what candidate_name is passed.
+    monkeypatch.setattr(
+        "agentbench_frame.hl.adapter.candidate_command",
+        lambda version, *, store, dest, python=None: (["python", str(dest)], dest),
+    )
+
+    factory = hl_cli._evaluator_factory(
+        "echo", [hl_cli.Opponent(name="rank06", command="echo")], "echo",
+        codebase=cb, stage_root=tmp_path / "stage", data_root=tmp_path / "data",
+    )
+
+    class _V:
+        version_id = "v2026-07-29T052332974022Z_000001"
+        content_hash = "abc123"
+        parent_version_id = None
+        edit_type = "parametrize"
+
+    spec = BenchmarkSpec(spec_id="bench-v1", opponents=("rank06",),
+                         pairs=1, seats="0", timeout=5.0)
+    factory(version=_V(), spec=spec, run_id="hl-v1")
+
+    assert captured["candidate_name"] == "hl-v1"  # stable run name, not hl-<version_id>
+
+
 # ---- logic interpreter probe (D1) ----
 
 def test_rewrite_logic_python_swaps_bare_python():

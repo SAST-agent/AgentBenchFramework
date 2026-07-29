@@ -74,6 +74,12 @@ class HLIterationController:
         self._context_builder = context_builder
         self._events = HLEventWriter(run_id=run_id, path=events_path)
         self._act_counter = 0
+        # Feedback carried from act N into act N+1's prompt: the eval outcome
+        # + policy_kl/occupancy measured at the end of the previous act. None
+        # before the first act with a prior result. Without this the loop
+        # measures whether an edit changed behavior and then never tells the
+        # coding agent — so it keeps making no-op edits.
+        self._prev_feedback: Optional[Dict[str, Any]] = None
         self._budget = {
             "learning_coding_agent_acts": 0,
             "evaluation_coding_agent_acts": 0,
@@ -104,6 +110,7 @@ class HLIterationController:
             try:
                 extra = self._context_builder(
                     version_before=version_before, act_id=act_id,
+                    prev_feedback=self._prev_feedback,
                 )
                 if extra:
                     context.update(extra)
@@ -159,6 +166,7 @@ class HLIterationController:
         # 5. eval on the frozen BenchmarkSpec (only if we have a runnable version)
         eval_status = "incomplete"
         win_rate = None
+        ev_result = None
         if version_after is not None and self._evaluator_factory is not None:
             try:
                 ev_result = self._run_eval(version_after)
@@ -169,6 +177,7 @@ class HLIterationController:
             except Exception:
                 eval_status = "incomplete"
                 win_rate = None
+                ev_result = None
         self._events.write(
             "eval", act_id=act_id,
             spec_id=self.spec.spec_id,
@@ -197,6 +206,16 @@ class HLIterationController:
                 version_after=version_after.version_id,
                 shift=occupancy_shift,
             )
+
+        # 6.5 carry this act's measurements into the NEXT act's prompt so the
+        # coding agent sees whether its edit moved behavior/outcome (not just
+        # the events.jsonl research stream). Best-effort: missing fields stay
+        # missing, never coerced.
+        self._prev_feedback = self._assemble_feedback(
+            ev_result=ev_result, kl_trace=kl_trace,
+            occupancy_shift=occupancy_shift, run_result=run_result,
+            version_after=version_after,
+        )
 
         # 7. budget (learning scope; unknown tokens → None)
         self._budget["learning_coding_agent_acts"] += 1
@@ -279,3 +298,30 @@ class HLIterationController:
         reached_new = sum(1 for e in emitted_new if e is not None)
         total = max(1, len(emitted_old))
         return abs(reached_old - reached_new) / total
+
+    def _assemble_feedback(
+        self, *, ev_result, kl_trace: List[float],
+        occupancy_shift: Optional[float], run_result, version_after,
+    ) -> Dict[str, Any]:
+        """Pack the previous act's outcome + behavior-change measurement for the
+        next act's prompt. All fields optional — missing stays missing."""
+        summary = getattr(ev_result, "summary", None) if ev_result else None
+        summary = summary or {}
+        agg = (summary.get("lostspace") or {}).get("aggregate") or {}
+        kl_mean = (sum(kl_trace) / len(kl_trace)) if kl_trace else None
+        n_changed = sum(
+            1 for k in kl_trace if k is not None and k > self.epsilon
+        )
+        return {
+            "evaluation_status": summary.get("evaluation_status"),
+            "win_rate": summary.get("win_rate"),
+            "avg_rank": agg.get("avg_rank"),
+            "avg_score": agg.get("avg_score"),
+            "avg_turns": agg.get("avg_turns"),
+            "kl_mean": kl_mean,
+            "occupancy_shift": occupancy_shift,
+            "n_changed": n_changed,
+            "n_total": len(kl_trace),
+            "edit_type": getattr(version_after, "edit_type", None),
+            "files_touched": list(run_result.files_touched) if run_result else [],
+        }

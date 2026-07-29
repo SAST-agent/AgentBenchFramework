@@ -98,8 +98,10 @@ def test_prompt_has_anti_derail_clause_unconditional(tmp_path):
     # explicit direction not to debug the harness on all-error histories
     assert "error" in prompt.lower()
     assert "harness" in prompt.lower()
-    # bounds: don't read outside the workspace
-    assert "outside this workspace" in prompt
+    # bounds: agentbench_data/eval/logic/judger stay off-limits, but reading
+    # the ranked reference corpus for strategy research is now allowed.
+    assert "agentbench_data" in prompt.lower()
+    assert "25_lostspace_final_ladder" in prompt
 
 
 def test_prompt_has_anti_derail_clause_with_history(tmp_path):

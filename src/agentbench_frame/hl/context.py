@@ -76,15 +76,17 @@ class ContextBuilder:
         *,
         version_before: Optional[VersionHandle],
         act_id: str,
+        prev_feedback: Optional[Dict[str, Any]] = None,
         **_: Any,
     ) -> Dict[str, Any]:
-        return {"prompt": self._prompt(version_before, act_id),
+        return {"prompt": self._prompt(version_before, act_id, prev_feedback),
                 "timeout": self.timeout}
 
     # ---- internals ----
 
     def _prompt(self, version_before: Optional[VersionHandle],
-                act_id: str) -> str:
+                act_id: str,
+                prev_feedback: Optional[Dict[str, Any]] = None) -> str:
         lines: list[str] = []
         lines.append(
             f"# HL act {act_id} — improve the LostSpace agent\n"
@@ -132,6 +134,10 @@ class ContextBuilder:
                 "improvement.\n"
             )
 
+        feedback = self._feedback_section(prev_feedback)
+        if feedback:
+            lines.append(feedback)
+
         lines.append(
             "## What to do now\n"
             "1. Read `agent.py`.\n"
@@ -147,8 +153,13 @@ class ContextBuilder:
             "(win_rate is null / '-' across all opponents), that is a "
             "harness or environment problem — NOT a strategy problem. "
             "Do NOT try to fix the eval, the logic, or the judger. Do NOT "
-            "read files outside this workspace (no grepping the backend "
-            "logic, no inspecting `agentbench_data/` internals).\n"
+            "inspect `agentbench_data/` internals.\n"
+            "- You MAY read the ranked reference algorithms under "
+            "`AgentBench/top_algorithms/corpus/25_lostspace_final_ladder/` "
+            "for strategy and mechanics research (status enums, operation "
+            "sequencing, scoring, tile types) — that is legitimate strategy "
+            "research, not harness debugging. Do not copy them verbatim and "
+            "do not edit anything outside `agent.py`.\n"
             "- Even with no usable eval signal, make ONE small, reasoned "
             "edit to `agent.py` based on reading the current strategy, then "
             "stop. If you genuinely believe the agent is already optimal, "
@@ -158,6 +169,59 @@ class ContextBuilder:
             "exploration. Edit, then finish.\n"
         )
         return "\n".join(lines)
+
+    def _feedback_section(self, fb: Optional[Dict[str, Any]]) -> str:
+        """Render the previous act's outcome + behavior-change measurement.
+
+        This is the closed-loop signal: the controller measures win_rate and
+        policy_kl every act, and this section hands them back so the agent
+        learns whether its last edit helped, hurt, or did nothing. Without it
+        the agent cannot tell a no-op edit from a productive one.
+        """
+        if not fb:
+            return ""
+        def fmt(v, spec="%g"):
+            return "-" if v is None else spec % v
+        win_rate = fb.get("win_rate")
+        wr_s = (f"{win_rate:.0%}" if isinstance(win_rate, (int, float))
+                else "-")
+        outcome = (
+            f"win_rate={wr_s} avg_rank={fmt(fb.get('avg_rank'), '%.1f')} "
+            f"avg_score={fmt(fb.get('avg_score'), '%.2f')} "
+            f"avg_turns={fmt(fb.get('avg_turns'), '.0f')} "
+            f"(eval={fb.get('evaluation_status') or '-'})"
+        )
+        kl_mean = fb.get("kl_mean")
+        n_changed = fb.get("n_changed", 0)
+        n_total = fb.get("n_total", 0)
+        occ = fb.get("occupancy_shift")
+        behavior = (
+            f"policy_kl={fmt(kl_mean, '%.4g')} — your edit changed the chosen "
+            f"action on {n_changed}/{n_total} reference decision points; "
+            f"occupancy_shift={fmt(occ, '%.3g')}"
+        )
+        parts = [
+            "## Feedback on your last edit",
+            f"- outcome: {outcome}",
+            f"- behavior: {behavior}",
+        ]
+        # No-op callout: the edit landed but changed zero reference decisions
+        # and produced no occupancy shift. This is the exact failure mode that
+        # stalled prior iterations (plausible edits in dead/dominated code).
+        no_behavior_change = (
+            n_total > 0 and n_changed == 0
+            and (occ is None or occ == 0)
+        )
+        if no_behavior_change:
+            parts.append(
+                "- NO MEASURABLE EFFECT: your last edit changed nothing "
+                "observable (0/" + f"{n_total} decisions changed, no occupancy "
+                "shift). It likely lands in a code path the game never reaches, "
+                "or is dominated by other logic. This act, edit the ACTIVE "
+                "decision path — the branch actually taken when seat 0 is alive "
+                "— or say explicitly that the agent is optimal and make no edit."
+            )
+        return "\n".join(parts) + "\n"
 
     def _history_section(self) -> str:
         view = MatchHistoryView(

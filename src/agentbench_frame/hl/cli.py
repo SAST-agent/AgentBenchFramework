@@ -199,7 +199,12 @@ def _evaluator_factory(logic_command: str, opponents: List[Opponent],
             cmd_str = " ".join(shlex.quote(c) for c in cmd)
         return LostSpaceEvaluator(
             logic_command=logic_command,
-            candidate_name=f"hl-{version.version_id}"[:40],
+            # Write runs under the stable run name (args.name), not
+            # 'hl-<version_id>'. ContextBuilder/MatchHistoryView read under
+            # args.name, so any other value leaves the per-act prompt with an
+            # empty match-history table and no replay path (the agent edits
+            # blind). version_id stays in run.toml/summary.json for provenance.
+            candidate_name=run_id,
             candidate_command=cmd_str,
             opponents=opponents,
             filler_command=filler_command,

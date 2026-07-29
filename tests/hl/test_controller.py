@@ -321,3 +321,90 @@ def test_successful_run_has_no_failure_reason(tmp_path):
     events = read_events(tmp_path / "e.jsonl")
     v_ev = next(e for e in events if e["event_type"] == "version")
     assert v_ev.get("failure_reason") is None
+
+
+# ---- A2/A3: thread previous measurements into the next prompt ----
+
+class _CapturingRunner:
+    """Records the prompt each act and mutates agent.py so versions differ."""
+    def __init__(self):
+        self.prompts: List[str] = []
+    def run(self, *, workspace, context):
+        from agentbench_frame.hl.runner import AgentRunResult
+        self.prompts.append(context.get("prompt", ""))
+        (workspace / "agent.py").write_text(
+            f"# act {len(self.prompts)}\n", encoding="utf-8")
+        return AgentRunResult(edit_type="parametrize", files_touched=["agent.py"],
+                              time_s=0.0)
+
+
+def _controller_with_context(tmp_path, *, eval_results, probe_emissions):
+    """Controller wired with a real ContextBuilder so prompts get built."""
+    from agentbench_frame.hl.context import ContextBuilder
+    ws = _make_workspace(tmp_path)
+    cb = HLCodebase(root=ws, store=tmp_path / "store")
+    v0 = cb.snapshot(parent_version_id=None)
+    builder = ContextBuilder(codebase=cb, data_root=tmp_path, game="25_lostspace",
+                             agent_name="r", spec=_spec())
+    runner = _CapturingRunner()
+    ctrl = HLIterationController(
+        codebase=cb, runner=runner, spec=_spec(), reference=_ref_set(),
+        run_id="r", events_path=tmp_path / "e.jsonl",
+        evaluator_factory=_stub_evaluator_factory(eval_results),
+        probe_factory=_stub_probe_factory(probe_emissions),
+        stage_root=tmp_path / "stage", context_builder=builder.build,
+    )
+    return ctrl, v0, runner
+
+
+def test_first_act_prompt_has_no_feedback_section(tmp_path):
+    ctrl, v0, runner = _controller_with_context(
+        tmp_path,
+        eval_results=[_stub_result(0.0, "complete")],
+        probe_emissions=[[("finish",)], [("finish",)]],
+    )
+    ctrl.act(version_before=v0)
+    assert len(runner.prompts) == 1
+    assert "Feedback on your last edit" not in runner.prompts[0]
+
+
+def test_second_act_prompt_carries_previous_eval_and_noop_callout(tmp_path):
+    """A2/A3: act 2's prompt shows act 1's eval + policy_kl, and the explicit
+    NO-MEASURABLE-EFFECT callout when the edit changed zero reference decisions
+    (kl=0). This is the feedback that was previously measured then hidden."""
+    # 2 acts × 2 probes each, all identical primitives -> kl=0 both acts.
+    emissions = [[("finish",)], [("finish",)], [("finish",)], [("finish",)]]
+    ctrl, v0, runner = _controller_with_context(
+        tmp_path,
+        eval_results=[_stub_result(0.0, "complete"),
+                      _stub_result(0.0, "complete")],
+        probe_emissions=emissions,
+    )
+    v1 = ctrl.act(version_before=v0)
+    ctrl.act(version_before=v1)
+    assert len(runner.prompts) == 2
+    p2 = runner.prompts[1]
+    assert "Feedback on your last edit" in p2
+    assert "win_rate" in p2
+    assert "policy_kl" in p2
+    # zero behavior change -> the explicit no-op callout fires
+    assert "NO MEASURABLE EFFECT" in p2
+    assert "0/" in p2  # "changed the chosen action on 0/N"
+
+
+def test_second_act_prompt_no_callout_when_edit_changed_behavior(tmp_path):
+    """When policy_kl > 0 (the edit changed decisions), the no-op callout is
+    suppressed — positive signal only."""
+    # act 1: v0 emits finish, v1 emits move -> kl>0
+    emissions = [[("finish",)], [("move", 0)], [("finish",)], [("move", 0)]]
+    ctrl, v0, runner = _controller_with_context(
+        tmp_path,
+        eval_results=[_stub_result(0.5, "complete"),
+                      _stub_result(0.5, "complete")],
+        probe_emissions=emissions,
+    )
+    v1 = ctrl.act(version_before=v0)
+    ctrl.act(version_before=v1)
+    p2 = runner.prompts[1]
+    assert "Feedback on your last edit" in p2
+    assert "NO MEASURABLE EFFECT" not in p2
