@@ -109,6 +109,14 @@ episode 全部进入 prompt，然后只执行一次 Codex act。editable workspa
 18 局正式评测。真实 rollback-guided 结果从 v4 的 4/18 恢复到 7/18，详见
 [`docs/experiments/2026-07-29-generals-v5-rollback-guided-result.md`](docs/experiments/2026-07-29-generals-v5-rollback-guided-result.md)。
 
+v6 是已批准的 legacy `v5 -> v6` macro-planner pilot。完整的冻结输入、精确命令、
+split 隔离、recovery 语义、产物与审计清单见
+[`docs/experiments/2026-07-29-generals-v6-protocol.md`](docs/experiments/2026-07-29-generals-v6-protocol.md)。
+真实命令使用 agent-polished
+`backend_sources/corpus/28_generals/skills/replay-analysis-v2/SKILL.md`；
+validation 与 formal evidence 都只能在 provider act 和 v6 source freeze 之后
+生成，不能进入 prompt。
+
 ### 5 行跑一场对战
 
 ```python
