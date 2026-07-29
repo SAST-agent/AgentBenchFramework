@@ -56,9 +56,12 @@ Paths are relative to the selected source root. Length prefixes make the
 encoding injective even for arbitrary binary contents. The complexity program
 is the complete zlib stream produced with level 9, `Z_DEFLATED`,
 `MAX_WBITS`, memory level 9, and `Z_DEFAULT_STRATEGY`. The reference-machine
-identity includes the zlib runtime version and a SHA-256 fingerprint of the
-compressed output for a fixed test vector. The report also records the zlib
-compile/runtime versions and the full behavior fingerprint.
+identity includes the expected SHA-256 fingerprint of framed compressed outputs
+for a fixed multi-vector behavior suite. The calculator recomputes that full
+fingerprint on the host and fails closed before measuring if it differs. zlib
+release numbers are intentionally not part of the identity: implementations
+with the exact required behavior are equivalent, while a version with different
+behavior cannot emit an AB-Ludi/1 report.
 
 ## Input Boundary
 
@@ -102,9 +105,9 @@ The frozen exclusions remove:
 The versioned source manifest fixes all 149 included relative paths and their
 SHA-256 digests. Selection rules are applied to the pinned Git tree and compared
 against that exact manifest; a missing, newly eligible, non-regular, or
-hash-mismatched blob fails closed. The manifest itself has a SHA-256 identity in
-the result artifact, so a future corpus revision cannot silently reuse the same
-input identity.
+hash-mismatched blob fails closed. The manifest itself has a SHA-256 identity
+over canonical JSON in the result artifact, so checkout newline conversion does
+not alter the identity and a future corpus revision cannot silently reuse it.
 
 ## Components
 

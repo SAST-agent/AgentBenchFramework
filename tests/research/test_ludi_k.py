@@ -1,5 +1,6 @@
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
 
@@ -8,6 +9,8 @@ from agentbench_frame.research.agentbench_catalog import (
     SourceModule,
 )
 from agentbench_frame.research.ludi_k import (
+    ACTIVE_ZLIB_BEHAVIOR_FINGERPRINT,
+    EXPECTED_ZLIB_BEHAVIOR_FINGERPRINT,
     REFERENCE_MACHINE_ID,
     ZLIB_BEHAVIOR_FINGERPRINT,
     decode_ludi_description,
@@ -19,9 +22,26 @@ from agentbench_frame.research.ludi_k import (
 
 
 def test_reference_machine_identity_includes_compressor_behavior():
-    assert REFERENCE_MACHINE_ID.startswith("AB-LUDI/1+zlib-")
+    assert REFERENCE_MACHINE_ID == (
+        "AB-LUDI/1+zlib-profile-"
+        f"{EXPECTED_ZLIB_BEHAVIOR_FINGERPRINT[:16]}"
+    )
     assert len(ZLIB_BEHAVIOR_FINGERPRINT) == 64
-    assert ZLIB_BEHAVIOR_FINGERPRINT[:16] in REFERENCE_MACHINE_ID
+    assert ZLIB_BEHAVIOR_FINGERPRINT == EXPECTED_ZLIB_BEHAVIOR_FINGERPRINT
+    assert ACTIVE_ZLIB_BEHAVIOR_FINGERPRINT == EXPECTED_ZLIB_BEHAVIOR_FINGERPRINT
+
+
+def test_measurement_fails_closed_on_compressor_behavior_drift(monkeypatch):
+    monkeypatch.setattr(
+        "agentbench_frame.research.ludi_k.ACTIVE_ZLIB_BEHAVIOR_FINGERPRINT",
+        "0" * 64,
+    )
+
+    with pytest.raises(RuntimeError, match="compressor behavior mismatch"):
+        measure_game(
+            GameSourceSpec("g", "Game", "logic/g"),
+            (SourceModule("rules.py", b"RULE = 1\n"),),
+        )
 
 
 def test_ludi_description_round_trips_arbitrary_source_bytes():
@@ -157,3 +177,35 @@ def test_report_writers_are_stable_and_machine_readable(tmp_path):
     assert "AB-Ludi/1" in markdown
     assert "not exact Kolmogorov complexity" in markdown
     assert "| 1 | `g` | Game |" in markdown
+
+
+def test_report_writers_emit_canonical_utf8_lf_bytes(tmp_path, monkeypatch):
+    report = {
+        "schema_version": "agentbench.ludi-k.v1",
+        "reference_machine": {
+            "id": REFERENCE_MACHINE_ID,
+            "metric": "conditional_k_upper_bits",
+        },
+        "source": {
+            "repository": "https://github.com/Aoraku/AgentBench",
+            "commit": "a" * 40,
+        },
+        "games": [
+            measure_game(
+                GameSourceSpec("g", "游戏", "logic/g"),
+                (SourceModule("rules.py", b"RULE = 1\n"),),
+            )
+        ],
+    }
+
+    def reject_text_write(*args, **kwargs):
+        raise AssertionError("report writers must bypass platform newline translation")
+
+    monkeypatch.setattr(Path, "write_text", reject_text_write)
+    json_path = write_json_report(report, tmp_path / "report.json")
+    markdown_path = write_markdown_report(report, tmp_path / "report.md")
+
+    assert b"\r\n" not in json_path.read_bytes()
+    assert b"\r\n" not in markdown_path.read_bytes()
+    assert json_path.read_bytes().endswith(b"\n")
+    assert markdown_path.read_bytes().endswith(b"\n")

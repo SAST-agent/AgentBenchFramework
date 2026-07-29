@@ -28,8 +28,12 @@ from .agentbench_catalog import (
 SCHEMA_VERSION = "agentbench.ludi-k.v1"
 _MAGIC = b"AB-LUDI/1\x00"
 _UINT64 = struct.Struct(">Q")
-_COMPRESSOR_TEST_VECTOR = (
-    b"AB-Ludi/1 compressor behavior test vector\n" * 32
+_COMPRESSOR_TEST_VECTORS = (
+    b"",
+    b"AB-Ludi/1 compressor behavior test vector\n" * 32,
+    bytes(range(256)) * 4,
+    b"\x00" * 4096,
+    bytes((index * 73 + 19) % 256 for index in range(8192)),
 )
 
 
@@ -44,13 +48,26 @@ def _compress_with_profile(description: bytes) -> bytes:
     return compressor.compress(description) + compressor.flush()
 
 
-ZLIB_BEHAVIOR_FINGERPRINT = sha256(
-    _compress_with_profile(_COMPRESSOR_TEST_VECTOR)
-).hexdigest()
+def _compressor_behavior_fingerprint() -> str:
+    framed_outputs = (
+        _UINT64.pack(len(compressed)) + compressed
+        for compressed in (
+            _compress_with_profile(vector)
+            for vector in _COMPRESSOR_TEST_VECTORS
+        )
+    )
+    return sha256(b"".join(framed_outputs)).hexdigest()
+
+
+EXPECTED_ZLIB_BEHAVIOR_FINGERPRINT = (
+    "1aea6c5af9a095f5a8502fcfa535b649c119bf32ff22c3a59b60233617b46698"
+)
+ACTIVE_ZLIB_BEHAVIOR_FINGERPRINT = _compressor_behavior_fingerprint()
+ZLIB_BEHAVIOR_FINGERPRINT = EXPECTED_ZLIB_BEHAVIOR_FINGERPRINT
 REFERENCE_MACHINE_FAMILY = "AB-LUDI/1"
 REFERENCE_MACHINE_ID = (
-    f"{REFERENCE_MACHINE_FAMILY}+zlib-{zlib.ZLIB_RUNTIME_VERSION}"
-    f"+tv-{ZLIB_BEHAVIOR_FINGERPRINT[:16]}"
+    f"{REFERENCE_MACHINE_FAMILY}+zlib-profile-"
+    f"{EXPECTED_ZLIB_BEHAVIOR_FINGERPRINT[:16]}"
 )
 
 
@@ -155,6 +172,15 @@ def decode_ludi_description(
 
 
 def _compress_description(description: bytes) -> bytes:
+    if (
+        ACTIVE_ZLIB_BEHAVIOR_FINGERPRINT
+        != EXPECTED_ZLIB_BEHAVIOR_FINGERPRINT
+    ):
+        raise RuntimeError(
+            "AB-Ludi/1 compressor behavior mismatch: expected "
+            f"{EXPECTED_ZLIB_BEHAVIOR_FINGERPRINT}, got "
+            f"{ACTIVE_ZLIB_BEHAVIOR_FINGERPRINT}"
+        )
     return _compress_with_profile(description)
 
 
@@ -234,9 +260,9 @@ def measure_agentbench_repository(
                 "wbits": zlib.MAX_WBITS,
                 "mem_level": 9,
                 "strategy": "Z_DEFAULT_STRATEGY",
-                "compile_version": zlib.ZLIB_VERSION,
-                "runtime_version": zlib.ZLIB_RUNTIME_VERSION,
-                "behavior_fingerprint": ZLIB_BEHAVIOR_FINGERPRINT,
+                "behavior_fingerprint": (
+                    EXPECTED_ZLIB_BEHAVIOR_FINGERPRINT
+                ),
             },
             "decoder_constant_included": False,
             "conditioned_on": [
@@ -274,7 +300,7 @@ def write_json_report(report: dict[str, Any], output_path: str | Path) -> Path:
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    path.write_text(text, encoding="utf-8")
+    path.write_bytes(text.encode("utf-8"))
     return path
 
 
@@ -310,9 +336,9 @@ def write_markdown_report(
         (
             "`k_upper_bits` is eight times the byte length of the canonical "
             "ludeme tree compressed with the report's fixed zlib-9 profile. "
-            "The reference-machine ID binds the zlib runtime and fixed-vector "
-            "behavior fingerprint. The shared decoder and language runtimes "
-            "are conditioned out."
+            "The reference-machine ID binds an enforced multi-vector behavior "
+            "fingerprint. The shared decoder and language runtimes are "
+            "conditioned out."
         ),
         "",
         "$$",
@@ -372,5 +398,5 @@ def write_markdown_report(
 
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines), encoding="utf-8")
+    path.write_bytes("\n".join(lines).encode("utf-8"))
     return path

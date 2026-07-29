@@ -4,7 +4,7 @@
 
 **Goal:** Add a reproducible AB-Ludi/1 calculator and frozen Kolmogorov-complexity upper bounds for all ten public AgentBench game-logic corpora.
 
-**Architecture:** A versioned path/hash manifest binds the authoritative logic source for each game to immutable blobs at one pinned Git commit. A lossless binary ludeme-tree encoder frames exact source modules, a zlib profile identified by runtime and behavior fingerprint supplies the executable description upper bound, and renderers produce auditable JSON and Markdown artifacts.
+**Architecture:** A versioned path/hash manifest binds the authoritative logic source for each game to immutable blobs at one pinned Git commit. A lossless binary ludeme-tree encoder frames exact source modules, a zlib profile enforced by a fixed multi-vector behavior fingerprint supplies the executable description upper bound, and renderers produce auditable JSON and Markdown artifacts.
 
 **Tech Stack:** Python 3.11 standard library, `pytest`, argparse, zlib, SHA-256.
 

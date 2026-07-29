@@ -1,4 +1,5 @@
 import hashlib
+import json
 import subprocess
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from agentbench_frame.research.agentbench_catalog import (
     SourceFileSpec,
     collect_game_sources,
     git_head_commit,
+    source_manifest_sha256,
     validate_agentbench_corpus,
 )
 
@@ -96,6 +98,17 @@ def test_catalog_freezes_every_public_game_and_exact_source_file():
     assert set(game_ids) == EXPECTED_GAME_IDS
     assert sum(len(spec.files) for spec in AGENTBENCH_GAME_SPECS) == 149
     assert all(len(file.sha256) == 64 for spec in AGENTBENCH_GAME_SPECS for file in spec.files)
+
+
+def test_source_manifest_identity_is_independent_of_checkout_newlines():
+    manifest = {
+        "schema_version": "example.v1",
+        "games": [{"game_id": "g", "title": "测试"}],
+    }
+    lf = (json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode()
+    crlf = lf.replace(b"\n", b"\r\n")
+
+    assert source_manifest_sha256(lf) == source_manifest_sha256(crlf)
 
 
 def test_collect_game_sources_reads_pinned_git_blobs_not_worktree(tmp_path):

@@ -4,7 +4,7 @@ Source: [https://github.com/Aoraku/AgentBench](https://github.com/Aoraku/AgentBe
 
 These values are **not exact Kolmogorov complexity**. They are conditional executable-description upper bounds under the fixed AB-Ludi/1 source-module reference machine.
 
-`k_upper_bits` is eight times the byte length of the canonical ludeme tree compressed with the report's fixed zlib-9 profile. The reference-machine ID binds the zlib runtime and fixed-vector behavior fingerprint. The shared decoder and language runtimes are conditioned out.
+`k_upper_bits` is eight times the byte length of the canonical ludeme tree compressed with the report's fixed zlib-9 profile. The reference-machine ID binds an enforced multi-vector behavior fingerprint. The shared decoder and language runtimes are conditioned out.
 
 $$
 K(G \mid U_{\mathrm{AB\text{-}Ludi/1}}, R) \leq 8\,\left|\operatorname{zlib9}(\operatorname{encode}_{\mathrm{AB\text{-}Ludi/1}}(G))\right| + \mathcal{O}(1)

@@ -46,7 +46,22 @@ if _MANIFEST.get("schema_version") != "agentbench.ludi-source-manifest.v1":
     raise RuntimeError(f"unsupported AB-Ludi source manifest: {_MANIFEST_PATH}")
 
 AGENTBENCH_SOURCE_COMMIT: str = _MANIFEST["source_commit"]
-SOURCE_MANIFEST_SHA256 = hashlib.sha256(_MANIFEST_BYTES).hexdigest()
+
+
+def source_manifest_sha256(raw_manifest: bytes) -> str:
+    """Hash the manifest's canonical JSON, independent of checkout newlines."""
+
+    manifest = json.loads(raw_manifest.decode("utf-8"))
+    canonical = json.dumps(
+        manifest,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+SOURCE_MANIFEST_SHA256 = source_manifest_sha256(_MANIFEST_BYTES)
 
 _GAME_EXCLUDED_PATHS: dict[str, tuple[str, ...]] = {
     "23_doto": ("GamePlayerInUnity.py", "server2.py", "server3.py"),

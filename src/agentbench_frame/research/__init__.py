@@ -9,6 +9,7 @@ from .agentbench_catalog import (
     SourceModule,
     collect_game_sources,
     git_head_commit,
+    source_manifest_sha256,
     validate_agentbench_corpus,
 )
 
@@ -21,5 +22,6 @@ __all__ = [
     "SourceModule",
     "collect_game_sources",
     "git_head_commit",
+    "source_manifest_sha256",
     "validate_agentbench_corpus",
 ]

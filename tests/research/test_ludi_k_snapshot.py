@@ -5,9 +5,25 @@ from agentbench_frame.research.agentbench_catalog import (
     AGENTBENCH_GAME_SPECS,
     SOURCE_MANIFEST_SHA256,
 )
+from agentbench_frame.research.ludi_k import (
+    EXPECTED_ZLIB_BEHAVIOR_FINGERPRINT,
+    REFERENCE_MACHINE_ID,
+)
 
 REPORT_PATH = Path("docs/research/agentbench-ludi-k-v1.json")
 SOURCE_COMMIT = "b581bca3ba3d2d7d58a2f8c6bbddd060fc7fdc87"
+EXPECTED_K_UPPER_BITS = {
+    "23_doto": 113384,
+    "24_miracle": 144200,
+    "25_aquawar": 178632,
+    "25_lostspace": 179032,
+    "26_snakego": 79624,
+    "27_antwar": 170528,
+    "28_generals": 126888,
+    "29_rollman": 101920,
+    "30_antwar2": 299528,
+    "30_deepclue": 189496,
+}
 
 
 def test_frozen_agentbench_report_covers_every_game_and_source_file():
@@ -15,7 +31,16 @@ def test_frozen_agentbench_report_covers_every_game_and_source_file():
 
     assert report["schema_version"] == "agentbench.ludi-k.v1"
     assert report["reference_machine"]["family"] == "AB-LUDI/1"
-    assert report["reference_machine"]["id"].startswith("AB-LUDI/1+zlib-")
+    assert report["reference_machine"]["id"] == REFERENCE_MACHINE_ID
+    assert report["reference_machine"]["compressor"] == {
+        "behavior_fingerprint": EXPECTED_ZLIB_BEHAVIOR_FINGERPRINT,
+        "format": "zlib",
+        "level": 9,
+        "mem_level": 9,
+        "method": "DEFLATED",
+        "strategy": "Z_DEFAULT_STRATEGY",
+        "wbits": 15,
+    }
     assert report["reference_machine"]["decoder_constant_included"] is False
     assert report["source"]["commit"] == SOURCE_COMMIT
     assert report["source"]["manifest_sha256"] == SOURCE_MANIFEST_SHA256
@@ -24,6 +49,9 @@ def test_frozen_agentbench_report_covers_every_game_and_source_file():
     expected_ids = {spec.game_id for spec in AGENTBENCH_GAME_SPECS}
     assert len(games) == 10
     assert {game["game_id"] for game in games} == expected_ids
+    assert {
+        game["game_id"]: game["k_upper_bits"] for game in games
+    } == EXPECTED_K_UPPER_BITS
     assert [game["k_upper_bits"] for game in games] == sorted(
         game["k_upper_bits"] for game in games
     )

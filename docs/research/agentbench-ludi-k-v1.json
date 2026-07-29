@@ -918,13 +918,11 @@
   ],
   "reference_machine": {
     "compressor": {
-      "behavior_fingerprint": "97409c7e2ba69aa5c8e30aabc3ca35a903d0cd90d61e45b9684299de2c8980da",
-      "compile_version": "1.3.1",
+      "behavior_fingerprint": "1aea6c5af9a095f5a8502fcfa535b649c119bf32ff22c3a59b60233617b46698",
       "format": "zlib",
       "level": 9,
       "mem_level": 9,
       "method": "DEFLATED",
-      "runtime_version": "1.3.1",
       "strategy": "Z_DEFAULT_STRATEGY",
       "wbits": 15
     },
@@ -935,7 +933,7 @@
     "decoder_constant_included": false,
     "encoding": "uint64-be-length-prefixed source-module ludeme tree",
     "family": "AB-LUDI/1",
-    "id": "AB-LUDI/1+zlib-1.3.1+tv-97409c7e2ba69aa5",
+    "id": "AB-LUDI/1+zlib-profile-1aea6c5af9a095f5",
     "literature": [
       {
         "title": "Evolutionary Game Design",
@@ -953,7 +951,7 @@
     "catalog_game_count": 10,
     "commit": "b581bca3ba3d2d7d58a2f8c6bbddd060fc7fdc87",
     "manifest_schema": "agentbench.ludi-source-manifest.v1",
-    "manifest_sha256": "da4fbdc697c41a3159dd0045c8401357bc5194f09aa919c9173239900932756a",
+    "manifest_sha256": "fbfd2ddd03faea8365c9c28c3a0131f25af6e715bfe1525b8838829ff97c8055",
     "repository": "https://github.com/Aoraku/AgentBench"
   }
 }
