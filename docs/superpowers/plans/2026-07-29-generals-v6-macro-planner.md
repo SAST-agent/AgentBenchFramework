@@ -635,7 +635,7 @@ Expected: no output.
   --agentbench-root /home/cathy/AgentBench/AgentBench/.worktrees/generals-assets \
   --manifest /home/cathy/AgentBench/AgentBench/.worktrees/generals-assets/backend_sources/corpus/28_generals/benchmark/pilot-v1.toml \
   --learning-manifest /home/cathy/AgentBench/AgentBench/.worktrees/generals-assets/backend_sources/corpus/28_generals/benchmark/v6-strongest-learning-v1.toml \
-  --replay-skill backend_sources/corpus/28_generals/skills/replay-analysis-v1/SKILL.md \
+  --replay-skill backend_sources/corpus/28_generals/skills/replay-analysis-v2/SKILL.md \
   --parent-run /home/cathy/AgentBench/AgentBenchFramework/.worktrees/generals-hl/agentbench_data/runs/28_generals/generals-hl/20260729_0818_e6bcb9b3 \
   --expected-parent-hash facd39c8a0c064823da68f3dd3eba4a832c08815f75369407112ca087f1ecd9e \
   --data-dir /home/cathy/AgentBench/AgentBenchFramework/.worktrees/generals-hl/agentbench_data \
