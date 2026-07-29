@@ -1,10 +1,17 @@
+import hashlib
+import subprocess
 from pathlib import Path
 
 import pytest
 
 from agentbench_frame.research.agentbench_catalog import (
     AGENTBENCH_GAME_SPECS,
+    AGENTBENCH_SOURCE_COMMIT,
+    SOURCE_MANIFEST_SHA256,
+    GameSourceSpec,
+    SourceFileSpec,
     collect_game_sources,
+    git_head_commit,
     validate_agentbench_corpus,
 )
 
@@ -22,129 +29,178 @@ EXPECTED_GAME_IDS = {
 }
 
 
-def _spec(game_id: str):
-    return next(spec for spec in AGENTBENCH_GAME_SPECS if spec.game_id == game_id)
+def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+    )
 
 
-def _source_root(repo: Path, game_id: str) -> Path:
-    spec = _spec(game_id)
-    root = repo / spec.source_root
-    root.mkdir(parents=True)
-    return root
+def _init_repo(repo: Path) -> None:
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
 
 
-def _materialize_all_games(repo: Path) -> None:
-    for spec in AGENTBENCH_GAME_SPECS:
-        root = repo / spec.source_root
-        root.mkdir(parents=True)
-        (root / "rules.py").write_text(f"GAME = {spec.game_id!r}\n")
+def _commit(repo: Path, message: str = "fixture") -> str:
+    _git(repo, "add", ".")
+    _git(
+        repo,
+        "-c",
+        "user.name=AgentBench Test",
+        "-c",
+        "user.email=agentbench-test@example.invalid",
+        "commit",
+        "-qm",
+        message,
+    )
+    return git_head_commit(repo)
 
 
-def test_catalog_names_every_public_game_once():
-    game_ids = [spec.game_id for spec in AGENTBENCH_GAME_SPECS]
-
-    assert len(game_ids) == 10
-    assert len(set(game_ids)) == 10
-    assert set(game_ids) == EXPECTED_GAME_IDS
+def _sha(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
 
 
-def test_collect_game_sources_keeps_rule_code_and_configuration(tmp_path):
-    root = _source_root(tmp_path, "25_lostspace")
-    expected = {
-        "engine.py": b"print('engine')\n",
-        "native/rule.cpp": b"int rule = 1;\n",
-        "native/rule.h": b"#define RULE 1\n",
-        "native/rule.hpp": b"struct Rule {};\n",
-        "native/rule.c": b"int c_rule = 1;\n",
-        "rules/config.json": b'{"turns": 8}\n',
-        "rules/map.g4": b"grammar Map;\n",
-        "rules/arena.map": b"floor\n",
-    }
-    for relative_path, content in expected.items():
-        path = root / relative_path
+def _custom_spec(
+    game_id: str,
+    files: dict[str, bytes],
+    *,
+    excluded_paths: tuple[str, ...] = (),
+) -> GameSourceSpec:
+    return GameSourceSpec(
+        game_id=game_id,
+        title=game_id,
+        source_root=f"backend_sources/corpus/{game_id}/logic/gamecode_logic",
+        files=tuple(
+            SourceFileSpec(path=path, sha256=_sha(content))
+            for path, content in sorted(files.items())
+        ),
+        excluded_paths=excluded_paths,
+    )
+
+
+def _write_files(repo: Path, spec: GameSourceSpec, files: dict[str, bytes]) -> None:
+    for relative_path, content in files.items():
+        path = repo / spec.source_root / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(content)
 
-    modules = collect_game_sources(tmp_path, _spec("25_lostspace"))
 
-    assert [module.path for module in modules] == sorted(expected)
-    assert {module.path: module.content for module in modules} == expected
+def test_catalog_freezes_every_public_game_and_exact_source_file():
+    game_ids = [spec.game_id for spec in AGENTBENCH_GAME_SPECS]
+
+    assert AGENTBENCH_SOURCE_COMMIT == "b581bca3ba3d2d7d58a2f8c6bbddd060fc7fdc87"
+    assert len(SOURCE_MANIFEST_SHA256) == 64
+    assert len(game_ids) == 10
+    assert len(set(game_ids)) == 10
+    assert set(game_ids) == EXPECTED_GAME_IDS
+    assert sum(len(spec.files) for spec in AGENTBENCH_GAME_SPECS) == 149
+    assert all(len(file.sha256) == 64 for spec in AGENTBENCH_GAME_SPECS for file in spec.files)
 
 
-def test_collect_game_sources_excludes_non_authoritative_material(tmp_path):
-    root = _source_root(tmp_path, "30_deepclue")
-    (root / "engine.py").write_text("ENGINE = True\n")
+def test_collect_game_sources_reads_pinned_git_blobs_not_worktree(tmp_path):
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    committed = {"rules.py": b"RULE = 'committed'\n"}
+    spec = _custom_spec("game", committed)
+    _write_files(repo, spec, committed)
+    commit = _commit(repo)
 
-    excluded = {
-        "data/0/story.json": "{}",
-        "jsoncpp/json.hpp": "// vendor",
-        "lib/helper.cpp": "// vendor",
-        "output/main.cpp": "// generated output",
-        "test_config/case.json": "{}",
-        "tests/test_engine.py": "assert True",
-        "judge_dev_sample_ai/bot.py": "pass",
-        "bak/old.py": "pass",
-        "docs/rules.py": "pass",
-        "MapLexer.py": "# generated",
-        "MapParser.py": "# generated",
-        "MapListener.py": "# generated",
-        "main_test.py": "pass",
-        "main_with_debug.py": "pass",
-        "old_main.py": "pass",
-        "ai_demo.py": "pass",
-        "upload.py": "pass",
-        "binary.png": "not source",
-        "README.md": "not executable logic",
-        "Makefile": "build only",
+    root = repo / spec.source_root
+    (root / "rules.py").write_bytes(b"RULE = 'dirty'\n")
+    (root / "untracked.py").write_bytes(b"RULE = 'untracked'\n")
+
+    modules = collect_game_sources(repo, spec, commit)
+
+    assert [(module.path, module.content) for module in modules] == [
+        ("rules.py", committed["rules.py"])
+    ]
+
+
+def test_collect_game_sources_enforces_exact_manifest_boundary(tmp_path):
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    selected = {
+        "engine.py": b"ENGINE = True\n",
+        "native/rule.cpp": b"int rule = 1;\n",
+        "rules/config.json": b'{"turns": 8}\n',
     }
-    for relative_path, content in excluded.items():
-        path = root / relative_path
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content)
+    spec = _custom_spec("game", selected)
+    _write_files(repo, spec, selected)
+    commit = _commit(repo)
 
-    modules = collect_game_sources(tmp_path, _spec("30_deepclue"))
+    modules = collect_game_sources(repo, spec, commit)
+    assert [module.path for module in modules] == sorted(selected)
 
-    assert [module.path for module in modules] == ["engine.py"]
-
-
-def test_collect_game_sources_rejects_missing_or_empty_root(tmp_path):
-    spec = _spec("24_miracle")
-
-    with pytest.raises(ValueError, match="missing authoritative source root"):
-        collect_game_sources(tmp_path, spec)
-
-    (tmp_path / spec.source_root).mkdir(parents=True)
-    with pytest.raises(ValueError, match="no selected logic files"):
-        collect_game_sources(tmp_path, spec)
+    extra = repo / spec.source_root / "new_rule.py"
+    extra.write_text("NEW = True\n")
+    changed_commit = _commit(repo, "add selected source")
+    with pytest.raises(ValueError, match="source manifest mismatch.*extra=new_rule.py"):
+        collect_game_sources(repo, spec, changed_commit)
 
 
-def test_collect_game_sources_rejects_symlinks_outside_authoritative_root(tmp_path):
-    root = _source_root(tmp_path, "26_snakego")
-    outside = tmp_path / "outside.py"
-    outside.write_text("SECRET = True\n")
-    (root / "rules.py").symlink_to(outside)
+def test_collect_game_sources_rejects_missing_file_or_hash_mismatch(tmp_path):
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    original = {"rules.py": b"RULE = 1\n"}
+    spec = _custom_spec("game", original)
+    _write_files(repo, spec, original)
+    commit = _commit(repo)
 
-    with pytest.raises(ValueError, match="symbolic link"):
-        collect_game_sources(tmp_path, _spec("26_snakego"))
+    (repo / spec.source_root / "rules.py").unlink()
+    missing_commit = _commit(repo, "delete source")
+    with pytest.raises(ValueError, match="source manifest mismatch.*missing=rules.py"):
+        collect_game_sources(repo, spec, missing_commit)
+
+    _write_files(repo, spec, {"rules.py": b"RULE = 2\n"})
+    changed_commit = _commit(repo, "change source")
+    with pytest.raises(ValueError, match="SHA-256 mismatch.*rules.py"):
+        collect_game_sources(repo, spec, changed_commit)
+
+    assert collect_game_sources(repo, spec, commit)[0].content == original["rules.py"]
+
+
+def test_collect_game_sources_rejects_git_symlink(tmp_path):
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    content = b"outside.py"
+    spec = _custom_spec("game", {"rules.py": content})
+    target = repo / spec.source_root / "rules.py"
+    target.parent.mkdir(parents=True)
+    target.symlink_to("outside.py")
+    commit = _commit(repo)
+
+    with pytest.raises(ValueError, match="regular Git blob"):
+        collect_game_sources(repo, spec, commit)
 
 
 def test_validate_agentbench_corpus_fails_closed_on_missing_or_extra_game(tmp_path):
-    _materialize_all_games(tmp_path)
-    validate_agentbench_corpus(tmp_path)
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    specs = tuple(
+        _custom_spec(game_id, {"rules.py": f"GAME = {game_id!r}\n".encode()})
+        for game_id in ("game_a", "game_b")
+    )
+    for spec in specs:
+        _write_files(
+            repo,
+            spec,
+            {"rules.py": f"GAME = {spec.game_id!r}\n".encode()},
+        )
+    valid_commit = _commit(repo)
+    validate_agentbench_corpus(repo, valid_commit, specs=specs)
 
-    missing = tmp_path / "backend_sources/corpus/24_miracle"
-    for path in sorted(missing.rglob("*"), reverse=True):
-        if path.is_file():
-            path.unlink()
-        else:
-            path.rmdir()
-    missing.rmdir()
-    with pytest.raises(ValueError, match="game set mismatch.*missing=24_miracle"):
-        validate_agentbench_corpus(tmp_path)
+    missing_root = repo / specs[1].source_root
+    (missing_root / "rules.py").unlink()
+    missing_root.rmdir()
+    missing_commit = _commit(repo, "remove game")
+    with pytest.raises(ValueError, match="game set mismatch.*missing=game_b"):
+        validate_agentbench_corpus(repo, missing_commit, specs=specs)
 
-    _source_root(tmp_path, "24_miracle").joinpath("rules.py").write_text("pass\n")
-    extra = tmp_path / "backend_sources/corpus/31_unknown/logic/gamecode_logic"
-    extra.mkdir(parents=True)
-    (extra / "rules.py").write_text("pass\n")
-    with pytest.raises(ValueError, match="extra=31_unknown"):
-        validate_agentbench_corpus(tmp_path)
+    _write_files(repo, specs[1], {"rules.py": b"GAME = 'game_b'\n"})
+    extra = repo / "backend_sources/corpus/game_c/logic/gamecode_logic/rules.py"
+    extra.parent.mkdir(parents=True)
+    extra.write_text("GAME = 'game_c'\n")
+    extra_commit = _commit(repo, "add extra game")
+    with pytest.raises(ValueError, match="extra=game_c"):
+        validate_agentbench_corpus(repo, extra_commit, specs=specs)

@@ -4,7 +4,7 @@ Source: [https://github.com/Aoraku/AgentBench](https://github.com/Aoraku/AgentBe
 
 These values are **not exact Kolmogorov complexity**. They are conditional executable-description upper bounds under the fixed AB-Ludi/1 source-module reference machine.
 
-`k_upper_bits` is eight times the byte length of the canonical ludeme tree compressed with the report's fixed zlib-9 profile. The shared decoder and language runtimes are conditioned out.
+`k_upper_bits` is eight times the byte length of the canonical ludeme tree compressed with the report's fixed zlib-9 profile. The reference-machine ID binds the zlib runtime and fixed-vector behavior fingerprint. The shared decoder and language runtimes are conditioned out.
 
 $$
 K(G \mid U_{\mathrm{AB\text{-}Ludi/1}}, R) \leq 8\,\left|\operatorname{zlib9}(\operatorname{encode}_{\mathrm{AB\text{-}Ludi/1}}(G))\right| + \mathcal{O}(1)
@@ -25,7 +25,7 @@ $$
 
 ## Boundary and interpretation
 
-The measurement covers the selected published backend logic files listed in the JSON artifact. Duplicate judge-dev copies, sample agents, backups, generated/build artifacts, vendored libraries, tests, and DeepClue story data are excluded.
+The measurement reads the exact Git blobs at the pinned commit for the path/SHA-256 manifest identified in the JSON artifact. Working-tree changes cannot affect it. Duplicate judge-dev copies, sample agents, backups, generated/build artifacts, vendored libraries, tests, and DeepClue story data are excluded.
 
 This is implementation-description complexity. It is not game-tree size, strategic depth, learning difficulty, or information gain.
 

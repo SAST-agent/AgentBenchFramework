@@ -194,15 +194,27 @@ def _cmd_data_list(args):
 
 def _cmd_ludi_complexity(args):
     """Calculate AB-Ludi/1 source-description complexity upper bounds."""
+    from pathlib import Path
+
     from agentbench_frame.research.ludi_k import (
         measure_agentbench_repository,
         write_json_report,
         write_markdown_report,
     )
 
+    json_output = Path(args.json_output).resolve()
+    markdown_output = Path(args.markdown_output).resolve()
+    same_output = json_output == markdown_output
+    if json_output.exists() and markdown_output.exists():
+        same_output = same_output or json_output.samefile(markdown_output)
+    if same_output:
+        raise ValueError(
+            "--json-output and --markdown-output must resolve to different paths"
+        )
+
     report = measure_agentbench_repository(args.agentbench_repo)
-    json_path = write_json_report(report, args.json_output)
-    markdown_path = write_markdown_report(report, args.markdown_output)
+    json_path = write_json_report(report, json_output)
+    markdown_path = write_markdown_report(report, markdown_output)
 
     print("AB-Ludi/1 complexity upper bounds:")
     for rank, game in enumerate(report["games"], start=1):

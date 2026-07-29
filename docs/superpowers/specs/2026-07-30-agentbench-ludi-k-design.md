@@ -12,7 +12,7 @@ conditional description-length upper bound under one fixed reference machine:
 \[
 K(G \mid U_{\mathrm{AB-Ludi/1}}, R) \leq
 8\,\lvert\operatorname{zlib9}(\operatorname{encode}_{\mathrm{AB-Ludi/1}}(G))\rvert
-\mathcal{O}(1)
++ \mathcal{O}(1)
 \]
 
 Here \(R\) is the shared language runtime/toolchain and the additive decoder
@@ -55,12 +55,19 @@ The byte stream is:
 Paths are relative to the selected source root. Length prefixes make the
 encoding injective even for arbitrary binary contents. The complexity program
 is the complete zlib stream produced with level 9, `Z_DEFLATED`,
-`MAX_WBITS`, memory level 9, and `Z_DEFAULT_STRATEGY`. The report records the
-Python and zlib versions.
+`MAX_WBITS`, memory level 9, and `Z_DEFAULT_STRATEGY`. The reference-machine
+identity includes the zlib runtime version and a SHA-256 fingerprint of the
+compressed output for a fixed test vector. The report also records the zlib
+compile/runtime versions and the full behavior fingerprint.
 
 ## Input Boundary
 
-The source repository and commit are recorded. Exactly ten games are expected:
+The source repository is fixed to AgentBench commit
+`b581bca3ba3d2d7d58a2f8c6bbddd060fc7fdc87`. The calculator requires `HEAD`
+to equal that commit and reads content from its immutable Git blobs, never from
+working-tree files. Dirty edits, untracked files, symlinks, and checkout filters
+therefore cannot alter a measurement while retaining the same provenance.
+Exactly ten games are expected:
 
 - `23_doto`
 - `24_miracle`
@@ -92,18 +99,24 @@ The frozen exclusions remove:
 - DeepClue scenario content under `data/`, because this metric targets the
   shared game engine rather than individual stories.
 
-Every included file path and SHA-256 digest is written to the result artifact,
-so reviewers can audit the boundary and detect source drift.
+The versioned source manifest fixes all 149 included relative paths and their
+SHA-256 digests. Selection rules are applied to the pinned Git tree and compared
+against that exact manifest; a missing, newly eligible, non-regular, or
+hash-mismatched blob fails closed. The manifest itself has a SHA-256 identity in
+the result artifact, so a future corpus revision cannot silently reuse the same
+input identity.
 
 ## Components
 
 ### Catalog
 
 `agentbench_frame.research.agentbench_catalog` owns the immutable ten-game
-catalog, authoritative roots, suffix allowlist, and exclusions. Discovery fails
-closed when the corpus directory, an authoritative root, or an expected game is
-missing. Unexpected additional corpus games are reported as an error rather
-than silently omitted.
+catalog, exact 149-file path/hash manifest, authoritative roots, suffix
+allowlist, and exclusions. It resolves the pinned commit through Git plumbing
+and reads blobs by object ID. Discovery fails closed when the corpus directory,
+an authoritative blob, or an expected game is missing. Unexpected eligible
+files or additional corpus games are errors rather than silently changing the
+measurement boundary.
 
 ### Encoder and Calculator
 
@@ -118,13 +131,14 @@ The framework CLI adds:
 
 ```bash
 agentbench complexity ludi \
-  --agentbench-repo /path/to/Aoraku/AgentBench \
+  --agentbench-repo /path/to/Aoraku/AgentBench-at-b581bca \
   --json-output docs/research/agentbench-ludi-k-v1.json \
   --markdown-output docs/research/agentbench-ludi-k-v1.md
 ```
 
-The command fails nonzero on boundary drift or unreadable inputs. It prints a
-compact ranking after writing both artifacts.
+The command fails nonzero on source-commit or boundary drift, unreadable inputs,
+or JSON/Markdown paths that identify the same file. It prints a compact ranking
+after writing both artifacts.
 
 ### Frozen Results
 
@@ -139,13 +153,18 @@ Tests must demonstrate:
 - binary framing is injective and round-trips arbitrary bytes;
 - file order does not change the encoding or measurement;
 - one-byte source changes alter the source digest and generally the bound;
-- exclusions remove vendor, generated, test, debug, binary, and story-data
-  files while preserving genuine rule source/configuration;
+- committed Git blobs, rather than dirty or untracked working-tree files, are
+  measured;
+- the exact path/hash manifest rejects missing, extra, changed, and symlink
+  inputs while preserving genuine rule source/configuration;
+- the compressor behavior fingerprint is part of the reference-machine
+  identity;
 - missing or extra games fail closed;
 - the public snapshot contains exactly ten unique game results and every result
   has nonzero file count, hashes, source bits, canonical bits, and upper-bound
   bits;
-- CLI output is parseable and deterministic.
+- CLI output is parseable and deterministic, and colliding output paths are
+  rejected before either report is written.
 
 The complete existing suite must still pass. Network access is not needed by
 the calculator after the source repository is present.

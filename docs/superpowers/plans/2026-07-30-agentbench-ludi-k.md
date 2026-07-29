@@ -4,7 +4,7 @@
 
 **Goal:** Add a reproducible AB-Ludi/1 calculator and frozen Kolmogorov-complexity upper bounds for all ten public AgentBench game-logic corpora.
 
-**Architecture:** A frozen catalog selects the authoritative logic source for each game. A lossless binary ludeme-tree encoder frames exact source modules, a fixed zlib profile supplies the executable description upper bound, and renderers produce auditable JSON and Markdown artifacts.
+**Architecture:** A versioned path/hash manifest binds the authoritative logic source for each game to immutable blobs at one pinned Git commit. A lossless binary ludeme-tree encoder frames exact source modules, a zlib profile identified by runtime and behavior fingerprint supplies the executable description upper bound, and renderers produce auditable JSON and Markdown artifacts.
 
 **Tech Stack:** Python 3.11 standard library, `pytest`, argparse, zlib, SHA-256.
 
@@ -24,6 +24,7 @@
 **Files:**
 - Create: `src/agentbench_frame/research/__init__.py`
 - Create: `src/agentbench_frame/research/agentbench_catalog.py`
+- Create: `src/agentbench_frame/research/agentbench_ludi_v1_manifest.json`
 - Create: `tests/research/__init__.py`
 - Create: `tests/research/test_agentbench_catalog.py`
 
@@ -53,9 +54,10 @@ does not exist.
 
 - [ ] **Step 3: Implement the immutable catalog and fail-closed collector**
 
-Define one source root per game, the exact suffix allowlist, path/name
-exclusions, explicit generated-file exclusions, file-byte loading, and
-unexpected/missing-game validation. Use `Path.rglob`, POSIX relative paths, and
+Define one source root per game, an exact 149-file path/SHA-256 manifest, the
+suffix allowlist, path/name exclusions, explicit generated-file exclusions,
+Git-blob loading, and unexpected/missing-game validation. Read by object ID from
+the pinned commit, compare the selected Git tree against the manifest, and use
 immutable dataclasses/tuples.
 
 - [ ] **Step 4: Run focused tests and verify GREEN**
@@ -93,8 +95,9 @@ exist.
 - [ ] **Step 3: Implement minimal deterministic framing, measurement, provenance, and rendering**
 
 Use unsigned 64-bit big-endian prefixes, `hashlib.sha256`, a fully specified
-`zlib.compressobj`, sorted modules/results, `git rev-parse HEAD` for provenance,
-and stable UTF-8 JSON/Markdown output with a trailing newline.
+`zlib.compressobj`, a fixed compressor test-vector fingerprint, sorted
+modules/results, pinned `git rev-parse HEAD` provenance, and stable UTF-8
+JSON/Markdown output with a trailing newline.
 
 - [ ] **Step 4: Run focused tests and verify GREEN**
 

@@ -299,17 +299,23 @@ agentbench data list --data-dir ./data                   # 列出所有 run
 
 ```bash
 agentbench complexity ludi \
-  --agentbench-repo /path/to/Aoraku/AgentBench \
+  --agentbench-repo /path/to/Aoraku/AgentBench-at-b581bca \
   --json-output docs/research/agentbench-ludi-k-v1.json \
   --markdown-output docs/research/agentbench-ludi-k-v1.md
 ```
 
 AB-Ludi/1 将每个游戏表示为由 `source-module` 叶节点组成的无歧义 ludeme
-树，再用固定 zlib-9 配置得到可执行描述长度上界。输出中的
+树，再用固定 zlib-9 配置得到可执行描述长度上界。该命令只接受清单固定的
+AgentBench 提交 `b581bca3ba3d2d7d58a2f8c6bbddd060fc7fdc87`，并直接读取
+该提交的 Git blob；工作区修改、未跟踪文件和 checkout 换行转换不会进入测量。
+149 个输入文件的精确路径和 SHA-256 由版本化清单固定，任何入选文件增删或
+内容漂移都会失败关闭。
+
+输出中的
 `k_upper_bits` 是固定参考机和共享语言运行时条件下的 **Kolmogorov
 complexity 上界**，不是不可计算的精确 \(K\)，也不是状态空间大小、策略深度、
 学习难度或信息增益。JSON 会保留输入仓库提交、每个入选文件的路径和 SHA-256，
-便于审计与复算。
+以及 zlib 运行时和固定测试向量的压缩行为指纹，便于审计与复算。
 
 ## 环境变量
 

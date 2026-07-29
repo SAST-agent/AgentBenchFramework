@@ -8,12 +8,20 @@ from agentbench_frame.research.agentbench_catalog import (
     SourceModule,
 )
 from agentbench_frame.research.ludi_k import (
+    REFERENCE_MACHINE_ID,
+    ZLIB_BEHAVIOR_FINGERPRINT,
     decode_ludi_description,
     encode_ludi_description,
     measure_game,
     write_json_report,
     write_markdown_report,
 )
+
+
+def test_reference_machine_identity_includes_compressor_behavior():
+    assert REFERENCE_MACHINE_ID.startswith("AB-LUDI/1+zlib-")
+    assert len(ZLIB_BEHAVIOR_FINGERPRINT) == 64
+    assert ZLIB_BEHAVIOR_FINGERPRINT[:16] in REFERENCE_MACHINE_ID
 
 
 def test_ludi_description_round_trips_arbitrary_source_bytes():
@@ -123,7 +131,7 @@ def test_report_writers_are_stable_and_machine_readable(tmp_path):
     report = {
         "schema_version": "agentbench.ludi-k.v1",
         "reference_machine": {
-            "id": "AB-LUDI/1",
+            "id": REFERENCE_MACHINE_ID,
             "metric": "conditional_k_upper_bits",
         },
         "source": {

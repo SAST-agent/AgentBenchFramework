@@ -7,9 +7,7 @@ machine, not exact or machine-independent Kolmogorov complexity.
 """
 
 import json
-import platform
 import struct
-import subprocess
 import zlib
 from collections.abc import Iterable
 from hashlib import sha256
@@ -18,16 +16,42 @@ from typing import Any
 
 from .agentbench_catalog import (
     AGENTBENCH_GAME_SPECS,
+    AGENTBENCH_SOURCE_COMMIT,
+    SOURCE_MANIFEST_SHA256,
     GameSourceSpec,
     SourceModule,
     collect_game_sources,
+    git_head_commit,
     validate_agentbench_corpus,
 )
 
-REFERENCE_MACHINE_ID = "AB-LUDI/1"
 SCHEMA_VERSION = "agentbench.ludi-k.v1"
 _MAGIC = b"AB-LUDI/1\x00"
 _UINT64 = struct.Struct(">Q")
+_COMPRESSOR_TEST_VECTOR = (
+    b"AB-Ludi/1 compressor behavior test vector\n" * 32
+)
+
+
+def _compress_with_profile(description: bytes) -> bytes:
+    compressor = zlib.compressobj(
+        level=9,
+        method=zlib.DEFLATED,
+        wbits=zlib.MAX_WBITS,
+        memLevel=9,
+        strategy=zlib.Z_DEFAULT_STRATEGY,
+    )
+    return compressor.compress(description) + compressor.flush()
+
+
+ZLIB_BEHAVIOR_FINGERPRINT = sha256(
+    _compress_with_profile(_COMPRESSOR_TEST_VECTOR)
+).hexdigest()
+REFERENCE_MACHINE_FAMILY = "AB-LUDI/1"
+REFERENCE_MACHINE_ID = (
+    f"{REFERENCE_MACHINE_FAMILY}+zlib-{zlib.ZLIB_RUNTIME_VERSION}"
+    f"+tv-{ZLIB_BEHAVIOR_FINGERPRINT[:16]}"
+)
 
 
 def _frame(blob: bytes) -> bytes:
@@ -131,14 +155,7 @@ def decode_ludi_description(
 
 
 def _compress_description(description: bytes) -> bytes:
-    compressor = zlib.compressobj(
-        level=9,
-        method=zlib.DEFLATED,
-        wbits=zlib.MAX_WBITS,
-        memLevel=9,
-        strategy=zlib.Z_DEFAULT_STRATEGY,
-    )
-    return compressor.compress(description) + compressor.flush()
+    return _compress_with_profile(description)
 
 
 def measure_game(
@@ -182,20 +199,6 @@ def measure_game(
     }
 
 
-def _git_commit(repo_root: Path) -> str:
-    process = subprocess.run(
-        ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    commit = process.stdout.strip()
-    if process.returncode != 0 or len(commit) != 40:
-        message = process.stderr.strip() or "git rev-parse HEAD failed"
-        raise ValueError(f"cannot determine AgentBench source commit: {message}")
-    return commit
-
-
 def measure_agentbench_repository(
     repo_root: str | Path,
     *,
@@ -204,9 +207,15 @@ def measure_agentbench_repository(
     """Calculate all frozen public AgentBench game-logic bounds."""
 
     root = Path(repo_root).resolve()
-    validate_agentbench_corpus(root)
+    source_commit = git_head_commit(root)
+    if source_commit != AGENTBENCH_SOURCE_COMMIT:
+        raise ValueError(
+            "AB-Ludi/1 requires AgentBench commit "
+            f"{AGENTBENCH_SOURCE_COMMIT}, got {source_commit}"
+        )
+    validate_agentbench_corpus(root, source_commit)
     games = [
-        measure_game(spec, collect_game_sources(root, spec))
+        measure_game(spec, collect_game_sources(root, spec, source_commit))
         for spec in AGENTBENCH_GAME_SPECS
     ]
     games.sort(key=lambda game: (game["k_upper_bits"], game["game_id"]))
@@ -214,6 +223,7 @@ def measure_agentbench_repository(
     return {
         "schema_version": SCHEMA_VERSION,
         "reference_machine": {
+            "family": REFERENCE_MACHINE_FAMILY,
             "id": REFERENCE_MACHINE_ID,
             "metric": "conditional_k_upper_bits",
             "encoding": "uint64-be-length-prefixed source-module ludeme tree",
@@ -224,7 +234,9 @@ def measure_agentbench_repository(
                 "wbits": zlib.MAX_WBITS,
                 "mem_level": 9,
                 "strategy": "Z_DEFAULT_STRATEGY",
+                "compile_version": zlib.ZLIB_VERSION,
                 "runtime_version": zlib.ZLIB_RUNTIME_VERSION,
+                "behavior_fingerprint": ZLIB_BEHAVIOR_FINGERPRINT,
             },
             "decoder_constant_included": False,
             "conditioned_on": [
@@ -244,11 +256,12 @@ def measure_agentbench_repository(
                     "url": "https://arxiv.org/abs/1109.1314",
                 },
             ],
-            "python_version": platform.python_version(),
         },
         "source": {
             "repository": repository_url,
-            "commit": _git_commit(root),
+            "commit": source_commit,
+            "manifest_schema": "agentbench.ludi-source-manifest.v1",
+            "manifest_sha256": SOURCE_MANIFEST_SHA256,
             "catalog_game_count": len(AGENTBENCH_GAME_SPECS),
         },
         "games": games,
@@ -297,7 +310,9 @@ def write_markdown_report(
         (
             "`k_upper_bits` is eight times the byte length of the canonical "
             "ludeme tree compressed with the report's fixed zlib-9 profile. "
-            "The shared decoder and language runtimes are conditioned out."
+            "The reference-machine ID binds the zlib runtime and fixed-vector "
+            "behavior fingerprint. The shared decoder and language runtimes "
+            "are conditioned out."
         ),
         "",
         "$$",
@@ -325,8 +340,9 @@ def write_markdown_report(
             "## Boundary and interpretation",
             "",
             (
-                "The measurement covers the selected published backend logic "
-                "files listed in the JSON artifact. Duplicate judge-dev copies, "
+                "The measurement reads the exact Git blobs at the pinned commit "
+                "for the path/SHA-256 manifest identified in the JSON artifact. "
+                "Working-tree changes cannot affect it. Duplicate judge-dev copies, "
                 "sample agents, backups, generated/build artifacts, vendored "
                 "libraries, tests, and DeepClue story data are excluded."
             ),
