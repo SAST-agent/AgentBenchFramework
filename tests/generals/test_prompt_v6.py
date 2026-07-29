@@ -175,3 +175,21 @@ def test_v6_prompt_rejects_formal_or_validation_payload_context(
 ):
     with pytest.raises(ValueError, match="formal or validation material"):
         _build(_records(), **{context_name: payload_marker})
+
+
+@pytest.mark.parametrize(
+    ("context_name", "payload_marker"),
+    (
+        ("v5_strategy", "formal methodology notes"),
+        ("v5_experience", "formal evaluation results"),
+        ("rules_text", "validation metrics"),
+        ("replay_skill_text", "validation methodology notes"),
+        ("action_profile", {"marker": "FORMAL methodology notes"}),
+    ),
+)
+def test_v6_prompt_rejects_standalone_formal_or_validation_context(
+    context_name: str,
+    payload_marker: object,
+):
+    with pytest.raises(ValueError, match="formal or validation material"):
+        _build(_records(), **{context_name: payload_marker})

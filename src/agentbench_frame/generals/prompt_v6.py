@@ -53,12 +53,8 @@ FORBIDDEN_ROUND6_EVIDENCE_SEEDS = (
 _ROUND6_EPISODE_PAIRS = frozenset(
     (seed, seat) for seed in ROUND6_EVIDENCE_SEEDS for seat in (0, 1)
 )
-_FORMAL_OR_VALIDATION_MATERIAL = re.compile(
-    r"\b(?:formal|validation)[\s_-]+"
-    r"(?:evaluation[\s_-]+)?"
-    r"(?:replay|trajectory|critical[\s_-]+window|"
-    r"dense[\s_-]+(?:trace|summary)|action[\s_-]+profile|"
-    r"outcome|result|score|case|game|episode|evidence|spec)\b",
+_EXTERNAL_CONTEXT_PHASE_WORD = re.compile(
+    r"\b(?:formal|validation)\b",
     re.IGNORECASE,
 )
 
@@ -108,11 +104,16 @@ def _validate_evidence(
 def _reject_round6_leaks(text: str) -> None:
     """Protect the prompt boundary beyond the shared formal-evaluation gate."""
     _reject_leaks(text)
-    if _FORMAL_OR_VALIDATION_MATERIAL.search(text):
-        raise ValueError("forbidden round-6 formal or validation material")
     for seed in FORBIDDEN_ROUND6_EVIDENCE_SEEDS:
         if str(seed) in text:
             raise ValueError(f"forbidden round-6 seed in prompt: {seed}")
+
+
+def _reject_round6_external_context(text: str) -> None:
+    """Reject held-out phase material before it can be interpolated."""
+    _reject_round6_leaks(text)
+    if _EXTERNAL_CONTEXT_PHASE_WORD.search(text):
+        raise ValueError("forbidden round-6 formal or validation material")
 
 
 def build_round6_prompt(
@@ -149,6 +150,14 @@ def build_round6_prompt(
         raise ValueError(
             "round-6 action profile must be JSON serializable"
         ) from exc
+    for context in (
+        v5_strategy,
+        v5_experience,
+        rules_text,
+        replay_skill_text,
+        action_profile_json,
+    ):
+        _reject_round6_external_context(context)
 
     mandatory = f"""You are performing the v5-to-v6 bounded macro-action planner
 act for {benchmark_id}.
