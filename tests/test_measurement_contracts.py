@@ -1,4 +1,5 @@
 import unittest
+from decimal import Decimal
 
 
 class BenchmarkContractTests(unittest.TestCase):
@@ -65,6 +66,77 @@ class BenchmarkContractTests(unittest.TestCase):
 
 
 class InformationGainContractTests(unittest.TestCase):
+    def test_canonical_action_space_allows_count_only_support(self):
+        from agentbench_frame.eval.action_space import CanonicalActionSpace
+
+        class CountOnlySpace:
+            spec_id = "toy-v1"
+
+            def canonicalize(self, state, action):
+                return tuple(tuple(command) for command in action)
+
+            def contains(self, state, action):
+                return True
+
+            def cardinality(self, state):
+                return 7
+
+        self.assertIsInstance(CountOnlySpace(), CanonicalActionSpace)
+
+    def test_deterministic_uniform_kl_matches_explicit_distribution(self):
+        from agentbench_frame.eval.information_gain import (
+            policy_kl,
+            uniform_smoothed_deterministic_kl,
+        )
+
+        epsilon = Decimal("0.01")
+        support_size = 5
+        measured = uniform_smoothed_deterministic_kl(
+            new_action=("b",),
+            old_action=("a",),
+            support_size=support_size,
+            epsilon=epsilon,
+        )
+        q = 1.0 - float(epsilon) + float(epsilon) / support_size
+        r = float(epsilon) / support_size
+        explicit = policy_kl([r, q, r, r, r], [q, r, r, r, r])
+        self.assertAlmostEqual(float(measured), explicit)
+
+    def test_deterministic_uniform_kl_is_zero_for_equal_action(self):
+        from agentbench_frame.eval.information_gain import (
+            uniform_smoothed_deterministic_kl,
+        )
+
+        self.assertEqual(
+            uniform_smoothed_deterministic_kl(
+                new_action=((8,),),
+                old_action=((8,),),
+                support_size=10**30,
+                epsilon="0.01",
+            ),
+            Decimal(0),
+        )
+
+    def test_deterministic_uniform_kl_rejects_invalid_support(self):
+        from agentbench_frame.eval.information_gain import (
+            uniform_smoothed_deterministic_kl,
+        )
+
+        with self.assertRaisesRegex(ValueError, "support_size"):
+            uniform_smoothed_deterministic_kl("b", "a", 0, "0.01")
+        with self.assertRaisesRegex(ValueError, "one legal action"):
+            uniform_smoothed_deterministic_kl("b", "a", 1, "0.01")
+
+    def test_deterministic_uniform_kl_rejects_invalid_epsilon(self):
+        from agentbench_frame.eval.information_gain import (
+            uniform_smoothed_deterministic_kl,
+        )
+
+        for epsilon in ("0", "1", "-0.01", "NaN"):
+            with self.subTest(epsilon=epsilon):
+                with self.assertRaisesRegex(ValueError, "epsilon"):
+                    uniform_smoothed_deterministic_kl("b", "a", 2, epsilon)
+
     def test_epsilon_regularization_gives_finite_common_support(self):
         from agentbench_frame.eval.information_gain import epsilon_regularize, policy_kl
 

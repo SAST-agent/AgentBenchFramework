@@ -7,6 +7,7 @@ contexts. They do not attempt to construct a global game-tree measure.
 import math
 from collections import Counter
 from collections.abc import Mapping, Sequence
+from decimal import Decimal, localcontext
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 
@@ -61,6 +62,46 @@ def policy_kl(
             return math.inf
         value += new_probability * math.log(new_probability / old_probability)
     return value
+
+
+def uniform_smoothed_deterministic_kl(
+    new_action: Any,
+    old_action: Any,
+    support_size: int,
+    epsilon: Any,
+    precision: int = 80,
+) -> Decimal:
+    """Return exact-support ``KL(new || old)`` for deterministic policies.
+
+    Each point mass is mixed with the strict uniform distribution over the
+    complete legal action support. The closed form avoids materializing that
+    support and retains arbitrary-precision cardinalities.
+    """
+
+    if not isinstance(support_size, int) or isinstance(support_size, bool):
+        raise ValueError("support_size must be a positive integer")
+    if support_size < 1:
+        raise ValueError("support_size must be positive")
+    if not isinstance(precision, int) or precision < 2:
+        raise ValueError("precision must be an integer of at least 2")
+
+    try:
+        eps = Decimal(str(epsilon))
+    except Exception as exc:
+        raise ValueError("epsilon must be a finite decimal") from exc
+    if not eps.is_finite() or not Decimal(0) < eps < Decimal(1):
+        raise ValueError("epsilon must be strictly between zero and one")
+
+    if new_action == old_action:
+        return Decimal(0)
+    if support_size == 1:
+        raise ValueError("different actions cannot share one legal action")
+
+    with localcontext() as context:
+        context.prec = precision
+        one_minus = Decimal(1) - eps
+        ratio = Decimal(1) + Decimal(support_size) * one_minus / eps
+        return +(one_minus * ratio.ln())
 
 
 def _distribution_for_context(policy: Callable[[Any], Any], context: Any, actions: List[Any]) -> List[float]:

@@ -16,6 +16,11 @@ from agentbench_frame.eval.benchmark import (
     evaluate_benchmark,
 )
 from agentbench_frame.eval.curves import trapezoid_auc
+from agentbench_frame.eval.action_space import (
+    CanonicalActionSpace,
+    CanonicalMacro,
+    EnumerableCanonicalActionSpace,
+)
 from agentbench_frame.eval.information_gain import (
     epsilon_regularize,
     episode_policy_kl_trace,
@@ -23,6 +28,7 @@ from agentbench_frame.eval.information_gain import (
     occupancy_shift,
     policy_kl,
     trajectory_kl_from_trace,
+    uniform_smoothed_deterministic_kl,
 )
 from agentbench_frame.eval.measurement import (
     PolicyDistributionProvider,
@@ -40,12 +46,16 @@ __all__ = [
     "GameResult",
     "evaluate_benchmark",
     "trapezoid_auc",
+    "CanonicalActionSpace",
+    "CanonicalMacro",
+    "EnumerableCanonicalActionSpace",
     "epsilon_regularize",
     "episode_policy_kl_trace",
     "occupancy_histogram",
     "occupancy_shift",
     "policy_kl",
     "trajectory_kl_from_trace",
+    "uniform_smoothed_deterministic_kl",
     "PolicyDistributionProvider",
     "StateIdProvider",
     "canonical_state_id",
