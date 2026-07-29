@@ -47,6 +47,31 @@ class AgentRunResult:
     time_s: Optional[float] = None
     error: Optional[str] = None               # legacy alias of failure_reason
     failure_reason: Optional[str] = None      # set if the run failed (timeout/not-found/non-zero)
+    session_id: Optional[str] = None          # claude session id (opaque UUID)
+    transcript_path: Optional[str] = None     # ~/.claude/projects/<slug>/<session_id>.jsonl
+
+
+def _resolve_transcript_path(session_id: Optional[str]) -> Optional[str]:
+    """Locate claude's transcript for a session by its globally-unique id.
+
+    Claude writes one transcript per session to
+    ``~/.claude/projects/<cwd-slug>/<session_id>.jsonl``. The cwd-slug is
+    claude-internal (non-alphanumeric -> ``-``); rather than hand-roll it we
+    glob ``~/.claude/projects/*/<session_id>.jsonl`` — the session_id is
+    globally unique, so at most one match (``None`` if the file was rotated or
+    the home isn't a real claude home, e.g. in tests). Recording this path in
+    the run output lets each act's claude history be located without guessing
+    by mtime.
+    """
+    if not session_id:
+        return None
+    try:
+        matches = sorted(
+            (Path.home() / ".claude" / "projects").glob(f"*/{session_id}.jsonl")
+        )
+    except OSError:
+        return None
+    return str(matches[0]) if matches else None
 
 
 @runtime_checkable
@@ -66,9 +91,10 @@ class FakeRunner:
     """
 
     def __init__(self, *, transform: Callable[[Path], None],
-                 edit_type: str = "noop"):
+                 edit_type: str = "noop", session_id: Optional[str] = None):
         self._transform = transform
         self._edit_type = edit_type
+        self._session_id = session_id
 
     def run(self, *, workspace: Path, context: Dict[str, Any]
             ) -> AgentRunResult:
@@ -85,6 +111,8 @@ class FakeRunner:
             completion_tokens=None,
             total_tokens=None,
             time_s=0.0,
+            session_id=self._session_id,
+            transcript_path=_resolve_transcript_path(self._session_id),
         )
 
     @staticmethod
@@ -173,6 +201,7 @@ class ClaudeCodeRunner:
         # The --output-format json stream yields one JSON object per line.
         edit_type = "refactor"  # default classification; the controller reclassifies via diff
         prompt_tokens = completion_tokens = total_tokens = None
+        session_id = None
         try:
             for line in proc.stdout.splitlines():
                 line = line.strip()
@@ -184,6 +213,7 @@ class ClaudeCodeRunner:
                     prompt_tokens = usage.get("input_tokens")
                     completion_tokens = usage.get("output_tokens")
                     total_tokens = usage.get("total_tokens")
+                    session_id = evt.get("session_id")
         except _json.JSONDecodeError:
             pass
 
@@ -204,6 +234,8 @@ class ClaudeCodeRunner:
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
             time_s=elapsed,
+            session_id=session_id,
+            transcript_path=_resolve_transcript_path(session_id),
         )
 
     @staticmethod

@@ -233,6 +233,28 @@ def test_version_event_records_content_hash_and_edit_type(tmp_path):
     assert v_ev["parent_version_id"] == v0.version_id
 
 
+def test_version_event_records_session_id(tmp_path):
+    """The claude session_id + transcript path flow from the runner through to
+    the version event, so each act's claude history is locatable in the run
+    output (no mtime guessing)."""
+    sid = "cafe1234-0000-1111-2222-333333333333"
+    ctrl, v0 = _two_act_controller(
+        tmp_path,
+        runner=FakeRunner(transform=lambda w: None, edit_type="noop",
+                          session_id=sid),
+        eval_results=[_stub_result(0.5, "complete")],
+        probe_emissions=[[("finish",)], [("finish",)]],
+    )
+    h = ctrl.act(version_before=v0)
+    events = read_events(tmp_path / "e.jsonl")
+    v_ev = next(e for e in events if e["event_type"] == "version"
+                and e["version_id"] == h.version_id)
+    assert v_ev["session_id"] == sid
+    # transcript_path is None here because the sid isn't a real claude home
+    # entry; what matters is the field is present and honest.
+    assert v_ev["transcript_path"] is None
+
+
 def test_act_emits_occupancy_shift(tmp_path):
     ctrl, v0 = _two_act_controller(
         tmp_path,

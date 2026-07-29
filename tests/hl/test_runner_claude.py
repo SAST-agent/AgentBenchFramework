@@ -124,3 +124,58 @@ def test_default_prompt_used_when_context_omits_prompt(monkeypatch, tmp_path):
     r.run(workspace=tmp_path, context={"goal": "win more"})
     p = cap["argv"][cap["argv"].index("-p") + 1]
     assert "win more" in p
+
+
+def test_session_id_captured_from_result_event(monkeypatch, tmp_path):
+    """claude -p --output-format json returns session_id in the result event.
+    The runner must capture it (was discarded) so each act's claude history is
+    locatable in the run output."""
+    cap = {}
+    result_line = json.dumps({
+        "type": "result",
+        "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
+        "session_id": "abc12345-dead-beef-cafe-feedface0000",
+    })
+    _patch_run(monkeypatch, cap, _FakeProc(stdout=result_line + "\n",
+                                          returncode=0))
+    r = ClaudeCodeRunner()
+    res = r.run(workspace=tmp_path, context={"prompt": "go"})
+    assert res.session_id == "abc12345-dead-beef-cafe-feedface0000"
+
+
+def test_transcript_path_resolved_by_globbing_claude_home(monkeypatch, tmp_path):
+    """transcript_path is found by globbing ~/.claude/projects/*/<sid>.jsonl —
+    no hand-rolled cwd-slug. Monkeypatch home so the lookup is deterministic."""
+    sid = "deadbeef-0000-1111-2222-333333333333"
+    fake_home = tmp_path / "home"
+    proj_dir = fake_home / ".claude" / "projects" / "some-cwd-slug"
+    proj_dir.mkdir(parents=True)
+    transcript = proj_dir / f"{sid}.jsonl"
+    transcript.write_text("[]")
+    monkeypatch.setattr("agentbench_frame.hl.runner.Path.home",
+                        staticmethod(lambda: fake_home))
+
+    result_line = json.dumps({"type": "result",
+                              "usage": {"input_tokens": 1, "output_tokens": 1,
+                                        "total_tokens": 2}, "session_id": sid})
+    _patch_run(monkeypatch, {}, _FakeProc(stdout=result_line + "\n",
+                                          returncode=0))
+    r = ClaudeCodeRunner()
+    res = r.run(workspace=tmp_path, context={"prompt": "go"})
+    assert res.session_id == sid
+    assert res.transcript_path == str(transcript)
+
+
+def test_transcript_path_none_when_session_absent(monkeypatch, tmp_path):
+    """No matching transcript file -> transcript_path None (not an error)."""
+    monkeypatch.setattr("agentbench_frame.hl.runner.Path.home",
+                        staticmethod(lambda: tmp_path))
+    result_line = json.dumps({"type": "result", "session_id": "no-such-sid-0000",
+                              "usage": {"input_tokens": 1, "output_tokens": 1,
+                                        "total_tokens": 2}})
+    _patch_run(monkeypatch, {}, _FakeProc(stdout=result_line + "\n",
+                                          returncode=0))
+    r = ClaudeCodeRunner()
+    res = r.run(workspace=tmp_path, context={"prompt": "go"})
+    assert res.session_id == "no-such-sid-0000"
+    assert res.transcript_path is None

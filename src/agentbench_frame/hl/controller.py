@@ -137,6 +137,8 @@ class HLIterationController:
                 edit_type=version_after.edit_type,
                 files_touched=run_result.files_touched,
                 failure_reason=failure_reason,
+                session_id=run_result.session_id,
+                transcript_path=run_result.transcript_path,
             )
         else:
             # Workspace unreadable: still record the failure reason so the
@@ -150,6 +152,8 @@ class HLIterationController:
                 edit_type="noop",
                 files_touched=[],
                 failure_reason=failure_reason or "workspace unreadable after run",
+                session_id=run_result.session_id,
+                transcript_path=run_result.transcript_path,
             )
 
         # 5. eval on the frozen BenchmarkSpec (only if we have a runnable version)
