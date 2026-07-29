@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -235,3 +236,47 @@ def test_probe_drives_real_bundled_baseline():
     probe.close()
     assert isinstance(emitted, EmittedAction)
     assert emitted.primitive[0] == "move"   # random_agent's on-turn action
+
+
+def test_probe_hard_timeout_on_write_blocked_candidate(tmp_path):
+    """Regression for the act-2 production hang (run hl-run-0730).
+
+    A candidate that spawns but NEVER drains stdin blocks ``_write_frame``'s
+    ``flush()`` once the frame exceeds the OS pipe buffer (~4 KB). That block
+    sits BEFORE the read-deadline loop in ``probe_one``, so the existing
+    per-read deadline never fires and the probe hangs forever (observed ~11 min
+    of zero progress at act 2). ``probe_one`` must instead return ``None``
+    within a hard wall-clock bound (worker thread joined with a timeout +
+    force-kill), not infinity.
+    """
+    hog = r'''
+import time
+while True:
+    time.sleep(0.5)   # spawn, but never read stdin, never exit
+'''
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    (ws / "agent.py").write_text(hog, encoding="utf-8")
+    (ws / "manifest.toml").write_text(
+        'shape = "single_file"\nentrypoint = "agent.py"\n', encoding="utf-8")
+    cb = HLCodebase(root=ws, store=tmp_path / "store")
+    h = cb.snapshot(parent_version_id=None)
+    cmd, cwd = candidate_command(h, store=cb.store, dest=tmp_path / "stage")
+
+    probe = ReferenceProbe(cmd=cmd, cwd=cwd, timeout=1.5)
+    # Observation padded past the pipe buffer so the roundbegin frame's flush
+    # blocks (the candidate never reads it). The pad is an extra field the
+    # probe forwards verbatim — enumerate_legal_actions ignores it.
+    big = ReferenceSample(
+        observation={"round": 1, "inturn": 0, "pad": "x" * 20000},
+        legal_actions={"attack": [], "move": [False] * 8, "detect": False,
+                       "interprops": []},
+        inventory={"LandMine": 0, "Sticky": 0, "Transport": 0, "Kit": 0},
+        status=0, seat=0, opponent="rank01",
+    )
+    t0 = time.monotonic()
+    emitted = probe.probe_one(big)
+    elapsed = time.monotonic() - t0
+    probe.close()
+    assert emitted is None          # missing, not coerced
+    assert elapsed < 10.0           # hard wall-clock bound, not infinite

@@ -20,6 +20,7 @@ never 0 (doc §13: unknown -> unknown, not 0).
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,8 +40,10 @@ class AgentRunResult:
     events so a silent timeout is never mistaken for a clean no-op in the
     research stream. ``None`` (unknown/none) on success.
     """
-    edit_type: str                       # add_rule | reorder | parametrize | refactor | replace
+    edit_type: Optional[str]            # add_rule | reorder | parametrize | refactor | replace
                                        #   | utility | search | planner | consolidate | noop
+                                       # None = "unclassified": the controller will
+                                       #   diff-classify (noop vs a real edit).
     files_touched: List[str] = field(default_factory=list)
     prompt_tokens: Optional[int] = None      # None = unknown, not 0
     completion_tokens: Optional[int] = None
@@ -73,6 +76,42 @@ def _resolve_transcript_path(session_id: Optional[str]) -> Optional[str]:
     except OSError:
         return None
     return str(matches[0]) if matches else None
+
+
+def _kill_tree(proc: "subprocess.Popen") -> None:
+    """Reap the *whole* claude process tree on a timeout.
+
+    ``subprocess``'s own timeout handling only kills the **direct** child; the
+    ``claude`` CLI is a launcher that spawns a runtime grandchild, and that
+    grandchild survives as an orphan (run ``hl-run-0730`` leaked a
+    ``claude.exe`` PID that had to be ``taskkill``'d by hand). We launch the
+    child in its own process group / Windows process group so the tree can be
+    killed wholesale:
+
+    - Windows: ``taskkill /F /T /PID`` (``/T`` = the whole subtree).
+    - POSIX: ``os.killpg(os.getpgid(pid), SIGKILL)`` (works because we launched
+      with ``start_new_session=True``).
+
+    Both fall back to ``proc.kill()`` (the direct child) if the platform
+    tree-kill finds no group / fails — so a timed-out child is always reaped
+    even when the tree-kill misses. Best-effort: never raises.
+    """
+    pid = getattr(proc, "pid", None)
+    if pid is not None:
+        try:
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(pid)],
+                    capture_output=True, timeout=5.0,
+                )
+            else:
+                os.killpg(os.getpgid(pid), signal.SIGKILL)
+        except Exception:
+            pass
+    try:
+        proc.kill()
+    except Exception:
+        pass
 
 
 @runtime_checkable
@@ -183,28 +222,60 @@ class ClaudeCodeRunner:
         import time as _time
         prompt = context.get("prompt") or self._default_prompt(context)
         argv = self._build_argv(prompt)
+        timeout = context.get("timeout", 300)
         started = _time.monotonic()
+        # Launch in its own process group so a timeout can reap the WHOLE tree
+        # (claude is a launcher; its runtime grandchild otherwise orphans — see
+        # ``_kill_tree``). start_new_session is POSIX-only; on Windows the
+        # CREATE_NEW_PROCESS_GROUP flag serves the analogous role and ``taskkill
+        # /T`` walks the subtree regardless.
+        popen_kwargs: Dict[str, Any] = dict(
+            cwd=str(workspace),
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True,
+        )
+        if os.name == "nt":
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            popen_kwargs["start_new_session"] = True
         try:
-            proc = subprocess.run(
-                argv, cwd=str(workspace),
-                capture_output=True, text=True, timeout=context.get("timeout", 300),
-            )
+            proc = subprocess.Popen(argv, **popen_kwargs)
         except FileNotFoundError:
             reason = f"claude CLI not found: {self.claude_path}"
             return AgentRunResult(edit_type="noop",
                                   error=reason, failure_reason=reason)
-        except subprocess.TimeoutExpired:
-            reason = "claude CLI timed out"
-            return AgentRunResult(edit_type="noop",
-                                  error=reason, failure_reason=reason)
-        elapsed = _time.monotonic() - started
 
-        # The --output-format json stream yields one JSON object per line.
-        edit_type = "refactor"  # default classification; the controller reclassifies via diff
+        # edit_type=None signals "unclassified" — the controller diff-classifies
+        # the snapshot (noop vs a real edit) because the CLI gives us no
+        # semantic label. FakeRunner declares a concrete edit_type and the
+        # controller trusts it; only None triggers diff-based classification.
+        edit_type: Optional[str] = None
         prompt_tokens = completion_tokens = total_tokens = None
         session_id = None
         try:
-            for line in proc.stdout.splitlines():
+            stdout, stderr = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            # Reap the whole tree (direct child + grandchildren), then drain
+            # the pipes so the child is collected and we can parse any partial
+            # result streamed before the timeout. claude emits ``result`` only
+            # at the end, so on timeout there usually isn't one (tokens stay
+            # None = unknown, never 0 — doc §13).
+            _kill_tree(proc)
+            try:
+                stdout, stderr = proc.communicate(timeout=10.0)
+            except Exception:
+                stdout, stderr = "", ""
+            elapsed = _time.monotonic() - started
+            reason = "claude CLI timed out"
+            return AgentRunResult(
+                edit_type="noop",
+                error=reason, failure_reason=reason,
+                time_s=elapsed,
+            )
+        elapsed = _time.monotonic() - started
+
+        try:
+            for line in (stdout or "").splitlines():
                 line = line.strip()
                 if not line:
                     continue
@@ -219,7 +290,7 @@ class ClaudeCodeRunner:
             pass
 
         if proc.returncode != 0:
-            reason = f"claude exited {proc.returncode}: {proc.stderr[:500]}"
+            reason = f"claude exited {proc.returncode}: {(stderr or '')[:500]}"
             return AgentRunResult(
                 edit_type="noop",
                 error=reason,

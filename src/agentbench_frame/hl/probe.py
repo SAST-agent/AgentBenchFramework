@@ -88,17 +88,54 @@ def _read_exact(stream, n: int) -> Optional[bytes]:
 class ReferenceProbe:
     """Drive one staged candidate through reference decision points.
 
-    One probe = one candidate process. ``probe_one(sample)`` presents a single
-    decision point; ``probe_set(samples)`` presents all of them (reusing the
-    same process). Call ``close()`` when done.
+    **One fresh candidate process per sample.** Several ranked/sample
+    candidates emit their action and then CRASH on the same turn (a bad
+    ``end_turn`` / next-read path). With a single shared process the first
+    crash poisons every subsequent sample (``poll() != None`` → every later
+    emission ``None``), so both versions measure ``uniform-vs-uniform`` and
+    ``policy_kl`` collapses to 0 — the exact "no policy update" symptom that
+    stalled prior iterations. Restarting the candidate per sample isolates the
+    crash to that one decision point; the judger itself TLEs-and-continues the
+    same way, so this mirrors real play.
+
+    ``probe_one(sample)`` starts a fresh process, sends ``id`` + the
+    ``roundbegin`` for that sample, reads the emitted action, and closes the
+    process. ``probe_set(samples)`` loops ``probe_one`` (so each sample gets
+    its own process). ``close()`` is a no-op kept for API compatibility (each
+    ``probe_one`` already cleans up its own process).
+
+    **Hard wall-clock timeout.** The read loop inside ``_probe_one_impl`` is
+    deadline-bounded, but the two ``_write_frame`` calls (the ``id`` frame in
+    ``_start`` and the ``roundbegin`` in ``probe_one``) do a blocking
+    ``flush()`` with NO deadline guard. A candidate that spawns but never
+    drains stdin blocks that ``flush()`` forever once the frame exceeds the OS
+    pipe buffer — *before* the read deadline is ever reached — which is exactly
+    the act-2 production hang (run ``hl-run-0730``: ~11 min of zero progress).
+    So ``probe_one`` runs the blocking body on a daemon worker and
+    ``join(timeout)``s it; if the worker is still alive at the deadline it
+    force-kills the candidate process (closing the pipes → the worker's stuck
+    ``flush`` raises ``BrokenPipeError`` / its read returns EOF) and returns
+    ``None`` (missing). The worker is fully joined before ``probe_one``
+    returns, so there is no race on ``self._proc`` across the sequential
+    samples of ``probe_set``.
     """
+
+    # Grace given to the worker thread to finish after a hard-timeout
+    # force-kill: it only needs to surface from the unblocked I/O and run
+    # ``_close_proc`` (≤ its 2 s wait). 5 s comfortably bounds the worst case.
+    _KILL_GRACE: float = 5.0
+    # Best-effort drain of the candidate's ``id`` ack in ``_start``. The ack is
+    # not used (only drained so it doesn't sit in the pipe); candidates that
+    # don't ack (e.g. ``random_agent``) would otherwise burn the whole
+    # ``self.timeout`` here, leaving no budget for the actual decision-point
+    # read. Kept small and fixed so the read loop owns the real timeout budget.
+    _ACK_DRAIN: float = 1.0
 
     def __init__(self, *, cmd, cwd, timeout: float = 5.0):
         self.cmd = list(cmd)
         self.cwd = str(cwd)
         self.timeout = timeout
         self._proc: Optional[subprocess.Popen] = None
-        self._initialized = False
         self._frame_q: "queue.Queue[Optional[Dict[str, Any]]]" = queue.Queue()
         self._reader_thread: Optional[threading.Thread] = None
 
@@ -140,9 +177,8 @@ class ReferenceProbe:
         except queue.Empty:
             return None
 
-    def _ensure_started(self) -> None:
-        if self._proc is not None:
-            return
+    def _start(self) -> None:
+        """Spawn a fresh candidate process for one sample."""
         env = dict(os.environ)
         # scrub uv-poisoning env vars (CLAUDE.md gotcha)
         for k in ("PYTHONHOME", "PYTHONPATH"):
@@ -152,18 +188,15 @@ class ReferenceProbe:
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
         )
+        self._frame_q = queue.Queue()
+        self._reader_thread = None
         self._start_reader()
-        self._send_init()
-
-    def _send_init(self) -> None:
         # Send the id frame so the candidate sets its player id. seat 0.
         _write_frame(self._proc.stdin, {"type": "id", "id": 0,
                                         "birth_pos": [0, 0]})
-        # The candidate replies with an id-ack; drain it (best-effort). A
-        # timeout here (candidate doesn't ack id) no longer leaks a reader —
-        # the single reader thread simply waits for the next real frame.
-        self._read_frame(self.timeout)
-        self._initialized = True
+        # The candidate replies with an id-ack; drain it (best-effort, small —
+        # candidates that don't ack must not burn the whole timeout here).
+        self._read_frame(self._ACK_DRAIN)
 
     def probe_one(self, sample: ReferenceSample) -> Optional[EmittedAction]:
         las = enumerate_legal_actions(
@@ -173,9 +206,46 @@ class ReferenceProbe:
         if len(las) == 0:
             return None  # no decision point
 
-        self._ensure_started()
+        # Hard wall-clock timeout (see class docstring): run the blocking body
+        # on a daemon worker so a stuck write-flush / read can't hang the loop.
+        holder: Dict[str, Any] = {"result": None}
+        worker = threading.Thread(
+            target=self._probe_one_impl_safe,
+            args=(sample, las, holder), daemon=True)
+        worker.start()
+        # The body budget = ack-drain (``_ACK_DRAIN``) + the read loop
+        # (``self.timeout``) + a small slack for the roundbegin write / close.
+        # Bound the worker by that sum so a normal sample always finishes
+        # before the join; only a genuinely stuck sample trips the force-kill.
+        worker.join(self.timeout + self._ACK_DRAIN + 0.5)
+        if worker.is_alive():
+            # Force-kill the candidate so its pipes close and the worker's
+            # blocked flush()/read() unblock, letting the worker exit.
+            self._force_kill()
+            worker.join(self._KILL_GRACE)
+            return None  # missing — same contract as any unresponsive candidate
+        return holder["result"]
+
+    def _probe_one_impl_safe(self, sample: ReferenceSample, las: LegalActionSet,
+                             holder: Dict[str, Any]) -> None:
+        """Worker entry: run ``_probe_one_impl`` and capture its result (or
+        None on any exception, so a worker crash never propagates to the
+        main thread)."""
+        try:
+            holder["result"] = self._probe_one_impl(sample, las)
+        except Exception:
+            holder["result"] = None
+
+    def _probe_one_impl(self, sample: ReferenceSample, las: LegalActionSet
+                        ) -> Optional[EmittedAction]:
+        # One fresh process per sample (see class docstring): a candidate that
+        # crashes after its action must not poison the next sample.
+        try:
+            self._start()
+        except OSError:
+            return None  # couldn't spawn -> missing
         if self._proc is None or self._proc.poll() is not None:
-            return None  # process died -> missing
+            return None
 
         # Present the decision point as a roundbegin for player 0. The sample's
         # observation IS the roundbegin frame: the judger carries the turn
@@ -200,7 +270,11 @@ class ReferenceProbe:
             {"player_id": 2, "status": 0, "keys": [0], "hp": 200},
             {"player_id": 3, "status": 0, "keys": [0], "hp": 200},
         ])
-        _write_frame(self._proc.stdin, frame)
+        try:
+            _write_frame(self._proc.stdin, frame)
+        except OSError:
+            self._close_proc()
+            return None
 
         # Read action frames until finish or timeout. The FIRST non-finish
         # action is the behavioral choice; we keep draining to finish so the
@@ -230,6 +304,7 @@ class ReferenceProbe:
                 if token not in las.tokens:
                     out_of_support = True
                 # keep reading until finish to drain the turn
+        self._close_proc()
         if emitted is None:
             return None  # truly no emission
         return EmittedAction(primitive=emitted, out_of_support=out_of_support,
@@ -239,7 +314,7 @@ class ReferenceProbe:
                   ) -> List[Optional[EmittedAction]]:
         out: List[Optional[EmittedAction]] = []
         for i, s in enumerate(samples):
-            ea = self.probe_one(s)
+            ea = self.probe_one(s)  # fresh process per sample
             if ea is not None:
                 ea = EmittedAction(primitive=ea.primitive,
                                    out_of_support=ea.out_of_support,
@@ -247,7 +322,7 @@ class ReferenceProbe:
             out.append(ea)
         return out
 
-    def close(self) -> None:
+    def _close_proc(self) -> None:
         if self._proc is not None:
             try:
                 if self._proc.stdin:
@@ -260,3 +335,20 @@ class ReferenceProbe:
                 except Exception:
                     pass
             self._proc = None
+
+    def _force_kill(self) -> None:
+        """Unconditional kill of the live candidate process — used by the
+        hard-timeout path in ``probe_one`` to unblock a worker stuck in
+        ``flush()`` / ``read()``. Does NOT clear ``self._proc``; the worker
+        is responsible for its own ``_close_proc`` cleanup once unblocked.
+        Safe to call when no process is live (no-op)."""
+        if self._proc is None:
+            return
+        try:
+            self._proc.kill()
+        except Exception:
+            pass
+
+    def close(self) -> None:
+        # Each probe_one cleans up its own process; kept for API compatibility.
+        self._close_proc()
