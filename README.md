@@ -85,6 +85,30 @@ v4 用三个新 seed、双座位对最强人类算法生成 6 局学习回放，
 行为变化或稠密指标不作为隐藏版本的 gate。失败和退步版本同样保存，严格 policy
 KL/信息增益以及跨历史缺失点的 AUC 保持缺失。
 
+在保留 v4 血缘的同时，从历史 v3 策略回滚并执行配对学习的 v5：
+
+```bash
+agentbench generals iterate-v5 \
+  --agentbench-root "$ASSET_ROOT" \
+  --manifest "$MANIFEST" \
+  --learning-manifest \
+    "$ASSET_ROOT/backend_sources/corpus/28_generals/benchmark/v5-rollback-learning-v1.toml" \
+  --replay-skill \
+    backend_sources/corpus/28_generals/skills/replay-analysis-v1/SKILL.md \
+  --parent-run ./agentbench_data/runs/28_generals/generals-hl/V4_RUN_ID \
+  --expected-parent-hash V4_CONTENT_HASH \
+  --expected-rollback-hash V3_CONTENT_HASH \
+  --campaign-budget-receipt ./agentbench_data/derived/28_generals/generals-hl/V4_BUDGET.json \
+  --data-dir ./agentbench_data \
+  --codex-executable "$(command -v codex)"
+```
+
+v5 分别运行 v3/v4 各 6 局新 seed 学习回放，要求 12/12 个带版本标签的
+episode 全部进入 prompt，然后只执行一次 Codex act。editable workspace 从 v3
+启动，但 v4 仍作为不可变 parent 保存；可运行的 v5 无条件完成 6 局验证和原
+18 局正式评测。真实 rollback-guided 结果从 v4 的 4/18 恢复到 7/18，详见
+[`docs/experiments/2026-07-29-generals-v5-rollback-guided-result.md`](docs/experiments/2026-07-29-generals-v5-rollback-guided-result.md)。
+
 ### 5 行跑一场对战
 
 ```python

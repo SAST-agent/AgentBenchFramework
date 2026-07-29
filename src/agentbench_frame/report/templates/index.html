@@ -32,11 +32,11 @@
   </div>
 </section>
 {% endif %}
-{% set diagnostics = lr.get('behavior_diagnostics') %}
+{% set diagnostics = lr.get('behavior_diagnostics') %}{% set behavior_receipt = lr.get('derived_behavior_receipt') %}
 {% if diagnostics %}
 <section class="grid-2">
   <article class="panel">
-    <div class="panel-header"><div><h2>{{ icon('flask') }} Behavior diagnostics</h2><p class="panel-subtitle">Diagnostic evidence does not block formal evaluation for a runnable version.</p></div><div class="panel-meta">{% if diagnostics.get('validation_complete') %}<span class="status status-success">validation complete</span>{% else %}<span class="status status-warning">validation incomplete</span>{% endif %}</div></div>
+    <div class="panel-header"><div><h2>{{ icon('flask') }} Behavior diagnostics</h2><p class="panel-subtitle">Diagnostic evidence does not block formal evaluation for a runnable version.{% if behavior_receipt %} Missing action values recovered from a hash-verified derived behavior receipt; the finalized summary remains unchanged.{% endif %}</p></div><div class="panel-meta">{% if diagnostics.get('validation_complete') %}<span class="status status-success">validation complete</span>{% else %}<span class="status status-warning">validation incomplete</span>{% endif %}</div></div>
     <div class="budget-grid">
       {% if diagnostics.get('action_disagreement_vs_v3') is not none or diagnostics.get('action_disagreement_vs_v4') is not none %}
       <div class="budget-cell"><span class="budget-label">Action disagreement vs v3</span><strong class="budget-value">{{ fmt_num(diagnostics.get('action_disagreement_vs_v3')) }}</strong></div>

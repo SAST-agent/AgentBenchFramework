@@ -1,4 +1,5 @@
 import json
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -824,8 +825,8 @@ class LocalResearchReportTests(unittest.TestCase):
                     }),
                     json.dumps({
                         "event_type": "behavior_diagnostics",
-                        "action_disagreement_vs_v3": 0.25,
-                        "action_disagreement_vs_v4": 0.5,
+                        "action_disagreement_vs_v3": None,
+                        "action_disagreement_vs_v4": None,
                         "validation_complete": True,
                         "valid_validation_case_count": 6,
                         "validation_case_count": 6,
@@ -839,6 +840,46 @@ class LocalResearchReportTests(unittest.TestCase):
                     }),
                 ]) + "\n"
             )
+            summary_path = run_dir / "summary.json"
+            events_path = run_dir / "events.jsonl"
+            receipt = (
+                root / "derived" / "28_generals"
+                / "generals-hl" / "v5-behavior.json"
+            )
+            receipt.parent.mkdir(parents=True)
+            receipt.write_text(json.dumps({
+                "schema_version": "1.0",
+                "status": "derived_behavior_measurement_recovered",
+                "mutation_policy": (
+                    "inputs_immutable_separate_derived_receipt"
+                ),
+                "success_run_id": "v5-run",
+                "success_summary_ref": str(summary_path),
+                "success_summary_sha256": hashlib.sha256(
+                    summary_path.read_bytes()
+                ).hexdigest(),
+                "events_ref": str(events_path),
+                "events_sha256": hashlib.sha256(
+                    events_path.read_bytes()
+                ).hexdigest(),
+                "measurement": {
+                    "v5_vs_v3": {
+                        "decision_count": 42,
+                        "changed_count": 10,
+                        "action_disagreement": 0.25,
+                    },
+                    "v5_vs_v4": {
+                        "decision_count": 43,
+                        "changed_count": 21,
+                        "action_disagreement": 0.5,
+                    },
+                    "v5_decision_classes": {
+                        "total": 85,
+                        "counts": {"main_army_move": 20},
+                        "rates": {"main_army_move": 20 / 85},
+                    },
+                },
+            }))
 
             output = root / "site"
             ReportBuilder(
@@ -853,6 +894,9 @@ class LocalResearchReportTests(unittest.TestCase):
         self.assertIn("Action disagreement vs v4", html)
         self.assertIn("v5 − v3", html)
         self.assertIn("v5 − v4", html)
+        self.assertIn("derived behavior receipt", html)
+        self.assertIn(">0.25<", html)
+        self.assertIn(">0.50<", html)
 
 
 if __name__ == "__main__":

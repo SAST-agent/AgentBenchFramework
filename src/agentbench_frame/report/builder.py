@@ -13,6 +13,7 @@ Usage:
 """
 
 import json
+import hashlib
 import os
 from collections import Counter
 from typing import Any, Dict, List, Optional
@@ -135,6 +136,7 @@ class ReportBuilder:
         self.runs.sort(key=lambda r: r.get("started_at", 0), reverse=True)
         self._link_round2_learning_budgets()
         self._apply_derived_budget_receipts()
+        self._apply_derived_behavior_receipts()
 
     def _apply_derived_budget_receipts(self) -> None:
         """Overlay audited campaign budgets without changing run summaries."""
@@ -177,6 +179,125 @@ class ReportBuilder:
                     receipt["after"]
                 )
                 research["campaign_budget_receipt"] = audited_receipt
+
+    def _apply_derived_behavior_receipts(self) -> None:
+        """Overlay hash-verified recovered diagnostics on missing values."""
+        derived_dir = os.path.join(self.data_dir, "derived")
+        if not os.path.isdir(derived_dir):
+            return
+        by_id = {
+            str(run.get("run_id")): run
+            for run in self.runs
+            if run.get("run_id")
+        }
+        for dirpath, dirnames, filenames in os.walk(derived_dir):
+            dirnames.sort()
+            for fname in sorted(filenames):
+                if not fname.endswith(".json"):
+                    continue
+                path = os.path.join(dirpath, fname)
+                try:
+                    with open(path, encoding="utf-8") as receipt_file:
+                        receipt = json.load(receipt_file)
+                except (json.JSONDecodeError, IOError):
+                    continue
+                measurement = (
+                    receipt.get("measurement")
+                    if isinstance(receipt, dict)
+                    else None
+                )
+                if (
+                    not isinstance(receipt, dict)
+                    or receipt.get("status")
+                    != "derived_behavior_measurement_recovered"
+                    or receipt.get("mutation_policy")
+                    != "inputs_immutable_separate_derived_receipt"
+                    or not isinstance(measurement, dict)
+                ):
+                    continue
+                run = by_id.get(str(receipt.get("success_run_id")))
+                if run is None:
+                    continue
+                summary_path = os.path.abspath(str(run.get("_path", "")))
+                events_path = os.path.join(
+                    os.path.dirname(summary_path),
+                    "events.jsonl",
+                )
+                if (
+                    os.path.abspath(
+                        str(receipt.get("success_summary_ref", ""))
+                    )
+                    != summary_path
+                    or os.path.abspath(
+                        str(receipt.get("events_ref", ""))
+                    )
+                    != os.path.abspath(events_path)
+                ):
+                    continue
+                try:
+                    with open(summary_path, "rb") as summary_file:
+                        summary_hash = hashlib.sha256(
+                            summary_file.read()
+                        ).hexdigest()
+                    with open(events_path, "rb") as events_file:
+                        events_hash = hashlib.sha256(
+                            events_file.read()
+                        ).hexdigest()
+                except IOError:
+                    continue
+                if (
+                    receipt.get("success_summary_sha256")
+                    != summary_hash
+                    or receipt.get("events_sha256") != events_hash
+                ):
+                    continue
+                vs_v3 = measurement.get("v5_vs_v3")
+                vs_v4 = measurement.get("v5_vs_v4")
+                classes = measurement.get("v5_decision_classes")
+                if (
+                    not isinstance(vs_v3, dict)
+                    or not isinstance(vs_v4, dict)
+                    or not isinstance(classes, dict)
+                ):
+                    continue
+                research = run.setdefault("research", {})
+                diagnostics = dict(
+                    research.get("behavior_diagnostics") or {}
+                )
+                if diagnostics.get("action_disagreement_vs_v3") is None:
+                    diagnostics["action_disagreement_vs_v3"] = (
+                        vs_v3.get("action_disagreement")
+                    )
+                if diagnostics.get("action_disagreement_vs_v4") is None:
+                    diagnostics["action_disagreement_vs_v4"] = (
+                        vs_v4.get("action_disagreement")
+                    )
+                diagnostics["v3_probe_decision_count"] = vs_v3.get(
+                    "decision_count"
+                )
+                diagnostics["v4_probe_decision_count"] = vs_v4.get(
+                    "decision_count"
+                )
+                research["behavior_diagnostics"] = diagnostics
+                decision_classes = list(
+                    research.get("decision_class_history") or []
+                )
+                if not any(
+                    item.get("version") == "v5"
+                    for item in decision_classes
+                ):
+                    decision_classes.append({
+                        "version": "v5",
+                        "learning_id": run.get("learning_id"),
+                        "total": classes.get("total"),
+                        "counts": classes.get("counts", {}),
+                        "rates": classes.get("rates", {}),
+                        "source": "derived_behavior_receipt",
+                    })
+                research["decision_class_history"] = decision_classes
+                audited_receipt = dict(receipt)
+                audited_receipt["_path"] = path
+                research["derived_behavior_receipt"] = audited_receipt
 
     @staticmethod
     def _pair_dense_history(
