@@ -1,6 +1,7 @@
 """Tests for hl/context.py — ContextBuilder prompt assembly."""
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from agentbench_frame.hl.codebase import HLCodebase
@@ -137,4 +138,53 @@ def test_prompt_anti_derail_clause_on_all_error_history(tmp_path):
     prompt = builder.build(version_before=None, act_id="r-act0001")["prompt"]
     assert "STAY ON MISSION" in prompt
     assert "harness" in prompt.lower()
+
+
+def test_prompt_replay_section_includes_seat0_digest(tmp_path):
+    """A4: when a replay file is present, the replay section renders a seat-0
+    failure digest (keys / escaped / died / rounds) so the agent sees *why* it
+    lost, not just that it lost."""
+    cb = _codebase(tmp_path)
+    run_dir = tmp_path / "runs" / "25_lostspace" / "hl-v1" / "run-001"
+    art = run_dir / "artifacts"
+    art.mkdir(parents=True)
+    replay = [
+        [[0, 0, 1], [6, 0, 1], [6, 6, 1], [0, 6, 1]],
+        [[{"type": "getkey", "playerid": 0},
+          {"type": "move", "playerid": 0, "pos": [0, 0, 1]}],
+         [{"type": "move", "playerid": 1, "pos": [6, 0, 1]}],
+         [{"type": "move", "playerid": 2, "pos": [6, 6, 1]}],
+         [{"type": "move", "playerid": 3, "pos": [0, 6, 1]}]],
+        {"0": 2, "1": 3, "2": 4, "3": 1},
+    ]
+    (art / "rank06-pair000-seat0.json").write_text(
+        json.dumps(replay), encoding="utf-8")
+    (run_dir / "matches.jsonl").write_text(
+        json.dumps({"opponent": "rank06", "candidate_result": "loss",
+                    "candidate_rank": 3, "candidate_score": 2, "turns": 1900,
+                    "pair": 0, "candidate_seat": 0,
+                    "replay": "artifacts/rank06-pair000-seat0.json"}) + "\n",
+        encoding="utf-8")
+    builder = ContextBuilder(codebase=cb, data_root=tmp_path, game="25_lostspace",
+                             agent_name="hl-v1", spec=_spec())
+    prompt = builder.build(version_before=None, act_id="r-act0001")["prompt"]
+    assert "seat 0" in prompt.lower()
+    assert "keys=" in prompt
+    assert "rounds=" in prompt
+
+
+def test_prompt_history_table_shows_partial_credit_cols(tmp_path):
+    """A5: the match-history table includes avg_score and avg_turns columns."""
+    cb = _codebase(tmp_path)
+    run_dir = tmp_path / "runs" / "25_lostspace" / "hl-v1" / "run-001"
+    run_dir.mkdir(parents=True)
+    (run_dir / "matches.jsonl").write_text(
+        '{"opponent":"rank06","candidate_result":"loss",'
+        '"candidate_rank":3,"candidate_score":2,"turns":1900,"pair":0,'
+        '"candidate_seat":0}\n', encoding="utf-8")
+    builder = ContextBuilder(codebase=cb, data_root=tmp_path, game="25_lostspace",
+                             agent_name="hl-v1", spec=_spec())
+    prompt = builder.build(version_before=None, act_id="r-act0001")["prompt"]
+    assert "avg_score" in prompt
+    assert "avg_turns" in prompt
 

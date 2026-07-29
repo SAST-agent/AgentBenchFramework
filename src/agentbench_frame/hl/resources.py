@@ -67,12 +67,18 @@ class MatchHistoryView:
 
     def by_opponent(self) -> Dict[str, Dict[str, Any]]:
         """Per-opponent W/L/error counts. Errors are NOT losses (doc §12);
-        ``win_rate`` is None when there are no valid games."""
+        ``win_rate`` is None when there are no valid games.
+
+        Also surfaces ``avg_score`` and ``avg_turns`` — partial-credit columns
+        that give a hill to climb even when ``win_rate`` is pinned at 0 (a
+        0.0 win rate with avg_score rising 2 -> 2.5 is real progress the raw
+        win/loss counts hide)."""
         agg: Dict[str, Dict[str, Any]] = {}
         for r in self.match_rows():
             opp = r.get("opponent", "?")
             a = agg.setdefault(opp, {"wins": 0, "losses": 0, "errors": 0,
-                                    "valid_games": 0, "ranks": []})
+                                    "valid_games": 0, "ranks": [],
+                                    "scores": [], "turns": []})
             res = r.get("candidate_result")
             if res == "win":
                 a["wins"] += 1
@@ -84,6 +90,10 @@ class MatchHistoryView:
                 a["errors"] += 1
             if r.get("candidate_rank") is not None:
                 a["ranks"].append(r["candidate_rank"])
+            if r.get("candidate_score") is not None:
+                a["scores"].append(r["candidate_score"])
+            if r.get("turns") is not None:
+                a["turns"].append(r["turns"])
         for a in agg.values():
             if a["valid_games"] > 0:
                 a["win_rate"] = a["wins"] / a["valid_games"]
@@ -92,6 +102,10 @@ class MatchHistoryView:
             else:
                 a["win_rate"] = None
                 a["avg_rank"] = None
+            a["avg_score"] = (sum(a["scores"]) / len(a["scores"])
+                              if a["scores"] else None)
+            a["avg_turns"] = (sum(a["turns"]) / len(a["turns"])
+                              if a["turns"] else None)
         return agg
 
 
@@ -132,6 +146,60 @@ class ReplayView:
         if not sd:
             return None
         return max(sd, key=lambda k: sd[k])
+
+    def seat0_digest(self, seat: int = 0) -> Dict[str, Any]:
+        """Classify seat ``seat``'s failure mode by scanning its actions across
+        all rounds: keys collected, escaped/died (+ round), ai_errors, last
+        non-move action, round count, and an action-type histogram.
+
+        Used to localize *why* the agent lost (stalling? never keying? dying?
+        erroring?) so the next edit targets the real cause instead of guessing
+        from a 0.0 win rate. Replays are event-summarized, so counts are lower
+        bounds — callers should say so when rendering.
+        """
+        rounds = self.rounds()
+        keys = 0
+        escaped = False
+        died = False
+        died_round: Optional[int] = None
+        ai_errors = 0
+        last_action: Optional[str] = None
+        last_action_round: Optional[int] = None
+        hist: Dict[str, int] = {}
+        for ri, rd in enumerate(rounds):
+            if not isinstance(rd, list):
+                continue
+            for seat_entry in rd:
+                if not isinstance(seat_entry, list):
+                    continue
+                for a in seat_entry:
+                    if not isinstance(a, dict) or a.get("playerid") != seat:
+                        continue
+                    t = a.get("type") or "?"
+                    hist[t] = hist.get(t, 0) + 1
+                    if t == "getkey":
+                        keys += 1
+                    elif t in ("escaped", "to_escape", "escape_capsule"):
+                        escaped = True
+                    elif t in ("died", "death"):
+                        died = True
+                        died_round = ri
+                    elif t == "ai_error":
+                        ai_errors += 1
+                    if t != "move":
+                        last_action = t
+                        last_action_round = ri
+        return {
+            "n_rounds": len(rounds),
+            "keys": keys,
+            "escaped": escaped,
+            "died": died,
+            "died_round": died_round,
+            "ai_errors": ai_errors,
+            "last_action": last_action,
+            "last_action_round": last_action_round,
+            "hist": hist,
+        }
 
 
 class VersionDiffView:

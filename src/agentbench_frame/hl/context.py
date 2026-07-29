@@ -230,15 +230,19 @@ class ContextBuilder:
         by_opp = view.by_opponent()
         if not by_opp:
             return ""
-        rows = ["opponent  W  L  err  win_rate  avg_rank"]
+        rows = ["opponent  W  L  err  win_rate  avg_rank  avg_score  avg_turns"]
         for name, a in by_opp.items():
             wr = a.get("win_rate")
             wr_s = f"{wr:.0%}" if wr is not None else "-"
             ar = a.get("avg_rank")
             ar_s = f"{ar:.1f}" if ar is not None else "-"
+            asc = a.get("avg_score")
+            asc_s = f"{asc:.1f}" if asc is not None else "-"
+            atn = a.get("avg_turns")
+            atn_s = f"{atn:.0f}" if atn is not None else "-"
             rows.append(
                 f"{name}  {a['wins']}  {a['losses']}  {a['errors']}  "
-                f"{wr_s}  {ar_s}"
+                f"{wr_s}  {ar_s}  {asc_s}  {atn_s}"
             )
         return "\n".join(rows)
 
@@ -261,8 +265,35 @@ class ContextBuilder:
             f"- last match   : opponent={latest.get('opponent')} "
             f"result={latest.get('candidate_result')} "
             f"rank={latest.get('candidate_rank')} turns={latest.get('turns')}",
-            "",
-            "How to read a replay:",
-            _PLAYBACK_RECIPE,
         ]
+        # Seat-0 failure digest: load the last match's replay (if present) and
+        # summarize *why* seat 0 lost — keys/escaped/died/rounds/last-action.
+        # Best-effort: a missing/unparseable replay never breaks the prompt.
+        digest = self._seat0_digest_line(run_dir, latest)
+        if digest:
+            out.append(f"- {digest}")
+        out += ["", "How to read a replay:", _PLAYBACK_RECIPE]
         return "\n".join(out)
+
+    @staticmethod
+    def _seat0_digest_line(run_dir: Path, latest: Dict[str, Any]) -> str:
+        from agentbench_frame.hl.resources import ReplayView
+
+        replay_rel = latest.get("replay")
+        if not replay_rel:
+            return ""
+        replay_abs = run_dir / replay_rel
+        if not replay_abs.exists():
+            return ""
+        try:
+            d = ReplayView(replay_abs).seat0_digest()
+        except Exception:
+            return ""
+        died = f"died={d['died']}" + (
+            f"@round{d['died_round']}" if d["died_round"] is not None else "")
+        bits = [f"keys={d['keys']}", f"escaped={d['escaped']}", died,
+                f"ai_errors={d['ai_errors']}", f"rounds={d['n_rounds']}"]
+        if d["last_action"]:
+            bits.append(f"last={d['last_action']}")
+        return ("seat 0 last game: " + " ".join(bits)
+                + "  (replays are event-summarized; counts are lower bounds)")

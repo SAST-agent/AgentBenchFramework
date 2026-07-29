@@ -123,6 +123,68 @@ def test_replay_view_winner(tmp_path):
     assert rv.winner() == 1
 
 
+def test_replay_view_seat0_digest_classifies_failure(tmp_path):
+    """A4: seat0_digest scans player-0's actions across rounds and reports the
+    failure mode (keys collected, escaped/died, ai_errors, last action, rounds).
+    This localizes *why* the agent lost so the next edit targets the real cause
+    instead of guessing from a 0.0 win_rate."""
+    replay = [
+        [[0, 0, 1], [6, 0, 1], [6, 6, 1], [0, 6, 1]],      # birthplaces
+        # round 0: everyone moves; seat 0 (playerid 0) collects a key
+        [[{"type": "move", "playerid": 0, "pos": [0, 0, 1]},
+          {"type": "getkey", "playerid": 0}],
+         [{"type": "move", "playerid": 1, "pos": [6, 0, 1]}],
+         [{"type": "move", "playerid": 2, "pos": [6, 6, 1]}],
+         [{"type": "move", "playerid": 3, "pos": [0, 6, 1]}]],
+        # round 1: seat 0 dies
+        [[{"type": "died", "playerid": 0}],
+         [], [], []],
+        {"0": 2, "1": 3, "2": 4, "3": 1},
+    ]
+    p = tmp_path / "r.json"
+    p.write_text(json.dumps(replay), encoding="utf-8")
+    rv = ReplayView(p)
+    d = rv.seat0_digest()
+    assert d["n_rounds"] == 2
+    assert d["keys"] == 1
+    assert d["died"] is True
+    assert d["died_round"] == 1
+    assert d["escaped"] is False
+    assert d["last_action"] == "died"
+
+
+def test_replay_view_seat0_digest_handles_empty(tmp_path):
+    """No player-0 actions recorded (event-summarized replay) -> zeros, no raise."""
+    replay = [
+        [[0, 0, 1], [6, 0, 1], [6, 6, 1], [0, 6, 1]],
+        [[], [], [], []],
+        {"0": 2, "1": 3, "2": 4, "3": 1},
+    ]
+    p = tmp_path / "r.json"
+    p.write_text(json.dumps(replay), encoding="utf-8")
+    d = ReplayView(p).seat0_digest()
+    assert d["keys"] == 0
+    assert d["died"] is False
+    assert d["escaped"] is False
+    assert d["n_rounds"] == 1
+
+
+def test_by_opponent_reports_partial_credit_score_and_turns(tmp_path):
+    """A5: by_opponent surfaces avg_score and avg_turns so the prompt has a
+    gradient to climb even when win_rate is pinned at 0."""
+    data = tmp_path / "data"
+    _make_run(data, "cand-v1", "r1", matches=[
+        {"opponent": "rank01", "candidate_result": "loss", "candidate_rank": 3,
+         "candidate_score": 2, "turns": 1900, "pair": 0, "candidate_seat": 0},
+        {"opponent": "rank01", "candidate_result": "loss", "candidate_rank": 3,
+         "candidate_score": 2, "turns": 2000, "pair": 1, "candidate_seat": 0},
+    ])
+    view = MatchHistoryView(data_root=data, game="25_lostspace", agent="cand-v1")
+    by_opp = view.by_opponent()
+    assert by_opp["rank01"]["avg_score"] == 2.0
+    assert by_opp["rank01"]["avg_turns"] == 1950.0
+
+
 def test_version_diff_view_is_read_only(tmp_path):
     ws = tmp_path / "workspace"
     ws.mkdir()
