@@ -185,7 +185,7 @@ def _evaluator_factory(logic_command: str, opponents: List[Opponent],
     """Build a fresh LostSpaceEvaluator per evaluated version."""
     from agentbench_frame.hl.adapter import candidate_command
 
-    def make(*, version, spec, run_id):
+    def make(*, version, spec, run_id, opponent_names=None):
         cmd, cwd = candidate_command(
             version, store=codebase.store,
             dest=stage_root / f"eval-{version.version_id}",
@@ -197,6 +197,12 @@ def _evaluator_factory(logic_command: str, opponents: List[Opponent],
             cmd_str = subprocess.list2cmdline(cmd)
         else:
             cmd_str = " ".join(shlex.quote(c) for c in cmd)
+        # Curriculum (B1): optionally restrict this eval to a subset of the
+        # configured opponents (one tier). Empty subset falls back to all.
+        opps = opponents
+        if opponent_names:
+            filtered = [o for o in opponents if o.name in opponent_names]
+            opps = filtered or opponents
         return LostSpaceEvaluator(
             logic_command=logic_command,
             # Write runs under the stable run name (args.name), not
@@ -206,7 +212,7 @@ def _evaluator_factory(logic_command: str, opponents: List[Opponent],
             # blind). version_id stays in run.toml/summary.json for provenance.
             candidate_name=run_id,
             candidate_command=cmd_str,
-            opponents=opponents,
+            opponents=opps,
             filler_command=filler_command,
             pairs=spec.pairs, seats=spec.seats, timeout=spec.timeout,
             data_dir=data_root,
@@ -258,7 +264,18 @@ def build_parser() -> argparse.ArgumentParser:
                    help="command to pad empty seats (default: bundled sample AI)")
     p.add_argument("--acts", type=int, default=5)
     p.add_argument("--epsilon", type=float, default=0.1)
-    p.add_argument("--pairs", type=int, default=3)
+    p.add_argument("--pairs", type=int, default=3,
+                   help="match pairs per eval. 4-player FFA is noisy; 5+ is "
+                        "recommended so a real improvement isn't drowned in "
+                        "variance over a 2-pair sample.")
+    p.add_argument("--curriculum", action="store_true",
+                   help="evaluate one opponent tier at a time, weakest first "
+                        "(order of --ladder-opponent), promoting to the next "
+                        "tier once avg_rank <= --promote-rank. Avoids throwing "
+                        "a weak agent straight at the strongest opponent.")
+    p.add_argument("--promote-rank", type=float, default=2.0,
+                   help="avg_rank threshold to advance to the next curriculum "
+                        "tier (default 2.0 = must reach 2nd place or better).")
     p.add_argument("--seats", choices=("all", "0", "1", "2", "3"), default="0")
     p.add_argument("--timeout", type=float, default=15.0)
     p.add_argument("--spec-id", default=None,
@@ -347,6 +364,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         run_id=run_id, events_path=events_path, epsilon=args.epsilon,
         evaluator_factory=eval_factory, stage_root=stage_root,
         context_builder=context_builder.build,
+        curriculum=args.curriculum, promote_rank=args.promote_rank,
     )
 
     print(f"[hl] running {args.acts} acts against "

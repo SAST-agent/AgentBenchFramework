@@ -61,6 +61,8 @@ class HLIterationController:
         probe_factory: Optional[ProbeFactory] = None,
         stage_root: Optional[Path] = None,
         context_builder: Optional[Callable[..., Dict[str, Any]]] = None,
+        curriculum: bool = False,
+        promote_rank: float = 2.0,
     ):
         self.codebase = codebase
         self.runner = runner
@@ -72,6 +74,15 @@ class HLIterationController:
         self._probe_factory = probe_factory or ReferenceProbe
         self._stage_root = Path(stage_root) if stage_root else codebase.root.parent / "stage"
         self._context_builder = context_builder
+        # Curriculum (B1): when on, evaluate one opponent tier at a time, weakest
+        # first, promoting to the next tier only once avg_rank <= promote_rank.
+        # Stops the loop from throwing a weak agent straight at the strongest
+        # opponent (a guaranteed 0.0 that teaches nothing). _tier indexes
+        # spec.opponents.
+        self.curriculum = curriculum
+        self.promote_rank = promote_rank
+        self._tier = 0
+        self._last_eval_opponents: Optional[tuple] = None
         self._events = HLEventWriter(run_id=run_id, path=events_path)
         self._act_counter = 0
         # Feedback carried from act N into act N+1's prompt: the eval outcome
@@ -167,6 +178,9 @@ class HLIterationController:
         eval_status = "incomplete"
         win_rate = None
         ev_result = None
+        # Capture the opponent tier actually evaluated this act (before any
+        # promotion) so the feedback section reports who the outcome was against.
+        self._last_eval_opponents = self._active_opponent_names()
         if version_after is not None and self._evaluator_factory is not None:
             try:
                 ev_result = self._run_eval(version_after)
@@ -174,6 +188,14 @@ class HLIterationController:
                 # honor the evaluator's own completeness verdict if present
                 eval_status = summary.get("evaluation_status") or "complete"
                 win_rate = summary.get("win_rate")
+                # B1: curriculum promotion — advance to the next (stronger)
+                # opponent tier once avg_rank meets the threshold.
+                if self.curriculum and eval_status == "complete":
+                    agg = (summary.get("lostspace") or {}).get("aggregate") or {}
+                    ar = agg.get("avg_rank")
+                    if (ar is not None and ar <= self.promote_rank
+                            and self._tier < len(self.spec.opponents) - 1):
+                        self._tier += 1
             except Exception:
                 eval_status = "incomplete"
                 win_rate = None
@@ -241,11 +263,21 @@ class HLIterationController:
         The evaluator_factory (supplied by the CLI) captures the real
         logic command, opponents, and filler — it builds a LostSpaceEvaluator
         given ``(version, spec, run_id)`` and returns its ``evaluate()`` result.
+        ``opponent_names`` (None for the full pool, or a subset under curriculum)
+        lets the controller gate evaluation to one tier at a time.
         """
         ev = self._evaluator_factory(
             version=version, spec=self.spec, run_id=self.run_id,
+            opponent_names=self._last_eval_opponents,
         )
         return ev.evaluate()
+
+    def _active_opponent_names(self) -> Optional[tuple]:
+        """Names of opponents to evaluate this act. None => the factory uses
+        the full pool (no curriculum, or no opponents configured)."""
+        if not self.curriculum or not self.spec.opponents:
+            return None
+        return (self.spec.opponents[self._tier],)
 
     def _measure_policy_kl(
         self, version_before: VersionHandle, version_after: VersionHandle,
@@ -324,4 +356,5 @@ class HLIterationController:
             "n_total": len(kl_trace),
             "edit_type": getattr(version_after, "edit_type", None),
             "files_touched": list(run_result.files_touched) if run_result else [],
+            "active_opponents": self._last_eval_opponents,
         }

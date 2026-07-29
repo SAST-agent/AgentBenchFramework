@@ -408,3 +408,84 @@ def test_second_act_prompt_no_callout_when_edit_changed_behavior(tmp_path):
     p2 = runner.prompts[1]
     assert "Feedback on your last edit" in p2
     assert "NO MEASURABLE EFFECT" not in p2
+
+
+# ---- B1: curriculum (weak -> strong opponent ladder) ----
+
+def test_curriculum_evaluates_current_tier_and_promotes(tmp_path):
+    """B1: with curriculum on, each act evaluates ONLY the current-tier
+    opponent; when avg_rank meets the promote threshold the controller advances
+    to the next tier for subsequent acts. Stops the loop from throwing a weak
+    agent straight at the strongest opponent (guaranteed 0.0)."""
+    seen = []
+
+    def factory(*, version, spec, run_id, opponent_names=None):
+        seen.append(opponent_names)
+        class _Rec:
+            def evaluate(self):
+                class R:
+                    summary = _promo_results.pop(0)
+                    matches = []
+                    error_count = 0
+                    run_dir = tmp_path
+                return R()
+        return _Rec()
+
+    _promo_results = [
+        {"win_rate": 0.0, "evaluation_status": "complete",
+         "lostspace": {"aggregate": {"avg_rank": 3.0}}},   # act1: no promote
+        {"win_rate": 0.5, "evaluation_status": "complete",
+         "lostspace": {"aggregate": {"avg_rank": 1.0}}},   # act2: promote
+    ]
+
+    def change(w):
+        (w / "agent.py").write_text(f"# {len(seen)}\n", encoding="utf-8")
+
+    ws = _make_workspace(tmp_path)
+    cb = HLCodebase(root=ws, store=tmp_path / "store")
+    v0 = cb.snapshot(parent_version_id=None)
+    ctrl = HLIterationController(
+        codebase=cb, runner=FakeRunner(transform=change, edit_type="parametrize"),
+        spec=BenchmarkSpec(spec_id="b", opponents=("rank12", "rank06", "rank01"),
+                           pairs=1, seats="0", timeout=5.0),
+        reference=_ref_set(), run_id="r", events_path=tmp_path / "e.jsonl",
+        evaluator_factory=factory,
+        probe_factory=_stub_probe_factory([[("finish",)]] * 4),
+        stage_root=tmp_path / "stage", curriculum=True, promote_rank=2.0,
+    )
+    v1 = ctrl.act(version_before=v0)
+    ctrl.act(version_before=v1)
+    # Both acts evaluated tier 0 (rank12); promotion happens AFTER act2's eval.
+    assert seen[0] == ("rank12",)
+    assert seen[1] == ("rank12",)
+    assert ctrl._tier == 1   # promoted to rank06 after act2
+
+
+def test_no_curriculum_passes_none_so_factory_uses_all_opponents(tmp_path):
+    """Without curriculum the controller does not filter opponents (None -> the
+    factory evaluates the full pool), preserving existing behavior."""
+    seen = []
+
+    def factory(*, version, spec, run_id, opponent_names=None):
+        seen.append(opponent_names)
+        class _Rec:
+            def evaluate(self):
+                class R:
+                    summary = {"win_rate": 0.5, "evaluation_status": "complete",
+                               "lostspace": {"aggregate": {"avg_rank": 2.0}}}
+                    matches = []
+                    error_count = 0
+                    run_dir = tmp_path
+                return R()
+        return _Rec()
+
+    ctrl, v0 = _two_act_controller(
+        tmp_path,
+        runner=FakeRunner(transform=lambda w: None, edit_type="noop"),
+        eval_results=[_stub_result(0.5, "complete")],
+        probe_emissions=[[("finish",)], [("finish",)]],
+    )
+    # swap in the recording factory on a curriculum-OFF controller
+    ctrl._evaluator_factory = factory
+    ctrl.act(version_before=v0)
+    assert seen == [None]

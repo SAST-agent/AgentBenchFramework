@@ -203,8 +203,11 @@ class ContextBuilder:
         parts = [
             "## Feedback on your last edit",
             f"- outcome: {outcome}",
-            f"- behavior: {behavior}",
         ]
+        active = fb.get("active_opponents")
+        if active:
+            parts.append(f"- evaluated against: {', '.join(active)}")
+        parts.append(f"- behavior: {behavior}")
         # No-op callout: the edit landed but changed zero reference decisions
         # and produced no occupancy shift. This is the exact failure mode that
         # stalled prior iterations (plausible edits in dead/dominated code).
