@@ -40,7 +40,8 @@ class VersionHandle:
     version_id: str
     content_hash: str
     parent_version_id: Optional[str]
-    edit_type: str            # initial | add_rule | reorder | parametrize | refactor | replace | rollback | noop
+    edit_type: str            # initial | add_rule | reorder | parametrize | refactor | replace
+                              #         | utility | search | planner | consolidate | rollback | noop
     created_at: str
 
 

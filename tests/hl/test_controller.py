@@ -511,3 +511,84 @@ def test_no_curriculum_passes_none_so_factory_uses_all_opponents(tmp_path):
     ctrl._evaluator_factory = factory
     ctrl.act(version_before=v0)
     assert seen == [None]
+
+
+# ---- HL std 4/5: experience store + consolidation cadence ----
+
+def test_experience_store_records_one_observation_per_act(tmp_path):
+    """Each act appends one raw observation to .experience_staging.jsonl, so
+    accumulated experience persists across the round (HL std 5)."""
+    from agentbench_frame.hl.context import ContextBuilder
+    from agentbench_frame.hl.experience import ExperienceStore
+    ws = _make_workspace(tmp_path)
+    cb = HLCodebase(root=ws, store=tmp_path / "store")
+    v0 = cb.snapshot(parent_version_id=None)
+    store = ExperienceStore(round_root=tmp_path)
+    builder = ContextBuilder(codebase=cb, data_root=tmp_path, game="25_lostspace",
+                             agent_name="r", spec=_spec(), experience=store)
+    runner = _CapturingRunner()
+    ctrl = HLIterationController(
+        codebase=cb, runner=runner, spec=_spec(), reference=_ref_set(),
+        run_id="r", events_path=tmp_path / "e.jsonl",
+        evaluator_factory=_stub_evaluator_factory(
+            [_stub_result(0.0, "complete")] * 3),
+        probe_factory=_stub_probe_factory([[("finish",)]] * 6),
+        stage_root=tmp_path / "stage", context_builder=builder.build,
+        experience=store,
+    )
+    v = v0
+    for _ in range(3):
+        v = ctrl.act(version_before=v)
+    obs = store.observations()
+    assert len(obs) == 3
+    assert [o["act_id"] for o in obs] == ["r-000001", "r-000002", "r-000003"]
+
+
+def test_consolidation_mission_fires_on_cadence_through_controller(tmp_path):
+    """With consolidate_every=2, act 2's prompt carries the CONSOLIDATION ACT
+    mission while acts 1 and 3 carry the normal 'What to do now' mission.
+    The growth nudge also fires once agent.py has grown under piling edits."""
+    from agentbench_frame.hl.context import ContextBuilder
+    from agentbench_frame.hl.experience import ExperienceStore
+
+    class _GrowingRunner:
+        """Records prompts and grows agent.py each act (piling add_rule edits)."""
+        def __init__(self):
+            self.prompts: List[str] = []
+        def run(self, *, workspace, context):
+            from agentbench_frame.hl.runner import AgentRunResult
+            self.prompts.append(context.get("prompt", ""))
+            # grow agent.py ~10x its size each act -> triggers the growth nudge
+            cur = (workspace / "agent.py").read_text(encoding="utf-8")
+            (workspace / "agent.py").write_text(cur * 10, encoding="utf-8")
+            return AgentRunResult(edit_type="add_rule", files_touched=["agent.py"],
+                                  time_s=0.0)
+
+    ws = _make_workspace(tmp_path)
+    cb = HLCodebase(root=ws, store=tmp_path / "store")
+    v0 = cb.snapshot(parent_version_id=None)
+    store = ExperienceStore(round_root=tmp_path)
+    builder = ContextBuilder(codebase=cb, data_root=tmp_path, game="25_lostspace",
+                             agent_name="r", spec=_spec(), experience=store,
+                             consolidate_every=2, max_growth_pct=40.0)
+    runner = _GrowingRunner()
+    ctrl = HLIterationController(
+        codebase=cb, runner=runner, spec=_spec(), reference=_ref_set(),
+        run_id="r", events_path=tmp_path / "e.jsonl",
+        evaluator_factory=_stub_evaluator_factory(
+            [_stub_result(0.0, "complete")] * 3),
+        probe_factory=_stub_probe_factory([[("finish",)]] * 6),
+        stage_root=tmp_path / "stage", context_builder=builder.build,
+        experience=store,
+    )
+    v = v0
+    for _ in range(3):
+        v = ctrl.act(version_before=v)
+    assert len(runner.prompts) == 3
+    assert "CONSOLIDATION ACT" not in runner.prompts[0]
+    assert "CONSOLIDATION ACT" in runner.prompts[1]
+    assert "CONSOLIDATION ACT" not in runner.prompts[2]
+    # the experience file path is surfaced on the consolidation act
+    assert str(store.path) in runner.prompts[1]
+    # act 3 saw enough piling growth to trigger the nudge
+    assert "CODE GROWTH" in runner.prompts[2]

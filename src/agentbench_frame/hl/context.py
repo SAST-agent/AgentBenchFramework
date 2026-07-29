@@ -17,7 +17,7 @@ self-serve the "why did I lose?" question without us embedding 20 KB of JSON.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from agentbench_frame.hl.codebase import HLCodebase, VersionHandle
 from agentbench_frame.hl.reference import BenchmarkSpec
@@ -60,6 +60,9 @@ class ContextBuilder:
         spec: BenchmarkSpec,
         playback_skill_path: Optional[Any] = None,
         timeout: float = 600.0,
+        experience: Any = None,
+        consolidate_every: int = 4,
+        max_growth_pct: float = 40.0,
     ):
         self.codebase = codebase
         self.data_root = Path(data_root)
@@ -70,6 +73,14 @@ class ContextBuilder:
             Path(playback_skill_path) if playback_skill_path else None
         )
         self.timeout = timeout
+        # Self-summarized experience (HL std 5) + consolidation cadence (std 4).
+        # ``experience`` is an ExperienceStore (or None to disable). The
+        # consolidate-every cadence swaps the per-act mission to a
+        # consolidation pass every K-th act; ``max_growth_pct`` gates the
+        # code-growth nudge in the feedback section.
+        self.experience = experience
+        self.consolidate_every = max(0, int(consolidate_every))
+        self.max_growth_pct = float(max_growth_pct)
 
     def build(
         self,
@@ -77,27 +88,52 @@ class ContextBuilder:
         version_before: Optional[VersionHandle],
         act_id: str,
         prev_feedback: Optional[Dict[str, Any]] = None,
+        act_index: int = 1,
+        loc_history: Optional[List[int]] = None,
+        edit_type_history: Optional[List[str]] = None,
         **_: Any,
     ) -> Dict[str, Any]:
-        return {"prompt": self._prompt(version_before, act_id, prev_feedback),
-                "timeout": self.timeout}
+        return {
+            "prompt": self._prompt(
+                version_before, act_id, prev_feedback,
+                act_index=act_index,
+                loc_history=loc_history,
+                edit_type_history=edit_type_history,
+            ),
+            "timeout": self.timeout,
+        }
 
     # ---- internals ----
 
     def _prompt(self, version_before: Optional[VersionHandle],
                 act_id: str,
-                prev_feedback: Optional[Dict[str, Any]] = None) -> str:
+                prev_feedback: Optional[Dict[str, Any]] = None,
+                *,
+                act_index: int = 1,
+                loc_history: Optional[List[int]] = None,
+                edit_type_history: Optional[List[str]] = None) -> str:
         lines: list[str] = []
+        is_consolidation = (
+            self.consolidate_every > 0
+            and act_index > 1
+            and act_index % self.consolidate_every == 0
+        )
         lines.append(
             f"# HL act {act_id} — improve the LostSpace agent\n"
-            "You are editing a heuristic LostSpace agent in this workspace. "
+            "You are editing a LostSpace agent in this workspace. "
             "Your goal is to raise its win rate against the benchmark "
             f"opponents ({', '.join(self.spec.opponents)}).\n"
             "RULES OF ENGAGEMENT:\n"
             "- Edit only the agent source (`agent.py` and any helper modules "
             "in this directory). Do NOT touch `manifest.toml`.\n"
-            "- Make ONE coherent improvement. Do not rewrite from scratch "
-            "unless clearly broken.\n"
+            "- The agent may be ANY interpretable Python — not just if-else. "
+            "You are encouraged to use utility/scoring functions, weighted "
+            "evaluation of candidate moves, bounded lookahead or shallow "
+            "search, explicit planners, and parametrized decision tables — "
+            "whichever is the smallest change that fixes the weakest matchup. "
+            "The only constraint: the logic must stay HUMAN-READABLE (no "
+            "opaque black-box blobs, no dumped learned weights without an "
+            "interpretable wrapper).\n"
             "- Keep the Saiblo stdio protocol intact (read 4-byte "
             "length-prefixed JSON, send the same).\n"
         )
@@ -134,18 +170,30 @@ class ContextBuilder:
                 "improvement.\n"
             )
 
-        feedback = self._feedback_section(prev_feedback)
+        feedback = self._feedback_section(
+            prev_feedback, loc_history=loc_history,
+            edit_type_history=edit_type_history,
+        )
         if feedback:
             lines.append(feedback)
 
-        lines.append(
-            "## What to do now\n"
-            "1. Read `agent.py`.\n"
-            "2. Use the match history above to find the weakest matchup; "
-            "read one of its replays if you need to see *why*.\n"
-            "3. Make a targeted improvement. Prefer small, reasoned edits.\n"
-            "4. Leave the agent runnable (valid Python, protocol intact).\n"
-        )
+        experience = self._experience_section()
+        if experience:
+            lines.append(experience)
+
+        if is_consolidation:
+            lines.append(self._consolidation_mission())
+        else:
+            lines.append(
+                "## What to do now\n"
+                "1. Read `agent.py`.\n"
+                "2. Use the match history above to find the weakest matchup; "
+                "read one of its replays if you need to see *why*.\n"
+                "3. Make a targeted improvement — a new/adjusted rule, a "
+                "utility/scoring function, or a bounded lookahead — "
+                "whichever is the smallest change that fixes it.\n"
+                "4. Leave the agent runnable (valid Python, protocol intact).\n"
+            )
         lines.append(
             "## STAY ON MISSION — read this before acting\n"
             "Your job is to edit `agent.py`, not to debug the harness.\n"
@@ -170,7 +218,9 @@ class ContextBuilder:
         )
         return "\n".join(lines)
 
-    def _feedback_section(self, fb: Optional[Dict[str, Any]]) -> str:
+    def _feedback_section(self, fb: Optional[Dict[str, Any]], *,
+                          loc_history: Optional[List[int]] = None,
+                          edit_type_history: Optional[List[str]] = None) -> str:
         """Render the previous act's outcome + behavior-change measurement.
 
         This is the closed-loop signal: the controller measures win_rate and
@@ -181,7 +231,7 @@ class ContextBuilder:
         if not fb:
             return ""
         def fmt(v, spec="%g"):
-            return "-" if v is None else spec % v
+            return "-" if v is None else format(v, spec.lstrip("%"))
         win_rate = fb.get("win_rate")
         wr_s = (f"{win_rate:.0%}" if isinstance(win_rate, (int, float))
                 else "-")
@@ -224,7 +274,79 @@ class ContextBuilder:
                 "decision path — the branch actually taken when seat 0 is alive "
                 "— or say explicitly that the agent is optimal and make no edit."
             )
+        nudge = self._growth_nudge(loc_history, edit_type_history)
+        if nudge:
+            parts.append(nudge)
         return "\n".join(parts) + "\n"
+
+    def _growth_nudge(self, loc_history: Optional[List[int]],
+                      edit_type_history: Optional[List[str]]) -> str:
+        """Code-growth nudge (HL std 4): when the last few acts were
+        rule-piling (``add_rule``/``parametrize``) and ``agent.py`` grew
+        beyond ``max_growth_pct`` over that window, surface a 'consider a
+        consolidation pass' nudge. Empty string when not triggered."""
+        if not loc_history or len(loc_history) < 2:
+            return ""
+        # Look at the trailing window of piling edits.
+        window_et = (edit_type_history or [])[-len(loc_history):]
+        piling = [e for e in window_et if e in ("add_rule", "parametrize")]
+        if len(piling) < 2:
+            return ""
+        first, last = loc_history[-len(piling)], loc_history[-1]
+        if first <= 0:
+            return ""
+        growth_pct = (last - first) / first * 100.0
+        if growth_pct < self.max_growth_pct:
+            return ""
+        return (
+            f"- CODE GROWTH: agent.py grew {first} -> {last} lines "
+            f"(+{growth_pct:.0f}%) over the last {len(piling)} piling acts "
+            f"with no consolidation. Consider a consolidation pass next "
+            f"(merge overlapping branches, extract helpers, remove dead "
+            f"rules) to keep the strategy from sprawling."
+        )
+
+    def _experience_section(self) -> str:
+        """Render accumulated lessons (HL std 5). The agent-authored
+        ``EXPERIENCE.md`` if present, else a compact view of raw staging
+        observations. Empty when experience is disabled or empty."""
+        if self.experience is None:
+            return ""
+        rendered = self.experience.render()
+        if not rendered:
+            return ""
+        return (
+            "## Lessons learned so far\n"
+            f"{rendered}\n"
+            f"Experience file (read & re-summarize on consolidation acts): "
+            f"{self.experience.path}\n"
+        )
+
+    def _consolidation_mission(self) -> str:
+        """The periodic consolidation mission (HL std 4): swap the act's goal
+        from 'add one improvement' to 'compress and consolidate'."""
+        xp_edit = ""
+        if self.experience is not None:
+            xp_edit = (
+                "\n2. Re-summarize the experience file "
+                f"`{self.experience.path}`: fold the new raw observations into "
+                "the existing lessons, deduplicate, retire disproven ideas "
+                "into a 'Retired ideas' section, and keep it short. This is "
+                "your self-summarized memory — compress it, don't just append."
+            )
+        return (
+            "## CONSOLIDATION ACT — compress, do NOT pile on\n"
+            "This act is a consolidation pass, not a new-feature act. Do NOT "
+            "add new behavior.\n"
+            "1. In `agent.py`: merge overlapping/duplicate decision branches, "
+            "extract shared logic into helper functions, remove dead or "
+            "superseded code paths, and tighten parametrization. Keep the "
+            "agent's chosen action on every reference decision point "
+            "UNCHANGED (behavior-preserving refactor)." + xp_edit + "\n"
+            "3. Leave the agent runnable (valid Python, protocol intact). "
+            "If you find nothing to consolidate, say so explicitly and make "
+            "no edit.\n"
+        )
 
     def _history_section(self) -> str:
         view = MatchHistoryView(

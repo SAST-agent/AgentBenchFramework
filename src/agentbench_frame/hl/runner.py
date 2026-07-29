@@ -39,7 +39,8 @@ class AgentRunResult:
     events so a silent timeout is never mistaken for a clean no-op in the
     research stream. ``None`` (unknown/none) on success.
     """
-    edit_type: str                       # add_rule | reorder | parametrize | refactor | replace | noop
+    edit_type: str                       # add_rule | reorder | parametrize | refactor | replace
+                                       #   | utility | search | planner | consolidate | noop
     files_touched: List[str] = field(default_factory=list)
     prompt_tokens: Optional[int] = None      # None = unknown, not 0
     completion_tokens: Optional[int] = None

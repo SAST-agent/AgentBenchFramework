@@ -330,9 +330,46 @@ The bundled sample AI pads empty seats (override with `--filler`).
 | `--seats` | `"0"` | candidate seat (`all`/`0`..`3`) |
 | `--timeout` | 15 | per-action judger TLE (seconds) |
 | `--epsilon` | 0.1 | smoothing for the policy-KL channel |
+| `--consolidate-every` | 4 | every K-th act is a consolidation pass (0 disables) |
+| `--max-growth-pct` | 40 | code-growth nudge threshold (% over piling acts) |
+| `--no-experience` | off | disable the self-summarized `EXPERIENCE.md` store |
 | `--claude-timeout` | 600 | per-act `claude` CLI timeout (seconds) |
 
-### 6.3 Your own ν
+### 6.3 Interpretable code beyond if-else, consolidation, and experience
+
+Three standards shape what the coding agent is told to do (and not do):
+
+**Interpretable code, not just if-else.** The per-act prompt explicitly licenses
+*any* interpretable Python — utility/scoring functions, weighted evaluation of
+candidate moves, bounded lookahead / shallow search, explicit planners,
+parametrized decision tables — whichever is the smallest change that fixes the
+weakest matchup. The single constraint: the logic must stay human-readable (no
+opaque black-box blobs, no dumped learned weights without an interpretable
+wrapper). The `edit_type` taxonomy reflects this: `add_rule | reorder |
+parametrize | refactor | replace | utility | search | planner | consolidate |
+noop`.
+
+**Consolidation, not endless piling.** Every K-th act (`--consolidate-every`,
+default 4; 0 disables) is a **consolidation act**: its mission is *not* to add
+behavior but to compress — merge overlapping branches, extract shared helpers,
+remove dead/superseded rules — while keeping the agent's chosen action on every
+reference decision point unchanged. On top of that, the feedback section
+surfaces a **code-growth nudge** (`--max-growth-pct`, default 40) when
+`agent.py` has grown beyond the threshold over a run of piling (`add_rule`/
+`parametrize`) edits, prompting a consolidation pass even off-cadence.
+
+**Self-summarized experience.** A persisted `EXPERIENCE.md` lives at the round
+root (`.hl_codebase/<round>/EXPERIENCE.md`, *outside* the snapshot store so it
+never pollutes the `agent.py` diff). After every act the controller appends one
+raw observation (opponent, win_rate, avg_rank, edit_type, KL) to a staging
+file; the **consolidation act** then asks the coding agent to re-summarize
+`EXPERIENCE.md` itself — fold in new observations, deduplicate lessons, retire
+disproven ideas into a `## Retired ideas` section, keep it short. The current
+document is injected into every act's prompt as `## Lessons learned so far`, so
+act N+1 benefits from everything distilled through act N. Disable with
+`--no-experience`.
+
+### 6.4 Your own ν
 
 Hand-author a JSON file in the seed format (the easiest path). Save this as
 `make_nu.py` (multi-line `python -c` is painful in PowerShell, so use a file):

@@ -63,6 +63,7 @@ class HLIterationController:
         context_builder: Optional[Callable[..., Dict[str, Any]]] = None,
         curriculum: bool = False,
         promote_rank: float = 2.0,
+        experience=None,  # ExperienceStore | None (HL std 5)
     ):
         self.codebase = codebase
         self.runner = runner
@@ -85,6 +86,13 @@ class HLIterationController:
         self._last_eval_opponents: Optional[tuple] = None
         self._events = HLEventWriter(run_id=run_id, path=events_path)
         self._act_counter = 0
+        # Self-summarized experience (HL std 5): persisted lessons fed back
+        # into each act's prompt. None disables the feature.
+        self._experience = experience
+        # Rolling per-act history for the code-growth nudge (HL std 4):
+        # (loc of agent.py, edit_type) per act, oldest first.
+        self._loc_history: List[int] = []
+        self._edit_type_history: List[str] = []
         # Feedback carried from act N into act N+1's prompt: the eval outcome
         # + policy_kl/occupancy measured at the end of the previous act. None
         # before the first act with a prior result. Without this the loop
@@ -125,6 +133,9 @@ class HLIterationController:
                 extra = self._context_builder(
                     version_before=version_before, act_id=act_id,
                     prev_feedback=self._prev_feedback,
+                    act_index=self._act_counter,
+                    loc_history=list(self._loc_history),
+                    edit_type_history=list(self._edit_type_history),
                 )
                 if extra:
                     context.update(extra)
@@ -241,6 +252,13 @@ class HLIterationController:
             occupancy_shift=occupancy_shift, run_result=run_result,
             version_after=version_after,
         )
+
+        # 6.6 update the self-summarized experience store + rolling LOC history
+        # (HL std 4/5). Best-effort: a failure here never breaks the act loop.
+        try:
+            self._record_experience(act_id, run_result, version_after)
+        except Exception:
+            pass
 
         # 7. budget (learning scope; unknown tokens → None)
         self._budget["learning_coding_agent_acts"] += 1
@@ -361,3 +379,29 @@ class HLIterationController:
             "files_touched": list(run_result.files_touched) if run_result else [],
             "active_opponents": self._last_eval_opponents,
         }
+
+    def _record_experience(self, act_id: str, run_result, version_after) -> None:
+        """Append this act's raw observation to the experience store and
+        update the rolling LOC/edit-type history used by the code-growth
+        nudge (HL std 4/5). Best-effort, called in a try/except."""
+        et = getattr(version_after, "edit_type", None) or "noop"
+        self._edit_type_history.append(et)
+        self._loc_history.append(self._workspace_loc())
+        if self._experience is None:
+            return
+        # seat0 digest is intentionally not recomputed here — the per-act prompt
+        # already surfaces it via ContextBuilder; the store keeps the
+        # outcome-level signal (win_rate / avg_rank / opponents / edit_type).
+        self._experience.propose_update(
+            act_id=act_id, feedback=self._prev_feedback or {},
+            seat0_digest=None,
+        )
+
+    def _workspace_loc(self) -> int:
+        """Line count of the current workspace ``agent.py`` (0 if unreadable).
+        A cheap proxy for strategy surface size, used to detect piling."""
+        try:
+            p = self.codebase.root / "agent.py"
+            return p.read_text(encoding="utf-8").count("\n")
+        except Exception:
+            return 0

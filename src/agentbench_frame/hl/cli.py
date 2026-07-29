@@ -280,6 +280,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--promote-rank", type=float, default=2.0,
                    help="avg_rank threshold to advance to the next curriculum "
                         "tier (default 2.0 = must reach 2nd place or better).")
+    p.add_argument("--consolidate-every", type=int, default=4,
+                   help="every K-th act is a consolidation pass (compress & "
+                        "re-summarize, no new behavior) instead of a piling "
+                        "edit (HL std 4). 0 disables. Default 4.")
+    p.add_argument("--max-growth-pct", type=float, default=40.0,
+                   help="code-growth nudge threshold: surface a 'consider "
+                        "consolidation' nudge when agent.py grows more than "
+                        "this many percent over the last piling acts. "
+                        "Default 40.")
+    p.add_argument("--no-experience", action="store_true",
+                   help="disable the self-summarized EXPERIENCE.md store "
+                        "(HL std 5). By default it is enabled.")
     p.add_argument("--seats", choices=("all", "0", "1", "2", "3"), default="0")
     p.add_argument("--timeout", type=float, default=15.0)
     p.add_argument("--spec-id", default=None,
@@ -370,10 +382,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     skill_path = (_PLAYBACK_SKILL if _PLAYBACK_SKILL.exists()
                   else _PLAYBACK_SKILL_FALLBACK)
+    # Self-summarized experience store (HL std 5): lives at the round root,
+    # outside the snapshot store so it never pollutes the agent.py diff.
+    experience = None
+    if not args.no_experience:
+        from agentbench_frame.hl.experience import ExperienceStore
+        experience = ExperienceStore(round_root=codebase_root)
     context_builder = ContextBuilder(
         codebase=codebase, data_root=data_root, game=GAME,
         agent_name=name, spec=spec,
         playback_skill_path=skill_path, timeout=args.claude_timeout,
+        experience=experience,
+        consolidate_every=args.consolidate_every,
+        max_growth_pct=args.max_growth_pct,
     )
     runner = ClaudeCodeRunner(
         claude_path=args.claude_path, model=args.model,
@@ -393,6 +414,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         evaluator_factory=eval_factory, stage_root=stage_root,
         context_builder=context_builder.build,
         curriculum=args.curriculum, promote_rank=args.promote_rank,
+        experience=experience,
     )
 
     print(f"[hl] running {args.acts} acts against "
