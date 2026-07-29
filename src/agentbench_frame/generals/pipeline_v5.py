@@ -851,11 +851,17 @@ class GeneralsHLRound5Pipeline(GeneralsHLPipeline):
                     )
                     behavior_v3 = measure_action_disagreement(
                         v3_probes,
-                        new_actions,
+                        {
+                            probe.state_id: new_actions[probe.state_id]
+                            for probe in v3_probes
+                        },
                     )
                     behavior_v4 = measure_action_disagreement(
                         v4_probes,
-                        new_actions,
+                        {
+                            probe.state_id: new_actions[probe.state_id]
+                            for probe in v4_probes
+                        },
                     )
                     action_vs_v3 = behavior_v3.mean
                     action_vs_v4 = behavior_v4.mean

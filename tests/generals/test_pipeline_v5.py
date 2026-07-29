@@ -152,6 +152,22 @@ def test_v5_runs_paired_learning_one_act_validation_and_formal(
     assert summary["budget"]["evaluation_episodes"] == 18
     assert summary["cumulative_learning_budget"]["learning_episodes"] == 70
     assert (
+        summary["behavior_diagnostics"][
+            "action_disagreement_vs_v3"
+        ]
+        is not None
+    )
+    assert (
+        summary["behavior_diagnostics"][
+            "action_disagreement_vs_v4"
+        ]
+        is not None
+    )
+    assert not any(
+        event["event_type"] == "behavior_measurement_error"
+        for event in _events(result.run_dir)
+    )
+    assert (
         result.run_dir / "versions" / "v3-to-v5.patch"
     ).is_file()
     assert (
