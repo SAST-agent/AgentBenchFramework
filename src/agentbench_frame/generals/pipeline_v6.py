@@ -7,11 +7,13 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import subprocess
 from typing import Any, Iterable, Mapping
 
 from agentbench_frame.tracking.provider import ProviderAdapter
 from agentbench_frame.tracking.quality import inspect_event_file
 from agentbench_frame.tracking.run import Run
+from agentbench_frame.tracking.snapshot import WorkspaceManifest
 
 from .action_profile import (
     action_profile_payload,
@@ -67,6 +69,15 @@ V6_SELECTION_REASONS = (
 
 V6_EDITABLE_FILES = frozenset(
     {
+        "strategy.py",
+        "state_view.py",
+        "STRATEGY.md",
+        "EXPERIENCE.md",
+    }
+)
+V6_REQUIRED_FILES = frozenset(
+    {
+        "main.py",
         "strategy.py",
         "state_view.py",
         "STRATEGY.md",
@@ -393,6 +404,120 @@ class GeneralsHLRound6Pipeline(GeneralsHLPipeline):
             for path in changed_files
         )
 
+    def _frozen_manifest_matches(
+        self,
+        source: Path,
+        manifest: WorkspaceManifest,
+    ) -> bool:
+        """Prove the saved source tree exactly matches its manifest."""
+        try:
+            actual = self.snapshotter.capture(source)
+        except (OSError, ValueError):
+            return False
+        return (
+            actual.content_hash == manifest.content_hash
+            and actual.files == manifest.files
+        )
+
+    @staticmethod
+    def _required_frozen_files_valid(
+        source: Path,
+        manifest: WorkspaceManifest,
+    ) -> bool:
+        return all(
+            relative in manifest.files
+            and (source / relative).is_file()
+            and not (source / relative).is_symlink()
+            for relative in V6_REQUIRED_FILES
+        )
+
+    def _materialize_verified_source(
+        self,
+        frozen_source: Path,
+        destination: Path,
+        manifest: WorkspaceManifest,
+    ) -> Path:
+        """Create a one-use copy and prove it is the frozen candidate."""
+        if destination.exists():
+            raise ValueError(
+                f"isolated source destination already exists: {destination}"
+            )
+        shutil.copytree(frozen_source, destination)
+        actual = self.snapshotter.capture(destination)
+        if (
+            actual.content_hash != manifest.content_hash
+            or actual.files != manifest.files
+        ):
+            raise ValueError(
+                "isolated v6 source does not match frozen manifest"
+            )
+        return destination
+
+    def _verify_runtime_source(
+        self,
+        run: Run,
+        source: Path,
+        manifest: WorkspaceManifest,
+        *,
+        phase: str,
+    ) -> None:
+        """Persist the immediate pre-use content-addressed verification."""
+        try:
+            actual = self.snapshotter.capture(source)
+            verified = (
+                actual.content_hash == manifest.content_hash
+                and actual.files == manifest.files
+            )
+            actual_hash: str | None = actual.content_hash
+            files_match: bool | None = actual.files == manifest.files
+            verification_error = None
+        except Exception as exc:
+            verified = False
+            actual_hash = None
+            files_match = None
+            verification_error = f"{type(exc).__name__}: {exc}"
+        run.write(
+            "behavior_diagnostics",
+            diagnostic="frozen_source_verification",
+            phase=phase,
+            version="v6",
+            source=str(source),
+            expected_manifest_hash=manifest.content_hash,
+            actual_manifest_hash=actual_hash,
+            files_match=files_match,
+            verified=verified,
+            error=verification_error,
+        )
+        if not verified:
+            raise ValueError(
+                f"{phase} source does not match frozen v6 manifest"
+            )
+
+    def _run_candidate_tests(
+        self,
+        workspace: Path,
+    ) -> tuple[bool, str]:
+        """Convert candidate-test timeouts into retained invalid results."""
+        try:
+            return self._baseline_tests(workspace)
+        except subprocess.TimeoutExpired as exc:
+            def output_text(value: object) -> str:
+                if value is None:
+                    return ""
+                if isinstance(value, bytes):
+                    return value.decode("utf-8", errors="replace")
+                return str(value)
+
+            return (
+                False,
+                (
+                    "candidate tests timeout after "
+                    f"{exc.timeout} seconds\n"
+                    f"{output_text(exc.output)}"
+                    f"{output_text(exc.stderr)}"
+                )[-100_000:],
+            )
+
     @staticmethod
     def _formal_success(
         formal_scores: Mapping[str, float | None],
@@ -449,6 +574,7 @@ class GeneralsHLRound6Pipeline(GeneralsHLPipeline):
         formal: GeneralsEvaluation | None = None
         validation_error: str | None = None
         formal_error: str | None = None
+        formal_attempted = False
         prompt: PromptBuildResult | None = None
         act = None
         action_profiles: dict[str, dict[str, object] | None] = {
@@ -713,29 +839,109 @@ class GeneralsHLRound6Pipeline(GeneralsHLPipeline):
                 workspace,
                 previous=imported_v5,
             )
+            frozen_v6_source = (
+                run_dir / "versions" / "v6" / "source"
+            )
             self.snapshotter.write_unified_patch(
                 versions_v5_source,
-                run_dir / "versions" / "v6" / "source",
+                frozen_v6_source,
                 run_dir / "versions" / "v5-to-v6.patch",
             )
             scope_valid = self._scope_valid(v6.changed_files)
+            frozen_manifest_valid = self._frozen_manifest_matches(
+                frozen_v6_source,
+                v6,
+            )
+            required_source_files_valid = (
+                self._required_frozen_files_valid(
+                    frozen_v6_source,
+                    v6,
+                )
+            )
             main_unchanged = (
-                v6.files.get("main.py")
+                "main.py" in v6.files
+                and v6.files.get("main.py")
                 == imported_v5.files.get("main.py")
                 and "main.py" not in v6.changed_files
+                and (frozen_v6_source / "main.py").is_file()
+                and not (frozen_v6_source / "main.py").is_symlink()
+                and (
+                    frozen_v6_source / "main.py"
+                ).read_bytes()
+                == (versions_v5_source / "main.py").read_bytes()
             )
             provider_completed = act.status == "completed"
-            strategy_documents_present = all(
-                (workspace / name).is_file()
-                for name in ("STRATEGY.md", "EXPERIENCE.md")
+            strategy_documents_present = (
+                required_source_files_valid
+                and all(
+                    name in v6.files
+                    for name in ("STRATEGY.md", "EXPERIENCE.md")
+                )
             )
-            if provider_completed and scope_valid and main_unchanged:
-                tests_ok, test_output = self._baseline_tests(workspace)
+            isolation_root = run_dir / "isolated-workspaces"
+            test_workspace = None
+            probe_workspace = None
+            validation_workspace = None
+            formal_workspace = None
+            isolation_valid = False
+            pretest_valid = (
+                provider_completed
+                and scope_valid
+                and frozen_manifest_valid
+                and required_source_files_valid
+                and main_unchanged
+                and strategy_documents_present
+            )
+            if pretest_valid:
+                try:
+                    test_workspace = self._materialize_verified_source(
+                        frozen_v6_source,
+                        isolation_root / "v6-tests",
+                        v6,
+                    )
+                    self._verify_runtime_source(
+                        run,
+                        test_workspace,
+                        v6,
+                        phase="tests",
+                    )
+                    tests_ok, test_output = (
+                        self._run_candidate_tests(test_workspace)
+                    )
+                    if tests_ok:
+                        probe_workspace = (
+                            self._materialize_verified_source(
+                                frozen_v6_source,
+                                isolation_root / "v6-probes",
+                                v6,
+                            )
+                        )
+                        validation_workspace = (
+                            self._materialize_verified_source(
+                                frozen_v6_source,
+                                isolation_root / "v6-validation",
+                                v6,
+                            )
+                        )
+                        formal_workspace = (
+                            self._materialize_verified_source(
+                                frozen_v6_source,
+                                isolation_root / "v6-formal",
+                                v6,
+                            )
+                        )
+                        isolation_valid = True
+                except Exception as exc:
+                    tests_ok = False
+                    test_output = (
+                        "candidate source isolation failed: "
+                        f"{type(exc).__name__}: {exc}\n"
+                    )
             else:
                 tests_ok = False
                 test_output = (
                     "candidate tests skipped because the provider did not "
-                    "complete or the source scope is invalid\n"
+                    "complete or the frozen source is invalid\n"
                 )
             (run_dir / "versions" / "v6" / "tests.log").write_text(
                 test_output,
@@ -747,6 +953,9 @@ class GeneralsHLRound6Pipeline(GeneralsHLPipeline):
                 and main_unchanged
                 and tests_ok
                 and strategy_documents_present
+                and frozen_manifest_valid
+                and required_source_files_valid
+                and isolation_valid
             )
             run.write(
                 "version",
@@ -766,6 +975,11 @@ class GeneralsHLRound6Pipeline(GeneralsHLPipeline):
                 provider_status=act.status,
                 scope_valid=scope_valid,
                 main_unchanged=main_unchanged,
+                frozen_manifest_valid=frozen_manifest_valid,
+                required_source_files_valid=(
+                    required_source_files_valid
+                ),
+                isolation_valid=isolation_valid,
                 strategy_documents_present=(
                     strategy_documents_present
                 ),
@@ -779,11 +993,20 @@ class GeneralsHLRound6Pipeline(GeneralsHLPipeline):
                     else "invalid_version"
                 )
             else:
+                assert probe_workspace is not None
+                assert validation_workspace is not None
+                assert formal_workspace is not None
                 action_disagreement = None
                 decision_classes = None
                 try:
+                    self._verify_runtime_source(
+                        run,
+                        probe_workspace,
+                        v6,
+                        phase="probes",
+                    )
                     new_actions = self._probe_actions(
-                        workspace,
+                        probe_workspace,
                         probes,
                     )
                     behavior = measure_action_disagreement(
@@ -828,8 +1051,14 @@ class GeneralsHLRound6Pipeline(GeneralsHLPipeline):
                     )
 
                 try:
+                    self._verify_runtime_source(
+                        run,
+                        validation_workspace,
+                        v6,
+                        phase="validation",
+                    )
                     validation = evaluator.evaluate(
-                        workspace,
+                        validation_workspace,
                         "v6",
                         "validation",
                         run,
@@ -860,8 +1089,23 @@ class GeneralsHLRound6Pipeline(GeneralsHLPipeline):
                     )
                 finally:
                     try:
+                        self._verify_runtime_source(
+                            run,
+                            formal_workspace,
+                            v6,
+                            phase="formal",
+                        )
+                        if (
+                            formal_workspace / "main.py"
+                        ).read_bytes() != (
+                            versions_v5_source / "main.py"
+                        ).read_bytes():
+                            raise ValueError(
+                                "formal main.py differs from v5"
+                            )
+                        formal_attempted = True
                         formal = evaluator.evaluate(
-                            workspace,
+                            formal_workspace,
                             "v6",
                             "evaluation",
                             run,
@@ -1041,6 +1285,13 @@ class GeneralsHLRound6Pipeline(GeneralsHLPipeline):
             )
             run.finish(
                 {
+                    "total_episodes": None,
+                    "total_steps": None,
+                    "total_reward": None,
+                    "win_rate": None,
+                    "wins": None,
+                    "losses": None,
+                    "draws": None,
                     "status": status,
                     "benchmark_id": self.config.benchmark_id,
                     "learning_id": self.learning_config.learning_id,
@@ -1087,8 +1338,13 @@ class GeneralsHLRound6Pipeline(GeneralsHLPipeline):
                     "evaluation_status": (
                         formal.status
                         if formal is not None
-                        else "not_run"
+                        else (
+                            "error"
+                            if formal_attempted
+                            else "not_run"
+                        )
                     ),
+                    "formal_attempted": formal_attempted,
                     "validation_status": (
                         validation.status
                         if validation is not None
