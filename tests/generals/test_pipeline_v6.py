@@ -298,6 +298,21 @@ def _summary(run_dir):
     )
 
 
+def _write_excluded_poison(source: Path) -> None:
+    (source / "__pycache__").mkdir(parents=True)
+    (source / "__pycache__" / "poison.pyc").write_bytes(b"poison cache")
+    (source / ".venv").mkdir(parents=True)
+    (source / ".venv" / "poison.py").write_text(
+        "raise RuntimeError('poison')\n",
+        encoding="utf-8",
+    )
+
+
+def _assert_excluded_poison_absent(target: Path) -> None:
+    assert not (target / "__pycache__" / "poison.pyc").exists()
+    assert not (target / ".venv" / "poison.py").exists()
+
+
 def _assert_generic_episode_fields_are_missing(summary):
     for key in (
         "total_episodes",
@@ -770,6 +785,26 @@ def test_v6_tests_probes_and_gameplay_use_verified_frozen_copies(
     )
 
 
+def test_v6_isolation_materializes_only_frozen_manifest_files(tmp_path):
+    pipeline, _ = _pipeline(tmp_path, Round6Provider())
+    frozen_source = (
+        pipeline.parent_run_dir / "versions" / "v5" / "source"
+    )
+    manifest = pipeline.snapshotter.capture(frozen_source)
+    _write_excluded_poison(frozen_source)
+    isolated = tmp_path / "isolated"
+
+    materialized = pipeline._materialize_verified_source(
+        frozen_source,
+        isolated,
+        manifest,
+    )
+
+    assert materialized == isolated
+    assert (isolated / "strategy.py").is_file()
+    _assert_excluded_poison_absent(isolated)
+
+
 def test_v6_candidate_test_timeout_is_retained_as_invalid(
     tmp_path,
     monkeypatch,
@@ -1056,6 +1091,9 @@ def test_v6_post_act_recovery_uses_verified_frozen_source_and_zero_acts(
             failed.run_dir / "versions" / "v6" / "manifest.json"
         ).read_text(encoding="utf-8")
     )
+    _write_excluded_poison(
+        failed.run_dir / "versions" / "v6" / "source"
+    )
 
     recovered_evaluator = ProvenanceEvaluator()
     pipeline.evaluator = recovered_evaluator
@@ -1108,6 +1146,10 @@ def test_v6_post_act_recovery_uses_verified_frozen_source_and_zero_acts(
     assert len({
         record["path"] for record in recovered_evaluator.v6_workspaces
     }) == 2
+    _assert_excluded_poison_absent(recovered.run_dir / "workspace")
+    _assert_excluded_poison_absent(
+        recovered.run_dir / "versions" / "v6" / "source"
+    )
 
 
 @pytest.mark.parametrize(

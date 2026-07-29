@@ -151,6 +151,14 @@ def test_round6_parent_rejects_non_object_summary(tmp_path):
 def test_import_round6_source_copies_exact_v5_and_writes_lineage(tmp_path):
     parent, v5_manifest = _parent(tmp_path)
     lineage = load_round6_parent(parent, v5_manifest.content_hash)
+    source = parent / "versions" / "v5" / "source"
+    (source / "__pycache__").mkdir()
+    (source / "__pycache__" / "poison.pyc").write_bytes(b"poison cache")
+    (source / ".venv").mkdir()
+    (source / ".venv" / "poison.py").write_text(
+        "raise RuntimeError('poison')\n",
+        encoding="utf-8",
+    )
     run_dir = tmp_path / "child"
 
     imported = import_round6_source(
@@ -169,6 +177,12 @@ def test_import_round6_source_copies_exact_v5_and_writes_lineage(tmp_path):
     ).read_text() == (
         parent / "versions" / "v5" / "source" / "strategy.py"
     ).read_text()
+    for target in (
+        run_dir / "workspace",
+        run_dir / "versions" / "v5" / "source",
+    ):
+        assert not (target / "__pycache__" / "poison.pyc").exists()
+        assert not (target / ".venv" / "poison.py").exists()
     assert json.loads(
         (run_dir / "versions" / "v5" / "manifest.json").read_text()
     ) == json.loads(

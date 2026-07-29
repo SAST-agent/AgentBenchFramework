@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
-import shutil
 import subprocess
 from typing import Mapping
 
@@ -185,7 +184,11 @@ def import_round6_source(
     version_source = target / "versions" / "v5" / "source"
     if workspace.exists() or version_source.exists():
         raise ValueError("round-6 import destination already exists")
-    shutil.copytree(lineage.v5_source, workspace)
+    snapshotter.materialize_manifest(
+        lineage.v5_source,
+        workspace,
+        lineage.v5_manifest,
+    )
     subprocess.run(
         ["git", "init", "-q"],
         cwd=workspace,
@@ -199,7 +202,11 @@ def import_round6_source(
         or imported.files != lineage.v5_manifest.files
     ):
         raise ValueError("imported v5 content does not match parent")
-    shutil.copytree(lineage.v5_source, version_source)
+    snapshotter.materialize_manifest(
+        lineage.v5_source,
+        version_source,
+        lineage.v5_manifest,
+    )
     preserved = WorkspaceManifest(
         content_hash=lineage.v5_manifest.content_hash,
         files=dict(lineage.v5_manifest.files),

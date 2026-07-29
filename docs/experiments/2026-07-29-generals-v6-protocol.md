@@ -2,8 +2,10 @@
 
 Date: 2026-07-29
 
-Status: frozen protocol, preflight-hardened after a zero-act Task 8 attempt;
-no retry has started
+Status: frozen pre-run protocol snapshot, preflight-hardened after a zero-act
+Task 8 attempt. At freeze time, no retry had started. The completed production
+run is audited in the
+[v6 macro-planner result](./2026-07-29-generals-v6-macro-planner-result.md).
 
 ## Scope and canonical defaults
 
@@ -151,9 +153,12 @@ opponent/match identity and whole-word held-out phase material. The assets
 cleanup remains required and is retained at commit `5d085bb`; it was not the
 source of the first reported `286101`. The failed run was not modified, and
 neither `iterate-v6` nor `recover-v6` was run during any preflight fix. No
-retry has started. Assets commit `804bc97` corrects the adjacent validation
-JSON/Markdown machine-readable attribution without changing the failed run or
-the production Skill bytes.
+retry had started when this pre-run protocol was frozen. The later completed
+production run is audited in the
+[v6 macro-planner result](./2026-07-29-generals-v6-macro-planner-result.md).
+Assets commit `804bc97` corrects the adjacent validation JSON/Markdown
+machine-readable attribution without changing the failed run or the
+production Skill bytes.
 
 ## Recovery semantics
 

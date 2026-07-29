@@ -459,15 +459,11 @@ class GeneralsHLRound6Pipeline(GeneralsHLPipeline):
             raise ValueError(
                 f"isolated source destination already exists: {destination}"
             )
-        shutil.copytree(frozen_source, destination)
-        actual = self.snapshotter.capture(destination)
-        if (
-            actual.content_hash != manifest.content_hash
-            or actual.files != manifest.files
-        ):
-            raise ValueError(
-                "isolated v6 source does not match frozen manifest"
-            )
+        self.snapshotter.materialize_manifest(
+            frozen_source,
+            destination,
+            manifest,
+        )
         return destination
 
     def _verify_runtime_source(
@@ -2080,10 +2076,11 @@ class GeneralsHLRound6Pipeline(GeneralsHLPipeline):
                 provider_dir / "source-provider-budget.json",
             )
 
-    @staticmethod
     def _replace_workspace_from_frozen(
+        self,
         workspace: Path,
         frozen_source: Path,
+        manifest: WorkspaceManifest,
     ) -> None:
         for child in workspace.iterdir():
             if child.name == ".git":
@@ -2092,10 +2089,10 @@ class GeneralsHLRound6Pipeline(GeneralsHLPipeline):
                 shutil.rmtree(child)
             else:
                 child.unlink()
-        shutil.copytree(
+        self.snapshotter.materialize_manifest(
             frozen_source,
             workspace,
-            dirs_exist_ok=True,
+            manifest,
         )
 
     def _run_audited_recovery(
@@ -2315,6 +2312,7 @@ class GeneralsHLRound6Pipeline(GeneralsHLPipeline):
                 self._replace_workspace_from_frozen(
                     workspace,
                     source_v6,
+                    v6,
                 )
                 recovered_workspace_manifest = (
                     self.snapshotter.capture(workspace)
@@ -2330,7 +2328,11 @@ class GeneralsHLRound6Pipeline(GeneralsHLPipeline):
                 frozen_target = (
                     run_dir / "versions" / "v6" / "source"
                 )
-                shutil.copytree(source_v6, frozen_target)
+                self.snapshotter.materialize_manifest(
+                    source_v6,
+                    frozen_target,
+                    v6,
+                )
                 self.snapshotter.write_manifest(
                     v6,
                     run_dir / "versions" / "v6" / "manifest.json",

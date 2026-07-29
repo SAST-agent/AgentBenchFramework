@@ -210,6 +210,22 @@ quality warnings, not empty provider stderr.
 - The saved candidate log reports `27 passed`; an independent rerun from
   `versions/v6/source` reports `27 passed`, and all four frozen Python files
   compile without writing to the source.
+- That independent audit rerun created two excluded bytecode files at
+  `2026-07-30 01:12:49 +0800`:
+  `versions/v6/source/__pycache__/strategy.cpython-311.pyc` and
+  `versions/v6/source/tests/__pycache__/test_strategy.cpython-311-pytest-8.4.2.pyc`.
+  The final summary predates them (`2026-07-30 01:08:20 +0800`), they are
+  absent from the frozen manifest, and they did not exist during the 36-game
+  evaluation. They therefore did not affect the recorded score or success
+  gates. They are retained unchanged as post-finalization audit provenance.
+- Subsequent review hardening makes v6 isolation, lineage import, and
+  post-act recovery materialize only hash-verified manifest files, preventing
+  excluded cache or environment files from propagating into future policy
+  workspaces. Future candidate audits use
+  `PYTHONDONTWRITEBYTECODE=1
+  /home/cathy/AgentBench/AgentBenchFramework/.worktrees/generals-hl/.venv/bin/python
+  -m pytest -p no:cacheprovider tests/test_strategy.py -q` from the frozen
+  source working directory.
 - Unavailable diagnostics remain explicit: all AUC fields, epistemic
   information gain, and policy KL are null; several dense pressure/share
   fields are null; cumulative historical token totals are null; and
