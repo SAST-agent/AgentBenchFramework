@@ -2,7 +2,7 @@
 
 Date: 2026-07-29
 
-Status: approved design, pending implementation plan
+Status: design approved; written specification pending user review
 
 Experiment line: legacy `v5 -> v6` pilot
 
