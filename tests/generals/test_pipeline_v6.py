@@ -159,6 +159,25 @@ class FormalExceptionEvaluator(FakeEvaluator):
         )
 
 
+class ProviderOrderingEvaluator(FakeEvaluator):
+    def __init__(self, provider):
+        super().__init__(improved=False)
+        self.provider = provider
+        self.provider_calls_by_phase = []
+
+    def evaluate(self, workspace, version, phase, run, cases=None):
+        self.provider_calls_by_phase.append(
+            (version, phase, self.provider.calls)
+        )
+        return super().evaluate(
+            workspace,
+            version,
+            phase,
+            run,
+            cases=cases,
+        )
+
+
 def _pipeline(
     tmp_path,
     provider,
@@ -230,6 +249,31 @@ def _inject_forbidden_static_context(
         pipeline.parent_run_dir / "versions" / "v5" / "source"
     )
     (source / filename).write_text(marker, encoding="utf-8")
+    snapshotter = LocalWorkspaceSnapshotter()
+    manifest = snapshotter.capture(source)
+    snapshotter.write_manifest(
+        manifest,
+        pipeline.parent_run_dir / "versions" / "v5" / "manifest.json",
+    )
+    pipeline.expected_parent_hash = manifest.content_hash
+
+
+def _inject_round5_experience(
+    pipeline: GeneralsHLRound6Pipeline,
+) -> None:
+    source = (
+        pipeline.parent_run_dir / "versions" / "v5" / "source"
+    )
+    (source / "EXPERIENCE.md").write_text(
+        "# Retained V5 experience\n\n"
+        "- `learn5-high-s286101-p0` / "
+        "`v3:learn5-high-s286101-p0-d64`\n"
+        "- `learn5-high-s286202-p1` / "
+        "`v3:learn5-high-s286202-p1-d179`\n"
+        "- `learn5-high-s286303-p0` / "
+        "`v3:learn5-high-s286303-p0-d27`\n",
+        encoding="utf-8",
+    )
     snapshotter = LocalWorkspaceSnapshotter()
     manifest = snapshotter.capture(source)
     snapshotter.write_manifest(
@@ -350,6 +394,34 @@ def test_v6_runs_high_learning_one_act_validation_and_formal(tmp_path):
     )
     assert summary["AUC_coding_agent_act"] is None
     _assert_generic_episode_fields_are_missing(summary)
+
+
+def test_v6_seed_bearing_parent_reaches_provider_before_post_act_games(
+    tmp_path,
+):
+    provider = Round6Provider()
+    evaluator = ProviderOrderingEvaluator(provider)
+    pipeline, evaluator = _pipeline(
+        tmp_path,
+        provider,
+        evaluator=evaluator,
+    )
+    _inject_round5_experience(pipeline)
+
+    result = pipeline.run()
+
+    assert result.status == "complete"
+    assert provider.calls == 1
+    assert evaluator.provider_calls_by_phase == [
+        ("v5", "learning", 0),
+        ("v6", "validation", 1),
+        ("v6", "evaluation", 1),
+    ]
+    prompt = (
+        result.run_dir / "provider" / "codex-act-v6.prompt.md"
+    ).read_text(encoding="utf-8")
+    assert "learn5-high-s286101-p0" in prompt
+    assert "v3:learn5-high-s286101-p0-d64" in prompt
 
 
 def test_v6_incomplete_validation_does_not_block_formal_evaluation(tmp_path):

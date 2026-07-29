@@ -112,6 +112,17 @@ def _production_static_paths() -> dict[str, Path]:
     return paths
 
 
+def _production_static_context() -> dict[str, str]:
+    static_context = {}
+    for role, path in _production_static_paths().items():
+        payload = path.read_bytes()
+        assert hashlib.sha256(payload).hexdigest() == (
+            PRODUCTION_STATIC_SHA256[role]
+        )
+        static_context[role] = payload.decode("utf-8")
+    return static_context
+
+
 def _evidence(seed: int, seat: int) -> CriticalLearningEvidence:
     return CriticalLearningEvidence(
         replay_id=f"learn6-high-s{seed}-p{seat}",
@@ -186,17 +197,42 @@ def test_exact_production_static_bundle_passes_without_artifacts(
     tmp_path,
     monkeypatch,
 ):
-    static_context = {}
-    for role, path in _production_static_paths().items():
-        payload = path.read_bytes()
-        assert hashlib.sha256(payload).hexdigest() == (
-            PRODUCTION_STATIC_SHA256[role]
-        )
-        static_context[role] = payload.decode("utf-8")
-
     monkeypatch.chdir(tmp_path)
-    prompt_v6.validate_round6_static_context(**static_context)
+    prompt_v6.validate_round6_static_context(**_production_static_context())
 
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_exact_production_bundle_builds_complete_prompt_without_artifacts(
+    tmp_path,
+    monkeypatch,
+):
+    expected_episode_ids = (
+        "learn6-high-s287101-p0",
+        "learn6-high-s287101-p1",
+        "learn6-high-s287202-p0",
+        "learn6-high-s287202-p1",
+        "learn6-high-s287303-p0",
+        "learn6-high-s287303-p1",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    result = build_round6_prompt(
+        benchmark_id="generals-hl-pilot-v1",
+        **_production_static_context(),
+        replay_skill_sha256=PRODUCTION_STATIC_SHA256["replay_skill_text"],
+        evidence=_records(),
+        action_profile={
+            "turn_count": 1228,
+            "mean_primitives_per_turn": 0.988599348534202,
+        },
+    )
+
+    assert "learn5-high-s286101-p0" in result.prompt
+    assert "v3:learn5-high-s286101-p0-d64" in result.prompt
+    assert result.included_episode_ids == expected_episode_ids
+    assert result.feedback_episodes_read == 6
+    assert result.prompt.count('"replay_id": "learn6-high-s287') == 6
     assert list(tmp_path.iterdir()) == []
 
 
@@ -309,6 +345,41 @@ def test_v6_prompt_rejects_incomplete_or_unexpected_episode_sets():
 def test_v6_prompt_rejects_complete_prompt_over_the_byte_cap():
     with pytest.raises(ValueError, match="exceeds max_bytes"):
         _build(_records(), max_bytes=1)
+
+
+@pytest.mark.parametrize(
+    "benchmark_id",
+    (
+        "generals-formal-pilot-v1",
+        "generals-validation-pilot-v1",
+        "generals-286101-pilot-v1",
+    ),
+)
+def test_v6_prompt_rejects_untrusted_benchmark_context(benchmark_id):
+    with pytest.raises(
+        ValueError,
+        match=r"forbidden (?:round-6|evaluation)",
+    ):
+        _build(_records(), benchmark_id=benchmark_id)
+
+
+@pytest.mark.parametrize(
+    "marker",
+    (
+        "formal replay payload",
+        "validation trajectory payload",
+        "historical replay s286101 payload",
+    ),
+)
+def test_v6_prompt_rejects_untrusted_serialized_evidence_context(marker):
+    records = list(_records())
+    records[-1] = replace(records[-1], dense={"marker": marker})
+
+    with pytest.raises(
+        ValueError,
+        match=r"forbidden (?:round-6|evaluation)",
+    ):
+        _build(tuple(records))
 
 
 @pytest.mark.parametrize(

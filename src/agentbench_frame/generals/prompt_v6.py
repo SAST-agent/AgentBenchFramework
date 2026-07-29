@@ -155,6 +155,7 @@ def build_round6_prompt(
     max_bytes: int = 131_072,
 ) -> PromptBuildResult:
     """Build the complete v6 prompt from only frozen high-only learning data."""
+    _reject_round6_external_context(benchmark_id)
     if (
         len(replay_skill_sha256) != 64
         or any(
@@ -250,11 +251,10 @@ ACTION-PROFILE DIAGNOSTICS FROM V5 HIGH-ONLY LEARNING
 
 CRITICAL HIGH-ONLY V5 LEARNING WINDOWS
 """
-    _reject_round6_leaks(mandatory)
 
     lines = tuple(item.to_json() + "\n" for item in ordered)
     for line in lines:
-        _reject_round6_leaks(line)
+        _reject_round6_external_context(line)
     prompt = mandatory + "".join(lines)
     prompt_bytes = len(prompt.encode("utf-8"))
     if prompt_bytes > max_bytes:

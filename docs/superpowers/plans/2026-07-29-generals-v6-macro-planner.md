@@ -241,6 +241,21 @@ as well as whole-word formal/validation material. The exact production bundle
 must pass through the public static validator without creating run, gameplay,
 evaluator, or provider artifacts.
 
+The same exact four-file bundle must also pass through the complete
+`build_round6_prompt` path with the frozen Skill hash, a valid action profile,
+and the exact six 287101/287202/287303 evidence records. Assert that the final
+prompt retains the legitimate v5 experience replay/state-ID citations, appends
+only those six round-6 evidence records, and creates no artifacts. Add
+negative tests proving that benchmark ID, strict static roles, action profile,
+and serialized evidence cannot introduce formal, validation, or historical
+material.
+
+An integration regression must also rehash a manifest-valid synthetic v5
+parent whose `EXPERIENCE.md` contains declared 286 replay/state citations, run
+the real pipeline through the fake provider, and prove temporal isolation:
+learning observes zero provider calls; validation and formal evaluation occur
+only after the single provider act.
+
 - [ ] **Step 2: Run prompt tests and verify failure**
 
 Run: `.venv/bin/python -m pytest tests/generals/test_prompt_v6.py -q`
@@ -272,6 +287,14 @@ FORBIDDEN_ROUND6_EVIDENCE_SEEDS = (
 context uses the role policy from Step 1: strict checks for v5 strategy, rules,
 and replay Skill, and a narrow exception for the declared round-5 learning
 citations already present in the exact v5 experience.
+
+Validate each untrusted input under its own role before interpolation:
+benchmark ID, v5 strategy, rules, replay Skill, action profile, and each
+serialized evidence line are strict; v5 experience alone gets the narrow
+round-5 citation exception. Do not concatenate differently trusted roles and
+then apply a context-agnostic denylist to the assembled mandatory prompt.
+Replay Skill digest format, exact-six evidence structure, and the prompt byte
+cap remain independent mandatory checks.
 
 The mandatory prompt must:
 

@@ -88,8 +88,25 @@ retain declared round-5 learning replay/state-ID citations for seeds
 286101/286202/286303. That role still rejects formal seeds, validation seeds,
 current-v6 seeds, undeclared historical seeds, arbitrary six-digit seeds, and
 whole-word formal/validation material. Final prompt construction reuses the
-same public validator. The dynamic learning action profile remains checked
-after learning but before any provider act.
+same public validator. It also validates the benchmark ID, dynamic learning
+action profile, and every serialized evidence record independently under the
+strict policy before interpolation. It does not reapply a context-agnostic
+denylist to the assembled mandatory prompt, because that would erase the V5
+experience role exception. Skill digest format, exact-six evidence structure,
+and the byte cap remain separately enforced. The dynamic learning action
+profile remains checked after learning but before any provider act.
+
+The executable preflight regression covers the complete builder, not only the
+public static validator: it uses these exact four files, the frozen Skill hash,
+a valid action profile, and exactly six 287 learning evidence records. The
+result must retain legitimate V5 experience replay/state-ID citations, contain
+only the declared six round-6 evidence records, and create no filesystem
+artifacts.
+
+A pipeline integration regression independently rehashes a manifest-valid v5
+parent with declared 286 replay/state citations. It must reach the fake
+provider exactly once after six learning games; validation and formal
+evaluation must observe that completed act and remain post-act.
 
 ## Split isolation
 
@@ -133,8 +150,10 @@ The old replay Skill was independently contaminated by a real forward-test
 opponent/match identity and whole-word held-out phase material. The assets
 cleanup remains required and is retained at commit `5d085bb`; it was not the
 source of the first reported `286101`. The failed run was not modified, and
-neither `iterate-v6` nor `recover-v6` was run during either preflight fix. No
-retry has started.
+neither `iterate-v6` nor `recover-v6` was run during any preflight fix. No
+retry has started. Assets commit `804bc97` corrects the adjacent validation
+JSON/Markdown machine-readable attribution without changing the failed run or
+the production Skill bytes.
 
 ## Recovery semantics
 
