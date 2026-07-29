@@ -1,0 +1,49 @@
+﻿{
+    "schema":  "derived_public_audit_v1",
+    "attempts":  8,
+    "valid":  8,
+    "invalid":  0,
+    "versions":  {
+                     "v0":  {
+                                "wins":  2,
+                                "losses":  2,
+                                "draws":  0,
+                                "train":  {
+                                              "wins":  1,
+                                              "losses":  1,
+                                              "steps":  1747
+                                          },
+                                "validation":  {
+                                                   "wins":  1,
+                                                   "losses":  1,
+                                                   "steps":  1417
+                                               },
+                                "total_steps":  3164
+                            },
+                     "v1":  {
+                                "wins":  2,
+                                "losses":  2,
+                                "draws":  0,
+                                "train":  {
+                                              "wins":  1,
+                                              "losses":  1,
+                                              "steps":  1747
+                                          },
+                                "validation":  {
+                                                   "wins":  1,
+                                                   "losses":  1,
+                                                   "steps":  1417
+                                               },
+                                "total_steps":  3164
+                            }
+                 },
+    "raw":  0.5,
+    "evo":  0.5,
+    "gain":  0,
+    "information_gain":  null,
+    "information_gain_status":  "pending_authoritative_definition",
+    "evidence":  {
+                     "session_logical_reference":  "iteration/20260725-063826_764716",
+                     "posthoc_manifest_sha256":  "E06CCE2D7DE82A435185460E05AB24A6323392DEF9CCB25BB9E2FB92DFD5A034"
+                 }
+}

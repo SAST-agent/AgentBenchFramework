@@ -421,7 +421,7 @@ class ReportBuilder:
                 html = template.render(**ctx)
                 out_path = os.path.join(self.output_dir,
                                         output_name or template_name)
-                with open(out_path, "w") as f:
+                with open(out_path, "w", encoding="utf-8") as f:
                     f.write(html)
             except jinja2.TemplateNotFound:
                 continue

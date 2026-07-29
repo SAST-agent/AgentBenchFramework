@@ -10,12 +10,39 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import time
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Optional, Sequence
+from typing import Any, Iterable, List, Mapping, Optional, Sequence, Union
 
 from agentbench_frame.tracking.provider import ProviderInvocation, ProviderUsage
+
+
+#: Type alias accepted by ``executable`` — a single command (string, split with
+#: :func:`shlex.split`) or a pre-split argv list. Accepting argv lets callers
+#: use ``[sys.executable, path_to_script]`` so provider tests run on Windows
+#: (where ``#!`` script execution via the bare filename is not possible).
+ExecutableLike = Union[str, Sequence[str]]
+
+
+def _split_executable(executable: ExecutableLike) -> List[str]:
+    """Normalize ``executable`` to a pre-split argv list.
+
+    * ``str``  → :func:`shlex.split` (POSIX-style; equivalent on Windows when
+                used as ``subprocess.run([argv0, argv1, ...])`` since we never
+                shell out).
+    * iterable/list → list(obj) verbatim.
+
+    Keeps backward compatibility with the prior single-string form
+    (``executable="codex"``) while enabling cross-platform argv pre-splitting
+    (``executable=[sys.executable, '/abs/path/fake-codex.py']``), required so
+    a real process can be invoked on Windows where ``WinError 193`` would
+    otherwise be raised by the OS loader for a non-PE ``#!`` file.
+    """
+    if isinstance(executable, str):
+        return list(shlex.split(executable, posix=os.name == "posix"))
+    return list(executable)
 
 
 def _lines(source: str | Iterable[str]) -> tuple[list[dict], int]:
@@ -165,12 +192,14 @@ class _SubprocessProvider:
 
     def __init__(
         self,
-        executable: str,
+        executable: ExecutableLike,
         timeout_s: Optional[float] = None,
         env: Optional[Mapping[str, str]] = None,
         extra_args: Sequence[str] = (),
     ) -> None:
-        self.executable = executable
+        # Canonical form is a pre-split argv list (list[str]). Backward
+        # compat: a plain string (e.g. ``"codex"``) is split via shlex.
+        self.executable: List[str] = _split_executable(executable)
         self.timeout_s = timeout_s
         self.env = dict(env) if env is not None else None
         self.extra_args = list(extra_args)
@@ -226,7 +255,8 @@ class CodexProvider(_SubprocessProvider):
     provider_name = "codex"
     parser = staticmethod(parse_codex_jsonl)
 
-    def __init__(self, executable: str = "codex", sandbox: str = "workspace-write", **kwargs) -> None:
+    def __init__(self, executable: ExecutableLike = "codex",
+                 sandbox: str = "workspace-write", **kwargs) -> None:
         super().__init__(executable, **kwargs)
         self.sandbox = sandbox
 
@@ -235,7 +265,7 @@ class CodexProvider(_SubprocessProvider):
         if not prompt:
             raise ValueError("Codex provider requires context['prompt'] or context['task']")
         sandbox = context.get("sandbox", self.sandbox)
-        return [self.executable, "exec", "--json", "--sandbox", str(sandbox),
+        return [*self.executable, "exec", "--json", "--sandbox", str(sandbox),
                 *self.extra_args, str(prompt)]
 
 
@@ -247,7 +277,7 @@ class ClaudeCodeProvider(_SubprocessProvider):
 
     def __init__(
         self,
-        executable: str = "claude",
+        executable: ExecutableLike = "claude",
         permission_mode: str = "acceptEdits",
         **kwargs,
     ) -> None:
@@ -259,7 +289,7 @@ class ClaudeCodeProvider(_SubprocessProvider):
         if not prompt:
             raise ValueError("Claude Code provider requires context['prompt'] or context['task']")
         permission_mode = context.get("permission_mode", self.permission_mode)
-        command = [self.executable, "-p", str(prompt), "--output-format", "stream-json",
+        command = [*self.executable, "-p", str(prompt), "--output-format", "stream-json",
                    "--verbose", "--permission-mode", str(permission_mode)]
         max_turns = context.get("max_turns")
         if max_turns is not None:

@@ -1,0 +1,1 @@
+﻿# Replay field guide`n`nLocal replay evidence is excluded from this payload. Derived game records retain: game_id, version, opponent role, camp, validity, normalized result, steps, and error type. Logical references and SHA256 values in the posthoc manifest bind these fields to local evidence.

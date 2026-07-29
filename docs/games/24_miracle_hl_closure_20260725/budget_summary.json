@@ -1,0 +1,12 @@
+﻿{
+    "coding_agent_acts":  1,
+    "episode_read":  2,
+    "step_read":  1747,
+    "input_tokens":  135157,
+    "output_tokens":  1459,
+    "total_tokens":  136616,
+    "agent_wall_clock_s":  52.88,
+    "tool_calls":  10,
+    "api_cost":  null,
+    "gpu_cost_time":  "not_used"
+}
