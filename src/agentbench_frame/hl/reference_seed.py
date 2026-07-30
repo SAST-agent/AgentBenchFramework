@@ -7,7 +7,11 @@ The *proper* way to populate ν is to instrument the logic's
 ``legal_actions`` dicts match the exact ``get_legal_actions()`` shape
 (``{'attack': [ids], 'move': [8 bools], 'detect': bool, 'interprops': [...]}}``)
 so the iteration loop is runnable and policy-KL is measurable out of the box.
-KL is coarse at this size (3 decision points) but real; expand ν later.
+The seed covers 8 diverse decision points (early move, attack, escape,
+KeyMachine interact, trap placement, Kit heal, multi-key routing,
+last-key transit) so a real strategy edit registers on at least one point
+instead of washing out to KL=0. KL is still coarse (synthetic, hand-authored)
+but real; the proper ν recorder is a follow-up.
 
 Usage::
 
@@ -25,13 +29,19 @@ from agentbench_frame.hl.reference import (
 
 
 def _seed_samples():
-    """Three representative decision points for the LostSpace candidate.
+    """Representative decision points for the LostSpace candidate.
 
     Coordinates are *grid* coords (0..6, layer 0=top..2=bottom). The probe
     sends these as the ``roundbegin`` observation; only the fields the
     candidate actually reads matter, but we include the common ones.
+
+    The set is deliberately DIVERSE across the situations a real strategy edit
+    is likely to touch — early movement, looting Materials, attacking,
+    trap-placement, Kit use, multi-key transit, and the endgame escape — so a
+    behavioral change registers on at least one point (KL>0) instead of every
+    edit washing out to KL=0 against a 3-point ν.
     """
-    # 1. Early game, NW corner area, all 4 cardinal moves open, on Materials.
+    # 1. Early game, NW corner area, 2 cardinal moves open, on Materials.
     s1 = ReferenceSample(
         observation={
             "type": "roundbegin", "inturn": 0, "state": 3, "round": 2,
@@ -100,7 +110,124 @@ def _seed_samples():
         inventory={"LandMine": 0, "Sticky": 0, "Transport": 0, "Kit": 0},
         status=0, seat=0, opponent="rank06",
     )
-    return [s1, s2, s3]
+    # 4. On a KeyMachine with 2 keys — the interact-to-get-key decision.
+    s4 = ReferenceSample(
+        observation={
+            "type": "roundbegin", "inturn": 0, "state": 3, "round": 8,
+            "status": 0, "hp": 180, "keys": [0, 1],
+            "pos": [5, 2, 0],
+            "tools": {"LandMine": [0, 0], "Sticky": [0, 0], "Kit": 0,
+                      "Transport": 0},
+            "others": [
+                {"player_id": 1, "status": 0, "keys": [0], "hp": 180},
+                {"player_id": 2, "status": 0, "keys": [0, 1], "hp": 160},
+                {"player_id": 3, "status": 0, "keys": [0], "hp": 200},
+            ],
+        },
+        legal_actions={
+            "attack": [],
+            "move": [True, True, False, False, False, False, False, False],
+            "detect": True,
+            "interprops": ["KeyMachine"],
+        },
+        inventory={"LandMine": 0, "Sticky": 0, "Transport": 0, "Kit": 0},
+        status=0, seat=0, opponent="rank06",
+    )
+    # 5. Carrying a Sticky trap, open corridor — trap-placement vs move decision.
+    s5 = ReferenceSample(
+        observation={
+            "type": "roundbegin", "inturn": 0, "state": 3, "round": 10,
+            "status": 0, "hp": 160, "keys": [0, 1],
+            "pos": [4, 4, 1],
+            "tools": {"LandMine": [0, 0], "Sticky": [1, 0], "Kit": 0,
+                      "Transport": 0},
+            "others": [
+                {"player_id": 1, "status": 0, "keys": [0], "hp": 140},
+                {"player_id": 2, "status": 0, "keys": [1], "hp": 170},
+                {"player_id": 3, "status": 1, "keys": [0], "hp": 0},
+            ],
+        },
+        legal_actions={
+            "attack": [],
+            "move": [True, True, True, True, True, True, True, True],
+            "detect": True,
+            "interprops": [],
+        },
+        inventory={"LandMine": 0, "Sticky": 1, "Transport": 0, "Kit": 0},
+        status=0, seat=0, opponent="rank06",
+    )
+    # 6. Low HP, carrying a Kit — heal vs keep moving decision.
+    s6 = ReferenceSample(
+        observation={
+            "type": "roundbegin", "inturn": 0, "state": 3, "round": 15,
+            "status": 0, "hp": 40, "keys": [0, 1],
+            "pos": [2, 5, 1],
+            "tools": {"LandMine": [0, 0], "Sticky": [0, 0], "Kit": 1,
+                      "Transport": 0},
+            "others": [
+                {"player_id": 1, "status": 0, "keys": [0], "hp": 100},
+                {"player_id": 2, "status": 2, "keys": [0, 1, 2, 3], "hp": 200},
+                {"player_id": 3, "status": 1, "keys": [0], "hp": 0},
+            ],
+        },
+        legal_actions={
+            "attack": [],
+            "move": [True, True, True, True, False, False, False, False],
+            "detect": True,
+            "interprops": [],
+        },
+        inventory={"LandMine": 0, "Sticky": 0, "Transport": 0, "Kit": 1},
+        status=0, seat=0, opponent="rank06",
+    )
+    # 7. Mid-board, 3 keys, multiple move dirs — routing toward the last key.
+    s7 = ReferenceSample(
+        observation={
+            "type": "roundbegin", "inturn": 0, "state": 3, "round": 20,
+            "status": 0, "hp": 130, "keys": [0, 1, 2],
+            "pos": [3, 4, 1],
+            "tools": {"LandMine": [0, 0], "Sticky": [0, 0], "Kit": 0,
+                      "Transport": 0},
+            "others": [
+                {"player_id": 1, "status": 0, "keys": [0, 1], "hp": 110},
+                {"player_id": 2, "status": 0, "keys": [0, 1, 2], "hp": 140},
+                {"player_id": 3, "status": 1, "keys": [0], "hp": 0},
+            ],
+        },
+        legal_actions={
+            "attack": [],
+            "move": [True, True, True, True, True, True, False, False],
+            "detect": True,
+            "interprops": [],
+        },
+        inventory={"LandMine": 0, "Sticky": 0, "Transport": 0, "Kit": 0},
+        status=0, seat=0, opponent="rank06",
+    )
+    # 8. Near the capsule, 3 keys, last-key routing — another mid-board route
+    #    point (status Alive so the candidate emits; the WAIT_FOR_ESCAPE status
+    #    crashes the sample AI, which would waste the point on a None emission).
+    s8 = ReferenceSample(
+        observation={
+            "type": "roundbegin", "inturn": 0, "state": 3, "round": 24,
+            "status": 0, "hp": 110, "keys": [0, 1, 2],
+            "pos": [2, 3, 1],
+            "tools": {"LandMine": [0, 0], "Sticky": [0, 0], "Kit": 0,
+                      "Transport": 0},
+            "others": [
+                {"player_id": 1, "status": 0, "keys": [0, 1], "hp": 90},
+                {"player_id": 2, "status": 0, "keys": [0, 1, 2], "hp": 120},
+                {"player_id": 3, "status": 1, "keys": [0], "hp": 0},
+            ],
+        },
+        legal_actions={
+            "attack": [],
+            "move": [True, True, True, True, True, True, True, True],
+            "detect": True,
+            "interprops": [],
+        },
+        inventory={"LandMine": 0, "Sticky": 0, "Transport": 0, "Kit": 0},
+        status=0, seat=0, opponent="rank06",
+    )
+    return [s1, s2, s3, s4, s5, s6, s7, s8]
 
 
 def build_seed(spec_id: str = "hl-seed-v1") -> ReferenceStateSet:

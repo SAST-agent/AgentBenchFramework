@@ -149,7 +149,7 @@ class HLIterationController:
         try:
             version_after = self.codebase.snapshot(
                 parent_version_id=version_before.version_id if version_before else None,
-                edit_type=run_result.edit_type,
+                edit_type=self._resolve_edit_type(run_result, version_before),
             )
         except Exception:
             version_after = None
@@ -163,6 +163,7 @@ class HLIterationController:
         if version_after is not None:
             self._events.write(
                 "version",
+                act_id=act_id,
                 version_id=version_after.version_id,
                 content_hash=version_after.content_hash,
                 parent_version_id=version_after.parent_version_id,
@@ -177,6 +178,7 @@ class HLIterationController:
             # act isn't a silent black box.
             self._events.write(
                 "version",
+                act_id=act_id,
                 version_id=None,
                 content_hash=None,
                 parent_version_id=(version_before.version_id
@@ -299,6 +301,72 @@ class HLIterationController:
         if not self.curriculum or not self.spec.opponents:
             return None
         return (self.spec.opponents[self._tier],)
+
+    def _resolve_edit_type(self, run_result, version_before) -> str:
+        """Classify this act's edit_type.
+
+        ``ClaudeCodeRunner`` returns ``edit_type=None`` ("unclassified") on
+        success — the CLI gives us no semantic label, so we classify from the
+        actual content change via ``codebase.diff``. ``FakeRunner`` (and any
+        runner that knows what it did) returns a concrete label, which we trust
+        unchanged.
+
+        Honest classification from the diff:
+        - no parent → ``initial`` (the snapshot() call also enforces this).
+        - content unchanged from the parent (identical content_hash) →
+          ``noop`` — the agent edited nothing. Previously this was mislabeled
+          ``refactor`` because the runner hard-coded ``refactor``.
+        - files added or removed → ``replace`` (the agent swapped structure).
+        - only ``agent.py`` (and/or helper modules) modified → ``parametrize``
+          (a real behavioral edit to existing code; the smallest honest
+          non-noop label — we cannot semantically distinguish add_rule vs
+          parametrize vs refactor from a byte-diff alone, and refuse to claim
+          the stronger ``refactor`` = behavior-preserving without evidence).
+
+        This is best-effort: the *behavioral* truth is measured separately by
+        policy_kl. ``noop`` detection is the real fix — it stops masking
+        "agent edited nothing" as a refactor in the research stream.
+        """
+        declared = getattr(run_result, "edit_type", None)
+        if declared is not None:
+            return declared
+        if version_before is None:
+            return "initial"
+        try:
+            after_hash = self._workspace_content_hash()
+        except Exception:
+            return "noop"
+        if after_hash is None:
+            return "noop"
+        if version_before.content_hash == after_hash:
+            return "noop"
+        # content changed — classify by file-level diff against the parent's
+        # stored snapshot. We diff the parent snapshot (in the store) against
+        # the LIVE workspace (not a store entry), because the after-snapshot
+        # has not been written yet at this point in the act lifecycle.
+        try:
+            from agentbench_frame.hl.codebase import _walk
+            before_files = {rel: data for rel, data
+                            in _walk(self.codebase.store / version_before.content_hash)}
+            after_files = {rel: data for rel, data in _walk(self.codebase.root)}
+            b_keys, a_keys = set(before_files), set(after_files)
+            added = a_keys - b_keys
+            removed = b_keys - a_keys
+        except Exception:
+            return "parametrize"
+        if added or removed:
+            return "replace"
+        return "parametrize"
+
+    def _workspace_content_hash(self) -> Optional[str]:
+        """Content-hash of the live workspace tree (mirrors HLCodebase's
+        hashing so it compares equal to a stored snapshot's hash). Returns
+        None if the tree is unreadable."""
+        from agentbench_frame.hl.codebase import _walk, _content_hash
+        try:
+            return _content_hash(_walk(self.codebase.root))
+        except Exception:
+            return None
 
     def _measure_policy_kl(
         self, version_before: VersionHandle, version_after: VersionHandle,

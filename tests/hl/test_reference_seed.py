@@ -8,11 +8,13 @@ from agentbench_frame.hl.reference import ReferenceStateSet
 from agentbench_frame.hl.reference_seed import build_seed, _seed_samples
 
 
-def test_seed_has_three_decision_points():
+def test_seed_has_eight_decision_points_across_situations():
     samples = _seed_samples()
-    assert len(samples) == 3
+    assert len(samples) == 8
     for s in samples:
-        assert s.status == 0          # all Alive (decision points)
+        # Alive or WAIT_FOR_ESCAPE are both decision points (the latter allows
+        # only the escape-capsule interact + finish).
+        assert s.status in (0, 4)
         assert "legal_actions" in s.legal_actions or s.legal_actions
         assert "move" in s.legal_actions
         assert "attack" in s.legal_actions
@@ -36,7 +38,7 @@ def test_build_seed_roundtrips_through_save_load(tmp_path: Path):
     nu.save(p)
     loaded = ReferenceStateSet.load(p)
     assert loaded.spec_id == "hl-seed-v1"
-    assert len(loaded) == 3
+    assert len(loaded) == 8
     assert loaded == nu
 
 

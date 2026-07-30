@@ -255,6 +255,70 @@ def test_version_event_records_content_hash_and_edit_type(tmp_path):
     assert v_ev["parent_version_id"] == v0.version_id
 
 
+class _UnclassifiedRunner:
+    """Mimics ClaudeCodeRunner: returns edit_type=None on success so the
+    controller must diff-classify. ``transform`` is applied to the workspace."""
+    def __init__(self, transform):
+        self._transform = transform
+
+    def run(self, *, workspace, context):
+        from agentbench_frame.hl.runner import AgentRunResult
+        before = {p: p.read_bytes()
+                  for p in workspace.rglob("*") if p.is_file()}
+        self._transform(workspace)
+        after = {p: p.read_bytes()
+                 for p in workspace.rglob("*") if p.is_file()}
+        touched = sorted(
+            {str(p.relative_to(workspace)) for p in after}
+            - {str(p.relative_to(workspace)) for p in before}
+            | {str(p.relative_to(workspace))
+               for p in (set(before) & set(after)) if before[p] != after[p]})
+        return AgentRunResult(edit_type=None, files_touched=touched, time_s=0.0)
+
+
+def test_unclassified_runner_no_edit_classified_as_noop(tmp_path):
+    """When the runner returns edit_type=None and the workspace is byte-identical
+    to the parent, the version event is 'noop' — not the stale 'refactor'
+    placeholder that previously masked a no-op as a refactor."""
+    ctrl, v0 = _two_act_controller(
+        tmp_path,
+        runner=_UnclassifiedRunner(transform=lambda w: None),  # edit nothing
+        eval_results=[_stub_result(0.5, "complete")],
+        probe_emissions=[[("finish",)], [("finish",)]],
+    )
+    h = ctrl.act(version_before=v0)
+    events = read_events(tmp_path / "e.jsonl")
+    v_ev = next(e for e in events if e["event_type"] == "version"
+                 and e["version_id"] == h.version_id)
+    assert v_ev["edit_type"] == "noop"
+    # identical content -> same hash as parent
+    assert v_ev["content_hash"] == v0.content_hash
+
+
+def test_unclassified_runner_real_edit_classified_as_parametrize(tmp_path):
+    """When the runner returns edit_type=None but agent.py genuinely changed
+    (in-place edit, same file set), the controller diff-classifies to
+    'parametrize' (a real edit) rather than the stale 'refactor' default."""
+    def change(w):
+        p = w / "agent.py"
+        txt = p.read_text(encoding="utf-8")
+        # in-place edit: same files, one line modified -> 'parametrize'
+        p.write_text(txt.replace("THRESHOLD = 10", "THRESHOLD = 99"),
+                     encoding="utf-8")
+    ctrl, v0 = _two_act_controller(
+        tmp_path,
+        runner=_UnclassifiedRunner(transform=change),
+        eval_results=[_stub_result(0.5, "complete")],
+        probe_emissions=[[("finish",)], [("finish",)]],
+    )
+    h = ctrl.act(version_before=v0)
+    events = read_events(tmp_path / "e.jsonl")
+    v_ev = next(e for e in events if e["event_type"] == "version"
+                 and e["version_id"] == h.version_id)
+    assert v_ev["edit_type"] == "parametrize"
+    assert v_ev["content_hash"] != v0.content_hash
+
+
 def test_version_event_records_session_id(tmp_path):
     """The claude session_id + transcript path flow from the runner through to
     the version event, so each act's claude history is locatable in the run

@@ -193,6 +193,18 @@ class ContextBuilder:
                 "utility/scoring function, or a bounded lookahead — "
                 "whichever is the smallest change that fixes it.\n"
                 "4. Leave the agent runnable (valid Python, protocol intact).\n"
+                "\n"
+                "## REQUIRED: a behavioral change (not a refactor)\n"
+                "Your edit MUST change the action the agent takes in at least "
+                "one reachable game situation — a different move direction, an "
+                "attack instead of a move, an interact/escape when it would "
+                "otherwise not, a reweighted candidate ranking that flips the "
+                "argmax. A pure rename, reformat, helper-extraction, or comment "
+                "with NO change to any emitted action is a FAILED act: the "
+                "harness measures policy_kl over reference decision points and "
+                "a zero-KL edit teaches nothing. If you believe the current "
+                "policy is already optimal, say so explicitly and make no edit "
+                "— but do not dress a no-op up as a refactor.\n"
             )
         lines.append(
             "## STAY ON MISSION — read this before acting\n"
