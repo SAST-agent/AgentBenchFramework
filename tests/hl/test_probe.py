@@ -238,6 +238,69 @@ def test_probe_drives_real_bundled_baseline():
     assert emitted.primitive[0] == "move"   # random_agent's on-turn action
 
 
+def test_probe_returns_promptly_when_candidate_blocks_after_first_action(tmp_path):
+    """Regression for the ~8 min/act probe slowdown in run hl-run-0730-fix.
+
+    The real candidate protocol (see ``candidates/v1/agent.py``) sends ONE
+    action then reads the judger's per-action reply before continuing — it
+    never sends ``finish`` on its own. The probe doesn't synthesize that
+    reply, so the candidate blocks after the first action. The probe's read
+    loop must NOT then drain the full read timeout waiting for a ``finish``
+    that will never come: it should return the captured first action
+    promptly. (The measurement already records only the first action; each
+    sample is a fresh process, so there is no turn state to preserve by
+    draining.) Otherwise the probe burns ~timeout seconds per sample —
+    8 samples x 2 versions = minutes of dead time per act.
+    """
+    blocker = r'''
+import json, sys
+def read_frame():
+    hdr = sys.stdin.buffer.read(4)
+    if len(hdr) < 4: return None
+    n = int(hdr.decode("utf-8"))
+    body = sys.stdin.buffer.read(n)
+    return json.loads(body.decode("utf-8"))
+def send(frame):
+    s = json.dumps(frame)
+    sys.stdout.buffer.write(len(s).to_bytes(4, "big", signed=True) + s.encode("utf-8"))
+    sys.stdout.buffer.flush()
+while True:
+    msg = read_frame()
+    if msg is None: break
+    t = msg.get("type")
+    if t == "id":
+        send({"type": "id", "player_num": 1, "player_list": [1, 1, 1, 1]})  # ack
+    elif t == "roundbegin":
+        send({"type": "action", "action": ["move", [1, 2, 3]]})  # one action
+        # then block waiting for the judger's per-action reply (never comes)
+        msg2 = read_frame()
+        if msg2 is None: break
+'''
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    (ws / "agent.py").write_text(blocker, encoding="utf-8")
+    (ws / "manifest.toml").write_text(
+        'shape = "single_file"\nentrypoint = "agent.py"\n', encoding="utf-8")
+    cb = HLCodebase(root=ws, store=tmp_path / "store")
+    h = cb.snapshot(parent_version_id=None)
+    cmd, cwd = candidate_command(h, store=cb.store, dest=tmp_path / "stage")
+    probe = ReferenceProbe(cmd=cmd, cwd=cwd, timeout=10.0)
+    sample = ReferenceSample(
+        observation={"round": 1, "inturn": 0},
+        legal_actions={"attack": [], "move": [True] * 8, "detect": False,
+                       "interprops": []},
+        inventory={"LandMine": 0, "Sticky": 0, "Transport": 0, "Kit": 0},
+        status=0, seat=0, opponent="rank01",
+    )
+    t0 = time.monotonic()
+    emitted = probe.probe_one(sample)
+    elapsed = time.monotonic() - t0
+    probe.close()
+    assert emitted is not None
+    assert emitted.primitive[0] == "move"
+    assert elapsed < 3.0   # prompt, NOT the full 10 s read timeout
+
+
 def test_probe_hard_timeout_on_write_blocked_candidate(tmp_path):
     """Regression for the act-2 production hang (run hl-run-0730).
 

@@ -276,11 +276,18 @@ class ReferenceProbe:
             self._close_proc()
             return None
 
-        # Read action frames until finish or timeout. The FIRST non-finish
-        # action is the behavioral choice; we keep draining to finish so the
-        # candidate's turn state stays consistent, but if it goes silent we
-        # still return the recorded action (not None — None is reserved for
-        # "no emission at all", i.e. a truly unresponsive candidate).
+        # Read action frames until the candidate emits its first action (the
+        # behavioral choice at this decision point) or ``finish``. The real
+        # candidate protocol (``candidates/v1/agent.py``) sends ONE action
+        # then reads the judger's per-action reply before continuing — it
+        # never sends ``finish`` on its own, and the probe doesn't synthesize
+        # that reply, so the candidate blocks after the first action. We
+        # therefore return as soon as we capture the first action: draining
+        # to ``finish`` would burn the whole read timeout per sample (it
+        # never arrives) — minutes of dead time per act. This is safe because
+        # each sample is a fresh process (no turn state to preserve), and the
+        # measurement already records only the first action. ``None`` is
+        # reserved for a truly unresponsive candidate (no emission at all).
         emitted: Optional[Tuple[Any, ...]] = None
         out_of_support = False
         deadline = time.monotonic() + self.timeout
@@ -299,11 +306,10 @@ class ReferenceProbe:
                 if emitted is None:
                     emitted = FINISH
                 break
-            if emitted is None:
-                emitted = token
-                if token not in las.tokens:
-                    out_of_support = True
-                # keep reading until finish to drain the turn
+            emitted = token
+            if token not in las.tokens:
+                out_of_support = True
+            break  # captured the first action — return promptly (no finish to drain to)
         self._close_proc()
         if emitted is None:
             return None  # truly no emission
