@@ -192,6 +192,11 @@ def _cmd_data_list(args):
 
 
 def main(argv: Optional[List[str]] = None):
+    effective_argv = list(sys.argv[1:] if argv is None else argv)
+    if effective_argv and effective_argv[0] == "hl":
+        from agentbench_frame.hl.cli import main as hl_main
+
+        return hl_main(effective_argv[1:])
     parser = argparse.ArgumentParser(
         prog="agentbench",
         description="AgentBench — unified agent framework for Saiblo games",
@@ -245,7 +250,7 @@ def main(argv: Optional[List[str]] = None):
     p_list = p_data_sub.add_parser("list", help="List all runs in data directory")
     p_list.add_argument("--data-dir", default=None, help="Data directory (default: $AGENTBENCH_DATA)")
 
-    args = parser.parse_args(argv)
+    args = parser.parse_args(effective_argv)
 
     if args.command == "train":
         _cmd_train(args)

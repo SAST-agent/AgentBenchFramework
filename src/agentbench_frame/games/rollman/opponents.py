@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import stat
 import subprocess
 import sys
@@ -55,10 +56,21 @@ def _safe_extract(archive: Path, destination: Path) -> None:
         package.extractall(destination)
 
 
-def _run_build(argv: tuple[str, ...], *, cwd: Path, label: str) -> None:
+def _run_build(
+    argv: tuple[str, ...],
+    *,
+    cwd: Path,
+    label: str,
+    extra_env: Mapping[str, str] | None = None,
+) -> None:
     completed = subprocess.run(
         argv,
         cwd=cwd,
+        env=(
+            None
+            if extra_env is None
+            else {**os.environ, **{str(k): str(v) for k, v in extra_env.items()}}
+        ),
         capture_output=True,
         text=True,
     )
@@ -144,6 +156,25 @@ def prepare_opponent(
         binary_name = str(profile.get("binary", "main"))
         binary = extracted / "target" / "release" / binary_name
         if not binary.is_file():
+            build_env = {
+                str(key): str(value)
+                for key, value in profile.get("build_env", {}).items()
+            }
+            for package, version in profile.get("cargo_pins", {}).items():
+                _run_build(
+                    (
+                        cargo_executable,
+                        "update",
+                        "-p",
+                        str(package),
+                        "--precise",
+                        str(version),
+                        "--manifest-path",
+                        str(entrypoint),
+                    ),
+                    cwd=entrypoint.parent,
+                    label=f"{opponent.opponent_id} dependency pin",
+                )
             build_command = (
                 cargo_executable,
                 "build",
@@ -157,6 +188,7 @@ def prepare_opponent(
                 build_command,
                 cwd=entrypoint.parent,
                 label=opponent.opponent_id,
+                extra_env=build_env,
             )
         process = ProcessSpec(argv=(str(binary),), cwd=entrypoint.parent)
     else:
@@ -208,3 +240,40 @@ def prepare_human_pool(
         )
         for opponent in sorted(opponents, key=lambda item: item.rank)
     )
+
+
+def verify_opponent_start(
+    opponent: Opponent,
+    *,
+    startup_timeout_s: float = 0.5,
+) -> None:
+    """Require the prepared process to initialize and wait for protocol input."""
+
+    if opponent.process is None:
+        raise OpponentBuildError(f"{opponent.opponent_id} has no process")
+    process = subprocess.Popen(
+        opponent.process.argv,
+        cwd=opponent.process.cwd,
+        env={name: os.environ[name] for name in ("PATH", "LANG", "LC_ALL") if name in os.environ},
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        try:
+            return_code = process.wait(timeout=startup_timeout_s)
+        except subprocess.TimeoutExpired:
+            return
+        diagnostic = process.stderr.read().decode("utf-8", errors="replace")[-2000:]
+        raise OpponentBuildError(
+            f"{opponent.opponent_id} exited during startup "
+            f"with code {return_code}: {diagnostic}"
+        )
+    finally:
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()

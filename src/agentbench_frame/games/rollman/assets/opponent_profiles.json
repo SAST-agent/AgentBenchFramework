@@ -16,7 +16,17 @@
   "rank11": {"kind": "python", "entrypoint": "Ghost/GhostsSDK-python/main.py"},
   "rank12": {"kind": "python", "entrypoint": "GGbomb/main.py"},
   "rank13": {"kind": "python", "entrypoint": "GhostsSDK-python-main/GhostsSDK-python-main/main.py"},
-  "rank14": {"kind": "cargo", "entrypoint": "Cargo.toml", "binary": "main"},
+  "rank14": {
+    "kind": "cargo",
+    "entrypoint": "Cargo.toml",
+    "binary": "main",
+    "cargo_pins": {
+      "rand": "0.8.5"
+    },
+    "build_env": {
+      "RUSTFLAGS": "-A dangerous_implicit_autorefs"
+    }
+  },
   "rank15": {"kind": "python", "entrypoint": "roll-man-ghost/main.py"},
   "rank16": {"kind": "python", "entrypoint": "GhostsSDK-python/main.py"}
 }

@@ -4,13 +4,23 @@ version = "0.1.0"
 description = "Unified agent framework with transparent tracking for THU Saiblo games"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+  "PyYAML>=6.0",
+  "python-dotenv>=1.0",
+]
 
 [project.optional-dependencies]
 tracking = ["psutil"]
 rl = ["torch", "numpy"]
 report = ["jinja2"]
-all = ["psutil", "torch", "numpy", "jinja2"]
+rollman = [
+  "cloudpickle==3.1.0",
+  "gym==0.26.2",
+  "numpy==2.1.2",
+  "torch==2.13.0",
+]
+hl = ["matplotlib>=3.8"]
+all = ["psutil", "torch", "numpy", "jinja2", "PyYAML", "python-dotenv", "matplotlib"]
 
 [project.scripts]
 agentbench = "agentbench_frame.cli:main"
@@ -21,3 +31,8 @@ build-backend = "hatchling.build"
 
 [tool.uv]
 dev-dependencies = []
+
+[tool.pytest.ini_options]
+markers = [
+  "integration: exercises frozen external game assets or native builds",
+]
