@@ -18,7 +18,7 @@ from agentbench_frame.tracking.records import RunMeta
 from agentbench_frame.tracking.writer import JSONLWriter
 from agentbench_frame.tracking.sampler import ResourceSampler
 from agentbench_frame.tracking.wrappers import TrackedEnv, TimedAgent
-from agentbench_frame.tracking.budget import BudgetLedger
+from agentbench_frame.tracking.budget import BudgetLedger, PHASES
 from agentbench_frame.tracking.iteration import ActRecord, VersionedActRecorder
 from agentbench_frame.eval.information_gain import occupancy_shift as derive_occupancy_shift
 from agentbench_frame.tracking.quality import inspect_event_file
@@ -113,7 +113,7 @@ class Run:
             config=config,
         )
         budget = summary.get("budget") or {}
-        for phase in ("calibration", "learning", "evaluation"):
+        for phase in PHASES:
             values = {
                 "episodes": int(budget.get(f"{phase}_episodes", 0) or 0),
                 "env_steps": int(budget.get(f"{phase}_env_steps", 0) or 0),

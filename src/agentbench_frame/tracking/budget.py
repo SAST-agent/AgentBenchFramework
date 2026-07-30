@@ -1,11 +1,18 @@
-"""Calibration/learning/validation/evaluation/total budget accounting."""
+"""Named experimental-phase and total budget accounting."""
 
 from dataclasses import dataclass
 from typing import Dict, Optional
 
 
 _MISSING = object()
-PHASES = ("calibration", "learning", "validation", "evaluation")
+PHASES = (
+    "calibration",
+    "learning",
+    "validation",
+    "formal",
+    "sealed",
+    "evaluation",
+)
 
 
 @dataclass
@@ -112,7 +119,7 @@ class BudgetLedger:
     ) -> None:
         if phase not in self._phases:
             raise ValueError(
-                "phase must be calibration, learning, validation, or evaluation"
+                f"phase must be one of {', '.join(PHASES)}"
             )
         if prompt_tokens is not _MISSING and prompt_tokens is not None and prompt_tokens < 0:
             raise ValueError("prompt_tokens must be non-negative")
