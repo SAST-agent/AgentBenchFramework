@@ -1,0 +1,12 @@
+challenge_id = "generals-hl-v7-champion-v1"
+opponent_id = "advanced-rank02-robinliu-v18"
+learning_seeds = [290101, 290202, 290303]
+validation_seeds = [291101, 291202, 291303, 291404, 291505, 291606]
+sealed_seeds = [292101, 292202, 292303, 292404, 292505, 292606, 292707, 292808, 292909, 292999]
+seats = [0, 1]
+validation_min_wins = 7
+validation_min_wins_per_seat = 3
+sealed_min_wins = 11
+sealed_min_wins_per_seat = 5
+engine_sha256 = "4ca898365a6fe9a0cca39c3c8be0e49f449334814b106882c0b78b3aabdb1d97"
+replay_skill_sha256 = "0e8f01f8825ad3f351a330d324f2a558613bc98a61ca6adc80d69d3c90690b48"
