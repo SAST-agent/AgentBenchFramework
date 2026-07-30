@@ -193,6 +193,8 @@ def test_report_writers_are_stable_and_machine_readable(tmp_path):
     markdown = first_markdown.decode()
     assert "AB-Ludi/1" in markdown
     assert "not exact Kolmogorov complexity" in markdown
+    assert "agentbench-rule-complexity-v1.md" in markdown
+    assert "must not be compared numerically" in markdown
     assert "| 1 | `g` | Game |" in markdown
 
 

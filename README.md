@@ -291,7 +291,25 @@ agentbench data check --data-dir ./data                  # 验证数据格式
 agentbench data list --data-dir ./data                   # 列出所有 run
 ```
 
-## 游戏逻辑复杂度
+## 游戏规则与实现复杂度
+
+框架把两种不同的描述长度分开报告：
+
+- **规则复杂度**：AB-Rule/1 把游戏规则写成受控伪码，以规范原子规则命题
+  `rule atoms (RA)` 为单位。总 RA 是状态、动作、观察、初始化、条件、转移和
+  终局七个互斥命题集合的并集大小，不计算表达式 AST 节点。
+- **实现复杂度**：AB-Ludi/1 对公开后端源码构造可执行描述，以
+  `k_upper_bits` 为单位。
+
+二者量纲不同，不允许数值混算或直接比较。规则报告排除 DeepClue，冻结结果见
+[`agentbench-rule-complexity-v1.md`](docs/research/agentbench-rule-complexity-v1.md)。
+它不需要 AgentBench checkout：
+
+```bash
+agentbench complexity rules \
+  --json-output docs/research/agentbench-rule-complexity-v1.json \
+  --markdown-output docs/research/agentbench-rule-complexity-v1.md
+```
 
 框架提供可复算的 AB-Ludi/1 游戏逻辑描述长度，用于比较
 [`Aoraku/AgentBench`](https://github.com/Aoraku/AgentBench) 中公开后端实现的

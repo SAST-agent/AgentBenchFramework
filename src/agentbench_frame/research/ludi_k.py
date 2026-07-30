@@ -412,6 +412,14 @@ def write_markdown_report(
                 "information gain."
             ),
             "",
+            (
+                "The separate [AB-Rule/1 report]"
+                "(agentbench-rule-complexity-v1.md) measures formal game-rule "
+                "description length in rule atoms (RA). Bits and RA have "
+                "different units and must not be compared numerically or "
+                "combined into one score."
+            ),
+            "",
             "## Method references",
             "",
             (
