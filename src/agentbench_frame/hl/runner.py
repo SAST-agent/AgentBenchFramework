@@ -318,3 +318,151 @@ class ClaudeCodeRunner:
                 f"workspace context.\n{resources}\n\nEdit the agent files in "
                 f"place to improve performance. Do not touch the manifest.toml "
                 f"entrypoint.")
+
+
+class ApiCodingRunner:
+    """Drive the HL edit via raw provider API calls (no claude CLI).
+
+    Hybrid depth: a bounded tool-use loop exposing read-only tools
+    (``read_file`` / ``list_replays`` / ``read_replay``) plus the single edit
+    ``write_agent_py`` (full-file rewrite). The loop stops when the model calls
+    ``write_agent_py``, emits a final message with no tool call, or hits the
+    step cap (``max_turns``). The edit is ``ast.parse``-validated before apply;
+    a SyntaxError leaves the workspace untouched and yields an honest ``noop``
+    plus a ``failure_reason``.
+
+    Failure contract matches ``ClaudeCodeRunner``: API error / step-cap /
+    parse-failure -> ``edit_type="noop"`` + stable ``failure_reason`` so the
+    controller records it in the event stream. A clean decision not to edit is
+    ``noop`` with ``failure_reason=None``.
+    """
+
+    _READ_TOOLS = ("read_file", "list_replays", "read_replay")
+
+    def __init__(self, *, client, system_prompt: str,
+                 max_turns: int = 6, max_tokens: int = 4096,
+                 timeout: float = 300.0):
+        self._client = client
+        self._system = system_prompt
+        self._max_turns = max_turns
+        self._max_tokens = max_tokens
+        self._timeout = timeout
+
+    def run(self, *, workspace: Path, context: Dict[str, Any]) -> AgentRunResult:
+        import time as _time
+        from agentbench_frame.hl.llm import SHARED_TOOLS
+        prompt = context.get("prompt") or self._default_prompt(context)
+        messages: List[Dict[str, Any]] = [{"role": "user", "content": prompt}]
+        prompt_tok = completion_tok = total_tok = 0
+        edit_applied = False
+        failure_reason: Optional[str] = None
+        started = _time.monotonic()
+        try:
+            for _ in range(self._max_turns):
+                resp = self._client.complete(
+                    system=self._system, messages=messages,
+                    tools=SHARED_TOOLS, max_tokens=self._max_tokens)
+                u = resp.usage
+                prompt_tok += u.prompt_tokens or 0
+                completion_tok += u.completion_tokens or 0
+                total_tok += u.total_tokens or 0
+
+                if not resp.tool_calls:
+                    messages.append({"role": "assistant", "content": resp.text})
+                    break  # model chose to stop -> clean no-op unless it edited
+
+                messages.append({"role": "assistant", "content": resp.text,
+                                 "tool_calls": resp.tool_calls})
+                wrote = False
+                for tc in resp.tool_calls:
+                    if tc.name == "write_agent_py":
+                        ok, reason = self._apply_edit(
+                            tc.arguments.get("content", ""), workspace)
+                        if ok:
+                            edit_applied = True
+                        else:
+                            failure_reason = reason
+                        wrote = True
+                        break
+                    result = self._dispatch(tc.name, tc.arguments, workspace, context)
+                    messages.append({"role": "tool", "tool_name": tc.name,
+                                     "tool_call_id": tc.id, "content": result})
+                if wrote:
+                    break
+            else:
+                failure_reason = "step_cap_exceeded"
+        except Exception as e:  # API/network/auth errors
+            failure_reason = f"api_error: {type(e).__name__}: {str(e)[:200]}"
+
+        elapsed = _time.monotonic() - started
+        if edit_applied:
+            return AgentRunResult(
+                edit_type=None,  # unclassified -> controller diff-classifies
+                prompt_tokens=prompt_tok or None,
+                completion_tokens=completion_tok or None,
+                total_tokens=total_tok or None,
+                time_s=elapsed)
+        return AgentRunResult(
+            edit_type="noop", failure_reason=failure_reason,
+            prompt_tokens=prompt_tok or None,
+            completion_tokens=completion_tok or None,
+            total_tokens=total_tok or None,
+            time_s=elapsed)
+
+    # ---- edit + tool dispatch ----
+
+    def _apply_edit(self, content: str, workspace: Path):
+        import ast
+        try:
+            ast.parse(content)
+        except SyntaxError as e:
+            return False, f"syntax_error: {e.msg} (line {e.lineno})"
+        (workspace / "agent.py").write_text(content, encoding="utf-8")
+        return True, None
+
+    def _dispatch(self, name: str, args: Dict[str, Any],
+                  workspace: Path, context: Dict[str, Any]) -> str:
+        if name == "read_file":
+            return self._tool_read_file(args.get("path", ""), workspace)
+        if name == "list_replays":
+            return self._tool_list_replays(context)
+        if name == "read_replay":
+            return self._tool_read_replay(args.get("id", ""), context)
+        return f"error: unknown tool {name!r}"
+
+    def _tool_read_file(self, rel: str, workspace: Path) -> str:
+        rel = (rel or "").strip()
+        if not rel:
+            return "error: path required"
+        target = (workspace / rel).resolve()
+        try:
+            target.relative_to(workspace.resolve())
+        except ValueError:
+            return "error: path escapes workspace"
+        if not target.is_file():
+            return f"error: not found: {rel}"
+        text = target.read_text(encoding="utf-8", errors="replace")
+        return text[:20000]  # bound context
+
+    def _tool_list_replays(self, context: Dict[str, Any]) -> str:
+        import json as _json
+        replays = context.get("replays") or []
+        if not replays:
+            return "no replays available"
+        return _json.dumps(replays[:20])
+
+    def _tool_read_replay(self, rid: str, context: Dict[str, Any]) -> str:
+        replays_dir = context.get("replays_dir")
+        if not replays_dir:
+            return "error: replays not available for this run"
+        p = Path(replays_dir) / rid
+        if not p.is_file():
+            return f"error: replay not found: {rid}"
+        return p.read_text(encoding="utf-8", errors="replace")[:20000]
+
+    @staticmethod
+    def _default_prompt(context: Dict[str, Any]) -> str:
+        goal = context.get("goal", "Improve the agent's win rate.")
+        resources = context.get("resources_summary", "")
+        return (f"{goal}\n\n{resources}\n\nInspect the workspace and replays, "
+                f"then call write_agent_py with the improved complete agent.py.")
