@@ -2,7 +2,7 @@
 
 Date: 2026-07-31
 
-Status: Approved direction; written-spec review pending
+Status: Approved on 2026-07-31
 
 Framework branch: `zhaoyicheng/generals-hl-implementation`
 
