@@ -41,6 +41,7 @@ class LineageManager:
         self.rollback_enabled = rollback_enabled
         self.versions: dict[str, VersionEvaluation] = {}
         self.latest_attempt_version_id: Optional[str] = None
+        self.lineage_head_version_id: Optional[str] = None
         self.champion_version_id: Optional[str] = None
         self._champion_score: Optional[float] = None
         self._degradation_streak = 0
@@ -54,6 +55,22 @@ class LineageManager:
         status: str,
         score: Optional[float],
     ) -> bool:
+        self.register_candidate(
+            version_id,
+            parent_version_id=parent_version_id,
+            status=status,
+            score=score,
+        )
+        return self.select_version(version_id)
+
+    def register_candidate(
+        self,
+        version_id: str,
+        *,
+        parent_version_id: Optional[str],
+        status: str,
+        score: Optional[float],
+    ) -> None:
         if version_id in self.versions:
             raise ValueError(f"version already recorded: {version_id}")
         if status not in {"complete", "incomplete", "failed", "timeout"}:
@@ -68,15 +85,21 @@ class LineageManager:
         self.versions[version_id] = evaluation
         self.latest_attempt_version_id = version_id
 
+    def select_version(self, version_id: str) -> bool:
+        if version_id not in self.versions:
+            raise KeyError(version_id)
+        evaluation = self.versions[version_id]
+        self.lineage_head_version_id = version_id
+
         promoted = False
-        if status == "complete" and score is not None:
-            if self._champion_score is None or score > self._champion_score:
-                self.champion_version_id = version_id
-                self._champion_score = score
+        if evaluation.status == "complete" and evaluation.score is not None:
+            if self._champion_score is None or evaluation.score > self._champion_score:
+                self.champion_version_id = evaluation.version_id
+                self._champion_score = evaluation.score
                 self._degradation_streak = 0
                 self._rollback_pending = False
                 promoted = True
-            elif score <= self._champion_score - self.rollback_margin:
+            elif evaluation.score <= self._champion_score - self.rollback_margin:
                 self._degradation_streak += 1
                 self._rollback_pending = (
                     self.rollback_enabled
@@ -88,12 +111,12 @@ class LineageManager:
         return promoted
 
     def select_next_parent(self) -> ParentDecision:
-        if self.latest_attempt_version_id is None:
+        if self.lineage_head_version_id is None:
             raise ValueError("cannot select parent before any version")
         if self._rollback_pending and self.champion_version_id is not None:
             decision = ParentDecision(
                 rollback=True,
-                from_version_id=self.latest_attempt_version_id,
+                from_version_id=self.lineage_head_version_id,
                 to_version_id=self.champion_version_id,
                 reason="sustained_degradation",
             )
@@ -102,7 +125,7 @@ class LineageManager:
             return decision
         return ParentDecision(
             rollback=False,
-            from_version_id=self.latest_attempt_version_id,
-            to_version_id=self.latest_attempt_version_id,
+            from_version_id=self.lineage_head_version_id,
+            to_version_id=self.lineage_head_version_id,
             reason="continue_latest",
         )

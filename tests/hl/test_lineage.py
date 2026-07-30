@@ -56,3 +56,19 @@ def test_improvement_resets_degradation_and_promotes_new_champion():
     assert lineage.champion_version_id == "v2"
     assert decision.rollback is False
     assert decision.to_version_id == "v2"
+
+
+def test_k_siblings_are_retained_but_only_selected_candidate_advances_lineage():
+    from agentbench_frame.hl.lineage import LineageManager
+
+    lineage = LineageManager(rollback_patience=2, rollback_margin=0.05)
+    lineage.register_candidate("v1", parent_version_id="v0", status="complete", score=0.40)
+    lineage.register_candidate("v2", parent_version_id="v0", status="complete", score=0.70)
+    lineage.register_candidate("v3", parent_version_id="v0", status="complete", score=0.50)
+    promoted = lineage.select_version("v2")
+
+    assert promoted is True
+    assert lineage.lineage_head_version_id == "v2"
+    assert lineage.latest_attempt_version_id == "v3"
+    assert set(lineage.versions) == {"v1", "v2", "v3"}
+    assert lineage.select_next_parent().to_version_id == "v2"

@@ -129,7 +129,17 @@ class VersionStore:
         parent_version_id: str,
         act_id: str,
     ) -> Version:
-        source = self.get(source_version_id)
+        self.checkout(source_version_id)
+        return self.snapshot(
+            parent_version_id=parent_version_id,
+            act_id=act_id,
+            edit_type="rollback",
+        )
+
+    def checkout(self, version_id: str) -> None:
+        """Place an immutable version in the workspace without creating a version."""
+
+        source = self.get(version_id)
         object_root = self.objects / source.content_hash
         if not object_root.is_dir():
             raise FileNotFoundError(f"missing snapshot object: {source.content_hash}")
@@ -145,8 +155,3 @@ class VersionStore:
             destination = self.workspace / relative
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(content)
-        return self.snapshot(
-            parent_version_id=parent_version_id,
-            act_id=act_id,
-            edit_type="rollback",
-        )
