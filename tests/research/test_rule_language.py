@@ -130,3 +130,9 @@ def test_requires_one_game_declaration():
 
     with pytest.raises(RuleSyntaxError, match="exactly one game"):
         parse_rule_description("game One\ngame Two\nplayers 2\n")
+
+
+def test_game_identifier_can_use_corpus_number_prefix():
+    document = parse_rule_description("game 23_doto\nplayers 2\n")
+
+    assert document.game_id == "23_doto"

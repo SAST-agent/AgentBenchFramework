@@ -80,6 +80,7 @@ class _MutableNode:
 
 
 _NAME = r"[A-Za-z_][A-Za-z0-9_.-]*"
+_GAME_ID = r"[A-Za-z0-9_][A-Za-z0-9_.-]*"
 _METADATA = re.compile(
     r"^#\s*(provenance|source-root|reviewed|includes|excludes):\s*(.+?)\s*$"
 )
@@ -229,7 +230,7 @@ def _node(
 
 
 def _parse_content(content: str, *, path: str, line: int) -> _MutableNode:
-    match = re.fullmatch(rf"game\s+({_NAME})", content)
+    match = re.fullmatch(rf"game\s+({_GAME_ID})", content)
     if match:
         return _node("game", line=line, name=match.group(1), path=path)
 
