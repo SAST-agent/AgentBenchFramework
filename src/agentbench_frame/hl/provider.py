@@ -1,0 +1,192 @@
+"""Programmatic Codex CLI sessions for HL acts."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import subprocess
+import time
+from pathlib import Path
+from typing import Mapping, Optional
+
+from agentbench_frame.hl.config import ProviderConfig
+from agentbench_frame.tracking.provider import ProviderInvocation
+from agentbench_frame.tracking.providers import parse_codex_jsonl
+
+
+def _toml_string(value: str) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+class CodexSessionProvider:
+    """Invoke official ``codex exec`` and resume its persisted session."""
+
+    provider_name = "codex"
+
+    def __init__(
+        self,
+        config: ProviderConfig,
+        *,
+        run_root: str | Path,
+        environ: Optional[Mapping[str, str]] = None,
+        timeout_s: Optional[float] = None,
+    ) -> None:
+        self.config = config
+        self.run_root = Path(run_root)
+        self.codex_home = self.run_root / "codex-home"
+        self.codex_home.mkdir(parents=True, exist_ok=True)
+        self.config_path = self.codex_home / "config.toml"
+        self.environ = dict(os.environ if environ is None else environ)
+        self.timeout_s = timeout_s
+        self._write_config()
+
+    def _write_config(self) -> None:
+        lines = [
+            f"model = {_toml_string(self.config.model)}" if self.config.model else "",
+            f"review_model = {_toml_string(self.config.review_model)}"
+            if self.config.review_model
+            else "",
+            f"model_reasoning_effort = {_toml_string(self.config.reasoning_effort)}",
+            'sandbox_mode = "workspace-write"',
+            f"disable_response_storage = {str(self.config.disable_response_storage).lower()}",
+            "",
+            "[sandbox_workspace_write]",
+            f"network_access = {str(self.config.network_access == 'enabled').lower()}",
+            "",
+            "[shell_environment_policy]",
+            'inherit = "core"',
+            (
+                "exclude = "
+                + json.dumps(["CODEX_API_KEY", self.config.env_key], ensure_ascii=False)
+            ),
+        ]
+        if self.config.base_url:
+            lines[0:0] = ['model_provider = "agentbench_proxy"']
+            lines.extend(
+                [
+                    "",
+                    "[model_providers.agentbench_proxy]",
+                    'name = "AgentBench Proxy"',
+                    f"base_url = {_toml_string(self.config.base_url)}",
+                    f"wire_api = {_toml_string(self.config.wire_api)}",
+                    (
+                        "requires_openai_auth = "
+                        + str(self.config.requires_openai_auth).lower()
+                    ),
+                    f"# credential source: {self.config.env_key} -> CODEX_API_KEY",
+                ]
+            )
+        self.config_path.write_text(
+            "\n".join(line for line in lines if line is not None) + "\n",
+            encoding="utf-8",
+        )
+
+    @property
+    def fingerprint(self) -> str:
+        return hashlib.sha256(self.config_path.read_bytes()).hexdigest()
+
+    def build_command(
+        self,
+        prompt: str,
+        workspace: str | Path,
+        *,
+        session_id: Optional[str],
+    ) -> list[str]:
+        if not prompt:
+            raise ValueError("prompt is required")
+        executable = self.config.executable
+        model_args = ["-m", self.config.model] if self.config.model else []
+        if session_id and self.config.context_mode == "resumable":
+            return [
+                executable,
+                "exec",
+                "resume",
+                "--json",
+                *model_args,
+                session_id,
+                prompt,
+            ]
+        return [
+            executable,
+            "exec",
+            "--json",
+            "--sandbox",
+            "workspace-write",
+            "-C",
+            str(workspace),
+            *model_args,
+            prompt,
+        ]
+
+    def build_environment(self) -> dict[str, str]:
+        key = self.environ.get(self.config.env_key)
+        if not key:
+            raise RuntimeError(
+                f"missing provider credential environment variable: {self.config.env_key}"
+            )
+        child = {
+            name: value
+            for name, value in self.environ.items()
+            if name in {"PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "SHELL"}
+        }
+        child["CODEX_HOME"] = str(self.codex_home)
+        child["CODEX_API_KEY"] = key
+        return child
+
+    def redacted_environment(self) -> dict[str, str]:
+        return {
+            key: ("<redacted>" if key == "CODEX_API_KEY" else value)
+            for key, value in self.build_environment().items()
+        }
+
+    def invoke(
+        self,
+        *,
+        prompt: str,
+        workspace: str | Path,
+        raw_output_path: str | Path,
+        session_id: Optional[str] = None,
+    ) -> ProviderInvocation:
+        command = self.build_command(prompt, workspace, session_id=session_id)
+        started = time.monotonic()
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=str(workspace),
+                env=self.build_environment(),
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_s,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return ProviderInvocation(
+                status="timeout",
+                elapsed_time_s=time.monotonic() - started,
+                error=f"provider timed out after {self.timeout_s}s",
+                metadata={"command": command, "provider_fingerprint": self.fingerprint},
+            )
+        raw_path = Path(raw_output_path)
+        raw_path.parent.mkdir(parents=True, exist_ok=True)
+        raw_path.write_text(completed.stdout or "", encoding="utf-8")
+        result = parse_codex_jsonl(completed.stdout or "")
+        result.elapsed_time_s = time.monotonic() - started
+        result.raw_output_ref = str(raw_path)
+        result.metadata.update(
+            {
+                "command": command,
+                "return_code": completed.returncode,
+                "stderr": completed.stderr or "",
+                "provider_fingerprint": self.fingerprint,
+                "resumed_session_id": session_id,
+            }
+        )
+        if session_id and not result.metadata.get("thread_id"):
+            result.metadata["thread_id"] = session_id
+        if completed.returncode != 0:
+            result.status = "failed"
+            result.error = result.error or (
+                completed.stderr.strip() or f"provider exited {completed.returncode}"
+            )
+        return result

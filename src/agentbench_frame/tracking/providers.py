@@ -43,13 +43,19 @@ def _usage(value: Any) -> tuple[ProviderUsage, dict[str, Any]]:
         return ProviderUsage(), {}
     prompt = value.get("input_tokens", value.get("prompt_tokens"))
     completion = value.get("output_tokens", value.get("completion_tokens"))
+    cached = value.get("cached_input_tokens")
+    reasoning = value.get("reasoning_output_tokens")
     prompt = int(prompt) if isinstance(prompt, (int, float)) else None
     completion = int(completion) if isinstance(completion, (int, float)) else None
+    cached = int(cached) if isinstance(cached, (int, float)) else None
+    reasoning = int(reasoning) if isinstance(reasoning, (int, float)) else None
     accuracy = "exact" if prompt is not None and completion is not None else "unknown"
     return (
         ProviderUsage(
             prompt_tokens=prompt,
+            cached_input_tokens=cached,
             completion_tokens=completion,
+            reasoning_output_tokens=reasoning,
             total_tokens=(prompt + completion)
             if prompt is not None and completion is not None
             else None,

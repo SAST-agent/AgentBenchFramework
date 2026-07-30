@@ -14,12 +14,20 @@ class ProviderUsage:
     """First-hand provider usage; ``None`` means the provider did not expose it."""
 
     prompt_tokens: Optional[int] = None
+    cached_input_tokens: Optional[int] = None
     completion_tokens: Optional[int] = None
+    reasoning_output_tokens: Optional[int] = None
     total_tokens: Optional[int] = None
     token_accuracy: str = "unknown"
 
     def __post_init__(self) -> None:
-        for name in ("prompt_tokens", "completion_tokens", "total_tokens"):
+        for name in (
+            "prompt_tokens",
+            "cached_input_tokens",
+            "completion_tokens",
+            "reasoning_output_tokens",
+            "total_tokens",
+        ):
             value = getattr(self, name)
             if value is not None and value < 0:
                 raise ValueError(f"{name} must be non-negative")
