@@ -108,3 +108,118 @@ class EloTracker:
         r1 = self._ratings.get(player1, self.initial_rating)
         r2 = self._ratings.get(player2, self.initial_rating)
         return 1.0 / (1.0 + 10.0 ** ((r2 - r1) / self.scale))
+
+
+@dataclass(frozen=True)
+class EloGameRecord:
+    role: str
+    candidate: str
+    opponent: str
+    result: str
+    act_id: str
+    version_id: str
+    seed: int
+    game_index: int
+    rating_before: float
+    rating_after: float
+    opponent_rating_before: float
+    opponent_rating_after: float
+
+
+class RoleEloLedger:
+    """Per-game Elo with explicit asymmetric role and optional fixed anchors."""
+
+    def __init__(
+        self,
+        initial_rating: float = 1500.0,
+        k_factor: float = 32.0,
+        scale: float = 400.0,
+    ) -> None:
+        if k_factor <= 0 or scale <= 0:
+            raise ValueError("k_factor and scale must be positive")
+        self.initial_rating = float(initial_rating)
+        self.k_factor = float(k_factor)
+        self.scale = float(scale)
+        self._ratings: Dict[Tuple[str, str], float] = {}
+        self._records: List[EloGameRecord] = []
+
+    def rating(self, role: str, player: str) -> float:
+        return self._ratings.get((role, player), self.initial_rating)
+
+    def history(self, role: str, player: str) -> Tuple[EloGameRecord, ...]:
+        return tuple(
+            record
+            for record in self._records
+            if record.role == role and record.candidate == player
+        )
+
+    def update_game(
+        self,
+        *,
+        role: str,
+        candidate: str,
+        opponent: str,
+        result: str,
+        act_id: str,
+        version_id: str,
+        seed: int,
+        anchor_opponent: bool = False,
+    ) -> EloGameRecord:
+        if not role or not candidate or not opponent:
+            raise ValueError("role, candidate, and opponent are required")
+        scores = {"win": 1.0, "draw": 0.5, "loss": 0.0}
+        if result not in scores:
+            raise ValueError("Elo accepts only valid win, draw, or loss games")
+        candidate_key = (role, candidate)
+        opponent_key = (role, opponent)
+        before = self.rating(role, candidate)
+        opponent_before = self.rating(role, opponent)
+        expected = 1.0 / (1.0 + 10.0 ** ((opponent_before - before) / self.scale))
+        after = before + self.k_factor * (scores[result] - expected)
+        opponent_after = opponent_before
+        if not anchor_opponent:
+            opponent_after = opponent_before + self.k_factor * (
+                (1.0 - scores[result]) - (1.0 - expected)
+            )
+        self._ratings[candidate_key] = after
+        self._ratings[opponent_key] = opponent_after
+        record = EloGameRecord(
+            role=role,
+            candidate=candidate,
+            opponent=opponent,
+            result=result,
+            act_id=act_id,
+            version_id=version_id,
+            seed=int(seed),
+            game_index=len(self._records) + 1,
+            rating_before=before,
+            rating_after=after,
+            opponent_rating_before=opponent_before,
+            opponent_rating_after=opponent_after,
+        )
+        self._records.append(record)
+        return record
+
+    def update_series(
+        self,
+        *,
+        role: str,
+        candidate: str,
+        games: List[Dict[str, Any]],
+        anchor_opponents: bool = False,
+    ) -> Tuple[EloGameRecord, ...]:
+        records = []
+        for game in games:
+            records.append(
+                self.update_game(
+                    role=role,
+                    candidate=candidate,
+                    opponent=str(game["opponent"]),
+                    result=str(game["result"]),
+                    act_id=str(game["act_id"]),
+                    version_id=str(game["version_id"]),
+                    seed=int(game["seed"]),
+                    anchor_opponent=anchor_opponents,
+                )
+            )
+        return tuple(records)

@@ -84,6 +84,12 @@ class HLController:
             score=evaluation.score,
         )
         self._write_version_event(version, evaluation, selected=True)
+        self.events.write(
+            "candidate_selected",
+            iteration_id="iter-000000",
+            version_id=version.version_id,
+            act_id=version.act_id,
+        )
         if evaluation.status == "complete":
             self.events.write(
                 "champion_promoted",
@@ -186,6 +192,12 @@ class HLController:
                 version_id=selected.version.version_id,
                 score=selected.evaluation.score,
             )
+        self.events.write(
+            "candidate_selected",
+            iteration_id=iteration_id,
+            version_id=selected.version.version_id,
+            act_id=selected.act_id,
+        )
         return IterationResult(
             iteration_id=iteration_id,
             parent_version_id=parent_id,

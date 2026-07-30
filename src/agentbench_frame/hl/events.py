@@ -19,6 +19,7 @@ KNOWN_EVENT_TYPES = frozenset(
         "run_started",
         "act_completed",
         "version_created",
+        "candidate_selected",
         "match_completed",
         "evaluation_completed",
         "policy_kl_measured",
