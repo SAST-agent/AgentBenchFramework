@@ -1,0 +1,35 @@
+{
+  "schema_version": "1.0",
+  "game": "29_rollman",
+  "frozen_backend_commit": "b581bca3ba3d2d7d58a2f8c6bbddd060fc7fdc87",
+  "official_logic_commit": "81d0468d177089cefe1f08ed1cffe78beb0d27e9",
+  "official_core_commit": "b293c04746fc3bf9b67a00130a2ca15fc38691bc",
+  "pacman_sdk_commit": "7bd36b9938570ad0cc0dcbd80d1a9d21efbfa539",
+  "ghosts_sdk_commit": "da80f17c0341e4bfbe464e64f21a379c5c988961",
+  "core_files": [
+    "core/GymEnvironment.py",
+    "core/board.py",
+    "core/gamedata.py",
+    "core/ghost.py",
+    "core/pacman.py",
+    "core/utils.py"
+  ],
+  "frozen_backend_sha256": {
+    "README.md": "c133eecc02bb7d55656278d5441bd7b42672ca207eb91b78a4402c9920332b2f",
+    "core/GymEnvironment.py": "efdb7d8e85f82ea6e1bbd168db3ec7cd579d1a5281789d3ab5a80de738f8ed85",
+    "core/board.py": "71ddbc7d6b58dcf7e0b0df39af2f911bf508e3f70f66935a6846f7070f44af00",
+    "core/gamedata.py": "5fbcf8f971a9f2efe5baddc5fda639d2dbfb686c5ed809db96f88822a10efd74",
+    "core/ghost.py": "9314f04c0cca25500bb02c0e19201b11187e400c81297a3a6e222ff1382accb7",
+    "core/pacman.py": "3e2414053b8480b74cbb453dd9389b84eef750f3021a39fd25225774db6d9abf",
+    "core/utils.py": "177e61b0caf20c429146d35c8b38872d309486491a5ad599b8f7d8af526d864c",
+    "main.py": "0b7c202b7f4608f5118275224d287981fa273c9f015e9d37bde0600beecc6078"
+  },
+  "authoritative_urls": [
+    "https://agent-guide.net9.org/document/pacman/",
+    "https://agent-guide.net9.org/document/pacman_api/",
+    "https://agent-guide.net9.org/sdk_structure/pacman_sdk/",
+    "https://github.com/PacMan-Logic/PacmanLogic",
+    "https://github.com/PacMan-Logic/PacmanSDK-python",
+    "https://github.com/PacMan-Logic/GhostsSDK-python"
+  ]
+}

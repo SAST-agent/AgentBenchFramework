@@ -1,0 +1,50 @@
+schema_version: "1.0"
+game: "29_rollman"
+measurement_scope: "target_game_agent_decisions"
+context:
+  visible_state:
+    - level
+    - round
+    - board_size
+    - board
+    - pacman_skill_status
+    - pacman_coord
+    - ghosts_coord
+    - score
+    - beannumber
+    - portal_available
+    - portal_coord
+  private_memory: "Candidate-owned memory that can affect submitted_direction."
+roles:
+  rollman:
+    role_id: 0
+    decision_hook: "submitted_direction"
+    output_shape: "one integer"
+    support_complete: true
+    wall_collision_semantics: "The direction remains protocol-legal; movement stays at the last valid coordinate."
+    actions:
+      - {id: 0, name: "STAY", delta: [0, 0], protocol_legal: true}
+      - {id: 1, name: "UP", delta: [1, 0], protocol_legal: true}
+      - {id: 2, name: "LEFT", delta: [0, -1], protocol_legal: true}
+      - {id: 3, name: "DOWN", delta: [-1, 0], protocol_legal: true}
+      - {id: 4, name: "RIGHT", delta: [0, 1], protocol_legal: true}
+    measurement:
+      deterministic_policy: true
+      distribution_source: "epsilon_measurement_channel"
+      formula: "(1-epsilon)*I[action=chosen] + epsilon/5"
+      logarithm: "natural"
+      unit: "nats/decision"
+      terminal_state_included: false
+  ghosts:
+    role_id: 1
+    decision_hook: "submitted_joint_direction"
+    output_shape: "ordered triple of direction integers"
+    component_support: [0, 1, 2, 3, 4]
+    joint_support_size: 125
+manual_review:
+  checklist:
+    - "Every operation accepted by the frozen backend appears exactly once."
+    - "No item target, route goal, tactic, or hidden intent is inferred."
+    - "The measured decision is captured before env.step."
+    - "The complete support is shared by both compared versions."
+    - "Only actually reached target-agent decision contexts enter the trace."
