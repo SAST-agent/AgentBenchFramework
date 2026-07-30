@@ -52,6 +52,37 @@ def test_v7_recovery_reuses_exact_frozen_candidate_without_new_act(tmp_path):
     )
 
 
+def test_v7_frozen_recovery_retains_candidate_test_failure(
+    tmp_path,
+    monkeypatch,
+):
+    pipeline, _ = _pipeline(
+        tmp_path,
+        Round7Provider(),
+        PhaseExceptionEvaluator("validation"),
+    )
+    failed = pipeline.run()
+    monkeypatch.setattr(
+        pipeline,
+        "_run_candidate_tests",
+        lambda workspace: (False, "candidate regression\n"),
+    )
+
+    recovered = pipeline.recover(failed.run_dir)
+
+    assert recovered.status == "invalid_version"
+    assert recovered.runnable is False
+    assert recovered.round_act_count == 0
+    summary = _summary(recovered.run_dir)
+    assert summary["status"] == "invalid_version"
+    assert summary["runnable"] is False
+    assert summary["champion_validation"]["status"] == "not_run"
+    assert summary["champion_sealed"]["status"] == "not_opened"
+    assert (
+        recovered.run_dir / "versions/v7/tests.log"
+    ).read_text(encoding="utf-8") == "candidate regression\n"
+
+
 def test_v7_recovery_after_provider_failure_uses_new_visible_act(tmp_path):
     provider = Round7Provider(fail=True)
     pipeline, evaluator = _pipeline(tmp_path, provider)

@@ -1807,10 +1807,20 @@ class GeneralsHLRound7Pipeline(GeneralsHLRound6Pipeline):
         champion_claim = False
         sealed_status = "not_opened"
         status = "failed"
+        runnable = True
         evo_score_7: float | None = None
         gain_7: float | None = None
-        validation_payload: dict[str, object]
-        sealed_payload: dict[str, object]
+        validation_payload: dict[str, object] = {
+            "status": "not_run",
+            "passed": False,
+            "score": None,
+        }
+        sealed_payload: dict[str, object] = {
+            "status": "not_opened",
+            "champion_claim": False,
+            "score": None,
+            "reason": "validation_not_run",
+        }
         action_profiles: dict[str, object | None] = {
             "learning": (
                 (failed_summary.get("action_profiles") or {}).get(
@@ -1838,6 +1848,7 @@ class GeneralsHLRound7Pipeline(GeneralsHLRound6Pipeline):
             tests_path = run_dir / "versions" / "v7" / "tests.log"
             tests_path.write_text(test_output, encoding="utf-8")
             if not tests_ok:
+                runnable = False
                 raise _Round7Abort(
                     "invalid_version",
                     "recovered frozen v7 candidate tests failed",
@@ -2055,6 +2066,11 @@ class GeneralsHLRound7Pipeline(GeneralsHLRound6Pipeline):
                 status = "complete"
         except _Round7Abort as exc:
             status = exc.status
+            run.write(
+                "pipeline_error",
+                status=status,
+                error=str(exc),
+            )
         finally:
             run.writer.flush()
             quality = inspect_event_file(
@@ -2129,7 +2145,7 @@ class GeneralsHLRound7Pipeline(GeneralsHLRound6Pipeline):
                 "failed_run_id": failed_run.name,
                 "recovery_mode": "frozen_v7",
                 "source_learning_budget": source_learning_budget,
-                "runnable": True,
+                "runnable": runnable,
                 "action_profiles": action_profiles,
                 "validation_error": validation_error,
                 "formal_error": formal_error,
@@ -2148,7 +2164,7 @@ class GeneralsHLRound7Pipeline(GeneralsHLRound6Pipeline):
         return Round7PipelineResult(
             run_dir=run_dir,
             status=status,
-            runnable=True,
+            runnable=runnable,
             raw_score=lineage.raw_score,
             evo_score_7=evo_score_7,
             gain_7=gain_7,
