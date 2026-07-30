@@ -11,11 +11,15 @@ exact Kolmogorov complexity. It is the length of a verified formal rule
 description under one frozen vocabulary:
 
 \[
-\widehat C_{\mathcal L}(G)=\operatorname{Atoms}(d_G)
+\widehat C_{\mathcal L}(G)=|\mathcal A(d_G)|
 \]
 
 where \(d_G\) is the committed AB-Rule/1 description of game \(G\), and
-`Atoms` counts occurrences of semantic rule concepts. This is a
+\(\mathcal A(d_G)\) is the set of tagged occurrences of atomic rule
+propositions in that description. A proposition is atomic when one part of
+its meaning can be changed without necessarily changing another part. For
+example, "a fireball deals damage and disappears on impact" contains two
+propositions: the damage effect and the removal effect. This quantity is a
 language-relative upper bound on the minimum conceptual rule description.
 
 ## Scope
@@ -121,7 +125,28 @@ The statement vocabulary is:
 Expressions use a restricted Python-like notation for literals, references,
 attribute access, calls, indexing, collections, arithmetic, comparisons, and
 Boolean composition. This notation is only a concise mathematical surface
-syntax; CPython execution semantics are not part of AB-Rule/1.
+syntax; CPython execution semantics are not part of AB-Rule/1. An expression
+belongs to the proposition containing it: its compiler parse-tree nodes,
+operators, identifier lengths, and punctuation are never counted separately.
+
+### Atomic-proposition discipline
+
+Each declaration member or rule statement expresses exactly one independently
+changeable fact:
+
+```text
+rule fireball_hit(fireball, target):
+  require hostile(fireball.owner, target.owner)
+  update target.health = target.health - fireball.damage
+  delete fireball
+```
+
+The example has one applicability proposition and two transition
+propositions. Combining the two effects into one prose sentence or one helper
+expression does not reduce the count. Conjunctions that impose independently
+changeable requirements are written as separate `require` statements.
+Game-specific helper operations must be defined as rules, and invoking such a
+rule in a particular context remains one proposition.
 
 ### Abstraction boundary
 
@@ -137,38 +162,50 @@ reuse without hiding its definition.
 
 ## Measurement
 
-The parser constructs a semantic rule tree solely to make counting
-deterministic. The public scientific concepts are rule atoms and composition,
-not compiler AST nodes.
+The parser constructs a semantic rule tree solely to validate the controlled
+pseudocode and identify proposition occurrences. Compiler AST shape is not a
+scientific quantity and does not participate in the measurement.
 
 ### Primary metric
 
-`rule_atoms` counts:
+Each counted occurrence has a stable tag containing its semantic section and
+source position, so repeated propositions in different rule contexts remain
+distinct set members. The proposition set is partitioned into:
 
-- every declaration that introduces a rule-bearing concept: player model,
-  constant, enum, entity, field, action, observation, setup, rule, terminal;
-- every rule statement;
-- every operator and function/relation invocation inside an expression.
+- `state`: player, constant, enum, entity, and field propositions;
+- `action`: available action and action-parameter propositions;
+- `observation`: visible, revealed, and hidden-information propositions;
+- `setup`: initial-state and initial-randomization propositions;
+- `condition`: applicability, branch, iteration, and choice propositions;
+- `transition`: state-change, creation, deletion, event, and rule-application
+  propositions;
+- `outcome`: termination, ranking, winner, and score propositions.
 
-Names, punctuation, comments, indentation width, and line wrapping do not
-change `rule_atoms`. Plain references and attribute selections do not count as
-new rule atoms.
+The primary metric is
 
-### Explanatory metrics
+\[
+\texttt{rule\_atoms}
+=|\mathcal A_{\mathrm{state}}\uplus
+\mathcal A_{\mathrm{action}}\uplus
+\mathcal A_{\mathrm{observation}}\uplus
+\mathcal A_{\mathrm{setup}}\uplus
+\mathcal A_{\mathrm{condition}}\uplus
+\mathcal A_{\mathrm{transition}}\uplus
+\mathcal A_{\mathrm{outcome}}|.
+\]
 
-- `composition_depth`: maximum nesting depth of declarations, conditions,
-  loops, choices, and expression composition;
-- `branch_count`: occurrences of `when`, `otherwise`, and explicit `choose`
-  alternatives;
-- `parameter_count`: scalar literal occurrences plus entries in literal
-  collections and rule tables;
-- `canonical_tokens`: lexical token count after comments and nonsemantic
-  formatting are removed and identifiers are alpha-normalized;
-- `rule_lines`: non-empty, non-comment source lines, for display only.
+The sum has a set-theoretic meaning: it is the cardinality of a disjoint union,
+not a weighted score. Block names group propositions and the `game` header
+identifies the document; neither adds a rule atom. Names, comments,
+indentation width, punctuation, line wrapping, expression operators, and AST
+shape do not change the count.
 
-No arbitrary weighted sum of depth, branching, and parameters is used.
-`rule_atoms` is the only primary ranking quantity; the other values explain
-where the description length comes from.
+### Explanatory output
+
+The report publishes the seven partition cardinalities as
+`atom_breakdown`. It also publishes source bytes, SHA-256, and provenance for
+reproduction. Nesting depth, lexical token count, source line count, literal
+count, and compiler AST node count are not game-complexity outputs.
 
 ## Fairness Rules
 
@@ -224,9 +261,9 @@ canonical identifier mapping, and syntax diagnostics.
 
 ### Metric
 
-`agentbench_frame.research.rule_complexity` calculates the five metrics,
-validates the nine-game corpus, hashes descriptions and provenance, and renders
-JSON and Markdown reports.
+`agentbench_frame.research.rule_complexity` constructs the proposition
+partition, validates the nine-game corpus, hashes descriptions and provenance,
+and renders JSON and Markdown reports.
 
 ### Corpus
 
@@ -249,10 +286,13 @@ network after installation.
 
 Tests demonstrate:
 
-- comments, whitespace, line wrapping, and alpha-renaming do not change
+- comments, whitespace, expression spelling, and alpha-renaming do not change
   `rule_atoms`;
-- adding a rule concept, statement, condition, relation call, or operator
-  increases `rule_atoms`;
+- adding an independently changeable declaration, condition, transition, or
+  outcome proposition increases `rule_atoms`;
+- expression operators and AST nesting do not independently increase
+  `rule_atoms`;
+- `rule_atoms` equals the sum of the disjoint `atom_breakdown` partitions;
 - malformed indentation and unsupported syntax fail closed;
 - all required semantic sections are present;
 - exactly the nine in-scope games are packaged and measured;

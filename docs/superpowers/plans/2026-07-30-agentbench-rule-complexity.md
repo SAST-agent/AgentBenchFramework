@@ -4,7 +4,7 @@
 
 **Goal:** Define AB-Rule/1, translate the nine non-DeepClue AgentBench games, and publish deterministic Ludemic Rule Description Complexity measurements.
 
-**Architecture:** A small indentation parser converts formal pseudocode into a semantic rule tree without compiling it. A separate metric module counts rule atoms and explanatory dimensions, validates a packaged nine-game corpus, and renders frozen JSON/Markdown artifacts through the existing CLI.
+**Architecture:** A small indentation parser converts formal pseudocode into a semantic rule tree without compiling it. A separate metric module partitions atomic rule propositions by semantic role, validates a packaged nine-game corpus, and renders frozen JSON/Markdown artifacts through the existing CLI.
 
 **Tech Stack:** Python 3.10+, standard-library `ast`, `tokenize`, `dataclasses`, `importlib.resources`, pytest, Hatch packaging.
 
@@ -13,6 +13,8 @@
 - DeepClue is excluded.
 - The source provenance commit is `b581bca3ba3d2d7d58a2f8c6bbddd060fc7fdc87`.
 - `rule_atoms` is the only primary ranking metric.
+- `rule_atoms` is the cardinality of the disjoint semantic-proposition
+  partition; expression operators and AST shape are not counted.
 - No compilation or bytecode length participates in any AB-Rule/1 metric.
 - Existing AB-Ludi/1 implementation-complexity output remains unchanged.
 - Execution is inline in the existing `codex/ludi-k-complexity` worktree; no subagents.
@@ -27,7 +29,8 @@
 
 **Interfaces:**
 - Produces: `parse_rule_description(source: str, *, path: str = "<memory>") -> RuleDocument`
-- Produces: immutable `RuleDocument`, `RuleNode`, and `ExpressionStats`
+- Produces: immutable `RuleDocument`, `RuleNode`, and expression-validation
+  metadata
 - Produces: `RuleSyntaxError(ValueError)` with path and line diagnostics
 
 - [ ] **Step 1: Write parser tests for declarations, nested statements, expressions, and rejection**
@@ -79,8 +82,8 @@ The implementation must:
 - require two-space indentation and reject skipped indentation levels;
 - use `ast.parse(..., mode="eval")` only to analyze restricted expressions;
 - reject comprehensions, lambdas, assignment expressions, imports, and arbitrary statements;
-- count expression calls, Boolean/binary/unary/comparison operators, literals,
-  and expression nesting;
+- validate restricted expressions without treating their AST structure as
+  game complexity;
 - preserve source line numbers and comments beginning with `# provenance:`,
   `# source-root:`, `# reviewed:`, `# includes:`, and `# excludes:`.
 
@@ -122,10 +125,22 @@ def test_rule_atoms_ignore_comments_and_identifier_names():
     assert metric(left)["rule_atoms"] == metric(right)["rule_atoms"]
 
 
-def test_new_relation_increases_rule_atoms():
+def test_expression_ast_shape_does_not_increase_rule_atoms():
     base = "game A\nplayers 2\nrule r(x):\n  return occupied(x)\n"
-    richer = "game A\nplayers 2\nrule r(x):\n  return occupied(x) and hostile(x)\n"
-    assert metric(richer)["rule_atoms"] > metric(base)["rule_atoms"]
+    richer = (
+        "game A\nplayers 2\nrule r(x):\n"
+        "  return occupied(x) and hostile(x)\n"
+    )
+    assert metric(richer)["rule_atoms"] == metric(base)["rule_atoms"]
+
+
+def test_new_atomic_statement_increases_rule_atoms():
+    base = "game A\nplayers 2\nrule r(x):\n  return occupied(x)\n"
+    richer = (
+        "game A\nplayers 2\nrule r(x):\n"
+        "  require hostile(x)\n  return occupied(x)\n"
+    )
+    assert metric(richer)["rule_atoms"] == metric(base)["rule_atoms"] + 1
 ```
 
 - [ ] **Step 2: Run focused tests and confirm failure**
@@ -138,16 +153,16 @@ Expected: collection fails because `rule_complexity` does not exist.
 
 Use these exact rules:
 
-- each semantic `RuleNode` contributes one rule atom;
-- every restricted expression call or operator contributes one rule atom;
-- scalar literal occurrences and literal collection entries contribute to
-  `parameter_count`;
-- `composition_depth` is the maximum node nesting plus expression nesting;
-- `branch_count` counts `when`, `otherwise`, and `choose`;
-- `rule_lines` ignores blank and comment-only lines;
-- `canonical_tokens` uses Python lexical token categories for expression
-  fragments and one token per normalized AB-Rule keyword, identifier, type,
-  and literal.
+- block headers group propositions and do not contribute rule atoms;
+- player, constant, enum value, entity, field, and action/observation member
+  declarations contribute one proposition each;
+- every setup, condition, transition, and outcome statement contributes one
+  proposition;
+- each proposition belongs to exactly one of `state`, `action`,
+  `observation`, `setup`, `condition`, `transition`, or `outcome`;
+- `rule_atoms` equals the sum of those seven partition cardinalities;
+- expression calls, operators, literals, token count, and AST nesting do not
+  independently contribute to any metric.
 
 - [ ] **Step 4: Add fail-closed corpus checks**
 
