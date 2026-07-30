@@ -28,6 +28,7 @@ from agentbench_frame.hl.models_config import ModelEntry
 class ToolCall:
     name: str
     arguments: Dict[str, Any]
+    id: Optional[str] = None
 
 
 @dataclass
@@ -86,19 +87,36 @@ def _to_openai_tools(tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
 
 def _to_openai_messages(system: str, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = [{"role": "system", "content": system}]
+    last_assistant_tool_call_ids: List[str] = []
     for m in messages:
         role = m["role"]
         if role == "tool":
+            # Use provided tool_call_id if available, otherwise fall back to most recent assistant tool call
+            tool_call_id = m.get("tool_call_id")
+            if tool_call_id is None and last_assistant_tool_call_ids:
+                # Fallback: use the first tool call id from the most recent assistant message
+                # (correct for single-tool-call-per-turn case that existing tests use)
+                tool_call_id = last_assistant_tool_call_ids[0]
+            if tool_call_id is None:
+                # Ultimate fallback if no context (shouldn't happen in well-formed sequences)
+                tool_call_id = "unknown"
             out.append({"role": "tool",
-                        "tool_call_id": "c0",
+                        "tool_call_id": tool_call_id,
                         "content": str(m.get("content", ""))})
         elif role == "assistant" and m.get("tool_calls"):
+            assistant_tc_ids: List[str] = []
+            tool_calls = []
+            for i, tc in enumerate(m["tool_calls"]):
+                # Use tc.id if provided, otherwise generate one
+                tc_id = tc.id if tc.id else f"call_{i}"
+                assistant_tc_ids.append(tc_id)
+                tool_calls.append({"id": tc_id, "type": "function",
+                                   "function": {"name": tc.name,
+                                                "arguments": json.dumps(tc.arguments)}})
+            last_assistant_tool_call_ids = assistant_tc_ids
             out.append({"role": "assistant",
                         "content": m.get("content") or "",
-                        "tool_calls": [{"id": f"c{i}", "type": "function",
-                                        "function": {"name": tc.name,
-                                                     "arguments": json.dumps(tc.arguments)}}
-                                       for i, tc in enumerate(m["tool_calls"])]})
+                        "tool_calls": tool_calls})
         else:
             out.append({"role": role, "content": m.get("content", "")})
     return out
@@ -133,7 +151,7 @@ class OpenAICompatClient:
                 args = json.loads(tc.function.arguments or "{}")
             except json.JSONDecodeError:
                 args = {}
-            tool_calls.append(ToolCall(name=tc.function.name, arguments=args))
+            tool_calls.append(ToolCall(name=tc.function.name, arguments=args, id=tc.id))
         u = getattr(resp, "usage", None)
         usage = Usage(
             prompt_tokens=getattr(u, "prompt_tokens", None) if u else None,
@@ -147,18 +165,33 @@ class OpenAICompatClient:
 
 def _to_anthropic_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
+    last_assistant_tool_call_ids: List[str] = []
     for m in messages:
         role = m["role"]
         if role == "tool":
+            # Use provided tool_call_id if available, otherwise fall back to most recent assistant tool call
+            tool_use_id = m.get("tool_call_id")
+            if tool_use_id is None and last_assistant_tool_call_ids:
+                # Fallback: use the first tool call id from the most recent assistant message
+                # (correct for single-tool-call-per-turn case that existing tests use)
+                tool_use_id = last_assistant_tool_call_ids[0]
+            if tool_use_id is None:
+                # Ultimate fallback if no context (shouldn't happen in well-formed sequences)
+                tool_use_id = "unknown"
             out.append({"role": "user", "content": [
-                {"type": "tool_result", "tool_use_id": "t", "content": str(m.get("content", ""))}]})
+                {"type": "tool_result", "tool_use_id": tool_use_id, "content": str(m.get("content", ""))}]})
         elif role == "assistant" and m.get("tool_calls"):
             blocks: List[Dict[str, Any]] = []
+            assistant_tc_ids: List[str] = []
             if m.get("content"):
                 blocks.append({"type": "text", "text": m["content"]})
             for i, tc in enumerate(m["tool_calls"]):
-                blocks.append({"type": "tool_use", "id": f"t{i}", "name": tc.name,
+                # Use tc.id if provided, otherwise generate one
+                tc_id = tc.id if tc.id else f"toolu_{i}"
+                assistant_tc_ids.append(tc_id)
+                blocks.append({"type": "tool_use", "id": tc_id, "name": tc.name,
                                "input": tc.arguments})
+            last_assistant_tool_call_ids = assistant_tc_ids
             out.append({"role": "assistant", "content": blocks})
         else:
             out.append({"role": role, "content": m.get("content", "")})
@@ -189,7 +222,8 @@ class AnthropicClient:
                 text_parts.append(getattr(block, "text", ""))
             elif getattr(block, "type", None) == "tool_use":
                 tool_calls.append(ToolCall(name=block.name,
-                                           arguments=dict(getattr(block, "input", {}) or {})))
+                                           arguments=dict(getattr(block, "input", {}) or {}),
+                                           id=getattr(block, "id", None)))
         u = getattr(resp, "usage", None)
         pt = getattr(u, "input_tokens", None) if u else None
         ct = getattr(u, "output_tokens", None) if u else None

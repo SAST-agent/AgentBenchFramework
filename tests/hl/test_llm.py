@@ -136,3 +136,73 @@ def test_build_client_unknown_provider():
 def test_shared_tools_have_four_names():
     assert {t["name"] for t in SHARED_TOOLS} == {
         "read_file", "list_replays", "read_replay", "write_agent_py"}
+
+
+def test_openai_multi_call_roundtrip():
+    """Test that tool call IDs are preserved across multiple tool calls in a conversation."""
+    from agentbench_frame.hl.llm import _to_openai_messages, ToolCall
+
+    # Simulate a conversation where the assistant makes two tool calls with distinct IDs
+    neutral = [
+        {"role": "user", "content": "Read two files"},
+        {"role": "assistant", "content": "I'll read both files", "tool_calls": [
+            ToolCall(name="read_file", arguments={"path": "file1.py"}, id="call_a"),
+            ToolCall(name="read_file", arguments={"path": "file2.py"}, id="call_b"),
+        ]},
+        # Tool results matching the IDs above
+        {"role": "tool", "tool_call_id": "call_a", "content": "FILE1"},
+        {"role": "tool", "tool_call_id": "call_b", "content": "FILE2"},
+    ]
+
+    converted = _to_openai_messages("sys", neutral)
+
+    # Check that assistant message has correct tool_calls with proper IDs
+    assistant_msg = [m for m in converted if m["role"] == "assistant"][0]
+    assert len(assistant_msg["tool_calls"]) == 2
+    assert assistant_msg["tool_calls"][0]["id"] == "call_a"
+    assert assistant_msg["tool_calls"][1]["id"] == "call_b"
+
+    # Check that tool messages have matching tool_call_ids
+    tool_msgs = [m for m in converted if m["role"] == "tool"]
+    assert len(tool_msgs) == 2
+    assert tool_msgs[0]["tool_call_id"] == "call_a"
+    assert tool_msgs[1]["tool_call_id"] == "call_b"
+
+
+def test_anthropic_multi_call_roundtrip():
+    """Test that tool_use IDs are preserved across multiple tool calls in a conversation."""
+    from agentbench_frame.hl.llm import _to_anthropic_messages, ToolCall
+
+    # Simulate a conversation where the assistant makes two tool calls with distinct IDs
+    neutral = [
+        {"role": "user", "content": "Read two files"},
+        {"role": "assistant", "content": "I'll read both files", "tool_calls": [
+            ToolCall(name="read_file", arguments={"path": "file1.py"}, id="toolu_a1b2c3"),
+            ToolCall(name="read_file", arguments={"path": "file2.py"}, id="toolu_d4e5f6"),
+        ]},
+        # Tool results matching the IDs above
+        {"role": "tool", "tool_call_id": "toolu_a1b2c3", "content": "FILE1"},
+        {"role": "tool", "tool_call_id": "toolu_d4e5f6", "content": "FILE2"},
+    ]
+
+    converted = _to_anthropic_messages(neutral)
+
+    # Check that assistant message has correct tool_use blocks with proper IDs
+    assistant_msg = [m for m in converted if m["role"] == "assistant"][0]
+    tool_use_blocks = [b for b in assistant_msg["content"] if b["type"] == "tool_use"]
+    assert len(tool_use_blocks) == 2
+    assert tool_use_blocks[0]["id"] == "toolu_a1b2c3"
+    assert tool_use_blocks[1]["id"] == "toolu_d4e5f6"
+
+    # Check that tool result messages have matching tool_use_ids
+    user_msgs = [m for m in converted if m["role"] == "user"]
+    tool_result_blocks = []
+    for m in user_msgs:
+        # Only process if content is a list (tool result messages), not a string (regular user messages)
+        if isinstance(m["content"], list):
+            tool_result_blocks.extend([b for b in m["content"] if b["type"] == "tool_result"])
+
+    assert len(tool_result_blocks) == 2
+    assert tool_result_blocks[0]["tool_use_id"] == "toolu_a1b2c3"
+    assert tool_result_blocks[1]["tool_use_id"] == "toolu_d4e5f6"
+
