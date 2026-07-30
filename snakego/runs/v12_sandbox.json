@@ -1,0 +1,132 @@
+{
+  "epsilon": 0.05,
+  "seeds": [
+    1,
+    2,
+    3,
+    7,
+    11,
+    23
+  ],
+  "v12_avg_ratio": 0.397,
+  "ig_v9_to_v12": {
+    "ig_kl": 0.01311047677449373,
+    "trajectory_kl": 49.190508857900475,
+    "n_states": 3752,
+    "disagree_rate": 0.0031982942430703624,
+    "status": "ok"
+  },
+  "v12_detail": [
+    {
+      "seed": 1,
+      "scores": [
+        78,
+        104
+      ],
+      "ratio": 0.42857142857142855,
+      "seals": [
+        4,
+        11
+      ],
+      "rounds": 513,
+      "snakes0": 3,
+      "phases": {
+        "GROW": 1309,
+        "SPLIT": 7,
+        "HUNT_LOOP": 20,
+        "SALVAGE_SEAL": 10
+      }
+    },
+    {
+      "seed": 2,
+      "scores": [
+        24,
+        168
+      ],
+      "ratio": 0.125,
+      "seals": [
+        2,
+        11
+      ],
+      "rounds": 292,
+      "snakes0": 0,
+      "phases": {
+        "GROW": 346,
+        "SPLIT": 4
+      }
+    },
+    {
+      "seed": 3,
+      "scores": [
+        66,
+        74
+      ],
+      "ratio": 0.4714285714285714,
+      "seals": [
+        3,
+        3
+      ],
+      "rounds": 151,
+      "snakes0": 3,
+      "phases": {
+        "GROW": 421,
+        "SPLIT": 5
+      }
+    },
+    {
+      "seed": 7,
+      "scores": [
+        54,
+        100
+      ],
+      "ratio": 0.35064935064935066,
+      "seals": [
+        3,
+        7
+      ],
+      "rounds": 220,
+      "snakes0": 3,
+      "phases": {
+        "GROW": 511,
+        "SPLIT": 7
+      }
+    },
+    {
+      "seed": 11,
+      "scores": [
+        24,
+        38
+      ],
+      "ratio": 0.3870967741935484,
+      "seals": [
+        0,
+        1
+      ],
+      "rounds": 27,
+      "snakes0": 3,
+      "phases": {
+        "GROW": 49,
+        "SPLIT": 2
+      }
+    },
+    {
+      "seed": 23,
+      "scores": [
+        78,
+        48
+      ],
+      "ratio": 0.6190476190476191,
+      "seals": [
+        7,
+        5
+      ],
+      "rounds": 469,
+      "snakes0": 0,
+      "phases": {
+        "GROW": 835,
+        "SPLIT": 8,
+        "SALVAGE_SEAL": 67
+      }
+    }
+  ]
+}

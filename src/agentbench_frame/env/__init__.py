@@ -12,6 +12,10 @@ from agentbench_frame.env.stdio_protocol import StdioProtocol
 from agentbench_frame.env.generals_env import GeneralsEnv
 from agentbench_frame.env.registry import ENV_REGISTRY, make_env, register_env
 
+# Register 26_snakego so make_env("26_snakego") works
+from agentbench_frame.env.snakego_env import SnakeGoEnv
+register_env("26_snakego", SnakeGoEnv)
+
 __all__ = [
     "BaseEnv",
     "EnvMode",
@@ -19,6 +23,7 @@ __all__ = [
     "Observation",
     "StdioProtocol",
     "GeneralsEnv",
+    "SnakeGoEnv",
     "ENV_REGISTRY",
     "make_env",
     "register_env",

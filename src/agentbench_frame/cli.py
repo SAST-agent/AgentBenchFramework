@@ -11,7 +11,11 @@ Subcommands:
 """
 
 import argparse
-import json, sys, tomllib
+import json, sys
+try:  # Python 3.11+
+    import tomllib
+except ModuleNotFoundError:  # Python 3.9/3.10 fall back to tomli
+    import tomli as tomllib
 from pathlib import Path
 from typing import List, Optional
 
@@ -115,7 +119,11 @@ def _cmd_mcp(args):
 
 def _cmd_data_check(args):
     """Validate data directory against CI schema."""
-    import json, tomllib
+    import json
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        import tomli as tomllib
     from agentbench_frame.tracking.run import _data_root
     data_dir = args.data_dir or _data_root()
     runs_root = Path(data_dir) / "runs"

@@ -1,0 +1,21 @@
+{
+  "description": "HL main-line experience: structural lessons from v8->v9 phase-machine iterations. Each entry is a code-structure change (new decision module/phase), not a weight.",
+  "lessons": [
+    {
+      "hl_iter": 1,
+      "version": "v8_loopclose",
+      "insight": "Replace flat weighted scorer with 4-phase machine: GROW->SPLIT->HUNT_LOOP->SEAL. First real structural change; ratio 0.33->0.42, IG=1.87.",
+      "structural_change": "phase machine + seal_area_if_move + hunt_loop_move",
+      "code": "strategy_v8.py"
+    },
+    {
+      "hl_iter": 2,
+      "version": "v9_survive",
+      "insight": "Rewrite GROW phase to space-maximising with survival fallback (flood-fill reachable space), soft enemy penalty, early split. Removes v8 hard rejects that trapped snakes.",
+      "structural_change": "space-max GROW + survival fallback + soft enemy term",
+      "code": "strategy_v9.py",
+      "result": "IG=0.34 (only GROW internals changed)"
+    }
+  ],
+  "archived": []
+}

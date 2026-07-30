@@ -1,0 +1,120 @@
+{
+  "v8_avg_ratio": 0.4177,
+  "v7_avg_ratio": 0.4919,
+  "v8_avg_seals": 2.5,
+  "v7_avg_seals": 4.17,
+  "ig_v7_to_v8": {
+    "ig_kl": 1.868347845477122,
+    "trajectory_kl": 4089.8134337494203,
+    "n_states": 2189,
+    "disagree_rate": 0.4819552306989493,
+    "status": "ok"
+  },
+  "seeds": [
+    1,
+    2,
+    3,
+    7,
+    11,
+    23
+  ],
+  "epsilon": 0.05,
+  "v8_detail": [
+    {
+      "seed": 1,
+      "scores": [
+        12,
+        112
+      ],
+      "ratio": 0.0967741935483871,
+      "seals": [
+        2,
+        14
+      ],
+      "phases": {
+        "GROW": 130,
+        "SPLIT": 1
+      }
+    },
+    {
+      "seed": 2,
+      "scores": [
+        30,
+        32
+      ],
+      "ratio": 0.4838709677419355,
+      "seals": [
+        0,
+        0
+      ],
+      "phases": {
+        "GROW": 138,
+        "SPLIT": 2
+      }
+    },
+    {
+      "seed": 3,
+      "scores": [
+        36,
+        42
+      ],
+      "ratio": 0.46153846153846156,
+      "seals": [
+        1,
+        0
+      ],
+      "phases": {
+        "GROW": 48,
+        "SPLIT": 2
+      }
+    },
+    {
+      "seed": 7,
+      "scores": [
+        4,
+        198
+      ],
+      "ratio": 0.019801980198019802,
+      "seals": [
+        1,
+        21
+      ],
+      "phases": {
+        "GROW": 22
+      }
+    },
+    {
+      "seed": 11,
+      "scores": [
+        76,
+        46
+      ],
+      "ratio": 0.6229508196721312,
+      "seals": [
+        2,
+        4
+      ],
+      "phases": {
+        "GROW": 237,
+        "SPLIT": 4
+      }
+    },
+    {
+      "seed": 23,
+      "scores": [
+        156,
+        34
+      ],
+      "ratio": 0.8210526315789474,
+      "seals": [
+        9,
+        5
+      ],
+      "phases": {
+        "GROW": 1581,
+        "SPLIT": 13,
+        "HUNT_LOOP": 11
+      }
+    }
+  ]
+}
