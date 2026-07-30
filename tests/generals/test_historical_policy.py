@@ -221,7 +221,7 @@ def test_probe_captures_timeout_and_stderr(engine_root, tmp_path):
         engine_root=engine_root,
         sdk_root=tmp_path,
         repeats=2,
-        timeout_s=0.1,
+        timeout_s=0.5,
     )
 
     assert result.status == "timeout"
