@@ -10,7 +10,8 @@ dependencies = []
 tracking = ["psutil"]
 rl = ["torch", "numpy"]
 report = ["jinja2"]
-all = ["psutil", "torch", "numpy", "jinja2"]
+hl = ["openai>=1", "anthropic>=0.40", "python-dotenv>=1"]
+all = ["psutil", "torch", "numpy", "jinja2", "openai>=1", "anthropic>=0.40", "python-dotenv>=1"]
 
 [project.scripts]
 agentbench = "agentbench_frame.cli:main"

@@ -16,3 +16,6 @@ _scratch_dbg/
 _scratch_out/
 _scratch_realmatch.py
 _rank01_stderr.log
+
+# HL model config (real API keys) — never commit
+.env
