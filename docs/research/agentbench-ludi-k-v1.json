@@ -1,0 +1,967 @@
+{
+  "games": [
+    {
+      "canonical_bits": 330744,
+      "canonical_bytes": 41343,
+      "compressed_bytes": 9953,
+      "compressed_sha256": "a97b891639f25c871e70dc00aa283cf01f788e7564d8cc4320a766cfc9b6cd4e",
+      "compression_ratio": 0.24074208451249304,
+      "description_sha256": "150dec0dfe91165da92ff22a8d3556ccddd916b1a7b6c2fde8cf1ba1248d5765",
+      "files": [
+        {
+          "bytes": 0,
+          "path": "logic/__init__.py",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "bytes": 5853,
+          "path": "logic/communication.py",
+          "sha256": "7dd339d3492e5f02c3f1185c3002ee383a8dbc64106747700311b3270d4ebdb3"
+        },
+        {
+          "bytes": 23,
+          "path": "logic/constants.py",
+          "sha256": "0b83c20a65f1a97a5c08927938dddaec88fae43c8b730af169169b545f87ab63"
+        },
+        {
+          "bytes": 2547,
+          "path": "logic/formatter.py",
+          "sha256": "d95dfa37d66d3bd4879d353e3e190427578400a4728e271978f626783ef019cf"
+        },
+        {
+          "bytes": 5508,
+          "path": "logic/infrastructure.py",
+          "sha256": "154bc94b0a45f33131e2b3b09be8b061ea6a97ca1bd215f7fcd4473ff7fa6518"
+        },
+        {
+          "bytes": 13380,
+          "path": "logic/operate.py",
+          "sha256": "28bc0e8bcd28d36903d0cb78849724ffc32b826fa1dd4172e47e47084cc157cc"
+        },
+        {
+          "bytes": 1236,
+          "path": "logic/result.py",
+          "sha256": "c57710c489442af28f82f15aac7d1957431cc29858741de1273cc757c42bc6a8"
+        },
+        {
+          "bytes": 3427,
+          "path": "logic/spawn.py",
+          "sha256": "7aaa2fddead772ff8dd3c9fb732c27d8847c6a3bfcc9e24ee37b623c9501b975"
+        },
+        {
+          "bytes": 9039,
+          "path": "main.py",
+          "sha256": "da28761fa595e82c00293b5697e44896185ebad1b2792520dfc79c1dbe55e852"
+        }
+      ],
+      "game_id": "26_snakego",
+      "k_upper_bits": 79624,
+      "module_count": 9,
+      "source_bits": 328104,
+      "source_bytes": 41013,
+      "source_root": "backend_sources/corpus/26_snakego/logic/gamecode_logic",
+      "source_sha256": "d2f516c0d798e85a5fb0c3df597bab8e6ede01b913f7c662f1abdd6c4237995d",
+      "title": "SnakeGo"
+    },
+    {
+      "canonical_bits": 501184,
+      "canonical_bytes": 62648,
+      "compressed_bytes": 12740,
+      "compressed_sha256": "45e3def42005e999c8045a47c1912f030a695074e7d94fd99de1b69a6b16a1e6",
+      "compression_ratio": 0.2033584471970374,
+      "description_sha256": "f38ac69f4da683c4c3c918dd75612c48d5b34ee727edafa45a022b52596f17c4",
+      "files": [
+        {
+          "bytes": 19515,
+          "path": "core/GymEnvironment.py",
+          "sha256": "efdb7d8e85f82ea6e1bbd168db3ec7cd579d1a5281789d3ab5a80de738f8ed85"
+        },
+        {
+          "bytes": 8173,
+          "path": "core/board.py",
+          "sha256": "71ddbc7d6b58dcf7e0b0df39af2f911bf508e3f70f66935a6846f7070f44af00"
+        },
+        {
+          "bytes": 3975,
+          "path": "core/gamedata.py",
+          "sha256": "5fbcf8f971a9f2efe5baddc5fda639d2dbfb686c5ed809db96f88822a10efd74"
+        },
+        {
+          "bytes": 687,
+          "path": "core/ghost.py",
+          "sha256": "9314f04c0cca25500bb02c0e19201b11187e400c81297a3a6e222ff1382accb7"
+        },
+        {
+          "bytes": 4627,
+          "path": "core/pacman.py",
+          "sha256": "3e2414053b8480b74cbb453dd9389b84eef750f3021a39fd25225774db6d9abf"
+        },
+        {
+          "bytes": 805,
+          "path": "core/utils.py",
+          "sha256": "177e61b0caf20c429146d35c8b38872d309486491a5ad599b8f7d8af526d864c"
+        },
+        {
+          "bytes": 3777,
+          "path": "logic/utils.py",
+          "sha256": "8a70d3ee30819a899ce19de2111ba7e78d2058edd1177cafdff0cb9507a35398"
+        },
+        {
+          "bytes": 20813,
+          "path": "main.py",
+          "sha256": "0b7c202b7f4608f5118275224d287981fa273c9f015e9d37bde0600beecc6078"
+        }
+      ],
+      "game_id": "29_rollman",
+      "k_upper_bits": 101920,
+      "module_count": 8,
+      "source_bits": 498976,
+      "source_bytes": 62372,
+      "source_root": "backend_sources/corpus/29_rollman/logic/gamecode_logic/PacmanLogic",
+      "source_sha256": "c4272345d0287e7a1069863f1203d9363170d8eb3e67f94cac9da35fa2c55df8",
+      "title": "Rollman"
+    },
+    {
+      "canonical_bits": 2010392,
+      "canonical_bytes": 251299,
+      "compressed_bytes": 14173,
+      "compressed_sha256": "61f5731d8df1f8f03263003b8c2a46bf5042e9efa9c616868d113d7c5b791fb4",
+      "compression_ratio": 0.05639895105034242,
+      "description_sha256": "6ccff7d450cc9ef6792ea99c00849deadf950956807bef61aeb120882b112275",
+      "files": [
+        {
+          "bytes": 2093,
+          "path": "Arguments.py",
+          "sha256": "29790108ddaa86ba55cb095d8bde87b219acdff8dfe14fd30e8f13fc5c10899c"
+        },
+        {
+          "bytes": 4603,
+          "path": "BaseClass.py",
+          "sha256": "65e15225ddbea2befdc720e7648902c26818b340cad3bfdf4acebb9945e55696"
+        },
+        {
+          "bytes": 9144,
+          "path": "GamePlayer.py",
+          "sha256": "39365c02078357586f1fed36887976a62945ce9b8def361cdba5bc59b2cd54fc"
+        },
+        {
+          "bytes": 205848,
+          "path": "Maps/0.json",
+          "sha256": "d267deaa65a28556b7d11c854463f2ae84d89b1fffa5225faf278fd97ad3a66d"
+        },
+        {
+          "bytes": 931,
+          "path": "MySTL.py",
+          "sha256": "8ba71359e30cb52d9e93ebc4eb1d6b92ff343f49e8ab199b5110c86142bf4602"
+        },
+        {
+          "bytes": 24100,
+          "path": "main.py",
+          "sha256": "1217b83e972ed914e6239cf9f9db36e6b7e32a5551c213254f2411a231f34bb8"
+        },
+        {
+          "bytes": 4363,
+          "path": "server.py",
+          "sha256": "693d76de81844f82b0d14916073d32d7be504ee526809d836ac0f9c84e3c3f59"
+        }
+      ],
+      "game_id": "23_doto",
+      "k_upper_bits": 113384,
+      "module_count": 7,
+      "source_bits": 2008656,
+      "source_bytes": 251082,
+      "source_root": "backend_sources/corpus/23_doto/logic/public_Arena-Doto-AI/Arena-Doto-AI-master/server",
+      "source_sha256": "863b359cd82c417eb9702dfb4592415f98c66c9dfaed1d05c33d16f030cd101e",
+      "title": "DOTO"
+    },
+    {
+      "canonical_bits": 737864,
+      "canonical_bytes": 92233,
+      "compressed_bytes": 15861,
+      "compressed_sha256": "9476cb39eb4bd828e92c3a54d88dbba096424150cbb0506767f870f7ff85fd26",
+      "compression_ratio": 0.17196664968069997,
+      "description_sha256": "64745dd8bbe2b0489b3b8aec56493eb03ef8b601cda27e8fab262435a87bff89",
+      "files": [
+        {
+          "bytes": 1419,
+          "path": "logic/call_generals.py",
+          "sha256": "dedeb915baa6e894ac66bee6991818b2e344385bda8c5a829fa77da447721fd9"
+        },
+        {
+          "bytes": 3864,
+          "path": "logic/computation.py",
+          "sha256": "5c0dbfc9ca4b96cd8c087fd15050970b845b49ae9021be0315c27fd5418d83b3"
+        },
+        {
+          "bytes": 754,
+          "path": "logic/constant.py",
+          "sha256": "ea5306e429131622f394f603f134382ebda5ff9fa523ffc183d3584d41cc6d27"
+        },
+        {
+          "bytes": 1965,
+          "path": "logic/execute.py",
+          "sha256": "bac62f43b657445dc95ae3181b4c6816542533cb7736cf656cfae0b0781d4d22"
+        },
+        {
+          "bytes": 3084,
+          "path": "logic/gamedata.py",
+          "sha256": "d1a3858d9c9f1bfbae039e5b1f848214846f04f300440fe11b013acd7a534c6b"
+        },
+        {
+          "bytes": 11625,
+          "path": "logic/gamestate.py",
+          "sha256": "f38e777c08f63578844d52214e7650d224099a51060bbc45f58a298ce41b8f9a"
+        },
+        {
+          "bytes": 8483,
+          "path": "logic/general_skills.py",
+          "sha256": "6b5a7fe92f4b7f645d0e8493e6a414163045b4ed6cc23a310198ed6e5b0de915"
+        },
+        {
+          "bytes": 2362,
+          "path": "logic/generate_round_replay.py",
+          "sha256": "823082d675555799d32b653a65ad7360378c3704e6be673b9e99276561803aa2"
+        },
+        {
+          "bytes": 9236,
+          "path": "logic/movement.py",
+          "sha256": "05c68531f91f58453b7f2469956832c0761cdda7c6e7a007695868225aca7ff9"
+        },
+        {
+          "bytes": 6951,
+          "path": "logic/super_weapons.py",
+          "sha256": "5599dc568817a8b58a22eb564e973669a00d25126b92ae6b569cde7c0c5dc4e9"
+        },
+        {
+          "bytes": 17884,
+          "path": "logic/upgrade.py",
+          "sha256": "e2be2404f14d04a55479f145bceed825f1d4f197c3d3524e9a3a2eaa2fb84051"
+        },
+        {
+          "bytes": 24152,
+          "path": "main.py",
+          "sha256": "2ec6a9adfd0e261ebdca8caab9b65ac26dbd4c1def92b2a65932bf7ad27e5921"
+        }
+      ],
+      "game_id": "28_generals",
+      "k_upper_bits": 126888,
+      "module_count": 12,
+      "source_bits": 734232,
+      "source_bytes": 91779,
+      "source_root": "backend_sources/corpus/28_generals/logic/gamecode_logic",
+      "source_sha256": "e4120f8a82b6f1d630ff19d3ae09ede0ed1160dd3209232e14c538dd3bb3f7d6",
+      "title": "Generals"
+    },
+    {
+      "canonical_bits": 798944,
+      "canonical_bytes": 99868,
+      "compressed_bytes": 18025,
+      "compressed_sha256": "1e677d804e069e3bb849cd0b3d8c431a665ff11ebbd7a021a6d897eabde10d31",
+      "compression_ratio": 0.1804882444827172,
+      "description_sha256": "9455d3ffc6bf0fd5b03a9c467e6abf0befe82cafadf3031b71cbafb9383f7f19",
+      "files": [
+        {
+          "bytes": 4245,
+          "path": "Data.json",
+          "sha256": "6449e7dac86d6f0ee93b21a179efdb9d206fc5be062a3b9d07bfd128b482eb01"
+        },
+        {
+          "bytes": 0,
+          "path": "Geometry/__init__.py",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "bytes": 7532,
+          "path": "Geometry/calculator.py",
+          "sha256": "7182f7ace7b7efb3696b13877fd07d09c5a7224f593040d6cd32e55dbe25b0f6"
+        },
+        {
+          "bytes": 42,
+          "path": "PlayerLegality/__init__.py",
+          "sha256": "7d30bfa86a6af9624c6956a1307f9f9e33e71d203ce69a72efabac8a1d8bbc41"
+        },
+        {
+          "bytes": 14279,
+          "path": "PlayerLegality/operations.py",
+          "sha256": "f9ae263145245f24fcff355aa279de4133a70a387e1d16c6358722c3ee463d29"
+        },
+        {
+          "bytes": 4362,
+          "path": "PlayerLegality/player_legality.py",
+          "sha256": "76bbdd85764a63c055d2a31cbdc19c3c0dabdfc70f38b90c15bf233d5bc92f2a"
+        },
+        {
+          "bytes": 7705,
+          "path": "StateSystem/Artifact.py",
+          "sha256": "81bda657a3484741d861ff4927de0c1035ea0d3a1689f892b892425589ebed4d"
+        },
+        {
+          "bytes": 451,
+          "path": "StateSystem/Barrack.py",
+          "sha256": "5193d7c9b0701c2cc3a76e5257b1c52eea0d53a00bc71648c643675f5b44ba83"
+        },
+        {
+          "bytes": 1539,
+          "path": "StateSystem/Buff.py",
+          "sha256": "fddd3aa7c5dbc6a082c8c7b8e7b4be9b40e21649b8b997750284e0873e2d8ced"
+        },
+        {
+          "bytes": 1239,
+          "path": "StateSystem/CreatureCapacity.py",
+          "sha256": "d476703204a9eebb75c7b07e08ce7a3371491848db3b28ca224056f8bec7c107"
+        },
+        {
+          "bytes": 4245,
+          "path": "StateSystem/Data.json",
+          "sha256": "6449e7dac86d6f0ee93b21a179efdb9d206fc5be062a3b9d07bfd128b482eb01"
+        },
+        {
+          "bytes": 558,
+          "path": "StateSystem/Event.py",
+          "sha256": "e0f779e41d9febc91a896975d0087c29b7fb737fbf6e5cccd09c11baa63e64a7"
+        },
+        {
+          "bytes": 403,
+          "path": "StateSystem/EventHeap.py",
+          "sha256": "9bbba1f31106b18a49ba7a2b0056bbd80a919e1919619452f3f83bed5823e11b"
+        },
+        {
+          "bytes": 9359,
+          "path": "StateSystem/EventListener.py",
+          "sha256": "d1867c2016e9ff74f885699d478b46e726b31dc2e5a4e7c3166fa467cb00cda0"
+        },
+        {
+          "bytes": 1668,
+          "path": "StateSystem/Map.py",
+          "sha256": "7c767534f666f29541ec4d0cabdb3bcc239e611648a8d2dffcdac391936875e5"
+        },
+        {
+          "bytes": 1387,
+          "path": "StateSystem/Miracle.py",
+          "sha256": "d25f4d5130819e5cda527421e28019bdc8579c3432199e307d9fd3aec79e5256"
+        },
+        {
+          "bytes": 983,
+          "path": "StateSystem/Obstacle.py",
+          "sha256": "1148d06013fe94777f1217059f51adf8cdfd20d3fc0a9c8eecfef8a67e133ac4"
+        },
+        {
+          "bytes": 4685,
+          "path": "StateSystem/Player.py",
+          "sha256": "9cf49aecc8eeec9186d612b8f287221ecb99d0a48796a04d79008aef752a6c1e"
+        },
+        {
+          "bytes": 10037,
+          "path": "StateSystem/StateSystem.py",
+          "sha256": "64e7a0bad2ebec7eb590e6fe9742321fa30c13d399dbd3cee695d050825296a5"
+        },
+        {
+          "bytes": 4979,
+          "path": "StateSystem/Unit.py",
+          "sha256": "99dd06f3533ea2f72fc02c2b577db34b3c2834865a16a63ea4e4a0d75540aab2"
+        },
+        {
+          "bytes": 452,
+          "path": "StateSystem/UnitData.py",
+          "sha256": "3eba48aac472f5f2c37bffa60c982a3c9f5bdbcfe3a242091c660b29206f7ccb"
+        },
+        {
+          "bytes": 0,
+          "path": "StateSystem/__init__.py",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "bytes": 18806,
+          "path": "main.py",
+          "sha256": "f508c0fb98282d753a15481ecfc67a29801e4b462c576a5f7c04785691ca752e"
+        }
+      ],
+      "game_id": "24_miracle",
+      "k_upper_bits": 144200,
+      "module_count": 23,
+      "source_bits": 791648,
+      "source_bytes": 98956,
+      "source_root": "backend_sources/corpus/24_miracle/logic/gamecode_logic",
+      "source_sha256": "6094688a47af6a1292d71255dbef89b8e8c2b29018d21f121dea654ca69b5d2f",
+      "title": "Miracle"
+    },
+    {
+      "canonical_bits": 815680,
+      "canonical_bytes": 101960,
+      "compressed_bytes": 21316,
+      "compressed_sha256": "7d81636801fee71e76d8ed58e98a535e6e2d5c4b8aecf59c7034c5e6f2f58ee5",
+      "compression_ratio": 0.2090623774029031,
+      "description_sha256": "405fd3bac5feaeae400d43d78be35962fb29395765af2f3250aa15b27b739a7a",
+      "files": [
+        {
+          "bytes": 1040,
+          "path": "include/ant.h",
+          "sha256": "487f9ce62a3ed863825b43ff83626eda7a4422bd470387897e26831b6b997d46"
+        },
+        {
+          "bytes": 3103,
+          "path": "include/building.h",
+          "sha256": "61268dd36927dc4044d377e772188ec17dbc3af2bb555a04734fffe12aaac7f9"
+        },
+        {
+          "bytes": 1657,
+          "path": "include/coin.h",
+          "sha256": "4321bb2d1c244de111132a578dd65888ff52f15782081444842b1ab496e8c957"
+        },
+        {
+          "bytes": 2911,
+          "path": "include/comm_judger.h",
+          "sha256": "f33a5bf1dc435ff11645664ec9844a947d1cf3db161ae9db6344fb1a40755755"
+        },
+        {
+          "bytes": 2648,
+          "path": "include/game.hpp",
+          "sha256": "9ae286bfe2bd46eacdd9dac001719d4bd862a9d41103bbc263a1f1fb4119410e"
+        },
+        {
+          "bytes": 499,
+          "path": "include/item.h",
+          "sha256": "c880ecf4bd037a6816073bf9a81116943526d718d18f7f46215188aae2b48d23"
+        },
+        {
+          "bytes": 2520,
+          "path": "include/map.h",
+          "sha256": "4a0f7e4904a491ea1b650be153eb0413cb0a6517938c093b9312910629cf9a03"
+        },
+        {
+          "bytes": 1333,
+          "path": "include/operation.h",
+          "sha256": "98f58bba20721890a69b68cc5c6402dbd6df33f42eeafaca34e6e01dc310624c"
+        },
+        {
+          "bytes": 1500,
+          "path": "include/output.h",
+          "sha256": "db8fb9ac70bdd0bf403cf77df65e0f5dde9a7eb87c590eb13a4a22d1582e2851"
+        },
+        {
+          "bytes": 400,
+          "path": "include/player.h",
+          "sha256": "ce7c65d5645a834064bb5526feb2c341f72466eb96d03dc88cac027bd66d9214"
+        },
+        {
+          "bytes": 225,
+          "path": "include/pos.h",
+          "sha256": "563b91e2d645e155127ee41e9711fa3f0571ef4a8e2ab98b42a3baffb53fc0c1"
+        },
+        {
+          "bytes": 4092,
+          "path": "src/aco.cpp",
+          "sha256": "d91d3af0afed0a138f283a2579dedd5c4218df7de8083f5d79d792ad33787b63"
+        },
+        {
+          "bytes": 2552,
+          "path": "src/ant.cpp",
+          "sha256": "955e565c334b6284dfcd8d13532a86d4ea449de9f8929288ba903c3b611baa24"
+        },
+        {
+          "bytes": 7359,
+          "path": "src/building.cpp",
+          "sha256": "4b2918377e780985a48225ffb4dfcb36e1aa1052de33dd3802e5ff268ddc85c2"
+        },
+        {
+          "bytes": 2821,
+          "path": "src/coin.cpp",
+          "sha256": "ec32d8e2823fc93d26471f0f7a09078c8078ad572bc90367b6bacc72f1e567bb"
+        },
+        {
+          "bytes": 13706,
+          "path": "src/comm_judger.cpp",
+          "sha256": "7b64a18eae1a990375f80f24cd14fec1d60cbbfd3551932e70e3936cfe20634d"
+        },
+        {
+          "bytes": 37461,
+          "path": "src/game.cpp",
+          "sha256": "4418b12a9134908b719563233d223271f5d7e8cd1759e2c2e693b976e3107977"
+        },
+        {
+          "bytes": 259,
+          "path": "src/item.cpp",
+          "sha256": "729003fe296fcd2b9f2603c0fc0700ecfc80545ef8482adcdb5e05c50f1dd3dd"
+        },
+        {
+          "bytes": 1981,
+          "path": "src/main.cpp",
+          "sha256": "3fec5f6188771ebbe3008aa1c631a8be48150704c63976d1dfff503500b41457"
+        },
+        {
+          "bytes": 4670,
+          "path": "src/map.cpp",
+          "sha256": "e21300eccc388cbcb6f20050396f431040d1d6e90d69b598ca3c87d90f85d0b0"
+        },
+        {
+          "bytes": 2097,
+          "path": "src/operation.cpp",
+          "sha256": "276eabf6dc1ebb9157c6dc0e6fdbdda832be8d70e209482c50bff42c8a383569"
+        },
+        {
+          "bytes": 6419,
+          "path": "src/output.cpp",
+          "sha256": "48b18f91e86039621076cc21842ec0638823708c5c9cbc58eafa9086d1a49050"
+        }
+      ],
+      "game_id": "27_antwar",
+      "k_upper_bits": 170528,
+      "module_count": 22,
+      "source_bits": 810024,
+      "source_bytes": 101253,
+      "source_root": "backend_sources/corpus/27_antwar/logic/gamecode_logic/ant_game - deploy",
+      "source_sha256": "38cbbdf701877503a340eb9bac5d29b761d5f7855370247f9b9602d9b1f630f2",
+      "title": "AntWar"
+    },
+    {
+      "canonical_bits": 988864,
+      "canonical_bytes": 123608,
+      "compressed_bytes": 22329,
+      "compressed_sha256": "ceb32c1b7118c8c06a2579d1945bfc3f4a6f36c5a71b3445debad450ab0622b8",
+      "compression_ratio": 0.1806436476603456,
+      "description_sha256": "3fb0ce50d6dec123ac75d806601ccffa5f42a36dee6781ea80e71df56256e23b",
+      "files": [
+        {
+          "bytes": 61063,
+          "path": "src/aqua_sdk.cpp",
+          "sha256": "05bbf4a6281a395383e5da2c057cf03ccaf79bc61c00577189ef8f1ccc9d7f2f"
+        },
+        {
+          "bytes": 42098,
+          "path": "src/fish.cpp",
+          "sha256": "ab85125aeb16975dd8738f247ac9eaf6bccdf7cbd64446914b9e96e8c5508854"
+        },
+        {
+          "bytes": 9079,
+          "path": "src/fish.h",
+          "sha256": "97faaf6d83c8fba766cb66ec6d5fb182afc9b86bbc422c0a4f3efb7f73c46f71"
+        },
+        {
+          "bytes": 4525,
+          "path": "src/fishset.cpp",
+          "sha256": "41441040e70915e8c5df3f5736d6d83c8bc48403106ad1e26a1db38d428161c0"
+        },
+        {
+          "bytes": 1482,
+          "path": "src/fishset.h",
+          "sha256": "bf7702c282ef9d7a92cce7be2862fdf56402deb5802276999c1ad4111349861e"
+        },
+        {
+          "bytes": 1329,
+          "path": "src/game.cpp",
+          "sha256": "aa8780f0543022ff213474015cc331e5585dd9295c57b2a6cac0480b8a368590"
+        },
+        {
+          "bytes": 873,
+          "path": "src/game.h",
+          "sha256": "7c0a2425bcd32d8768a784e8761af28a64545cc0d2c9d471d715d1ca8e434cd3"
+        },
+        {
+          "bytes": 124,
+          "path": "src/main.cpp",
+          "sha256": "43fc026a304690811ee4657162c4a6914507f1d610b04a67c6db1cddfac2632c"
+        },
+        {
+          "bytes": 1448,
+          "path": "src/player.cpp",
+          "sha256": "c1e07ccf5a29beafcd9babbc7df18bddd54f893eb881a93120e76cfba6355929"
+        },
+        {
+          "bytes": 751,
+          "path": "src/player.h",
+          "sha256": "c151e6ca93358938cf05bda8e15996f4c5b53101b8dcdc86af5b3b145f7fa7ae"
+        },
+        {
+          "bytes": 487,
+          "path": "src/timer.h",
+          "sha256": "6a28d0908c2f6bb22562b68d73be19b58ab4f776026192b536e87113ee05e992"
+        }
+      ],
+      "game_id": "25_aquawar",
+      "k_upper_bits": 178632,
+      "module_count": 11,
+      "source_bits": 986072,
+      "source_bytes": 123259,
+      "source_root": "backend_sources/corpus/25_aquawar/logic/gamecode_logic",
+      "source_sha256": "fa0e3aa68ba72e76ddc6bea826e1e43f2e1ced69371acc383deca1237beb654e",
+      "title": "AquaWar"
+    },
+    {
+      "canonical_bits": 690128,
+      "canonical_bytes": 86266,
+      "compressed_bytes": 22379,
+      "compressed_sha256": "7e859c52bca78666b94635d615e90fef4e26a558b79ed2f4ea6e772be6fc6083",
+      "compression_ratio": 0.25941854264716113,
+      "description_sha256": "3ee28108b665556f3dfc00ccc8eb377e372e5c7edb861848bd0bd5d338d0dba5",
+      "files": [
+        {
+          "bytes": 60,
+          "path": "main.py",
+          "sha256": "0f40aaee0c9260cbff65e4008d18b92d51f334dcf5d010c3e32b0884ec63138f"
+        },
+        {
+          "bytes": 17310,
+          "path": "src/GameController.py",
+          "sha256": "6d0446d9aaf07eaa7d40c5d0a25c40948e838a86af510252f475377f8440e310"
+        },
+        {
+          "bytes": 1425,
+          "path": "src/MapGen/Map.g4",
+          "sha256": "b10e3809215f2dafea09d8562019dd508fe3b3b0c4c9002c13f5c3a5923fe6c4"
+        },
+        {
+          "bytes": 3164,
+          "path": "src/MapGen/MapGen.py",
+          "sha256": "05317be8ec248cdc693ae4fa5c0ef80112ba93bd9028fb6555b77c50a33ca26a"
+        },
+        {
+          "bytes": 0,
+          "path": "src/MapGen/__init__.py",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "bytes": 26,
+          "path": "src/__init__.py",
+          "sha256": "f8d0bfdd33adb1c33649657556a67fb0e4e1c75bcb70b199472f7c7fda259fa8"
+        },
+        {
+          "bytes": 655,
+          "path": "src/__main__.py",
+          "sha256": "989ca883f1a948d865b776f0b967ea1159586d7cc07e5730bd15696863069f05"
+        },
+        {
+          "bytes": 8877,
+          "path": "src/communicate.py",
+          "sha256": "803d134d394ce594da18ec2061983903b1d23640c305afcfade080cb3c6f9661"
+        },
+        {
+          "bytes": 1066,
+          "path": "src/config.py",
+          "sha256": "24c1eca105cec1241390299025404f4130c2a98e23b735fdd8277a93134fa99d"
+        },
+        {
+          "bytes": 5891,
+          "path": "src/interactive_props.py",
+          "sha256": "07e96a52340824e51cb007adb26a49dff9694d74f7207182090e90c5489095a9"
+        },
+        {
+          "bytes": 13691,
+          "path": "src/map.py",
+          "sha256": "9fd855c8f219a9afdd4dd9fb66b66cb829fa46096be50f55c6bb4b93298db26f"
+        },
+        {
+          "bytes": 3136,
+          "path": "src/mapconf2.map",
+          "sha256": "0cca9c1c832f7529695a375024e6188147320ac72863959a7aaa21ca69e3e4c5"
+        },
+        {
+          "bytes": 12831,
+          "path": "src/player.py",
+          "sha256": "cb0117cfca7810fe1a15583b589a24176303465613c5be982ec01a6dc195c240"
+        },
+        {
+          "bytes": 1039,
+          "path": "src/position.py",
+          "sha256": "5827e4582b25651de14bf56991a0f327fe74cb4cfb8974ba6d21393a159cf79d"
+        },
+        {
+          "bytes": 4632,
+          "path": "src/replay.py",
+          "sha256": "93b02b94cfc0ca56a547f90954b77d7a5a960fc9c06bdd924254f232a5e3ba33"
+        },
+        {
+          "bytes": 3229,
+          "path": "src/toolbag.py",
+          "sha256": "5c5587fc13788269c2eed84ab6a24fce022ae82a36956f612ced189e84bcdabc"
+        },
+        {
+          "bytes": 3438,
+          "path": "src/tools.py",
+          "sha256": "266279723818010f1b774f55540b088ae5d2c46263a5f031cbe4cc6651d7d7a7"
+        },
+        {
+          "bytes": 5193,
+          "path": "src/traps.py",
+          "sha256": "6d8acafd79359029a20b0b51cfb345aa1b3298dbf3a995fe70bd77b399117d79"
+        }
+      ],
+      "game_id": "25_lostspace",
+      "k_upper_bits": 179032,
+      "module_count": 18,
+      "source_bits": 685304,
+      "source_bytes": 85663,
+      "source_root": "backend_sources/corpus/25_lostspace/logic/gamecode_logic",
+      "source_sha256": "3a2b26c161634e8c22f2d4401d1b94505c75f106c4760fc5f736a93961317bb5",
+      "title": "LostSpace"
+    },
+    {
+      "canonical_bits": 691096,
+      "canonical_bytes": 86387,
+      "compressed_bytes": 23687,
+      "compressed_sha256": "47873c26038ecf5ec1933772c9e5d1fe970ac3c96a79b2c1347797ab69e7a1ff",
+      "compression_ratio": 0.2741963489876949,
+      "description_sha256": "68b1c12c0304950e0750d17dc795c52223de737e772cfa7142f5fc1316aeddee",
+      "files": [
+        {
+          "bytes": 173,
+          "path": "app/ScriptId.py",
+          "sha256": "9e338ef518f07fde7d7c67fced4eb58c1f6b28d52487dd17eca7fece7056387a"
+        },
+        {
+          "bytes": 156,
+          "path": "app/__init__.py",
+          "sha256": "02559cd9068f3706d53e9cd3de475b3784f321b4a8d3772372dc0cb5e9a27ad9"
+        },
+        {
+          "bytes": 2929,
+          "path": "app/routers/Utils.py",
+          "sha256": "88adc20f2794493f3c735d17941e2b396c075aba885966210d7cbaa32dbcd8b5"
+        },
+        {
+          "bytes": 64,
+          "path": "app/routers/__init__.py",
+          "sha256": "38873445817fc3cb07a238499790e8cc92be8a7ba191898394ea125e2bf7d4d8"
+        },
+        {
+          "bytes": 23185,
+          "path": "app/routers/api.py",
+          "sha256": "24a4859cbb281a20aa36ab2bd8c86ba29b05d847cee8bae10fa4898f2b93e171"
+        },
+        {
+          "bytes": 7510,
+          "path": "app/services/Game.py",
+          "sha256": "ca8a4fa1d29b92da6677327c3e6b05852ea66b2bdd5339c088eedd49fac1d9a0"
+        },
+        {
+          "bytes": 148,
+          "path": "app/services/NPC/__init__.py",
+          "sha256": "6571f496ca10c72defa1272bede2dfb57bf7dba06d360c73ddfd2fd36518e8dd"
+        },
+        {
+          "bytes": 1021,
+          "path": "app/services/NPC/builder.py",
+          "sha256": "1bc5f851c4c02f7cc3d043ef7548f142e8ead99deb2f9ec0475f4a852dca1c04"
+        },
+        {
+          "bytes": 11925,
+          "path": "app/services/NPC/llm.py",
+          "sha256": "52bbe6140c0ac319fa89527fbcc5ca31bfa63f5e916081334e7911b1bce300d2"
+        },
+        {
+          "bytes": 10695,
+          "path": "app/services/NPC/npc.py",
+          "sha256": "6ff5c0fa8ffa939f03f9515b0b84cee44c662594be35a317586e5becbce2a003"
+        },
+        {
+          "bytes": 5966,
+          "path": "app/services/NPC/prompts.py",
+          "sha256": "89df532b40694ed9e71b07091566c03bbe0955d2cf85f148dc79972204088258"
+        },
+        {
+          "bytes": 824,
+          "path": "app/services/Scene.py",
+          "sha256": "541c54b601a1ecf91230bbf66507a233e5ac837f239c2f3a3b02725ca167a870"
+        },
+        {
+          "bytes": 4584,
+          "path": "app/services/ScriptRuntime.py",
+          "sha256": "0793e75eea8e62d51e187d2ff638a21a9fef3a9bbd90985c3371d23790691d65"
+        },
+        {
+          "bytes": 5059,
+          "path": "app/services/Stage.py",
+          "sha256": "0cac43723f5487d4e30fc510ca951216da9ca349d31335250e53d0e594436af9"
+        },
+        {
+          "bytes": 11014,
+          "path": "app/services/User.py",
+          "sha256": "d5693ad71d3ba79a08d6244824eee2aa0ca5c0569364ad11fb395c2fb581be9e"
+        },
+        {
+          "bytes": 49,
+          "path": "app/services/__init__.py",
+          "sha256": "6d5ef5476e3fd689289717a0b67a5a997a9980d64f67a3f62622605dc2ae8f18"
+        },
+        {
+          "bytes": 415,
+          "path": "main.py",
+          "sha256": "7adc6e448e9ce2b997373d85aa83b3e6e9863a471cff22be5aa314fa876e4c2b"
+        }
+      ],
+      "game_id": "30_deepclue",
+      "k_upper_bits": 189496,
+      "module_count": 17,
+      "source_bits": 685736,
+      "source_bytes": 85717,
+      "source_root": "backend_sources/corpus/30_deepclue/logic/gamecode_logic",
+      "source_sha256": "dbab3d93249426af8e22c5baba2451800d1ac9a3465328ed0a526209bd390b13",
+      "title": "DeepClue"
+    },
+    {
+      "canonical_bits": 1521856,
+      "canonical_bytes": 190232,
+      "compressed_bytes": 37441,
+      "compressed_sha256": "d712974f6ac3748c8d79999e47c6e764036af04e700628d800af312a8d055664",
+      "compression_ratio": 0.19681757012490012,
+      "description_sha256": "2a46d350620d5e10ecb5edd1696699bc94c35ea874eb9fc25ff68a232c8ef9d2",
+      "files": [
+        {
+          "bytes": 2956,
+          "path": "include/ant.h",
+          "sha256": "02cb63db3dca6ebc3ebef174bda85f39bcd906e604d8c620162a7d4abc50a443"
+        },
+        {
+          "bytes": 3836,
+          "path": "include/building.h",
+          "sha256": "39846fe3dcdf52af2a1afbee77b7d37fbcb18d4fa4769bf96bfa68ef1cc52d9f"
+        },
+        {
+          "bytes": 1729,
+          "path": "include/coin.h",
+          "sha256": "09e1c68364c2b1b10fe6933d95a5d69ca590021297fbe1874df03c2dd4e7fd35"
+        },
+        {
+          "bytes": 2983,
+          "path": "include/comm_judger.h",
+          "sha256": "7c6f3f0345a7aea48ace16469deea4f0522d307b3c967d4d866689c4503eaca9"
+        },
+        {
+          "bytes": 7425,
+          "path": "include/game.hpp",
+          "sha256": "0f21a70eee008bd99b9a4248eb989ee4fc950b99a9a0e43707d7f8bc1d7222bc"
+        },
+        {
+          "bytes": 727,
+          "path": "include/item.h",
+          "sha256": "f5238fdc87caff7c7133a6c693ed41cef2817035d760c4d802a0ef91d8c8e8dc"
+        },
+        {
+          "bytes": 2660,
+          "path": "include/map.h",
+          "sha256": "7c8ef10db0e98bc5b4e2bec2b6ad083c82e30642ce00ee7049fa05198e84d625"
+        },
+        {
+          "bytes": 1333,
+          "path": "include/operation.h",
+          "sha256": "98f58bba20721890a69b68cc5c6402dbd6df33f42eeafaca34e6e01dc310624c"
+        },
+        {
+          "bytes": 1771,
+          "path": "include/output.h",
+          "sha256": "9d84321835892c58acfe90f717f962df820ea5ed2c0e79242d92499d643cae39"
+        },
+        {
+          "bytes": 400,
+          "path": "include/player.h",
+          "sha256": "ce7c65d5645a834064bb5526feb2c341f72466eb96d03dc88cac027bd66d9214"
+        },
+        {
+          "bytes": 232,
+          "path": "include/pos.h",
+          "sha256": "efae14c53ce19db41c02867ce776b175b9f41c70dec61790e62fa7cdbf2cbff1"
+        },
+        {
+          "bytes": 3987,
+          "path": "src/aco.cpp",
+          "sha256": "a86db8dccfbb0180c495b47e6f61d11a27d3de13bf4a698f404933f1a14dd4ec"
+        },
+        {
+          "bytes": 7092,
+          "path": "src/ant.cpp",
+          "sha256": "588458e5df702518a54e7e4e7883914cfdb9dd22b4292a1519979cf28ab95128"
+        },
+        {
+          "bytes": 9577,
+          "path": "src/building.cpp",
+          "sha256": "04a4d66e762e1766d205af3a80305d18167b67decbe7b7e9ae565770e117905d"
+        },
+        {
+          "bytes": 3690,
+          "path": "src/coin.cpp",
+          "sha256": "8169901cab4e6870642e7b960c28f55cffe842d2a4d860b03fb040c196f1335a"
+        },
+        {
+          "bytes": 17208,
+          "path": "src/comm_judger.cpp",
+          "sha256": "18fbd0449e2bc673120b25568b8d9e79d3fd08f4d5d5a809eb13e5e6eb1e16c5"
+        },
+        {
+          "bytes": 104448,
+          "path": "src/game.cpp",
+          "sha256": "603ffa2e35fe5f9e830dbed86955fd45b762f342fc1f1b137d4026ddb26d637e"
+        },
+        {
+          "bytes": 258,
+          "path": "src/item.cpp",
+          "sha256": "2369c3681a450e1e00f0fe9603c72cc1b460dbd731be9946a44e6ce389205f24"
+        },
+        {
+          "bytes": 1907,
+          "path": "src/main.cpp",
+          "sha256": "121d82678930ae595a4b2e54e8df327116135cc0585cd241332b0b30fc06640a"
+        },
+        {
+          "bytes": 4747,
+          "path": "src/map.cpp",
+          "sha256": "eb37dd1c65f9dc2e9fb981998e3496ee0071041428473ba133da21c583d9cb42"
+        },
+        {
+          "bytes": 2097,
+          "path": "src/operation.cpp",
+          "sha256": "276eabf6dc1ebb9157c6dc0e6fdbdda832be8d70e209482c50bff42c8a383569"
+        },
+        {
+          "bytes": 8461,
+          "path": "src/output.cpp",
+          "sha256": "91c8de7a203ee8b614ef701f1687f81f031d4de5a9be185cdc3baa0abb6f0545"
+        }
+      ],
+      "game_id": "30_antwar2",
+      "k_upper_bits": 299528,
+      "module_count": 22,
+      "source_bits": 1516192,
+      "source_bytes": 189524,
+      "source_root": "backend_sources/corpus/30_antwar2/logic/gamecode_logic/game",
+      "source_sha256": "be3ea02cbab2026d462ededc059aa77bc4f3d89531d6de0dda2a01aad00fecae",
+      "title": "AntWar2"
+    }
+  ],
+  "reference_machine": {
+    "compressor": {
+      "behavior_fingerprint": "1aea6c5af9a095f5a8502fcfa535b649c119bf32ff22c3a59b60233617b46698",
+      "format": "zlib",
+      "level": 9,
+      "mem_level": 9,
+      "method": "DEFLATED",
+      "strategy": "Z_DEFAULT_STRATEGY",
+      "wbits": 15
+    },
+    "conditioned_on": [
+      "AB-Ludi/1 decoder",
+      "language runtimes and toolchains"
+    ],
+    "decoder_constant_included": false,
+    "encoding": "uint64-be-length-prefixed source-module ludeme tree",
+    "family": "AB-LUDI/1",
+    "id": "AB-LUDI/1+zlib-profile-1aea6c5af9a095f5",
+    "literature": [
+      {
+        "title": "Evolutionary Game Design",
+        "url": "https://cambolbro.com/cv/publications/ciaig-browne-maire-19.pdf"
+      },
+      {
+        "title": "Measuring Intelligence through Games",
+        "url": "https://arxiv.org/abs/1109.1314"
+      }
+    ],
+    "metric": "conditional_k_upper_bits"
+  },
+  "schema_version": "agentbench.ludi-k.v1",
+  "source": {
+    "catalog_game_count": 10,
+    "commit": "b581bca3ba3d2d7d58a2f8c6bbddd060fc7fdc87",
+    "manifest_schema": "agentbench.ludi-source-manifest.v1",
+    "manifest_sha256": "87d55ac73109056faf23506ab84bba92de46812879a4e970dee25bc4b2e7db49",
+    "repository": "https://github.com/Aoraku/AgentBench"
+  }
+}

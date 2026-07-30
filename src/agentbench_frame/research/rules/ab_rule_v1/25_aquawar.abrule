@@ -1,0 +1,228 @@
+# provenance: b581bca3ba3d2d7d58a2f8c6bbddd060fc7fdc87
+# source-root: backend_sources/corpus/25_aquawar/logic/gamecode_logic
+# reviewed: src/aqua_sdk.cpp, src/fish.cpp, src/fish.h, src/fishset.cpp, src/fishset.h, src/game.cpp, src/game.h, src/player.cpp, src/player.h, src/timer.h
+# includes: hidden fish selection, assertions, three rounds, alternating actions, fish health, active skills, passives, buffs, random damage, deaths, round and match scoring
+# excludes: C ABI transport, JSON parsing, logs, wall-clock enforcement outside game outcomes
+game 25_aquawar
+players 2
+
+constant ROUND_COUNT = 3
+constant LINEUP_SIZE = 4
+
+enum Phase:
+  value READY
+  value PICK
+  value ASSERT
+  value ACTION
+  value END
+
+enum FishPosition:
+  value FRONT
+  value BACK
+
+entity Match:
+  field phase: Phase
+  field round: Integer
+  field active_player: Player
+  field score: Integer
+  field last_round_winner: Optional[Player]
+
+entity PlayerState:
+  field player: Player
+  field available_fish: Set[FishKind]
+  field lineup: Sequence[Fish]
+  field assertion: Optional[Assertion]
+  field ready: Boolean
+
+entity Fish:
+  field owner: Player
+  field kind: FishKind
+  field position: FishPosition
+  field health: Number
+  field max_health: Number
+  field attack: Number
+  field alive: Boolean
+  field buffs: Sequence[Buff]
+  field passive_state: Map[String, Value]
+
+entity Buff:
+  field kind: BuffKind
+  field source: Fish
+  field target: Fish
+  field duration: Integer
+  field magnitude: Number
+
+entity Assertion:
+  field claimed_fish: FishKind
+  field target_player: Player
+
+action PickLineup:
+  field player: Player
+  field fish_kinds: Sequence[FishKind]
+  field positions: Sequence[FishPosition]
+
+action MakeAssertion:
+  field player: Player
+  field claimed_fish: FishKind
+
+action UseSkill:
+  field actor: Fish
+  field targets: Sequence[Fish]
+
+action EndAction:
+  field player: Player
+
+observation PrivateRoundView:
+  field public_match: Match
+  field own_lineup: Sequence[Fish]
+  field opponent_public_fish: Sequence[PublicFish]
+  field assertions: Sequence[Assertion]
+  field action_log: Sequence[PublicEvent]
+
+setup initial_match:
+  create Match(phase=READY, round=0, active_player=first_player, score=0, last_round_winner=None)
+  for player in all_players:
+    create PlayerState(player=player, available_fish=all_fish_kinds(), lineup=[], assertion=None, ready=False)
+  apply begin_round()
+
+rule begin_round():
+  update match.phase = PICK
+  for player in all_players:
+    update state(player).lineup = []
+    update state(player).assertion = None
+    update state(player).ready = False
+  hide opponent_lineup_from_each_player()
+
+rule pick_lineup(action):
+  require match.phase == PICK
+  require action.player in all_players
+  require length(action.fish_kinds) == LINEUP_SIZE
+  require distinct(action.fish_kinds)
+  require all_available(action.player, action.fish_kinds)
+  require length(action.positions) == LINEUP_SIZE
+  for pair in zip(action.fish_kinds, action.positions):
+    create Fish(owner=action.player, kind=pair.first, position=pair.second, health=max_health(pair.first), max_health=max_health(pair.first), attack=base_attack(pair.first), alive=True, buffs=[], passive_state=initial_passive_state(pair.first))
+  update state(action.player).lineup = fish_owned_by(action.player)
+  update state(action.player).ready = True
+  hide state(action.player).lineup
+  when all_players_ready():
+    update match.phase = ASSERT
+
+rule make_assertion(action):
+  require match.phase == ASSERT
+  require action.claimed_fish in all_fish_kinds()
+  create Assertion(claimed_fish=action.claimed_fish, target_player=other_player(action.player))
+  update state(action.player).assertion = latest_assertion(action.player)
+  when all_assertions_present():
+    apply resolve_assertions()
+    update match.phase = ACTION
+    update match.active_player = round_first_player(match.last_round_winner)
+
+rule resolve_assertions():
+  for assertion in all_assertions:
+    when assertion.claimed_fish in kinds(state(assertion.target_player).lineup):
+      apply assertion_success(assertion)
+    otherwise:
+      apply assertion_failure(assertion)
+  reveal public_fish_identities_after_assertions()
+
+rule legal_skill(action):
+  require match.phase == ACTION
+  require action.actor.owner == match.active_player
+  require action.actor.alive
+  require valid_target_count(action.actor.kind, action.targets)
+  require all_alive(action.targets)
+  require targets_permitted(action.actor.kind, action.targets)
+  return True
+
+rule use_skill(action):
+  require legal_skill(action)
+  emit skill_started(action.actor, action.targets)
+  apply active_skill(action.actor.kind, action.actor, action.targets)
+  apply trigger_passives(skill_finished(action.actor))
+  apply remove_dead_fish()
+  apply expire_action_buffs()
+  update match.active_player = other_player(match.active_player)
+  reveal action_result(action)
+  when lineup_defeated(any_player()):
+    apply finish_round()
+
+rule physical_damage(source, target, ratio):
+  choose variation from damage_random_factor():
+    let amount = source.attack * ratio * variation
+    apply before_damage_passives(source, target, amount)
+    update target.health = max(0, target.health - modified_damage(source, target, amount))
+    apply after_damage_passives(source, target, amount)
+  when target.health <= 0:
+    update target.alive = False
+
+rule true_damage(source, target, amount):
+  update target.health = max(0, target.health - amount)
+  apply after_damage_passives(source, target, amount)
+  when target.health <= 0:
+    update target.alive = False
+
+rule heal(source, target, amount):
+  require target.alive
+  update target.health = min(target.max_health, target.health + modified_heal(source, target, amount))
+  apply after_heal_passives(source, target, amount)
+
+rule apply_buff(source, target, kind, duration, magnitude):
+  create Buff(kind=kind, source=source, target=target, duration=duration, magnitude=magnitude)
+  apply buff_enter_effect(kind, target, magnitude)
+
+rule expire_action_buffs():
+  for buff in all_buffs:
+    update buff.duration = buff.duration - 1
+    when buff.duration <= 0:
+      apply buff_exit_effect(buff.kind, buff.target, buff.magnitude)
+      delete buff
+
+rule remove_dead_fish():
+  for fish in all_fish:
+    when fish.health <= 0:
+      update fish.alive = False
+      apply trigger_passives(fish_died(fish))
+
+rule assertion_success(assertion):
+  apply assertion_reward(owner_of(assertion))
+  emit assertion_revealed(assertion, True)
+
+rule assertion_failure(assertion):
+  apply assertion_penalty(owner_of(assertion))
+  emit assertion_revealed(assertion, False)
+
+rule end_action(action):
+  require match.phase == ACTION
+  require action.player == match.active_player
+  update match.active_player = other_player(match.active_player)
+
+rule finish_round():
+  let winner = surviving_player()
+  update match.last_round_winner = winner
+  when winner == player_zero:
+    update match.score = match.score + 1
+  otherwise:
+    update match.score = match.score - 1
+  update match.round = match.round + 1
+  reveal complete_round_state()
+  when match.round < ROUND_COUNT:
+    apply begin_round()
+  otherwise:
+    update match.phase = END
+
+rule abnormal_forfeit(player):
+  update match.phase = END
+  when player == player_zero:
+    update match.score = -ROUND_COUNT
+  otherwise:
+    update match.score = ROUND_COUNT
+
+terminal three_round_result:
+  require match.phase == END
+  when match.score > 0:
+    return player_zero
+  when match.score < 0:
+    return player_one
+  otherwise:
+    return draw

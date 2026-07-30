@@ -291,6 +291,55 @@ agentbench data check --data-dir ./data                  # 验证数据格式
 agentbench data list --data-dir ./data                   # 列出所有 run
 ```
 
+## 游戏规则与实现复杂度
+
+框架把两种不同的描述长度分开报告：
+
+- **规则复杂度**：AB-Rule/1 把游戏规则写成受控伪码，主指标
+  `ast_nodes` 以规范 AST 节点（canonical AST nodes）为单位，等于结构节点数与
+  表达式节点数之和。框架同时保留 `rule atoms (RA)` 作为辅助指标；RA 是状态、
+  动作、观察、初始化、条件、转移和终局七个互斥命题集合的并集大小。
+- **实现复杂度**：AB-Ludi/1 对公开后端源码构造可执行描述，以
+  `k_upper_bits` 为单位。
+
+规范 AST 节点、RA 和 bit 的量纲不同，不允许数值混算或直接比较。规则报告排除
+DeepClue，冻结结果见
+[`agentbench-rule-complexity-v1.md`](docs/research/agentbench-rule-complexity-v1.md)。
+它不需要 AgentBench checkout：
+
+```bash
+agentbench complexity rules \
+  --json-output docs/research/agentbench-rule-complexity-v1.json \
+  --markdown-output docs/research/agentbench-rule-complexity-v1.md
+```
+
+框架提供可复算的 AB-Ludi/1 游戏逻辑描述长度，用于比较
+[`Aoraku/AgentBench`](https://github.com/Aoraku/AgentBench) 中公开后端实现的
+相对复杂度：
+
+```bash
+agentbench complexity ludi \
+  --agentbench-repo /path/to/Aoraku/AgentBench-at-b581bca \
+  --json-output docs/research/agentbench-ludi-k-v1.json \
+  --markdown-output docs/research/agentbench-ludi-k-v1.md
+```
+
+AB-Ludi/1 将每个游戏表示为由 `source-module` 叶节点组成的无歧义 ludeme
+树，再用固定 zlib-9 配置得到可执行描述长度上界。该命令只接受清单固定的
+AgentBench 提交 `b581bca3ba3d2d7d58a2f8c6bbddd060fc7fdc87`，并直接读取
+该提交的 Git blob；工作区修改、未跟踪文件和 checkout 换行转换不会进入测量。
+149 个输入文件的精确路径和 SHA-256 由版本化清单固定，任何入选文件增删或
+内容漂移都会失败关闭。
+
+输出中的
+`k_upper_bits` 是固定参考机和共享语言运行时条件下的 **Kolmogorov
+complexity 上界**，不是不可计算的精确 \(K\)，也不是状态空间大小、策略深度、
+学习难度或信息增益。JSON 会保留输入仓库提交、每个入选文件的路径和 SHA-256，
+以及固定多向量测试套件的 zlib 压缩行为指纹，便于审计与复算；宿主压缩器
+行为不匹配时命令会拒绝生成 v1 报告。此外，v1 清单冻结了十个 canonical
+description 对应的完整压缩流 SHA-256 和长度；即使有限行为套件无法区分某个
+实现，任一游戏的实际压缩字节漂移也会被逐游戏拒绝。
+
 ## 环境变量
 
 | 变量 | 说明 | 默认值 |

@@ -8,6 +8,7 @@ Subcommands:
     arena   — Multi-agent tournament
     report  — Build static report site
     mcp     — Start MCP server
+    complexity — Reproducible research complexity metrics
 """
 
 import argparse
@@ -191,6 +192,60 @@ def _cmd_data_list(args):
         print("No runs yet. Start one with: agentbench train --game 28_generals --agent my_agent")
 
 
+def _cmd_ludi_complexity(args):
+    """Calculate AB-Ludi/1 source-description complexity upper bounds."""
+    from pathlib import Path
+
+    from agentbench_frame.research.ludi_k import (
+        measure_agentbench_repository,
+        write_json_report,
+        write_markdown_report,
+    )
+
+    json_output = Path(args.json_output).resolve()
+    markdown_output = Path(args.markdown_output).resolve()
+    same_output = json_output == markdown_output
+    if json_output.exists() and markdown_output.exists():
+        same_output = same_output or json_output.samefile(markdown_output)
+    if same_output:
+        raise ValueError(
+            "--json-output and --markdown-output must resolve to different paths"
+        )
+
+    report = measure_agentbench_repository(args.agentbench_repo)
+    json_path = write_json_report(report, json_output)
+    markdown_path = write_markdown_report(report, markdown_output)
+
+    print("AB-Ludi/1 complexity upper bounds:")
+    for rank, game in enumerate(report["games"], start=1):
+        print(
+            f"  {rank:2d}. {game['game_id']:<16} "
+            f"{game['k_upper_bits']:>10} bits  "
+            f"modules={game['module_count']}"
+        )
+    print(f"JSON: {json_path}")
+    print(f"Markdown: {markdown_path}")
+
+
+def _cmd_rule_complexity(args):
+    """Measure the packaged AB-Rule/1 semantic proposition corpus."""
+    from agentbench_frame.research.rule_complexity import write_rule_reports
+
+    report = write_rule_reports(args.json_output, args.markdown_output)
+
+    print("AB-Rule/1 canonical AST complexity:")
+    for rank, game in enumerate(report["games"], start=1):
+        print(
+            f"  {rank:2d}. {game['game_id']:<16} "
+            f"{game['ast_nodes']:>5} AST  "
+            f"{game['rule_atoms']:>4} RA  "
+            f"structure={game['structural_ast_nodes']} "
+            f"expression={game['expression_ast_nodes']}"
+        )
+    print(f"JSON: {Path(args.json_output).resolve()}")
+    print(f"Markdown: {Path(args.markdown_output).resolve()}")
+
+
 def main(argv: Optional[List[str]] = None):
     parser = argparse.ArgumentParser(
         prog="agentbench",
@@ -245,6 +300,46 @@ def main(argv: Optional[List[str]] = None):
     p_list = p_data_sub.add_parser("list", help="List all runs in data directory")
     p_list.add_argument("--data-dir", default=None, help="Data directory (default: $AGENTBENCH_DATA)")
 
+    # --- complexity ---
+    p_complexity = sub.add_parser(
+        "complexity",
+        help="Reproducible research complexity metrics",
+    )
+    p_complexity_sub = p_complexity.add_subparsers(dest="complexity_command")
+    p_ludi = p_complexity_sub.add_parser(
+        "ludi",
+        help="Calculate AB-Ludi/1 game-logic K upper bounds",
+    )
+    p_ludi.add_argument(
+        "--agentbench-repo",
+        required=True,
+        help="Local checkout of https://github.com/Aoraku/AgentBench",
+    )
+    p_ludi.add_argument(
+        "--json-output",
+        required=True,
+        help="Machine-readable report path",
+    )
+    p_ludi.add_argument(
+        "--markdown-output",
+        required=True,
+        help="Human-readable report path",
+    )
+    p_rules = p_complexity_sub.add_parser(
+        "rules",
+        help="Measure AB-Rule/1 semantic rule propositions",
+    )
+    p_rules.add_argument(
+        "--json-output",
+        required=True,
+        help="Machine-readable report path",
+    )
+    p_rules.add_argument(
+        "--markdown-output",
+        required=True,
+        help="Human-readable report path",
+    )
+
     args = parser.parse_args(argv)
 
     if args.command == "train":
@@ -266,6 +361,13 @@ def main(argv: Optional[List[str]] = None):
             _cmd_data_list(args)
         else:
             p_data.print_help()
+    elif args.command == "complexity":
+        if args.complexity_command == "ludi":
+            _cmd_ludi_complexity(args)
+        elif args.complexity_command == "rules":
+            _cmd_rule_complexity(args)
+        else:
+            p_complexity.print_help()
     else:
         parser.print_help()
         sys.exit(1)
