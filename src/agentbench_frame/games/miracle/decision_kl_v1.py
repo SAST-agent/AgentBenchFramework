@@ -28,6 +28,10 @@ UNIT = "nats / decision"
 _IDENTITY_KEYS = {"schema_version", "support_id", "action_ids"}
 
 
+def _passes_acceptance_threshold(value: float) -> bool:
+    return value <= ACCEPTANCE_THRESHOLD
+
+
 def _strict_step(value: Any) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
         raise ValueError("decision_step must be a positive strict integer")
@@ -229,7 +233,7 @@ def validate_distribution(
     return validated
 
 
-def compute_local_kl(
+def _compute_local_kl(
     old_distribution: Mapping[str, int | float],
     new_distribution: Mapping[str, int | float],
     support: ActionSupport,
@@ -259,7 +263,9 @@ def compute_local_kl(
                 None,
                 "old_positive_new_zero",
             )
-        value += old_probability * math.log(old_probability / new_probability)
+        value += old_probability * (
+            math.log(old_probability) - math.log(new_probability)
+        )
     if value < 0.0 and abs(value) <= 1e-15:
         value = 0.0
     return DecisionKLRecord(
@@ -313,7 +319,7 @@ def compute_trajectory_kl(
             raise ValueError("decision_step must be strict, unique, and continuous")
         support = build_trusted_action_support(item.state_before)
         records.append(
-            compute_local_kl(
+            _compute_local_kl(
                 item.old_distribution,
                 item.new_distribution,
                 support,
@@ -342,7 +348,7 @@ def compute_trajectory_kl(
     finite = [float(value) for value in values if value is not None]
     total = math.fsum(finite)
     mean = total / len(finite)
-    passed = mean <= ACCEPTANCE_THRESHOLD
+    passed = _passes_acceptance_threshold(mean)
     return TrajectoryKLSummary(
         "complete" if passed else "threshold_failed",
         mean,
@@ -368,6 +374,5 @@ __all__ = [
     "build_trusted_action_support",
     "trusted_support_identity",
     "validate_distribution",
-    "compute_local_kl",
     "compute_trajectory_kl",
 ]

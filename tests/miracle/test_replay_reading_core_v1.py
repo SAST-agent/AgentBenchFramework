@@ -251,6 +251,26 @@ def test_deep_tampering_fails_after_rebinding_outer_digests(tmp_path, monkeypatc
         replay.preflight_replay_reading(manifest_path, approved_root=root)
 
 
+@pytest.mark.parametrize("replacement", [0.0, False], ids=["float-zero", "bool-false"])
+def test_action_support_rejects_weak_json_types_after_rebinding_digests(
+    tmp_path, monkeypatch, replacement
+):
+    root, manifest_path, replay_path, manifest, document, _ = artifact_fixture(
+        tmp_path
+    )
+    frame = document["decision_frames"][0]
+    unselected = frame["action_support"]["actions"][1]
+    assert unselected != frame["chosen_action"]
+    assert unselected["command"]["player"] == 0
+    unselected["command"]["player"] = replacement
+    rewrite_document(replay_path, document)
+    manifest["replay_sha256"] = hashlib.sha256(replay_path.read_bytes()).hexdigest()
+    rewrite_document(manifest_path, manifest)
+    approve(monkeypatch, hashlib.sha256(manifest_path.read_bytes()).hexdigest())
+    with pytest.raises(ValueError, match="ActionSupport"):
+        replay.preflight_replay_reading(manifest_path, approved_root=root)
+
+
 def test_frame_chain_and_terminal_consistency_are_strict(tmp_path, monkeypatch):
     for target in ("chain", "terminal"):
         root, manifest_path, replay_path, manifest, document, _ = artifact_fixture(tmp_path / target, frames=2)

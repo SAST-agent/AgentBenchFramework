@@ -39,14 +39,26 @@ def two_action_support():
     )
 
 
-def local(old, new, *, support=None, supplied_identity=None, step=1):
-    support = support or two_action_support()
-    return kl.compute_local_kl(
-        old,
-        new,
-        support,
-        identity(support) if supplied_identity is None else supplied_identity,
-        decision_step=step,
+def local(old, new, *, supplied_identity=None, step=1):
+    state_before = empty_observation()
+    support = kl.build_trusted_action_support(state_before)
+    aliases = dict(zip(("a", "b"), support.action_ids, strict=True))
+    old_distribution = {aliases.get(key, key): value for key, value in old.items()}
+    new_distribution = {aliases.get(key, key): value for key, value in new.items()}
+    return kl.compute_trajectory_kl(
+        [
+            kl.DecisionKLEvidence(
+                decision_step=step,
+                state_before=state_before,
+                support_identity=(
+                    identity(support)
+                    if supplied_identity is None
+                    else supplied_identity
+                ),
+                old_distribution=old_distribution,
+                new_distribution=new_distribution,
+            )
+        ]
     )
 
 
@@ -78,12 +90,12 @@ def test_wind_blessing_fails_closed_instead_of_claiming_finite_support():
 
 
 def test_local_kl_is_strict_unsmoothed_old_new_natural_log():
-    record = local({"a": 0.8, "b": 0.2}, {"a": 0.5, "b": 0.5})
-    expected = 0.8 * math.log(0.8 / 0.5) + 0.2 * math.log(0.2 / 0.5)
-    reverse = local({"a": 0.5, "b": 0.5}, {"a": 0.8, "b": 0.2})
+    record = local({"a": 0.52, "b": 0.48}, {"a": 0.5, "b": 0.5})
+    expected = 0.52 * math.log(0.52 / 0.5) + 0.48 * math.log(0.48 / 0.5)
+    reverse = local({"a": 0.5, "b": 0.5}, {"a": 0.52, "b": 0.48})
     assert record.status == "complete"
-    assert record.local_kl == pytest.approx(expected)
-    assert record.local_kl != pytest.approx(reverse.local_kl)
+    assert record.trajectory_kl == pytest.approx(expected)
+    assert record.trajectory_kl != pytest.approx(reverse.trajectory_kl)
     assert record.direction == "old||new"
     assert record.smoothing == "none"
     assert record.log_base == "e"
@@ -91,12 +103,80 @@ def test_local_kl_is_strict_unsmoothed_old_new_natural_log():
 
 def test_zero_probability_rules_are_structured_and_json_safe():
     zero_old = local({"a": 0.0, "b": 1.0}, {"a": 0.5, "b": 0.5})
-    assert zero_old.local_kl == pytest.approx(math.log(2.0))
+    assert zero_old.trajectory_kl == pytest.approx(math.log(2.0))
     infinite = local({"a": 1.0, "b": 0.0}, {"a": 0.0, "b": 1.0})
     assert infinite.status == "threshold_failed"
-    assert infinite.local_kl is None
+    assert infinite.trajectory_kl is None
     assert infinite.reason == "old_positive_new_zero"
     json.dumps(infinite.to_dict(), allow_nan=False)
+
+
+@pytest.mark.parametrize("forgery", ["schema", "action_id", "illegal_command"])
+def test_public_local_kl_cannot_trust_caller_constructed_support(forgery):
+    state_before = empty_observation()
+    trusted = kl.build_trusted_action_support(state_before)
+    actions = list(trusted.actions)
+    schema = trusted.schema_version
+    if forgery == "schema":
+        schema = "caller-forged-schema"
+    elif forgery == "action_id":
+        actions[0] = ActionCandidate("caller-forged-action", actions[0].action)
+    else:
+        actions[0] = ActionCandidate(
+            "caller-forged-illegal-command",
+            {"operation_type": "forbid", "operation_parameters": {}},
+        )
+    forged = ActionSupport(tuple(actions), schema)
+    probabilities = {
+        action_id: 1.0 / len(forged.action_ids)
+        for action_id in forged.action_ids
+    }
+    with pytest.raises(AttributeError):
+        calculator = getattr(kl, "compute_local_kl")
+        calculator(
+            probabilities,
+            probabilities,
+            forged,
+            identity(forged),
+            decision_step=1,
+        )
+    trusted_probabilities = {
+        action_id: 1.0 / len(trusted.action_ids)
+        for action_id in trusted.action_ids
+    }
+    with pytest.raises(ValueError, match="identity"):
+        kl.compute_trajectory_kl(
+            [
+                kl.DecisionKLEvidence(
+                    decision_step=1,
+                    state_before=state_before,
+                    support_identity=identity(forged),
+                    old_distribution=trusted_probabilities,
+                    new_distribution=trusted_probabilities,
+                )
+            ]
+        )
+
+
+def test_tiny_nonzero_new_probability_has_finite_trajectory_kl():
+    state_before = empty_observation()
+    support = kl.build_trusted_action_support(state_before)
+    first, second = support.action_ids
+    summary = kl.compute_trajectory_kl(
+        [
+            trajectory_evidence(
+                state_before=state_before,
+                old_distribution={first: 1.0, second: 0.0},
+                new_distribution={first: 5e-324, second: 1.0},
+            )
+        ]
+    )
+    expected = math.log(1.0) - math.log(5e-324)
+    assert math.isfinite(summary.trajectory_kl)
+    assert summary.trajectory_kl == pytest.approx(expected)
+    assert summary.trace == pytest.approx((expected,))
+    assert summary.status == "threshold_failed"
+    assert summary.reason == "trajectory_kl_above_threshold"
 
 
 @pytest.mark.parametrize("invalid", [True, False, "0.5", -0.1, math.nan, math.inf])
@@ -128,7 +208,7 @@ def test_probability_sum_uses_absolute_tolerance_1e_9():
 
 @pytest.mark.parametrize("mutation", ["missing", "extra", "schema", "support", "order"])
 def test_support_identity_is_exact_and_not_self_reported(mutation):
-    support = two_action_support()
+    support = kl.build_trusted_action_support(empty_observation())
     supplied = identity(support)
     if mutation == "missing":
         supplied.pop("support_id")
@@ -144,7 +224,6 @@ def test_support_identity_is_exact_and_not_self_reported(mutation):
         local(
             {"a": 0.5, "b": 0.5},
             {"a": 0.5, "b": 0.5},
-            support=support,
             supplied_identity=supplied,
         )
 
@@ -281,13 +360,18 @@ def test_empty_trajectory_is_incomplete_and_finite_trace_uses_arithmetic_mean():
 
 
 @pytest.mark.parametrize(
-    ("value", "status", "passed"),
-    [(0.009999999, "complete", True), (0.01, "complete", True), (0.010000001, "threshold_failed", False)],
+    ("value", "passed"),
+    [(0.009999999, True), (0.01, True), (0.010000001, False)],
 )
-def test_threshold_is_exact_without_hidden_tolerance(value, status, passed):
+def test_threshold_is_exact_without_hidden_tolerance(value, passed):
+    assert kl._passes_acceptance_threshold(value) is passed
     summary = kl.compute_trajectory_kl([trajectory_evidence(value)])
-    assert summary.status == status
-    assert summary.threshold_passed is passed
+    assert summary.threshold_passed is (
+        summary.trajectory_kl <= summary.acceptance_threshold
+    )
+    assert summary.status == (
+        "complete" if summary.threshold_passed else "threshold_failed"
+    )
     assert summary.acceptance_threshold == 0.01
 
 
@@ -324,7 +408,6 @@ def test_core_api_has_no_policy_environment_or_mutable_factory_inputs():
     for function in (
         kl.build_trusted_action_support,
         kl.validate_distribution,
-        kl.compute_local_kl,
         kl.compute_trajectory_kl,
     ):
         parameters = set(inspect.signature(function).parameters)

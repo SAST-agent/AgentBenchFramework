@@ -46,7 +46,6 @@ def test_public_core_signatures_have_no_external_execution_inputs():
     forbidden = {"provider", "judge", "policy", "factory", "session", "runner"}
     functions = (
         miracle.build_trusted_action_support,
-        miracle.compute_local_kl,
         miracle.compute_trajectory_kl,
         miracle.preflight_replay_reading,
         miracle.open_replay_reading,
@@ -54,3 +53,10 @@ def test_public_core_signatures_have_no_external_execution_inputs():
     )
     for function in functions:
         assert not (set(inspect.signature(function).parameters) & forbidden)
+
+
+def test_public_api_does_not_export_caller_support_local_kl_calculator():
+    assert "compute_local_kl" not in decision_kl.__all__
+    assert "compute_local_kl" not in miracle.__all__
+    assert not hasattr(decision_kl, "compute_local_kl")
+    assert not hasattr(miracle, "compute_local_kl")

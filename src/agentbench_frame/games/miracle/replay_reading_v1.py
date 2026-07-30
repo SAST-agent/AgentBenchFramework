@@ -303,7 +303,12 @@ def _validate_frame(value: Any, expected_step: int, *, case, seeds, policy, cham
     actions = [{"action_id": item.action_id, "command": item.action} for item in support.actions]
     supplied = value["action_support"]
     trusted = {"schema_version": support.schema_version, "support_id": support.support_id, "actions": actions}
-    if not isinstance(supplied, Mapping) or supplied != trusted or set(supplied) != set(trusted):
+    if (
+        type(supplied) is not dict
+        or set(supplied) != set(trusted)
+        or canonical_replay_json_bytes(supplied)
+        != canonical_replay_json_bytes(trusted)
+    ):
         raise ValueError("DecisionFrame does not contain trusted ActionSupport")
     chosen = value["chosen_action"]
     if not isinstance(chosen, Mapping) or set(chosen) != {"action_id", "command"}:
