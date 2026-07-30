@@ -10,7 +10,8 @@ dependencies = []
 tracking = ["psutil"]
 rl = ["torch", "numpy"]
 report = ["jinja2"]
-all = ["psutil", "torch", "numpy", "jinja2"]
+figures = ["matplotlib>=3.8"]
+all = ["psutil", "torch", "numpy", "jinja2", "matplotlib>=3.8"]
 
 [project.scripts]
 agentbench = "agentbench_frame.cli:main"

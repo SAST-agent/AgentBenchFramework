@@ -1,4 +1,8 @@
 import json
+from pathlib import Path
+import struct
+import subprocess
+import sys
 
 import pytest
 
@@ -154,3 +158,55 @@ def test_rejects_non_null_partial_transition_aggregate(tmp_path):
 
     with pytest.raises(ValueError, match="coverage"):
         load_policy_kl_figure_data(run_dir)
+
+
+def test_renders_three_panel_svg_and_300_dpi_png(tmp_path):
+    from agentbench_frame.generals.paper_figure import (
+        load_policy_kl_figure_data,
+        render_policy_kl_three_panel,
+    )
+
+    data = load_policy_kl_figure_data(write_complete_run(tmp_path))
+    svg_path, png_path = render_policy_kl_three_panel(
+        data,
+        tmp_path / "figure" / "policy-kl",
+    )
+
+    svg = svg_path.read_text()
+    png = png_path.read_bytes()
+    width, height = struct.unpack(">II", png[16:24])
+    assert "Controlled-reference Policy KL over Iterations" in svg
+    assert "Epsilon Sensitivity" in svg
+    assert "Exact Canonical Support Size" in svg
+    assert svg.count("epsilon = ") >= 4
+    assert png.startswith(b"\x89PNG\r\n\x1a\n")
+    assert width >= 6000
+    assert height >= 1800
+
+
+def test_figure_cli_writes_both_explicit_outputs(tmp_path):
+    run_dir = write_complete_run(tmp_path)
+    output_prefix = tmp_path / "output" / "paper"
+    repository = Path(__file__).resolve().parents[2]
+    script = repository / "scripts/plot_generals_controlled_policy_kl.py"
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--run-dir",
+            str(run_dir),
+            "--output-prefix",
+            str(output_prefix),
+        ],
+        cwd=repository,
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert str(output_prefix.with_suffix(".svg")) in completed.stdout
+    assert str(output_prefix.with_suffix(".png")) in completed.stdout
+    assert output_prefix.with_suffix(".svg").is_file()
+    assert output_prefix.with_suffix(".png").is_file()

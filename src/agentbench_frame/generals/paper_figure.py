@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -248,3 +249,312 @@ def load_policy_kl_figure_data(run_dir: Path) -> PolicyKLFigureData:
         },
         support_states=_load_support_states(run_dir / "events.jsonl"),
     )
+
+
+def render_policy_kl_three_panel(
+    data: PolicyKLFigureData,
+    output_prefix: Path,
+) -> tuple[Path, Path]:
+    """Render the publication figure as editable SVG and 300 DPI PNG."""
+
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        from matplotlib import pyplot as plt
+        from matplotlib.lines import Line2D
+        from matplotlib.patches import Patch
+        from matplotlib.ticker import LogLocator, NullFormatter
+    except ImportError as exc:
+        raise RuntimeError(
+            "paper figure rendering requires the 'figures' extra"
+        ) from exc
+
+    output_prefix = Path(output_prefix)
+    output_prefix.parent.mkdir(parents=True, exist_ok=True)
+    svg_path = output_prefix.with_suffix(".svg")
+    png_path = output_prefix.with_suffix(".png")
+
+    colors = {
+        "blue": "#2A6FBB",
+        "navy": "#174A7E",
+        "orange": "#F4A261",
+        "deep_orange": "#E76F51",
+        "green": "#2A9D8F",
+        "purple": "#8F5DA2",
+        "grey": "#59636E",
+        "grid": "#D8DEE5",
+        "text": "#20262E",
+    }
+    epsilon_styles = {
+        "0.001": (colors["navy"], "o"),
+        "0.01": (colors["deep_orange"], "s"),
+        "0.05": (colors["green"], "^"),
+        "0.1": (colors["purple"], "D"),
+    }
+    rc = {
+        "figure.facecolor": "white",
+        "axes.facecolor": "white",
+        "axes.edgecolor": colors["grey"],
+        "axes.labelcolor": colors["text"],
+        "axes.titlecolor": colors["text"],
+        "text.color": colors["text"],
+        "xtick.color": colors["text"],
+        "ytick.color": colors["text"],
+        "font.family": "DejaVu Sans",
+        "font.size": 11,
+        "axes.titlesize": 14,
+        "axes.titleweight": "semibold",
+        "axes.labelsize": 11,
+        "legend.fontsize": 9.5,
+        "svg.fonttype": "none",
+    }
+
+    with matplotlib.rc_context(rc):
+        figure, axes = plt.subplots(
+            1,
+            3,
+            figsize=(24, 7.2),
+            gridspec_kw={"width_ratios": (1.0, 1.0, 1.18)},
+            layout="constrained",
+        )
+        x_values = list(range(len(data.transitions)))
+
+        primary_axis = axes[0]
+        primary_axis.plot(
+            x_values,
+            [
+                math.nan if value is None else value
+                for value in data.primary_kl
+            ],
+            color=colors["blue"],
+            linewidth=2.8,
+            marker="o",
+            markersize=7,
+            markerfacecolor="white",
+            markeredgewidth=2.2,
+            zorder=3,
+        )
+        primary_axis.set_title(
+            "Controlled-reference Policy KL over Iterations",
+            pad=14,
+        )
+        primary_axis.set_ylabel("Mean KL (nats / state)")
+        primary_axis.set_xlabel("Policy transition")
+        primary_axis.set_xticks(x_values, data.transitions, rotation=28, ha="right")
+        primary_complete = [
+            value for value in data.primary_kl if value is not None
+        ]
+        primary_max = max(primary_complete, default=1.0)
+        primary_axis.set_ylim(0, max(1.0, primary_max * 1.24))
+        for x_value, value in zip(x_values, data.primary_kl):
+            if value is None:
+                continue
+            primary_axis.annotate(
+                f"{value:.2f}",
+                (x_value, value),
+                xytext=(0, 11),
+                textcoords="offset points",
+                ha="center",
+                va="bottom",
+                fontsize=9.5,
+                color=colors["navy"],
+                fontweight="semibold",
+            )
+        primary_axis.legend(
+            handles=[
+                Line2D(
+                    [0],
+                    [0],
+                    color=colors["blue"],
+                    marker="o",
+                    markerfacecolor="white",
+                    markeredgewidth=1.8,
+                    linewidth=2.4,
+                    label=f"epsilon = {data.primary_epsilon}",
+                )
+            ],
+            loc="upper left",
+            frameon=False,
+        )
+
+        sensitivity_axis = axes[1]
+        all_sensitivity_values = []
+        for epsilon in EXPECTED_EPSILONS:
+            values = data.sensitivity[epsilon]
+            color, marker = epsilon_styles[epsilon]
+            sensitivity_axis.plot(
+                x_values,
+                [
+                    math.nan if value is None else value
+                    for value in values
+                ],
+                color=color,
+                marker=marker,
+                linewidth=2.2,
+                markersize=6,
+                label=f"epsilon = {epsilon}",
+            )
+            all_sensitivity_values.extend(
+                value for value in values if value is not None
+            )
+        sensitivity_axis.set_title("Epsilon Sensitivity", pad=14)
+        sensitivity_axis.set_ylabel("Mean KL (nats / state)")
+        sensitivity_axis.set_xlabel("Policy transition")
+        sensitivity_axis.set_xticks(
+            x_values,
+            data.transitions,
+            rotation=28,
+            ha="right",
+        )
+        sensitivity_axis.set_ylim(
+            0,
+            max(1.0, max(all_sensitivity_values, default=1.0) * 1.18),
+        )
+        sensitivity_axis.legend(
+            loc="upper left",
+            frameon=False,
+            ncols=2,
+            columnspacing=1.2,
+            handlelength=2.4,
+        )
+
+        support_axis = axes[2]
+        support_x = list(range(len(data.support_states)))
+        support_values = [
+            point.support_size if point.support_size is not None else 1
+            for point in data.support_states
+        ]
+        support_colors = [
+            (
+                colors["orange"]
+                if point.decision_number == 2
+                else colors["deep_orange"]
+            )
+            for point in data.support_states
+        ]
+        bars = support_axis.bar(
+            support_x,
+            support_values,
+            color=support_colors,
+            edgecolor="white",
+            linewidth=0.8,
+            width=0.76,
+            zorder=3,
+        )
+        for bar, point in zip(bars, data.support_states):
+            if point.support_size is None:
+                bar.set_height(1)
+                bar.set_facecolor("white")
+                bar.set_edgecolor(colors["grey"])
+                bar.set_hatch("///")
+                support_axis.annotate(
+                    "missing",
+                    (bar.get_x() + bar.get_width() / 2, 1.35),
+                    rotation=90,
+                    ha="center",
+                    va="bottom",
+                    fontsize=8.5,
+                    color=colors["grey"],
+                )
+                continue
+            support_axis.annotate(
+                f"{point.support_size:,}",
+                (
+                    bar.get_x() + bar.get_width() / 2,
+                    point.support_size * 1.12,
+                ),
+                rotation=90,
+                ha="center",
+                va="bottom",
+                fontsize=8.5,
+                color=colors["text"],
+            )
+        support_axis.set_yscale("log")
+        complete_support = [
+            point.support_size
+            for point in data.support_states
+            if point.support_size is not None
+        ]
+        support_axis.set_ylim(
+            1 if len(complete_support) < len(data.support_states) else 5,
+            max(complete_support, default=10) * 3.2,
+        )
+        support_axis.yaxis.set_major_locator(LogLocator(base=10))
+        support_axis.yaxis.set_minor_locator(
+            LogLocator(base=10, subs=(2, 5))
+        )
+        support_axis.yaxis.set_minor_formatter(NullFormatter())
+        support_axis.set_title("Exact Canonical Support Size", pad=14)
+        support_axis.set_ylabel("Exact |A(s)| (log scale)")
+        support_axis.set_xlabel("Reference state")
+        support_axis.set_xticks(
+            support_x,
+            [
+                (
+                    f"d{point.decision_number}\n"
+                    f"s{point.seed % 1000:03d} · p{point.seat}"
+                )
+                for point in data.support_states
+            ],
+            fontsize=8.5,
+        )
+        support_axis.legend(
+            handles=[
+                Patch(
+                    facecolor=colors["orange"],
+                    edgecolor="none",
+                    label="Decision 2",
+                ),
+                Patch(
+                    facecolor=colors["deep_orange"],
+                    edgecolor="none",
+                    label="Decision 10",
+                ),
+            ],
+            loc="upper left",
+            frameon=False,
+            ncols=2,
+        )
+
+        for panel, axis in zip(("a", "b", "c"), axes):
+            axis.text(
+                -0.10,
+                1.06,
+                f"({panel})",
+                transform=axis.transAxes,
+                fontsize=14,
+                fontweight="bold",
+                ha="left",
+                va="bottom",
+            )
+            axis.grid(
+                axis="y",
+                color=colors["grid"],
+                linestyle="--",
+                linewidth=0.8,
+                alpha=0.8,
+                zorder=0,
+            )
+            axis.spines["top"].set_visible(False)
+            axis.spines["right"].set_visible(False)
+            axis.tick_params(axis="both", which="major", length=4)
+
+        figure.suptitle(
+            "Generals Heuristic-Learning Policy Change",
+            fontsize=17,
+            fontweight="semibold",
+        )
+        figure.savefig(
+            svg_path,
+            format="svg",
+            facecolor="white",
+        )
+        figure.savefig(
+            png_path,
+            format="png",
+            dpi=300,
+            facecolor="white",
+        )
+        plt.close(figure)
+    return svg_path, png_path
