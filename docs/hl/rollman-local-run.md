@@ -11,7 +11,7 @@ Harness 驱动可解释 Rollman 程序从零开始迭代，学习对手固定为
 - 回滚开启：连续 3 个入选版本低于 champion 0.05 时，下一轮以 champion 为父版本；
 - Codex 上下文模式为 `resumable`；
 - 确定性策略测量 `epsilon: 0.05`；
-- 人类程序只在隔离子进程中执行，不进入 coding agent context。
+- 候选程序和人类程序在 default-deny 文件系统、无网络沙箱中执行，只读根目录和私有 scratch 显式声明；512 MiB 限额按完整后代进程树统计，进程组与脱离进程组的后代均清理；人类源码不进入 coding agent context。
 
 `candidates_per_act`、rollback、epsilon、seed、认证门槛和其他消融对象均由 YAML 参数控制。
 
@@ -56,7 +56,7 @@ Responses API 本身可按无状态接口理解：单次请求不自动等于可
 
 本配置不使用 `codex exec --ephemeral`。`ephemeral` 表示不保留可恢复的本地会话状态，会破坏跨 act 的 resume。`disable_response_storage: true` 控制上游响应存储；本地科研产物仍按 run 目录保存。
 
-模型调用消耗 `.env` 中 `AGENTBENCH_API_KEY` 对应账户的 token，不消耗 Codex App 对话预算。API key 只进入 Codex 子进程的 `CODEX_API_KEY`，不会进入候选程序、人类程序、prompt、事件或报告。
+模型调用消耗 `.env` 中 `AGENTBENCH_API_KEY` 对应账户的 token，不消耗 Codex App 对话预算。Harness 直接读取该键并构造仅供 Codex 子进程使用的环境，不把键加载进全局进程环境；API key 不进入构建程序、候选程序、人类程序、prompt、事件或报告。
 
 ## 4. 信息增益
 
@@ -78,7 +78,7 @@ Rollman 的人工审核决策空间是后端提交方向：
 pi_epsilon(a|z) = (1-epsilon) I[a=f(z)] + epsilon/5
 ```
 
-首个 origin 版本在固定 gate 对局中产生参考决策状态序列。每个版本对同一参考序列重新执行策略，得到：
+首个 origin 版本在固定 gate 对局中产生参考决策状态序列并冻结其哈希清单。这里冻结的是实际 rollout 中出现的原始状态，不是人工设计的战术类别；人工审核对象仅为完整原子动作空间。每个版本使用 SDK 的完整 `GameState`（包括 `space_info`）对同一参考序列重新执行策略，得到：
 
 - `local_policy_kl_trace`：每个真实参考决策点的 `KL(new || parent)`；
 - `episode_local_policy_kl`：每场对局的平均 KL 与轨迹 KL；
@@ -125,7 +125,7 @@ report/curves.svg
 - iteration、act、version；
 - raw score、benchmark score、gain、best score；
 - win rate；
-- role-scoped Rollman Elo；
+- 按策略版本独立计算、角色固定且人类对手锚定的 Rollman Elo；认证赛逐局进入同一 Elo 事件流；
 - mean local policy KL；
 - occupancy shift；
 - prompt、completion、total token 累计值。
@@ -185,7 +185,19 @@ cp .env.example .env
 
 `--acts N` 只用于 smoke test、调试和迭代轮数消融；正式目标运行省略该参数。
 
-## 8. 新游戏接入
+## 8. 冻结与裁判一致性
+
+`validate`、`audit`、`run` 和 `resume` 均核对 `source_manifest.json` 中的 AgentBench、PacmanLogic、Logic core、PacmanSDK commit，以及冻结后端 `main.py` 和 core 文件哈希；任一不匹配即拒绝正式运行。
+
+本地裁判执行后端下发的回合约束：首次 AI 响应 20 秒、后续响应 1 秒、AI 输出最多 1024 字节。非 `OK` 终态、回放终局分数与 `end_info` 不一致、超时、超长输出或资源越界均不产生有效科研赛果。
+
+人类池构建只接受 `opponent_profiles.json` 登记且 SHA-256 完全匹配的 16 份冻结归档，不提供任意源码构建入口。构建阶段禁网、限制环境变量，并设置整棵进程树的时间、内存、进程数、输出量和构建目录占用上限；候选与人类程序的比赛运行阶段采用只读白名单、私有临时写目录、禁网、禁止派生进程和内存上限。
+
+事件日志按事件类型校验必需字段、允许字段、类型、schema version 和 event ID 唯一性。代码版本对象以临时目录写入、fsync、原子重命名，并在读取和回滚前重新核对文件清单与内容哈希。`rollback_selected` 是持久 head 转移，因此中断恢复仍从选定历史 champion 继续。
+
+每个满足 rank-1 门槛但尚未完成认证的 champion 都会接受认证，包括 origin 和 resume 恢复出的 champion。已完成但未达标的版本不重复认证；不完整认证允许重试。
+
+## 9. 新游戏接入
 
 统一后端目录、运行协议、日志、版本、回滚、Elo、曲线、provider 和 checkpoint 由 Framework 提供。游戏合作者只提交必须由人定义并人工审核的三类内容：
 
@@ -194,4 +206,3 @@ cp .env.example .env
 3. 回放阅读 Skill。
 
 后端注册表负责绑定冻结 Logic、SDK、角色、对手池、seed 和评测方式，不要求合作者重复上传统一基础设施参数。
-

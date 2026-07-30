@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import shutil
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -61,6 +62,28 @@ def _hash_tree(files: list[tuple[str, bytes]]) -> str:
     return digest.hexdigest()
 
 
+def _fsync_directory(path: Path) -> None:
+    descriptor = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _verify_object(
+    object_root: Path,
+    *,
+    content_hash: str,
+    expected_files: tuple[str, ...],
+) -> None:
+    files = _read_tree(object_root)
+    actual_files = tuple(relative for relative, _ in files)
+    if actual_files != expected_files:
+        raise ValueError(f"snapshot object file manifest mismatch: {content_hash}")
+    if _hash_tree(files) != content_hash:
+        raise ValueError(f"snapshot object content hash mismatch: {content_hash}")
+
+
 class VersionStore:
     """Snapshot and restore one candidate workspace without nested Git."""
 
@@ -91,12 +114,35 @@ class VersionStore:
         files = _read_tree(self.workspace)
         content_hash = _hash_tree(files)
         object_root = self.objects / content_hash
-        if not object_root.exists():
-            object_root.mkdir()
-            for relative, content in files:
-                destination = object_root / relative
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                destination.write_bytes(content)
+        expected_files = tuple(relative for relative, _ in files)
+        if object_root.exists():
+            _verify_object(
+                object_root,
+                content_hash=content_hash,
+                expected_files=expected_files,
+            )
+        else:
+            temporary = Path(
+                tempfile.mkdtemp(prefix=f".{content_hash}.", dir=self.objects)
+            )
+            try:
+                for relative, content in files:
+                    destination = temporary / relative
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    with destination.open("wb") as handle:
+                        handle.write(content)
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                _verify_object(
+                    temporary,
+                    content_hash=content_hash,
+                    expected_files=expected_files,
+                )
+                os.replace(temporary, object_root)
+                _fsync_directory(self.objects)
+            finally:
+                if temporary.exists():
+                    shutil.rmtree(temporary)
         version = Version(
             version_id=self._next_version_id(),
             content_hash=content_hash,
@@ -104,14 +150,25 @@ class VersionStore:
             act_id=act_id,
             edit_type="initial" if parent_version_id is None else edit_type,
             created_at=_now(),
-            files=tuple(relative for relative, _ in files),
+            files=expected_files,
         )
         manifest_path = self.manifests / f"{version.version_id}.json"
-        manifest_path.write_text(
-            json.dumps(dataclasses.asdict(version), ensure_ascii=False, sort_keys=True, indent=2)
-            + "\n",
-            encoding="utf-8",
+        encoded = (
+            json.dumps(
+                dataclasses.asdict(version),
+                ensure_ascii=False,
+                sort_keys=True,
+                indent=2,
+            )
+            + "\n"
         )
+        temporary_manifest = manifest_path.with_suffix(".json.tmp")
+        with temporary_manifest.open("w", encoding="utf-8") as handle:
+            handle.write(encoded)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_manifest, manifest_path)
+        _fsync_directory(self.manifests)
         return version
 
     def get(self, version_id: str) -> Version:
@@ -120,7 +177,18 @@ class VersionStore:
             raise KeyError(version_id)
         value = json.loads(path.read_text(encoding="utf-8"))
         value["files"] = tuple(value["files"])
-        return Version(**value)
+        version = Version(**value)
+        if version.version_id != version_id:
+            raise ValueError(f"manifest version id mismatch: {version_id}")
+        object_root = self.objects / version.content_hash
+        if not object_root.is_dir():
+            raise FileNotFoundError(f"missing snapshot object: {version.content_hash}")
+        _verify_object(
+            object_root,
+            content_hash=version.content_hash,
+            expected_files=version.files,
+        )
+        return version
 
     def restore(
         self,
@@ -141,8 +209,6 @@ class VersionStore:
 
         source = self.get(version_id)
         object_root = self.objects / source.content_hash
-        if not object_root.is_dir():
-            raise FileNotFoundError(f"missing snapshot object: {source.content_hash}")
         self.workspace.mkdir(parents=True, exist_ok=True)
         for child in self.workspace.iterdir():
             if child.name in IGNORED_DIRS:

@@ -84,6 +84,8 @@ class LineageManager:
                 decision = manager.select_next_parent()
                 if not decision.rollback:
                     raise ValueError("rollback event is inconsistent with lineage state")
+                if decision.from_version_id != str(event["from_version_id"]):
+                    raise ValueError("rollback source does not match rebuilt lineage")
                 if decision.to_version_id != str(event["to_version_id"]):
                     raise ValueError("rollback target does not match rebuilt lineage")
         return manager
@@ -163,6 +165,7 @@ class LineageManager:
             )
             self._rollback_pending = False
             self._degradation_streak = 0
+            self.lineage_head_version_id = decision.to_version_id
             return decision
         return ParentDecision(
             rollback=False,

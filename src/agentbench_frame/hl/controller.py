@@ -73,6 +73,7 @@ class HLController:
         self._iteration_count = 0
         self._coding_agent_acts = 0
         self._sessions: dict[str, str] = {}
+        self._recorded_match_ids: set[str] = set()
         self._started = False
 
     def initialize(self, *, evaluate: bool = False) -> Version:
@@ -127,6 +128,24 @@ class HLController:
             thread_id = threads_by_act.get(str(event.get("act_id")))
             if thread_id:
                 self._sessions[str(event["version_id"])] = thread_id
+        for event in historical_events:
+            if (
+                event.get("event_type") != "match_completed"
+                or event.get("valid") is not True
+                or event.get("result") not in {"win", "draw", "loss"}
+            ):
+                continue
+            self._recorded_match_ids.add(str(event["match_id"]))
+            self.elo_ledger.update_game(
+                role=str(event.get("role") or "rollman"),
+                candidate=str(event["version_id"]),
+                opponent=str(event["opponent"]),
+                result=str(event["result"]),
+                act_id=str(event["act_id"]),
+                version_id=str(event["version_id"]),
+                seed=int(event["seed"]),
+                anchor_opponent=self.anchor_human_opponents,
+            )
         self._coding_agent_acts = sum(
             event.get("event_type") == "act_completed"
             for event in historical_events
@@ -146,6 +165,76 @@ class HLController:
             lineage_head_version_id=self.lineage.lineage_head_version_id,
             champion_version_id=self.lineage.champion_version_id,
         )
+
+    def record_matches(
+        self,
+        *,
+        version: Version,
+        act_id: str,
+        phase: str,
+        matches: Any,
+    ) -> int:
+        """Append valid game and Elo events for an evaluated match series."""
+
+        match_records = [
+            dict(match)
+            for match in matches
+            if match.get("status", "complete") == "complete"
+            and match.get("result") in {"win", "draw", "loss"}
+        ]
+        for index, match in enumerate(match_records):
+            match_phase = str(match.get("phase") or phase)
+            match_id = str(
+                match.get(
+                    "match_id",
+                    f"{version.version_id}-{match_phase}-{index:04d}",
+                )
+            )
+            if match_id in self._recorded_match_ids:
+                continue
+            self.events.write(
+                "match_completed",
+                match_id=match_id,
+                version_id=version.version_id,
+                act_id=act_id,
+                phase=match_phase,
+                role="rollman",
+                opponent=match.get("opponent"),
+                seed=match.get("seed"),
+                result=match.get("result"),
+                rollman_score=match.get("rollman_score"),
+                ghosts_score=match.get("ghosts_score"),
+                valid=True,
+                replay=match.get("replay"),
+                trace=match.get("trace"),
+            )
+            self._recorded_match_ids.add(match_id)
+            elo_record = self.elo_ledger.update_game(
+                role="rollman",
+                candidate=version.version_id,
+                opponent=str(match.get("opponent")),
+                result=str(match["result"]),
+                act_id=act_id,
+                version_id=version.version_id,
+                seed=int(match["seed"]),
+                anchor_opponent=self.anchor_human_opponents,
+            )
+            self.events.write(
+                "elo_updated",
+                match_id=match_id,
+                version_id=version.version_id,
+                act_id=act_id,
+                phase=match_phase,
+                candidate=elo_record.candidate,
+                opponent=elo_record.opponent,
+                seed=elo_record.seed,
+                result=elo_record.result,
+                rating_before=elo_record.rating_before,
+                rating=elo_record.rating_after,
+                opponent_rating=elo_record.opponent_rating_after,
+                role=elo_record.role,
+            )
+        return len(match_records)
 
     def run_act(self) -> IterationResult:
         if not self._started:
@@ -403,48 +492,12 @@ class HLController:
                 if match.get("status", "complete") == "complete"
                 and match.get("result") in {"win", "draw", "loss"}
             ]
-            for index, match in enumerate(match_records):
-                match_id = str(
-                    match.get(
-                        "match_id",
-                        f"{version.version_id}-{index:04d}",
-                    )
-                )
-                self.events.write(
-                    "match_completed",
-                    match_id=match_id,
-                    version_id=version.version_id,
-                    act_id=version.act_id,
-                    opponent=match.get("opponent"),
-                    seed=match.get("seed"),
-                    result=match.get("result"),
-                    rollman_score=match.get("rollman_score"),
-                    ghosts_score=match.get("ghosts_score"),
-                    valid=True,
-                    replay=match.get("replay"),
-                    trace=match.get("trace"),
-                )
-                elo_record = self.elo_ledger.update_game(
-                    role="rollman",
-                    candidate=self.elo_candidate_id,
-                    opponent=str(match.get("opponent")),
-                    result=str(match["result"]),
-                    act_id=version.act_id,
-                    version_id=version.version_id,
-                    seed=int(match["seed"]),
-                    anchor_opponent=self.anchor_human_opponents,
-                )
-                self.events.write(
-                    "elo_updated",
-                    version_id=version.version_id,
-                    act_id=version.act_id,
-                    opponent=elo_record.opponent,
-                    seed=elo_record.seed,
-                    result=elo_record.result,
-                    rating=elo_record.rating_after,
-                    opponent_rating=elo_record.opponent_rating_after,
-                    role=elo_record.role,
-                )
+            self.record_matches(
+                version=version,
+                act_id=version.act_id,
+                phase="learning",
+                matches=match_records,
+            )
             self.events.write(
                 "evaluation_completed",
                 version_id=version.version_id,

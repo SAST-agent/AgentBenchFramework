@@ -74,3 +74,31 @@ def test_missing_or_unreadable_workspace_fails_instead_of_fabricating_version(tm
     with pytest.raises(FileNotFoundError):
         store.snapshot(parent_version_id=None, act_id="act-0000")
 
+
+def test_checkout_rejects_mutated_content_addressed_object(tmp_path):
+    from agentbench_frame.hl.codebase import VersionStore
+
+    workspace = _workspace(tmp_path)
+    store = VersionStore(workspace, tmp_path / "versions")
+    version = store.snapshot(parent_version_id=None, act_id="act-0000")
+    object_file = (
+        tmp_path / "versions" / "objects" / version.content_hash / "agent.py"
+    )
+    object_file.write_text("corrupted = True\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="content hash"):
+        store.checkout(version.version_id)
+
+
+def test_partial_existing_object_is_never_accepted_as_snapshot(tmp_path):
+    from agentbench_frame.hl.codebase import VersionStore, _hash_tree, _read_tree
+
+    workspace = _workspace(tmp_path)
+    store = VersionStore(workspace, tmp_path / "versions")
+    content_hash = _hash_tree(_read_tree(workspace))
+    partial = tmp_path / "versions" / "objects" / content_hash
+    partial.mkdir()
+    (partial / "agent.py").write_text("partial\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="snapshot object"):
+        store.snapshot(parent_version_id=None, act_id="act-0000")

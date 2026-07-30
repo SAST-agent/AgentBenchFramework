@@ -4,17 +4,24 @@ from pathlib import Path
 
 AGENTBENCH_ROOT = Path("/Users/qingle/Code/SAST/AgentBench")
 OFFICIAL_LOGIC_ROOT = Path("/Users/qingle/Code/SAST/PacmanLogic")
+PACMAN_SDK_ROOT = Path("/Users/qingle/Code/SAST/PacmanSDK-python")
 
 
 def test_frozen_core_matches_pinned_official_logic_core():
     from agentbench_frame.games.rollman.contract import audit_sources
 
-    result = audit_sources(AGENTBENCH_ROOT, OFFICIAL_LOGIC_ROOT)
+    result = audit_sources(
+        AGENTBENCH_ROOT,
+        OFFICIAL_LOGIC_ROOT,
+        PACMAN_SDK_ROOT,
+    )
 
+    assert result["valid"] is True
     assert result["all_core_files_match"] is True
     assert result["frozen_backend_commit"] == "b581bca3ba3d2d7d58a2f8c6bbddd060fc7fdc87"
     assert result["official_logic_commit"] == "81d0468d177089cefe1f08ed1cffe78beb0d27e9"
     assert result["official_core_commit"] == "b293c04746fc3bf9b67a00130a2ca15fc38691bc"
+    assert result["pacman_sdk_commit"] == "7bd36b9938570ad0cc0dcbd80d1a9d21efbfa539"
     assert result["random_seed_is_applied"] is False
     assert result["adapter_seed_injection_required"] is True
 

@@ -1,4 +1,5 @@
 import sys
+import json
 from pathlib import Path
 
 import pytest
@@ -63,6 +64,64 @@ def test_same_seed_and_processes_produce_identical_normalized_replay(tmp_path):
     assert first.rollman_decisions == second.rollman_decisions
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS sandbox integration")
+def test_untrusted_runtime_cannot_spawn_subprocess(tmp_path):
+    from agentbench_frame.games.rollman.match import _start, _stop
+
+    marker = tmp_path / "spawned.txt"
+    script = tmp_path / "spawn_parent.py"
+    script.write_text(
+        "import subprocess, sys\n"
+        "subprocess.Popen([sys.executable, '-c', "
+        f"\"from pathlib import Path; Path({str(marker)!r}).write_text('bad')\""
+        "])\n",
+        encoding="utf-8",
+    )
+    process = _start(
+        ProcessSpec(
+            argv=(sys.executable, str(script)),
+            cwd=tmp_path,
+            untrusted=True,
+            read_roots=(tmp_path,),
+        ),
+        "spawn-fixture",
+    )
+    try:
+        return_code = process.wait(timeout=3)
+        assert return_code != 0
+        assert not marker.exists()
+    finally:
+        _stop(process)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS sandbox integration")
+def test_untrusted_direct_process_memory_is_limited(tmp_path):
+    from agentbench_frame.games.rollman.match import _start, _stop
+
+    script = tmp_path / "memory_process.py"
+    script.write_text(
+        "import time\n"
+        "memory = bytearray(160 * 1024 * 1024)\n"
+        "time.sleep(10)\n",
+        encoding="utf-8",
+    )
+    process = _start(
+        ProcessSpec(
+            argv=(sys.executable, str(script)),
+            cwd=tmp_path,
+            untrusted=True,
+            memory_limit_mb=100,
+            read_roots=(tmp_path,),
+        ),
+        "memory-fixture",
+    )
+    try:
+        return_code = process.wait(timeout=6)
+        assert return_code != 0
+    finally:
+        _stop(process)
+
+
 @pytest.mark.integration
 def test_frozen_backend_is_deterministic_after_seed_injection(tmp_path):
     agentbench_root = Path("/Users/qingle/Code/SAST/AgentBench")
@@ -107,6 +166,13 @@ def test_frozen_backend_is_deterministic_after_seed_injection(tmp_path):
     assert first.ghosts_score == second.ghosts_score
     assert first.rollman_decisions == second.rollman_decisions
     assert len(first.rollman_decisions) > 1
+    trace = [
+        json.loads(line)
+        for line in first.trace_path.read_text(encoding="utf-8").splitlines()
+    ]
+    limits = [item for item in trace if item["type"] == "round_config"]
+    assert limits[0] == {"type": "round_config", "time": 20.0, "length": 1024}
+    assert any(item["time"] == 1.0 for item in limits[1:])
 
 
 @pytest.mark.integration
@@ -150,7 +216,14 @@ def test_from_scratch_candidate_runner_completes_frozen_game(tmp_path):
                 str(candidate_workspace),
                 "--sdk-root",
                 str(sdk_root),
-            )
+            ),
+            untrusted=True,
+            read_roots=(
+                framework_root / "src",
+                candidate_workspace,
+                sdk_root,
+            ),
+            denied_paths=(framework_root / ".env",),
         ),
         ghosts=_python_fixture("fake_ghosts.py"),
         seed=99,

@@ -1,4 +1,5 @@
 import json
+import dataclasses
 from pathlib import Path
 
 
@@ -87,3 +88,27 @@ def test_real_run_fails_before_state_change_when_api_key_is_missing(
     assert code == 2
     assert not (tmp_path / "run").exists()
 
+
+def test_dotenv_credential_is_scoped_to_provider_environment(
+    tmp_path, monkeypatch
+):
+    from agentbench_frame.hl.cli import _provider_environment
+    from agentbench_frame.hl.local_config import LocalHLConfig
+
+    monkeypatch.delenv("AGENTBENCH_API_KEY", raising=False)
+    source = tmp_path / "configs" / "hl" / "29_rollman.yaml"
+    source.parent.mkdir(parents=True)
+    (tmp_path / ".env").write_text(
+        "AGENTBENCH_API_KEY=test-runtime-value\n",
+        encoding="utf-8",
+    )
+    config = dataclasses.replace(
+        LocalHLConfig.load(CONFIG),
+        source_path=source,
+    )
+
+    environment = _provider_environment(config)
+
+    assert environment is not None
+    assert environment["AGENTBENCH_API_KEY"] == "test-runtime-value"
+    assert "AGENTBENCH_API_KEY" not in __import__("os").environ

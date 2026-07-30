@@ -156,6 +156,7 @@ def _seed_is_applied(main_path: Path) -> bool:
 def audit_sources(
     agentbench_root: str | Path,
     official_logic_root: str | Path,
+    pacman_sdk_root: str | Path | None = None,
 ) -> dict[str, Any]:
     agentbench = Path(agentbench_root)
     official = Path(official_logic_root)
@@ -171,11 +172,66 @@ def audit_sources(
             "match": sha256_file(frozen) == sha256_file(upstream),
         }
     seed_applied = _seed_is_applied(backend / "main.py")
+    frozen_hashes = {
+        relative: {
+            "actual": sha256_file(backend / relative),
+            "expected": expected,
+            "match": sha256_file(backend / relative) == expected,
+        }
+        for relative, expected in manifest["frozen_backend_sha256"].items()
+    }
+    sdk_hashes: dict[str, dict[str, Any]] = {}
+    if pacman_sdk_root is not None:
+        sdk = Path(pacman_sdk_root)
+        for relative in manifest["core_files"]:
+            expected = manifest["frozen_backend_sha256"][relative]
+            actual = sha256_file(sdk / relative)
+            sdk_hashes[relative] = {
+                "actual": actual,
+                "expected": expected,
+                "match": actual == expected,
+            }
+    commits = {
+        "frozen_backend": {
+            "actual": _git_head(agentbench),
+            "expected": manifest["frozen_backend_commit"],
+        },
+        "official_logic": {
+            "actual": _git_head(official),
+            "expected": manifest["official_logic_commit"],
+        },
+        "official_core": {
+            "actual": _git_head(official / "core"),
+            "expected": manifest["official_core_commit"],
+        },
+    }
+    if pacman_sdk_root is not None:
+        commits["pacman_sdk"] = {
+            "actual": _git_head(Path(pacman_sdk_root)),
+            "expected": manifest["pacman_sdk_commit"],
+        }
+    for value in commits.values():
+        value["match"] = value["actual"] == value["expected"]
+    valid = (
+        all(value["match"] for value in comparisons.values())
+        and all(value["match"] for value in frozen_hashes.values())
+        and all(value["match"] for value in sdk_hashes.values())
+        and all(value["match"] for value in commits.values())
+    )
     return {
         "schema_version": "1.0",
-        "frozen_backend_commit": _git_head(agentbench),
-        "official_logic_commit": _git_head(official),
-        "official_core_commit": _git_head(official / "core"),
+        "valid": valid,
+        "frozen_backend_commit": commits["frozen_backend"]["actual"],
+        "official_logic_commit": commits["official_logic"]["actual"],
+        "official_core_commit": commits["official_core"]["actual"],
+        "pacman_sdk_commit": (
+            None
+            if "pacman_sdk" not in commits
+            else commits["pacman_sdk"]["actual"]
+        ),
+        "commits": commits,
+        "frozen_backend_files": frozen_hashes,
+        "pacman_sdk_files": sdk_hashes,
         "core_files": comparisons,
         "all_core_files_match": all(value["match"] for value in comparisons.values()),
         "random_seed_is_applied": seed_applied,

@@ -114,3 +114,51 @@ def test_lineage_can_be_rebuilt_from_finalized_events():
     assert decision.rollback is True
     assert decision.from_version_id == "v2"
     assert decision.to_version_id == "v0"
+
+
+def test_finalized_rollback_event_restores_target_as_durable_lineage_head():
+    from agentbench_frame.hl.lineage import LineageManager
+
+    events = [
+        {
+            "event_type": "version_created",
+            "version_id": "v0",
+            "parent_version_id": None,
+            "evaluation_status": "complete",
+            "benchmark_score": 0.8,
+        },
+        {"event_type": "candidate_selected", "version_id": "v0"},
+        {
+            "event_type": "version_created",
+            "version_id": "v1",
+            "parent_version_id": "v0",
+            "evaluation_status": "complete",
+            "benchmark_score": 0.6,
+        },
+        {"event_type": "candidate_selected", "version_id": "v1"},
+        {
+            "event_type": "version_created",
+            "version_id": "v2",
+            "parent_version_id": "v1",
+            "evaluation_status": "complete",
+            "benchmark_score": 0.61,
+        },
+        {"event_type": "candidate_selected", "version_id": "v2"},
+        {
+            "event_type": "rollback_selected",
+            "from_version_id": "v2",
+            "to_version_id": "v0",
+            "reason": "sustained_degradation",
+        },
+    ]
+
+    lineage = LineageManager.from_events(
+        events,
+        rollback_patience=2,
+        rollback_margin=0.05,
+    )
+
+    assert lineage.lineage_head_version_id == "v0"
+    decision = lineage.select_next_parent()
+    assert decision.rollback is False
+    assert decision.to_version_id == "v0"

@@ -52,6 +52,68 @@ def test_curve_rows_keep_performance_information_and_budget_separate():
     assert rows[2]["cumulative_total_tokens"] == 230
 
 
+def test_k_iteration_budget_includes_rejected_siblings_after_selected_branch_act():
+    from agentbench_frame.hl.report import derive_curve_rows
+
+    events = [
+        {
+            "event_type": "version_created",
+            "version_id": "v0",
+            "act_id": "initial",
+            "evaluation_status": "complete",
+            "benchmark_score": 0.2,
+        },
+        {
+            "event_type": "candidate_selected",
+            "iteration_id": "iter-000000",
+            "version_id": "v0",
+            "act_id": "initial",
+        },
+        {
+            "event_type": "act_completed",
+            "act_id": "act-b0",
+            "iteration_id": "iter-1",
+            "total_tokens": 100,
+            "prompt_tokens": 80,
+            "completion_tokens": 20,
+        },
+        {
+            "event_type": "version_created",
+            "version_id": "v1",
+            "act_id": "act-b0",
+            "evaluation_status": "complete",
+            "benchmark_score": 0.8,
+        },
+        {
+            "event_type": "act_completed",
+            "act_id": "act-b1",
+            "iteration_id": "iter-1",
+            "total_tokens": 70,
+            "prompt_tokens": 55,
+            "completion_tokens": 15,
+        },
+        {
+            "event_type": "version_created",
+            "version_id": "v2",
+            "act_id": "act-b1",
+            "evaluation_status": "complete",
+            "benchmark_score": 0.3,
+        },
+        {
+            "event_type": "candidate_selected",
+            "iteration_id": "iter-1",
+            "version_id": "v1",
+            "act_id": "act-b0",
+        },
+    ]
+
+    rows = derive_curve_rows(events)
+
+    assert rows[1]["version_id"] == "v1"
+    assert rows[1]["coding_agent_act"] == 2
+    assert rows[1]["cumulative_total_tokens"] == 170
+
+
 def test_report_writes_csv_and_six_panel_raster_and_vector_plots(tmp_path):
     from agentbench_frame.hl.report import write_hl_report
 

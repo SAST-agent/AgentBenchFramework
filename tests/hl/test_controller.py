@@ -276,3 +276,170 @@ def test_resume_restores_act_counter_and_parent_session(tmp_path):
     assert second_result.parent_version_id == first_result.selected.version.version_id
     assert second_result.selected.act_id.startswith("act-000002")
     assert provider.calls[0]["session_id"] == "thread-1"
+
+
+def test_resume_rebuilds_elo_from_finalized_match_events(tmp_path):
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+    from agentbench_frame.hl.events import HLEventWriter, read_events
+    from agentbench_frame.hl.lineage import LineageManager
+
+    class WinningEvaluator:
+        def evaluate(self, version):
+            return CandidateEvaluation(
+                status="complete",
+                score=1.0,
+                matches=(
+                    {
+                        "phase": "learning",
+                        "status": "complete",
+                        "opponent": "rank01",
+                        "seed": 7,
+                        "result": "win",
+                    },
+                ),
+            )
+
+    first = _controller(
+        tmp_path,
+        FakeProvider(["VALUE = 1\n"]),
+        WinningEvaluator(),
+    )
+    first.initialize()
+    first_result = first.run_act()
+    history = read_events(tmp_path / "events.jsonl")
+
+    from agentbench_frame.hl.codebase import VersionStore
+    from agentbench_frame.hl.config import IterationConfig, RollbackConfig
+    from agentbench_frame.hl.controller import HLController
+
+    resumed = HLController(
+        workspace=first.workspace,
+        run_root=tmp_path,
+        provider=FakeProvider(["VALUE = 2\n"]),
+        evaluator=WinningEvaluator(),
+        version_store=VersionStore(first.workspace, tmp_path / "versions"),
+        lineage=LineageManager.from_events(history),
+        events=HLEventWriter(tmp_path / "events.jsonl", run_id="run-test"),
+        iteration=IterationConfig(),
+        rollback=RollbackConfig(),
+        prompt_factory=lambda **values: values["act_id"],
+    )
+    resumed.resume(history)
+    resumed.record_matches(
+        version=first_result.selected.version,
+        act_id=first_result.selected.act_id,
+        phase="certification",
+        matches=(
+            {
+                "status": "complete",
+                "opponent": "rank01",
+                "seed": 8,
+                "result": "win",
+            },
+        ),
+    )
+
+    elo_events = [
+        event
+        for event in read_events(tmp_path / "events.jsonl")
+        if event["event_type"] == "elo_updated"
+    ]
+    assert elo_events[-1]["rating_before"] == elo_events[-2]["rating"]
+    assert elo_events[-1]["rating"] > elo_events[-2]["rating"]
+
+
+def test_k_sibling_elo_is_version_local_and_branch_order_independent(tmp_path):
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+    from agentbench_frame.hl.events import read_events
+
+    class MatchEvaluator:
+        def evaluate(self, version):
+            return CandidateEvaluation(
+                status="complete",
+                score=1.0,
+                matches=(
+                    {
+                        "status": "complete",
+                        "opponent": "rank01",
+                        "seed": 7,
+                        "result": "win",
+                    },
+                ),
+            )
+
+    controller = _controller(
+        tmp_path,
+        FakeProvider(["VALUE = 1\n", "VALUE = 2\n"]),
+        MatchEvaluator(),
+        k=2,
+    )
+    controller.initialize()
+    controller.run_act()
+
+    elo_events = [
+        event
+        for event in read_events(tmp_path / "events.jsonl")
+        if event["event_type"] == "elo_updated"
+    ]
+    assert len(elo_events) == 2
+    assert {event["rating_before"] for event in elo_events} == {1500.0}
+    assert len({event["rating"] for event in elo_events}) == 1
+    assert len({event["candidate"] for event in elo_events}) == 2
+
+
+def test_external_certification_matches_enter_match_and_elo_event_stream(tmp_path):
+    from agentbench_frame.hl.events import read_events
+
+    controller = _controller(
+        tmp_path,
+        FakeProvider([]),
+        FakeEvaluator([0.5]),
+    )
+    version = controller.initialize()
+    controller.record_matches(
+        version=version,
+        act_id="initial",
+        phase="certification",
+        matches=(
+            {
+                "status": "complete",
+                "opponent": "rank16",
+                "seed": 11,
+                "result": "win",
+                "rollman_score": 9,
+                "ghosts_score": 1,
+            },
+        ),
+    )
+    controller.record_matches(
+        version=version,
+        act_id="initial",
+        phase="certification",
+        matches=(
+            {
+                "status": "complete",
+                "opponent": "rank16",
+                "seed": 11,
+                "result": "win",
+            },
+        ),
+    )
+
+    events = read_events(tmp_path / "events.jsonl")
+    certification_matches = [
+        event
+        for event in events
+        if event["event_type"] == "match_completed"
+        and event.get("phase") == "certification"
+    ]
+    certification_elo = [
+        event
+        for event in events
+        if event["event_type"] == "elo_updated"
+        and event.get("phase") == "certification"
+    ]
+    assert len(certification_matches) == 1
+    assert len(certification_elo) == 1
+    assert certification_matches[0]["match_id"].endswith(
+        "-certification-0000"
+    )

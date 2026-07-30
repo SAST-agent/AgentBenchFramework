@@ -34,4 +34,5 @@ def test_protocol_fails_closed_on_truncated_or_oversized_frames():
         decode_ai_frame(io.BytesIO(struct.pack(">I", 10) + b"short"))
     with pytest.raises(ProtocolError, match="unreasonable"):
         decode_ai_frame(io.BytesIO(struct.pack(">I", 100)), max_frame_size=20)
-
+    with pytest.raises(ProtocolError, match="unreasonable"):
+        decode_ai_frame(io.BytesIO(struct.pack(">I", 1025)))

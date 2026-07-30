@@ -54,19 +54,24 @@ def probe_states(
     sdk = Path(sdk_root).resolve()
     sys.path.insert(0, str(sdk))
     sys.path.insert(0, str(candidate))
+    from core.GymEnvironment import PacmanEnv
     from core.gamedata import GameState
 
     policy = _load_policy(candidate)
     decisions = []
     for index, state in enumerate(states):
+        environment = PacmanEnv()
+        environment.ai_reset(dict(state))
         score = state["score"]
         game_state = GameState(
-            space_info={},
+            space_info=environment.game_state().space_info,
             level=int(state["level"]),
             round=int(state["round"]),
             board_size=int(state["board_size"]),
             board=np.asarray(state["board"], dtype=int),
-            pacman_skill_status=[int(value) for value in state["pacman_skill_status"]],
+            pacman_skill_status=[
+                int(value) for value in state["pacman_skill_status"]
+            ],
             pacman_pos=np.asarray(state["pacman_coord"], dtype=int),
             ghosts_pos=[
                 np.asarray(value, dtype=int) for value in state["ghosts_coord"]
@@ -167,4 +172,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

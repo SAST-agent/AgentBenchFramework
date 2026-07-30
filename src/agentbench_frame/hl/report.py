@@ -46,7 +46,6 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
     policy_kl: dict[str, float | None] = {}
     occupancy: dict[str, float | None] = {}
     elo: dict[str, float | None] = {}
-    budget_at_act: dict[str, dict[str, int]] = {}
     prompt_tokens = completion_tokens = total_tokens = act_count = 0
 
     for event in records:
@@ -56,16 +55,20 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
             prompt_tokens += int(event.get("prompt_tokens") or 0)
             completion_tokens += int(event.get("completion_tokens") or 0)
             total_tokens += int(event.get("total_tokens") or 0)
-            budget_at_act[str(event.get("act_id"))] = {
-                "coding_agent_act": act_count,
-                "prompt": prompt_tokens,
-                "completion": completion_tokens,
-                "total": total_tokens,
-            }
         elif event_type == "version_created":
             versions[str(event["version_id"])] = event
         elif event_type == "candidate_selected":
-            selected.append(event)
+            selected.append(
+                {
+                    **event,
+                    "_budget": {
+                        "coding_agent_act": act_count,
+                        "prompt": prompt_tokens,
+                        "completion": completion_tokens,
+                        "total": total_tokens,
+                    },
+                }
+            )
         elif event_type == "evaluation_completed":
             evaluations[str(event["version_id"])] = event
         elif event_type == "policy_kl_measured":
@@ -90,13 +93,11 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
 
     rows: list[dict[str, Any]] = []
     best = None
-    last_budget = {"coding_agent_act": 0, "prompt": 0, "completion": 0, "total": 0}
     for iteration, selection in enumerate(selected):
         version_id = str(selection.get("version_id"))
         version = versions.get(version_id, {})
         act_id = str(selection.get("act_id", version.get("act_id", "")))
-        if act_id in budget_at_act:
-            last_budget = budget_at_act[act_id]
+        budget = selection["_budget"]
         score_value = version.get("benchmark_score")
         score = None if score_value is None else float(score_value)
         if score is not None:
@@ -127,7 +128,7 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
             {
                 "iteration": iteration,
                 "iteration_id": selection.get("iteration_id"),
-                "coding_agent_act": last_budget["coding_agent_act"],
+                "coding_agent_act": budget["coding_agent_act"],
                 "act_id": act_id,
                 "version_id": version_id,
                 "evaluation_status": version.get("evaluation_status"),
@@ -143,9 +144,9 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
                 "rollman_elo": elo.get(version_id),
                 "mean_local_policy_kl": policy_kl.get(version_id),
                 "occupancy_shift": occupancy.get(version_id),
-                "cumulative_prompt_tokens": last_budget["prompt"],
-                "cumulative_completion_tokens": last_budget["completion"],
-                "cumulative_total_tokens": last_budget["total"],
+                "cumulative_prompt_tokens": budget["prompt"],
+                "cumulative_completion_tokens": budget["completion"],
+                "cumulative_total_tokens": budget["total"],
             }
         )
     return rows

@@ -62,3 +62,25 @@ def test_fixed_reference_probe_turns_deterministic_actions_into_kl(tmp_path):
     assert metrics["local_policy_kl_trace"][0] == 0
     assert metrics["local_policy_kl_trace"][1] > 0
 
+
+def test_probe_reconstructs_official_space_info(tmp_path):
+    sdk = Path("/Users/qingle/Code/SAST/PacmanSDK-python")
+    if not sdk.is_dir():
+        return
+    policy = tmp_path / "policy"
+    policy.mkdir()
+    (policy / "ai.py").write_text(
+        "def ai_func(s):\n"
+        "    keys = {'observation_space', 'pacman_action_space', 'ghost_action_space'}\n"
+        "    return 4 if keys <= set(s.space_info) else 0\n",
+        encoding="utf-8",
+    )
+
+    decisions = run_probe_episode(
+        workspace=policy,
+        sdk_root=sdk,
+        states=[_state(0)],
+        artifact_path=tmp_path / "probe.json",
+    )
+
+    assert decisions[0]["action"] == 4

@@ -13,10 +13,16 @@ class HLEventTests(unittest.TestCase):
             with TemporaryDirectory() as directory:
                 path = f"{directory}/events.jsonl"
                 writer = HLEventWriter(path, run_id="run-1")
-                first = writer.write("run_started", game="29_rollman")
+                first = writer.write(
+                    "run_started",
+                    game="29_rollman",
+                    iteration_config={},
+                )
                 second = writer.write(
                     "act_completed",
                     act_id="act-0001",
+                    iteration_id="iter-0001",
+                    status="completed",
                     prompt_tokens=123,
                     completion_tokens=None,
                 )
@@ -51,7 +57,11 @@ class HLEventTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             path = f"{directory}/events.jsonl"
             writer = HLEventWriter(path, run_id="run-1")
-            writer.write("run_started", event_id="fixed-id")
+            writer.write(
+                "run_started",
+                event_id="fixed-id",
+                iteration_config={},
+            )
             with self.assertRaises(ValueError):
                 writer.write("act_completed", event_id="fixed-id")
             self.assertEqual(len(read_events(path)), 1)
@@ -77,6 +87,31 @@ class HLEventTests(unittest.TestCase):
 
             self.assertEqual(records, [record])
             self.assertEqual(warnings, ["unknown event type: future_event"])
+
+    def test_reader_rejects_wrong_schema_and_duplicate_ids(self):
+        from agentbench_frame.hl.events import read_events
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as directory:
+            path = f"{directory}/events.jsonl"
+            record = {
+                "schema_version": "0.9",
+                "event_id": "same",
+                "event_type": "future_event",
+                "run_id": "run-1",
+                "created_at": "2026-07-31T00:00:00Z",
+            }
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(record) + "\n")
+            with self.assertRaisesRegex(ValueError, "schema_version"):
+                read_events(path)
+
+            record["schema_version"] = "1.0"
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(record) + "\n")
+                handle.write(json.dumps(record) + "\n")
+            with self.assertRaisesRegex(ValueError, "duplicate event_id"):
+                read_events(path)
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ from typing import BinaryIO
 
 
 DEFAULT_MAX_FRAME_SIZE = 16 * 1024 * 1024
+DEFAULT_MAX_AI_FRAME_SIZE = 1024
 
 
 class ProtocolError(RuntimeError):
@@ -63,7 +64,7 @@ def decode_ai_frame(
     *,
     timeout: float | None = None,
     label: str = "AI",
-    max_frame_size: int = DEFAULT_MAX_FRAME_SIZE,
+    max_frame_size: int = DEFAULT_MAX_AI_FRAME_SIZE,
 ) -> bytes:
     size = struct.unpack(
         ">I", _read_exact(stream, 4, timeout=timeout, label=label)
@@ -94,4 +95,3 @@ def decode_logic_frame(
 def write_logic_input(stream: BinaryIO, payload: bytes) -> None:
     stream.write(encode_logic_input(payload))
     stream.flush()
-

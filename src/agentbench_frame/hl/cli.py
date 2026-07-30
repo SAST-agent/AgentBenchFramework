@@ -39,6 +39,13 @@ def _validate(config: LocalHLConfig) -> dict[str, Any]:
         raise FileNotFoundError(config.paths.official_logic_root)
     if not config.paths.pacman_sdk_root.is_dir():
         raise FileNotFoundError(config.paths.pacman_sdk_root)
+    source_audit = audit_sources(
+        config.paths.agentbench_root,
+        config.paths.official_logic_root,
+        config.paths.pacman_sdk_root,
+    )
+    if not source_audit["valid"]:
+        raise ValueError("Rollman frozen source audit failed")
     return {
         "valid": True,
         "game": config.run.game,
@@ -98,15 +105,17 @@ def _dry_run(
     }
 
 
-def _credential_available(config: LocalHLConfig) -> bool:
-    if os.environ.get(config.run.provider.env_key):
-        return True
+def _provider_environment(config: LocalHLConfig) -> dict[str, str] | None:
+    key = os.environ.get(config.run.provider.env_key)
     dotenv = config.source_path.parents[2] / ".env"
-    if dotenv.is_file():
-        from dotenv import load_dotenv
+    if not key and dotenv.is_file():
+        from dotenv import dotenv_values
 
-        load_dotenv(dotenv_path=dotenv, override=False)
-    return bool(os.environ.get(config.run.provider.env_key))
+        value = dotenv_values(dotenv).get(config.run.provider.env_key)
+        key = None if value is None else str(value)
+    if not key:
+        return None
+    return {**os.environ, config.run.provider.env_key: key}
 
 
 def _default_run_dir(config: LocalHLConfig) -> Path:
@@ -124,8 +133,9 @@ def _cmd_audit(args: argparse.Namespace) -> int:
     result = audit_sources(
         config.paths.agentbench_root,
         config.paths.official_logic_root,
+        config.paths.pacman_sdk_root,
     )
-    if not result["all_core_files_match"]:
+    if not result["valid"]:
         _json(result)
         return 2
     _json(result)
@@ -143,7 +153,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if args.dry_run:
         _json(_dry_run(config, run_dir=run_dir, workspace=workspace))
         return 0
-    if not _credential_available(config):
+    provider_environment = _provider_environment(config)
+    if provider_environment is None:
         print(
             f"missing provider credential: {config.run.provider.env_key}",
             file=sys.stderr,
@@ -155,12 +166,14 @@ def _cmd_run(args: argparse.Namespace) -> int:
         workspace=workspace,
         acts=args.acts,
         resume=False,
+        provider_environment=provider_environment,
     )
 
 
 def _cmd_resume(args: argparse.Namespace) -> int:
     config = _load(args.config)
-    if not _credential_available(config):
+    provider_environment = _provider_environment(config)
+    if provider_environment is None:
         print(
             f"missing provider credential: {config.run.provider.env_key}",
             file=sys.stderr,
@@ -176,6 +189,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
         ),
         acts=args.acts,
         resume=True,
+        provider_environment=provider_environment,
     )
 
 
@@ -227,6 +241,7 @@ def _run_real(
     workspace: Path,
     acts: int | None,
     resume: bool,
+    provider_environment: dict[str, str],
 ) -> int:
     # Imported lazily so validate and dry-run never initialize model/runtime state.
     from agentbench_frame.games.rollman.candidate_runner import __file__ as candidate_runner
@@ -286,6 +301,7 @@ def _run_real(
         source_audit = audit_sources(
             config.paths.agentbench_root,
             config.paths.official_logic_root,
+            config.paths.pacman_sdk_root,
         )
         (run_dir / "source-audit.json").write_text(
             json.dumps(
@@ -331,6 +347,13 @@ def _run_real(
             str(config.paths.pacman_sdk_root),
         ),
         cwd=workspace,
+        untrusted=True,
+        read_roots=(
+            workspace,
+            config.paths.pacman_sdk_root,
+            Path(candidate_runner).resolve().parents[3],
+        ),
+        denied_paths=(config.source_path.parents[2] / ".env",),
     )
     evaluator = RollmanEvaluator(
         logic=logic,
@@ -361,6 +384,7 @@ def _run_real(
     provider = CodexSessionProvider(
         config.run.provider,
         run_root=run_dir,
+        environ=provider_environment,
     )
     events_path = run_dir / "events.jsonl"
     historical = read_events(events_path)
@@ -466,12 +490,92 @@ def _run_real(
         assert evaluator.last_evaluation is not None
         evaluations_by_version[origin.version_id] = evaluator.last_evaluation
         measurement_runner.freeze_reference(evaluator.last_evaluation)
+    completed_certifications = {
+        str(event["version_id"])
+        for event in historical
+        if event.get("event_type") == "certification_completed"
+        and event.get("status") == "complete"
+    }
+    certified = any(
+        event.get("event_type") == "run_completed"
+        and event.get("reason") == "human_pool_target_reached"
+        for event in historical
+    )
+    certification_pool_prepared = False
+
+    def certify_eligible_champion() -> bool:
+        nonlocal certification_pool_prepared
+        champion_id = controller.lineage.champion_version_id
+        if champion_id is None or champion_id in completed_certifications:
+            return False
+        evaluation = evaluations_by_version.get(champion_id)
+        if (
+            evaluation is None
+            or evaluation.status != "complete"
+            or evaluation.score is None
+            or evaluation.score < config.run.evaluation.required_win_rate
+        ):
+            return False
+        if not certification_pool_prepared:
+            evaluator.human_pool = prepare_human_pool(
+                pool,
+                build_root=config.paths.opponent_build_root,
+            )
+            certification_pool_prepared = True
+        champion = version_store.get(champion_id)
+        certification = evaluator.certify(champion)
+        controller.record_matches(
+            version=champion,
+            act_id=champion.act_id,
+            phase="certification",
+            matches=certification.matches,
+        )
+        per_opponent: dict[str, list[str]] = {}
+        for match in certification.matches:
+            if match.get("status") == "complete":
+                per_opponent.setdefault(str(match["opponent"]), []).append(
+                    str(match["result"])
+                )
+        passing = 0
+        for results in per_opponent.values():
+            rate = (
+                sum(result == "win" for result in results)
+                + 0.5 * sum(result == "draw" for result in results)
+            ) / len(results)
+            passing += rate >= config.run.evaluation.required_win_rate
+        writer.write(
+            "certification_completed",
+            version_id=champion.version_id,
+            act_id=champion.act_id,
+            status=certification.status,
+            score=certification.score,
+            passing_human_opponents=passing,
+            required_human_opponents=(
+                config.run.evaluation.required_human_opponents
+            ),
+            matches=list(certification.matches),
+        )
+        if certification.status == "complete":
+            completed_certifications.add(champion.version_id)
+        if (
+            certification.status == "complete"
+            and passing >= config.run.evaluation.required_human_opponents
+        ):
+            writer.write(
+                "run_completed",
+                reason="human_pool_target_reached",
+                version_id=champion.version_id,
+                passing_human_opponents=passing,
+            )
+            return True
+        return False
+
+    if not certified:
+        certified = certify_eligible_champion()
     completed_here = 0
-    certified = False
-    while acts is None or completed_here < acts:
+    while not certified and (acts is None or completed_here < acts):
         if controller.reached_iteration_limit():
             break
-        champion_before = controller.lineage.champion_version_id
         iteration_result = controller.run_act()
         completed_here += 1
         parent_evaluation = evaluations_by_version.get(
@@ -509,58 +613,7 @@ def _run_real(
                 parent_version_id=parent_version.version_id,
                 occupancy_shift=metrics["occupancy_shift"],
             )
-        champion_after = controller.lineage.champion_version_id
-        selected_evaluation = iteration_result.selected.evaluation
-        if (
-            champion_after is not None
-            and champion_after != champion_before
-            and selected_evaluation.status == "complete"
-            and selected_evaluation.score is not None
-            and selected_evaluation.score >= 0.8
-        ):
-            evaluator.human_pool = prepare_human_pool(
-                pool,
-                build_root=config.paths.opponent_build_root,
-            )
-            certification = evaluator.certify(iteration_result.selected.version)
-            per_opponent: dict[str, list[str]] = {}
-            for match in certification.matches:
-                if match.get("status") == "complete":
-                    per_opponent.setdefault(
-                        str(match["opponent"]), []
-                    ).append(str(match["result"]))
-            passing = 0
-            for results in per_opponent.values():
-                rate = (
-                    sum(result == "win" for result in results)
-                    + 0.5 * sum(result == "draw" for result in results)
-                ) / len(results)
-                passing += rate >= config.run.evaluation.required_win_rate
-            writer.write(
-                "certification_completed",
-                version_id=iteration_result.selected.version.version_id,
-                act_id=iteration_result.selected.act_id,
-                status=certification.status,
-                score=certification.score,
-                passing_human_opponents=passing,
-                required_human_opponents=(
-                    config.run.evaluation.required_human_opponents
-                ),
-                matches=list(certification.matches),
-            )
-            if (
-                certification.status == "complete"
-                and passing
-                >= config.run.evaluation.required_human_opponents
-            ):
-                certified = True
-                writer.write(
-                    "run_completed",
-                    reason="human_pool_target_reached",
-                    version_id=iteration_result.selected.version.version_id,
-                    passing_human_opponents=passing,
-                )
-                break
+        certified = certify_eligible_champion()
     _json(
         {
             "run_dir": str(run_dir),

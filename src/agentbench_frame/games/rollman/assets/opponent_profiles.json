@@ -1,22 +1,24 @@
 {
   "rank01": {
+    "archive_sha256": "8956ed456653cb5b53c41bb3b495211e588391977771335d2cf1a9484b3049d7",
     "kind": "cpp",
     "entrypoint": "main_ghost.cpp",
     "compiler_flags": ["-Wno-c++11-narrowing"]
   },
-  "rank02": {"kind": "python", "entrypoint": "main/main.py"},
-  "rank03": {"kind": "python", "entrypoint": "GhostsSDK-python/main.py"},
-  "rank04": {"kind": "python", "entrypoint": "TinyGhost/main.py"},
-  "rank05": {"kind": "python", "entrypoint": "GhostsSDK-python/main.py"},
-  "rank06": {"kind": "python", "entrypoint": "main.py"},
-  "rank07": {"kind": "python", "entrypoint": "GhostsSDK-python/main.py"},
-  "rank08": {"kind": "python", "entrypoint": "GhostsSDK-python/main.py"},
-  "rank09": {"kind": "python", "entrypoint": "GhostsSDK-python/main.py"},
-  "rank10": {"kind": "python", "entrypoint": "Rollman/main.py"},
-  "rank11": {"kind": "python", "entrypoint": "Ghost/GhostsSDK-python/main.py"},
-  "rank12": {"kind": "python", "entrypoint": "GGbomb/main.py"},
-  "rank13": {"kind": "python", "entrypoint": "GhostsSDK-python-main/GhostsSDK-python-main/main.py"},
+  "rank02": {"archive_sha256": "b54527be8c79dcec9705864a9bce1e17b933cd7f40f4a4ed92fb660243b9fae9", "kind": "python", "entrypoint": "main/main.py"},
+  "rank03": {"archive_sha256": "a9b40323c0a25dbcbbf53d98f686f762f5bd3fecc44b37468658101cda5ef67e", "kind": "python", "entrypoint": "GhostsSDK-python/main.py"},
+  "rank04": {"archive_sha256": "35a79d1517526f719cc8325b39bbb6f83e7c9d780a118e0aa48aae1b56020103", "kind": "python", "entrypoint": "TinyGhost/main.py"},
+  "rank05": {"archive_sha256": "cf96977c2207f5ff34b67d809548c5c79602f34623a2628ae348d588237e8e4f", "kind": "python", "entrypoint": "GhostsSDK-python/main.py"},
+  "rank06": {"archive_sha256": "dba0ca7d1c24ebe5fdedd07543911c93f7589b5e1142bb45c31bccc9a5792b52", "kind": "python", "entrypoint": "main.py"},
+  "rank07": {"archive_sha256": "aa1eca8dae2ad086d1a62bcae83c26e827ab33a318f273a1b2974d648e23b96d", "kind": "python", "entrypoint": "GhostsSDK-python/main.py"},
+  "rank08": {"archive_sha256": "aa3086071df4847f1db66a347959078c8b2c349e2cef367cd3e65d9a08283917", "kind": "python", "entrypoint": "GhostsSDK-python/main.py"},
+  "rank09": {"archive_sha256": "a96e5040163b92034fe9ae25c4bf5dc1f77cef2ef4f1e1350003a1940e5e9211", "kind": "python", "entrypoint": "GhostsSDK-python/main.py"},
+  "rank10": {"archive_sha256": "8f0d33db3d9b37e84f1bcfda46a6633c66262dcf7620e9ca8907f3d995d8e4a1", "kind": "python", "entrypoint": "Rollman/main.py"},
+  "rank11": {"archive_sha256": "3020bf3044fce30621a74f4d45fe68b9b1e76e60f0f728003a8885aae889b2fd", "kind": "python", "entrypoint": "Ghost/GhostsSDK-python/main.py"},
+  "rank12": {"archive_sha256": "5c0aa6eb668e334fa60e39542f590895787b165221500223a04e0dfdea9a7e66", "kind": "python", "entrypoint": "GGbomb/main.py"},
+  "rank13": {"archive_sha256": "3cceb7766f9e4282299e4fa25b8b58941b0dc57627e18e133c44506c55dbf7e0", "kind": "python", "entrypoint": "GhostsSDK-python-main/GhostsSDK-python-main/main.py"},
   "rank14": {
+    "archive_sha256": "d66bb68199a71bd573d60abfd86cebb982208e3af2444453e4cc1695f56df54b",
     "kind": "cargo",
     "entrypoint": "Cargo.toml",
     "binary": "main",
@@ -27,6 +29,6 @@
       "RUSTFLAGS": "-A dangerous_implicit_autorefs"
     }
   },
-  "rank15": {"kind": "python", "entrypoint": "roll-man-ghost/main.py"},
-  "rank16": {"kind": "python", "entrypoint": "GhostsSDK-python/main.py"}
+  "rank15": {"archive_sha256": "11e92e425d585db40c48e874459fbf5bb9dc88c5f9ea2845ccbce0f66ab30240", "kind": "python", "entrypoint": "roll-man-ghost/main.py"},
+  "rank16": {"archive_sha256": "3714e13fc19042b0dfa793b71da0a4a0c5488cee695efe202f6b4516e8a7dd34", "kind": "python", "entrypoint": "GhostsSDK-python/main.py"}
 }
