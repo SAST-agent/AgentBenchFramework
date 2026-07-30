@@ -407,6 +407,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         client=build_client(entry),
         system_prompt=_system_prompt(),
         max_turns=args.max_turns,
+        timeout=args.claude_timeout,
     )
     eval_factory = _evaluator_factory(
         logic_command, opponents, filler,

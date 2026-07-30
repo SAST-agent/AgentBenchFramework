@@ -359,9 +359,13 @@ class ApiCodingRunner:
         started = _time.monotonic()
         try:
             for _ in range(self._max_turns):
+                remaining = self._timeout - (_time.monotonic() - started)
+                if remaining <= 0:
+                    failure_reason = "timeout"
+                    break
                 resp = self._client.complete(
                     system=self._system, messages=messages,
-                    tools=SHARED_TOOLS, max_tokens=self._max_tokens)
+                    tools=SHARED_TOOLS, max_tokens=self._max_tokens, timeout=remaining)
                 u = resp.usage
                 prompt_tok += u.prompt_tokens or 0
                 completion_tok += u.completion_tokens or 0

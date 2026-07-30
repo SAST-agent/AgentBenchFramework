@@ -11,9 +11,11 @@ class ScriptedClient:
     def __init__(self, responses):
         self._responses = list(responses)
         self.calls = 0
+        self.last_timeout = None
 
-    def complete(self, *, system, messages, tools, max_tokens):
+    def complete(self, *, system, messages, tools, max_tokens, timeout=None):
         self.calls += 1
+        self.last_timeout = timeout
         return self._responses.pop(0)
 
 
@@ -74,7 +76,7 @@ def test_read_file_path_escape_blocked(tmp_path):
 
     class Probe:
         def __init__(self): self.calls = 0
-        def complete(self, *, system, messages, tools, max_tokens):
+        def complete(self, *, system, messages, tools, max_tokens, timeout=None):
             self.calls += 1
             # record the tool-result text the runner fed back
             for m in messages:
@@ -95,7 +97,7 @@ def test_api_error_is_visible_failure(tmp_path):
     _seed_agent(tmp_path)
 
     class Boom:
-        def complete(self, *, system, messages, tools, max_tokens):
+        def complete(self, *, system, messages, tools, max_tokens, timeout=None):
             raise RuntimeError("401 unauthorized")
 
     res = ApiCodingRunner(client=Boom(), system_prompt="S").run(
@@ -113,3 +115,34 @@ def test_no_tool_calls_clean_noop(tmp_path):
     assert res.edit_type == "noop"
     assert res.failure_reason is None              # clean no-op, not a failure
     assert (tmp_path / "agent.py").read_text() == "ORIG = 1\n"
+
+
+def test_timeout_passed_to_client(tmp_path):
+    """Test that timeout kwarg is passed to client complete() calls."""
+    _seed_agent(tmp_path)
+    client = ScriptedClient([
+        LLMResponse(text="", tool_calls=[ToolCall("read_file", {"path": "agent.py"})],
+                    usage=Usage(5, 1)),
+        LLMResponse(text="done", tool_calls=[ToolCall("write_agent_py",
+                    {"content": "EDITED = 1\n"})], usage=Usage(7, 2)),
+    ])
+    runner = ApiCodingRunner(client=client, system_prompt="S", timeout=42.0)
+    res = runner.run(workspace=tmp_path, context={"prompt": "improve it"})
+    assert res.edit_type is None
+    assert client.last_timeout is not None
+    assert client.last_timeout <= 42.0
+
+
+def test_zero_timeout_immediate_deadline(tmp_path):
+    """Test that timeout=0.0 causes immediate deadline exit."""
+    _seed_agent(tmp_path)
+    client = ScriptedClient([
+        LLMResponse(text="", tool_calls=[ToolCall("read_file", {"path": "agent.py"})],
+                    usage=Usage(1, 1))],
+    )
+    runner = ApiCodingRunner(client=client, system_prompt="S", timeout=0.0, max_turns=50)
+    res = runner.run(workspace=tmp_path, context={"prompt": "x"})
+    assert res.edit_type == "noop"
+    assert res.failure_reason == "timeout"
+    # Should exit immediately without calling the client more than once (or at all)
+    assert client.calls <= 1

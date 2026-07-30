@@ -206,3 +206,39 @@ def test_anthropic_multi_call_roundtrip():
     assert tool_result_blocks[0]["tool_use_id"] == "toolu_a1b2c3"
     assert tool_result_blocks[1]["tool_use_id"] == "toolu_d4e5f6"
 
+
+def test_openai_timeout_forwarded():
+    """Test that timeout kwarg is forwarded to OpenAI SDK create() call."""
+    resp = _openai_resp("ok")
+    fake = _FakeOpenAI(resp)
+    client = OpenAICompatClient(api_key="k", model="m", _client=fake)
+    client.complete(system="S", messages=[], tools=SHARED_TOOLS, max_tokens=100, timeout=12.5)
+    assert fake.calls[0]["timeout"] == 12.5
+
+
+def test_openai_timeout_omitted_when_none():
+    """Test that timeout is not passed to SDK when None."""
+    resp = _openai_resp("ok")
+    fake = _FakeOpenAI(resp)
+    client = OpenAICompatClient(api_key="k", model="m", _client=fake)
+    client.complete(system="S", messages=[], tools=SHARED_TOOLS, max_tokens=100, timeout=None)
+    assert "timeout" not in fake.calls[0]
+
+
+def test_anthropic_timeout_forwarded():
+    """Test that timeout kwarg is forwarded to Anthropic SDK create() call."""
+    resp = _anthropic_resp("ok")
+    fake = _FakeAnthropic(resp)
+    client = AnthropicClient(api_key="k", model="m", _client=fake)
+    client.complete(system="S", messages=[], tools=SHARED_TOOLS, max_tokens=100, timeout=12.5)
+    assert fake.calls[0]["timeout"] == 12.5
+
+
+def test_anthropic_timeout_omitted_when_none():
+    """Test that timeout is not passed to SDK when None."""
+    resp = _anthropic_resp("ok")
+    fake = _FakeAnthropic(resp)
+    client = AnthropicClient(api_key="k", model="m", _client=fake)
+    client.complete(system="S", messages=[], tools=SHARED_TOOLS, max_tokens=100, timeout=None)
+    assert "timeout" not in fake.calls[0]
+

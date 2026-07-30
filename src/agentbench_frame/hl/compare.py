@@ -59,7 +59,8 @@ def run_one_round(*, label: str, entry, experiment: str, acts: int,
         timeout=hl_args["claude_timeout"], experience=None)
     runner = ApiCodingRunner(client=build_client(entry),
                              system_prompt=hl_cli._system_prompt(),
-                             max_turns=hl_args["max_turns"])
+                             max_turns=hl_args["max_turns"],
+                             timeout=hl_args["claude_timeout"])
     eval_factory = hl_cli._evaluator_factory(
         hl_args["logic_command"], hl_args["opponents"], hl_args["filler"],
         codebase=codebase, stage_root=stage_root,

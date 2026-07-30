@@ -136,13 +136,16 @@ class OpenAICompatClient:
                 kwargs["base_url"] = base_url
             self._client = openai.OpenAI(**kwargs)
 
-    def complete(self, *, system: str, messages, tools, max_tokens: int) -> LLMResponse:
-        resp = self._client.chat.completions.create(
-            model=self.model,
-            messages=_to_openai_messages(system, messages),
-            tools=_to_openai_tools(tools),
-            max_tokens=max_tokens,
-        )
+    def complete(self, *, system: str, messages, tools, max_tokens: int, timeout: Optional[float] = None) -> LLMResponse:
+        kwargs: Dict[str, Any] = {
+            "model": self.model,
+            "messages": _to_openai_messages(system, messages),
+            "tools": _to_openai_tools(tools),
+            "max_tokens": max_tokens,
+        }
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        resp = self._client.chat.completions.create(**kwargs)
         choice = resp.choices[0]
         msg = choice.message
         tool_calls: List[ToolCall] = []
@@ -207,14 +210,17 @@ class AnthropicClient:
             import anthropic  # lazy
             self._client = anthropic.Anthropic(api_key=api_key)
 
-    def complete(self, *, system: str, messages, tools, max_tokens: int) -> LLMResponse:
-        resp = self._client.messages.create(
-            model=self.model,
-            system=system,
-            messages=_to_anthropic_messages(messages),
-            tools=tools,  # already anthropic-shaped
-            max_tokens=max_tokens,
-        )
+    def complete(self, *, system: str, messages, tools, max_tokens: int, timeout: Optional[float] = None) -> LLMResponse:
+        kwargs: Dict[str, Any] = {
+            "model": self.model,
+            "system": system,
+            "messages": _to_anthropic_messages(messages),
+            "tools": tools,  # already anthropic-shaped
+            "max_tokens": max_tokens,
+        }
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        resp = self._client.messages.create(**kwargs)
         text_parts: List[str] = []
         tool_calls: List[ToolCall] = []
         for block in resp.content:
@@ -235,7 +241,7 @@ class AnthropicClient:
 
 @runtime_checkable
 class LLMClient(Protocol):
-    def complete(self, *, system: str, messages, tools, max_tokens: int) -> LLMResponse: ...
+    def complete(self, *, system: str, messages, tools, max_tokens: int, timeout: Optional[float] = None) -> LLMResponse: ...
 
 
 def build_client(entry: ModelEntry):
