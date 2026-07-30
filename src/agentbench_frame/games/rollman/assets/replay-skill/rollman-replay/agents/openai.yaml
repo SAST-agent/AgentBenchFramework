@@ -1,0 +1,6 @@
+interface:
+  display_name: "Rollman Replay Analyst"
+  short_description: "Translate Rollman JSONL replays into decision evidence"
+  default_prompt: "Use $rollman-replay to diagnose a frozen Rollman match from its JSONL replay."
+policy:
+  allow_implicit_invocation: true
