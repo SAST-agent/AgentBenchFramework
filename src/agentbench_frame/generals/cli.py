@@ -26,6 +26,7 @@ from .pipeline_v3 import GeneralsHLRound3Pipeline
 from .pipeline_v4 import GeneralsHLRound4Pipeline
 from .pipeline_v5 import GeneralsHLRound5Pipeline
 from .pipeline_v6 import GeneralsHLRound6Pipeline
+from .policy_kl_pipeline import GeneralsPolicyKLPipeline
 
 
 def register_parser(subparsers) -> argparse.ArgumentParser:
@@ -68,6 +69,14 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
         (
             "recover-v6",
             "Recover an audited v6 prompt, provider, or evaluation failure",
+        ),
+        (
+            "measure-policy-kl",
+            "Measure exact controlled-reference v0-v6 policy KL",
+        ),
+        (
+            "recover-policy-kl",
+            "Resume an incomplete exact controlled-reference measurement",
         ),
     ):
         command = commands.add_parser(name, help=help_text)
@@ -162,6 +171,24 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
             command.add_argument("--failed-run", type=Path, required=True)
         if name == "recover-v6":
             command.add_argument("--failed-run", type=Path, required=True)
+        if name in {"measure-policy-kl", "recover-policy-kl"}:
+            command.add_argument(
+                "--reference-manifest",
+                type=Path,
+                required=True,
+            )
+            command.add_argument(
+                "--count-wall-time",
+                type=float,
+                default=3600,
+            )
+            command.add_argument(
+                "--count-max-states",
+                type=int,
+                default=5_000_000,
+            )
+        if name == "recover-policy-kl":
+            command.add_argument("--failed-run", type=Path, required=True)
     return parser
 
 
@@ -192,6 +219,38 @@ def handle(args) -> int:
                 f"{layout.engine_hash[:12]}"
             )
             return 0
+        if args.generals_command in {
+            "measure-policy-kl",
+            "recover-policy-kl",
+        }:
+            pipeline = GeneralsPolicyKLPipeline.from_paths(
+                agentbench_root=args.agentbench_root,
+                manifest_path=args.manifest,
+                reference_manifest_path=args.reference_manifest,
+                data_dir=args.data_dir,
+                count_wall_time_s=args.count_wall_time,
+                count_max_states=args.count_max_states,
+            )
+            result = (
+                pipeline.run()
+                if args.generals_command == "measure-policy-kl"
+                else pipeline.recover(args.failed_run)
+            )
+            print(
+                json.dumps(
+                    {
+                        "status": result.status,
+                        "run_dir": str(result.run_dir),
+                        "controlled_reference_policy_kl": (
+                            result.summary.get(
+                                "controlled_reference_policy_kl"
+                            )
+                        ),
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0 if result.status == "complete" else 1
         if args.generals_command == "calibrate-dev":
             calibration = load_calibration_config(
                 args.calibration_manifest

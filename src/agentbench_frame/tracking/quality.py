@@ -29,6 +29,10 @@ KNOWN_EVENT_TYPES = frozenset({
     "behavior_diagnostics",
     "prior_attempt_import",
     "version_rollback",
+    "reference_state_selected",
+    "action_space_count",
+    "historical_policy_action",
+    "controlled_reference_policy_kl",
 })
 
 
