@@ -44,9 +44,28 @@ class PipelineResult:
 
 def _strategy_view(state: dict, seat: int) -> dict:
     """Adapt current or legacy normalized engine states to the policy contract."""
-    if isinstance(state.get("generals"), dict) and isinstance(state.get("cells"), dict):
+    tech_level = state.get("tech_level", [[2, 0, 0, 0], [2, 0, 0, 0]])
+    movement_budget = state.get("movement_budget")
+    if movement_budget is None:
+        # Historical replay snapshots omitted rest_move_step. At the recorded
+        # pre-turn boundary it is reset to each player's mobility tech level.
+        movement_budget = [
+            int(row[0]) if isinstance(row, (list, tuple)) and row else 0
+            for row in tech_level
+        ]
+    active_super_weapons = state.get(
+        "active_super_weapons",
+        state.get("weapons", []),
+    )
+    if isinstance(state.get("generals"), dict) and isinstance(
+        state.get("cells"), dict
+    ):
         result = dict(state)
         result["my_seat"] = seat
+        result["movement_budget"] = list(movement_budget)
+        result["active_super_weapons"] = [
+            dict(item) for item in active_super_weapons if isinstance(item, dict)
+        ]
         return result
     generals = {}
     for general in state.get("generals", []):
@@ -64,7 +83,11 @@ def _strategy_view(state: dict, seat: int) -> dict:
         "round": int(state.get("round", 1)),
         "my_seat": int(seat),
         "coins": list(state.get("coins", [0, 0])),
-        "tech_level": state.get("tech_level", [[2, 0, 0, 0], [2, 0, 0, 0]]),
+        "tech_level": tech_level,
+        "movement_budget": list(movement_budget),
+        "active_super_weapons": [
+            dict(item) for item in active_super_weapons if isinstance(item, dict)
+        ],
         "cells": cells,
         "generals": generals,
     }

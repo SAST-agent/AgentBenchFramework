@@ -95,6 +95,39 @@ def test_probe_adapter_accepts_legacy_engine_normalization():
     assert view["my_seat"] == 1
 
 
+def test_probe_adapter_enriches_historical_replay_strategy_fields():
+    state = {
+        "round": 40,
+        "cells": {},
+        "generals": {},
+        "coins": [80, 90],
+        "tech_level": [[3, 0, 0, 0], [5, 0, 0, 0]],
+        "weapons": [
+            {
+                "type": 0,
+                "player": 1,
+                "rest": 4,
+                "position": [3, 4],
+                "cd": 0,
+            }
+        ],
+    }
+
+    view = _strategy_view(state, 1)
+
+    assert view["movement_budget"] == [3, 5]
+    assert view["active_super_weapons"] == [
+        {
+            "type": 0,
+            "player": 1,
+            "rest": 4,
+            "position": [3, 4],
+            "cd": 0,
+        }
+    ]
+    assert view["my_seat"] == 1
+
+
 def test_run_resume_restores_phase_budgets(tmp_path):
     run = Run.start("28_generals", "baseline", data_dir=str(tmp_path))
     run.log_budget(

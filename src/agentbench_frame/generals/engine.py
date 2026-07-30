@@ -199,6 +199,26 @@ class OfficialGeneralsEngine:
                     int(item) for item in getattr(general, "skill_duration", [])
                 ],
             }
+        active_super_weapons = [
+            {
+                "type": int(weapon.type),
+                "player": int(weapon.player),
+                "rest": int(weapon.rest),
+                "position": [
+                    int(weapon.position[0]),
+                    int(weapon.position[1]),
+                ],
+            }
+            for weapon in sorted(
+                self.state.active_super_weapon,
+                key=lambda item: (
+                    int(item.type),
+                    int(item.player),
+                    tuple(map(int, item.position)),
+                    int(item.rest),
+                ),
+            )
+        ]
         return {
             "round": int(self.state.round),
             "next_actor": 0,
@@ -206,6 +226,10 @@ class OfficialGeneralsEngine:
             "generals": generals,
             "coins": [int(item) for item in self.state.coin],
             "tech_level": _primitive(self.state.tech_level),
+            "movement_budget": [
+                int(item) for item in self.state.rest_move_step
+            ],
+            "active_super_weapons": active_super_weapons,
             "weapons": _primitive(self.state.active_super_weapon),
             "weapon_cds": [int(item) for item in self.state.super_weapon_cd],
         }

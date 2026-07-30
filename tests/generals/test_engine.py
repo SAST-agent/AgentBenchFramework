@@ -42,3 +42,5 @@ def test_normalized_state_matches_editable_strategy_view_contract(engine_root):
     assert isinstance(state["cells"], dict)
     assert isinstance(state["generals"], dict)
     assert all("type" in item for item in state["generals"].values())
+    assert state["movement_budget"] == [2, 2]
+    assert state["active_super_weapons"] == []
