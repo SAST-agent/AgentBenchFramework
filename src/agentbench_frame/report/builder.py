@@ -182,7 +182,7 @@ class ReportBuilder:
                 research["campaign_budget_receipt"] = audited_receipt
 
     def _apply_derived_behavior_receipts(self) -> None:
-        """Overlay hash-verified recovered diagnostics on missing values."""
+        """Overlay hash-verified recovered or corrected behavior diagnostics."""
         derived_dir = os.path.join(self.data_dir, "derived")
         if not os.path.isdir(derived_dir):
             return
@@ -209,8 +209,10 @@ class ReportBuilder:
                 )
                 if (
                     not isinstance(receipt, dict)
-                    or receipt.get("status")
-                    != "derived_behavior_measurement_recovered"
+                    or receipt.get("status") not in {
+                        "derived_behavior_measurement_recovered",
+                        "derived_behavior_measurement_corrected",
+                    }
                     or receipt.get("mutation_policy")
                     != "inputs_immutable_separate_derived_receipt"
                     or not isinstance(measurement, dict)
@@ -251,6 +253,59 @@ class ReportBuilder:
                     != summary_hash
                     or receipt.get("events_sha256") != events_hash
                 ):
+                    continue
+                if (
+                    receipt.get("status")
+                    == "derived_behavior_measurement_corrected"
+                ):
+                    research = run.setdefault("research", {})
+                    history = list(
+                        research.get("action_disagreement_history") or []
+                    )
+                    targets = [
+                        item
+                        for item in history
+                        if item.get("source_event_id")
+                        == measurement.get("supersedes_event_id")
+                        and item.get("version_before")
+                        == measurement.get("version_before")
+                        and item.get("version_after")
+                        == measurement.get("version_after")
+                    ]
+                    disagreement = measurement.get(
+                        "action_disagreement"
+                    )
+                    trace = measurement.get(
+                        "action_disagreement_trace"
+                    )
+                    if (
+                        len(targets) != 1
+                        or not isinstance(disagreement, (int, float))
+                        or isinstance(disagreement, bool)
+                        or not isinstance(trace, list)
+                        or not all(
+                            isinstance(value, (int, float))
+                            and not isinstance(value, bool)
+                            for value in trace
+                        )
+                    ):
+                        continue
+                    target = targets[0]
+                    target["mean"] = float(disagreement)
+                    target["trace"] = [
+                        float(value) for value in trace
+                    ]
+                    target[
+                        "decision_balanced_action_disagreement"
+                    ] = float(disagreement)
+                    target["correction_status"] = (
+                        "hash_verified_derived_receipt"
+                    )
+                    audited_receipt = dict(receipt)
+                    audited_receipt["_path"] = path
+                    research["derived_behavior_correction"] = (
+                        audited_receipt
+                    )
                     continue
                 vs_v3 = measurement.get("v5_vs_v3")
                 vs_v4 = measurement.get("v5_vs_v4")
@@ -609,6 +664,7 @@ class ReportBuilder:
                 })
             elif event_type == "behavior_change":
                 action_disagreement_history.append({
+                    "source_event_id": event.get("event_id"),
                     "version_before": event.get("version_before"),
                     "version_after": event.get("version_after"),
                     "mean": event.get("action_disagreement"),

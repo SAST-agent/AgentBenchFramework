@@ -983,6 +983,88 @@ class LocalResearchReportTests(unittest.TestCase):
         )
         self.assertAlmostEqual(support["log10_support_size"], 29.0915, 4)
 
+    def test_derived_behavior_correction_overlays_hash_verified_event(self):
+        from agentbench_frame.report.builder import ReportBuilder
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = (
+                root / "runs" / "28_generals" / "generals-hl" / "v7-run"
+            )
+            run_dir.mkdir(parents=True)
+            summary_path = run_dir / "summary.json"
+            summary_path.write_text(json.dumps({
+                "run_id": "v7-run",
+                "game": "28_generals",
+                "agent": "generals-hl",
+                "status": "complete",
+                "benchmark_score": 2 / 3,
+            }))
+            events_path = run_dir / "events.jsonl"
+            events_path.write_text(json.dumps({
+                "event_id": "evt_original",
+                "event_type": "behavior_change",
+                "version_before": "v6",
+                "version_after": "v7",
+                "action_disagreement": 0.78,
+                "action_disagreement_trace": [1.0, 0.0],
+            }) + "\n")
+            receipt_path = (
+                root / "derived" / "28_generals"
+                / "generals-hl" / "v7-probe-correction.json"
+            )
+            receipt_path.parent.mkdir(parents=True)
+            receipt_path.write_text(json.dumps({
+                "status": "derived_behavior_measurement_corrected",
+                "mutation_policy": (
+                    "inputs_immutable_separate_derived_receipt"
+                ),
+                "success_run_id": "v7-run",
+                "success_summary_ref": str(summary_path),
+                "success_summary_sha256": hashlib.sha256(
+                    summary_path.read_bytes()
+                ).hexdigest(),
+                "events_ref": str(events_path),
+                "events_sha256": hashlib.sha256(
+                    events_path.read_bytes()
+                ).hexdigest(),
+                "measurement": {
+                    "supersedes_event_id": "evt_original",
+                    "version_before": "v6",
+                    "version_after": "v7",
+                    "action_disagreement": 0.074,
+                    "action_disagreement_trace": [0.0, 0.0],
+                    "probe_diagnostics": {
+                        "decision_count": 27,
+                        "max_non_end_primitives": 5,
+                    },
+                },
+            }))
+
+            builder = ReportBuilder(
+                data_dir=str(root),
+                output_dir=str(root / "site"),
+            )
+            builder.build()
+
+            research = builder.runs[0]["research"]
+            html = (root / "site" / "index.html").read_text()
+            behavior = research["action_disagreement_history"][0]
+            self.assertEqual(
+                behavior["decision_balanced_action_disagreement"],
+                0.074,
+            )
+            self.assertEqual(behavior["trace"], [0.0, 0.0])
+            self.assertEqual(
+                behavior["correction_status"],
+                "hash_verified_derived_receipt",
+            )
+            self.assertEqual(
+                research["derived_behavior_correction"]["_path"],
+                str(receipt_path),
+            )
+            self.assertIn("corrected", html)
+
     def test_controlled_reference_policy_kl_panel_states_scope_and_coverage(self):
         from agentbench_frame.report.builder import ReportBuilder
 

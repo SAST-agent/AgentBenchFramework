@@ -95,7 +95,7 @@
   </article>
 </section>
 {% endif %}
-{% if lr.get('action_disagreement_history') %}<section class="panel"><h2>{{ icon('spark') }} Action disagreement</h2><table class="data-table"><tr><th>Versions</th><th>Episode-balanced</th><th>Decision-balanced</th><th>Policy KL</th><th>Occupancy shift</th></tr>{% for point in lr.get('action_disagreement_history') %}<tr><td>{{ point.version_before }} → {{ point.version_after }}</td><td>{{ fmt_num(point.episode_balanced_action_disagreement) }}</td><td>{{ fmt_num(point.decision_balanced_action_disagreement) }}</td><td>{{ point.policy_kl_status }}</td><td>{{ fmt_num(point.occupancy_shift) }}</td></tr>{% endfor %}</table></section>{% endif %}
+{% if lr.get('action_disagreement_history') %}<section class="panel"><h2>{{ icon('spark') }} Action disagreement</h2><table class="data-table"><tr><th>Versions</th><th>Episode-balanced</th><th>Decision-balanced</th><th>Policy KL</th><th>Occupancy shift</th></tr>{% for point in lr.get('action_disagreement_history') %}<tr><td>{{ point.version_before }} → {{ point.version_after }}{% if point.correction_status %} <span class="status status-warning">corrected</span>{% endif %}</td><td>{{ fmt_num(point.episode_balanced_action_disagreement) }}</td><td>{{ fmt_num(point.decision_balanced_action_disagreement) }}</td><td>{{ point.policy_kl_status }}</td><td>{{ fmt_num(point.occupancy_shift) }}</td></tr>{% endfor %}</table></section>{% endif %}
 {% set gate = lr.get('behavior_gate') %}
 {% if gate %}
 <section class="grid-2">
