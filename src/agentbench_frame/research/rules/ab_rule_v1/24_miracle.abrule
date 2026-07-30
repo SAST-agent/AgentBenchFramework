@@ -1,0 +1,263 @@
+# provenance: b581bca3ba3d2d7d58a2f8c6bbddd060fc7fdc87
+# source-root: backend_sources/corpus/24_miracle/logic/gamecode_logic
+# reviewed: Data.json, Geometry/calculator.py, PlayerLegality/operations.py, PlayerLegality/player_legality.py, StateSystem/Artifact.py, StateSystem/Barrack.py, StateSystem/Buff.py, StateSystem/Event.py, StateSystem/EventHeap.py, StateSystem/EventListener.py, StateSystem/Map.py, StateSystem/Miracle.py, StateSystem/Obstacle.py, StateSystem/Player.py, StateSystem/StateSystem.py, StateSystem/Unit.py, StateSystem/UnitData.py, main.py
+# includes: alternating tactical turns, hex geometry, units, barracks, mana, summons, movement, combat, events, listeners, buffs, artifacts, miracle health, score, round limit
+# excludes: transport protocol, JSON encoding, UI, logs, process supervision
+game 24_miracle
+players 2
+
+constant MAX_ROUND = 100
+constant MIRACLE_LEVEL = 0
+constant INITIAL_MANA = 0
+
+enum TimeOfDay:
+  value DAY
+  value NIGHT
+
+enum EventKind:
+  value TURN_START
+  value TURN_END
+  value MOVE
+  value ATTACK
+  value COUNTERATTACK
+  value DAMAGE
+  value HEAL
+  value DEATH
+  value SUMMON
+  value ARTIFACT
+
+entity Battle:
+  field round: Integer
+  field active_player: Player
+  field time_of_day: TimeOfDay
+  field map: HexMap
+  field event_heap: PriorityQueue[Event]
+
+entity PlayerState:
+  field player: Player
+  field mana: Integer
+  field score: Number
+  field miracle: Unit
+  field barracks: Sequence[Barrack]
+  field artifacts: Sequence[Artifact]
+
+entity Unit:
+  field owner: Player
+  field kind: UnitKind
+  field level: Integer
+  field position: Hex
+  field health: Number
+  field max_health: Number
+  field attack: Number
+  field attack_range: Integer
+  field movement: Integer
+  field cooldown: Integer
+  field flying: Boolean
+  field anti_air: Boolean
+  field agility: Number
+  field holy_shield: Integer
+  field can_move: Boolean
+  field can_attack: Boolean
+  field buffs: Sequence[Buff]
+
+entity Barrack:
+  field owner: Player
+  field position: Hex
+  field unit_kind: UnitKind
+  field mana_cost: Integer
+  field cooldown: Integer
+
+entity Artifact:
+  field owner: Player
+  field kind: ArtifactKind
+  field mana_cost: Integer
+  field cooldown: Integer
+  field target_rule: TargetRule
+
+entity Buff:
+  field kind: BuffKind
+  field source: Entity
+  field target: Unit
+  field duration: Integer
+  field magnitude: Number
+
+entity Event:
+  field timestamp: Integer
+  field priority: Integer
+  field kind: EventKind
+  field source: Optional[Entity]
+  field target: Optional[Entity]
+  field payload: Map[String, Value]
+
+action MoveUnit:
+  field unit: Unit
+  field destination: Hex
+
+action AttackUnit:
+  field attacker: Unit
+  field target: Unit
+
+action SummonUnit:
+  field barrack: Barrack
+  field destination: Hex
+
+action UseArtifact:
+  field artifact: Artifact
+  field target: Entity
+
+action EndTurn:
+  field player: Player
+
+observation BattleView:
+  field battle: Battle
+  field players: Sequence[PlayerState]
+  field units: Sequence[Unit]
+  field obstacles: Sequence[Obstacle]
+  field pending_events: Sequence[Event]
+
+setup initial_battle:
+  choose map_kind from configured_map_kinds:
+    create Battle(round=0, active_player=first_player, time_of_day=random_time_of_day(), map=generate_hex_map(map_kind), event_heap=empty_priority_queue())
+  for player in all_players:
+    create PlayerState(player=player, mana=INITIAL_MANA, score=0, miracle=create_miracle(player, MIRACLE_LEVEL), barracks=create_barracks(player, map_kind), artifacts=create_artifacts(player))
+  for obstacle in generated_obstacles(battle.map):
+    create obstacle
+  reveal BattleView(battle, all_player_states, all_units, all_obstacles, battle.event_heap)
+
+rule legal_move(action):
+  require action.unit.owner == battle.active_player
+  require action.unit.health > 0
+  require action.unit.can_move
+  require action.destination in battle.map
+  require traversable(action.unit, action.destination)
+  require path_cost(action.unit.position, action.destination) <= action.unit.movement
+  require unoccupied(action.destination)
+  return True
+
+rule move_unit(action):
+  require legal_move(action)
+  emit Event(now(), priority(MOVE), MOVE, action.unit, action.unit, payload(destination=action.destination))
+  update action.unit.position = action.destination
+  update action.unit.can_move = False
+  apply dispatch_events()
+
+rule legal_attack(action):
+  require action.attacker.owner == battle.active_player
+  require action.attacker.health > 0
+  require action.target.health > 0
+  require action.attacker.owner != action.target.owner
+  require action.attacker.can_attack
+  require hex_distance(action.attacker.position, action.target.position) <= action.attacker.attack_range
+  require action.attacker.anti_air or not action.target.flying
+  return True
+
+rule attack_unit(action):
+  require legal_attack(action)
+  emit Event(now(), priority(ATTACK), ATTACK, action.attacker, action.target, payload())
+  apply dispatch_events()
+  update action.attacker.can_attack = False
+  when action.target.health > 0:
+    apply counterattack(action.target, action.attacker)
+
+rule counterattack(defender, attacker):
+  require defender.health > 0
+  require defender.can_attack
+  require hex_distance(defender.position, attacker.position) <= defender.attack_range
+  require defender.anti_air or not attacker.flying
+  emit Event(now(), priority(COUNTERATTACK), COUNTERATTACK, defender, attacker, payload())
+  apply dispatch_events()
+
+rule resolve_attack(event):
+  let amount = modified_attack(event.source, event.target, event.kind)
+  apply deal_damage(event.source, event.target, amount)
+  for neighbor in splash_targets(event.source, event.target):
+    apply deal_damage(event.source, neighbor, splash_damage(amount))
+
+rule deal_damage(source, target, amount):
+  when target.holy_shield > 0:
+    update target.holy_shield = target.holy_shield - 1
+  otherwise:
+    emit Event(now(), priority(DAMAGE), DAMAGE, source, target, payload(amount=amount))
+    update target.health = target.health - modified_damage(target, amount)
+  when target.health <= 0:
+    emit Event(now(), priority(DEATH), DEATH, source, target, payload())
+
+rule resolve_death(event):
+  delete event.target
+  update owner_state(event.source).score = owner_state(event.source).score + death_score(event.target)
+
+rule legal_summon(action):
+  require action.barrack.owner == battle.active_player
+  require action.barrack.cooldown <= 0
+  require owner_state(action.barrack).mana >= action.barrack.mana_cost
+  require action.destination in summon_area(action.barrack)
+  require unoccupied(action.destination)
+  return True
+
+rule summon_unit(action):
+  require legal_summon(action)
+  update owner_state(action.barrack).mana = owner_state(action.barrack).mana - action.barrack.mana_cost
+  update action.barrack.cooldown = summon_cooldown(action.barrack.unit_kind)
+  create Unit(owner=action.barrack.owner, kind=action.barrack.unit_kind, level=unit_level(action.barrack), position=action.destination, health=unit_max_health(action.barrack), max_health=unit_max_health(action.barrack), attack=unit_attack(action.barrack), attack_range=unit_range(action.barrack), movement=unit_movement(action.barrack), cooldown=0, flying=unit_flying(action.barrack), anti_air=unit_anti_air(action.barrack), agility=unit_agility(action.barrack), holy_shield=unit_shield(action.barrack), can_move=False, can_attack=False, buffs=[])
+  emit Event(now(), priority(SUMMON), SUMMON, action.barrack, unit_at(action.destination), payload())
+  apply dispatch_events()
+
+rule use_artifact(action):
+  require action.artifact.owner == battle.active_player
+  require action.artifact.cooldown <= 0
+  require owner_state(action.artifact).mana >= action.artifact.mana_cost
+  require valid_target(action.artifact.target_rule, action.target)
+  update owner_state(action.artifact).mana = owner_state(action.artifact).mana - action.artifact.mana_cost
+  update action.artifact.cooldown = artifact_cooldown(action.artifact.kind)
+  emit Event(now(), priority(ARTIFACT), ARTIFACT, action.artifact, action.target, artifact_payload(action.artifact))
+  apply dispatch_events()
+
+rule dispatch_events():
+  for event in ordered_events(battle.event_heap):
+    for listener in listeners(event.kind):
+      apply listener(event)
+    apply base_event_effect(event)
+    delete event
+
+rule apply_buff(buff):
+  create buff
+  apply alter_attributes(buff.target, buff.kind, buff.magnitude)
+
+rule expire_buff(buff):
+  require buff.duration <= 0
+  apply restore_attributes(buff.target, buff.kind, buff.magnitude)
+  delete buff
+
+rule start_turn(player):
+  update battle.active_player = player
+  update owner_state(player).mana = mana_for_round(battle.round)
+  for unit in units_owned_by(player):
+    update unit.can_move = True
+    update unit.can_attack = True
+  emit Event(now(), priority(TURN_START), TURN_START, player, player, payload())
+  apply dispatch_events()
+
+rule end_turn(action):
+  require action.player == battle.active_player
+  emit Event(now(), priority(TURN_END), TURN_END, action.player, action.player, payload())
+  apply dispatch_events()
+  for buff in all_buffs:
+    update buff.duration = buff.duration - 1
+    apply expire_buff(buff)
+  for barrack in barracks_owned_by(action.player):
+    update barrack.cooldown = max(0, barrack.cooldown - 1)
+  for artifact in artifacts_owned_by(action.player):
+    update artifact.cooldown = max(0, artifact.cooldown - 1)
+  update battle.round = battle.round + turn_wraps(action.player)
+  update battle.time_of_day = time_for_round(battle.round)
+  apply start_turn(other_player(action.player))
+  reveal BattleView(battle, all_player_states, all_units, all_obstacles, battle.event_heap)
+
+rule miracle_score(player):
+  return owner_state(player).score + owner_state(player).miracle.health
+
+terminal miracle_destroyed_or_round_limit:
+  when any_miracle_health() <= 0:
+    return rank_descending(miracle_score_by_player())
+  when battle.round >= MAX_ROUND:
+    return rank_descending_with_player_one_winning_ties(miracle_score_by_player())

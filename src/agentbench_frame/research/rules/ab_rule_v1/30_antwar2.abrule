@@ -1,0 +1,502 @@
+# provenance: b581bca3ba3d2d7d58a2f8c6bbddd060fc7fdc87
+# source-root: backend_sources/corpus/30_antwar2/logic/gamecode_logic/game
+# reviewed: include/ant.h, include/building.h, include/coin.h, include/game.hpp, include/item.h, include/map.h, include/operation.h, include/player.h, include/pos.h, src/aco.cpp, src/ant.cpp, src/building.cpp, src/coin.cpp, src/game.cpp, src/item.cpp, src/map.cpp, src/operation.cpp
+# includes: AntWar economy and headquarters, deterministic PRNG, worker and combat ants, five behaviors, weighted risk-aware movement, control immunity, evasion, bewitching, expanded tower tree, producers, siege and medic spawning, items, combat, pheromone, outcomes
+# excludes: judge transport, JSON library, output formatting, mini-replay, logs, protocol error policy
+game 30_antwar2
+players 2
+
+constant MAX_ROUND = 512
+constant ANT_AGE_LIMIT = 64
+constant PHEROMONE_BASE = 10
+constant PHEROMONE_DECAY = 0.97
+
+enum AntKind:
+  value WORKER
+  value COMBAT
+
+enum Behavior:
+  value DEFAULT
+  value CONSERVATIVE
+  value RANDOMIZED
+  value BEWITCHED
+  value CONTROL_FREE
+
+enum AntStatus:
+  value ALIVE
+  value SUCCESS
+  value FAIL
+  value TOO_OLD
+  value FROZEN
+
+enum MovementPolicy:
+  value LEGACY
+  value ENHANCED
+
+enum TowerKind:
+  value BASIC
+  value HEAVY
+  value HEAVY_PLUS
+  value ICE
+  value BEWITCH
+  value QUICK
+  value QUICK_PLUS
+  value DOUBLE
+  value SNIPER
+  value MORTAR
+  value MORTAR_PLUS
+  value PULSE
+  value MISSILE
+  value PRODUCER
+  value PRODUCER_FAST
+  value PRODUCER_SIEGE
+  value PRODUCER_MEDIC
+
+enum ItemKind:
+  value LIGHTNING_STORM
+  value EMP_BLASTER
+  value DEFLECTORS
+  value EMERGENCY_EVASION
+
+entity Match:
+  field round: Integer
+  field map: HexMap
+  field random_state: Integer
+  field movement_policy: MovementPolicy
+  field pheromone: Map[Player, Map[Hex, Number]]
+  field damage_risk: Map[Hex, Number]
+  field control_risk: Map[Hex, Number]
+  field effect_pull: Map[Hex, Number]
+
+entity PlayerState:
+  field player: Player
+  field coins: Integer
+  field headquarters: Headquarters
+  field item_cooldown: Map[ItemKind, Integer]
+
+entity Headquarters:
+  field owner: Player
+  field position: Hex
+  field health: Number
+  field ant_level: Integer
+  field production_level: Integer
+  field production_timer: Integer
+
+entity MoveWeights:
+  field progress: Number
+  field pheromone: Number
+  field crowding: Number
+  field expected_damage: Number
+  field control_risk: Number
+  field tower_pull: Number
+  field effect_pull: Number
+
+entity Ant:
+  field identifier: Integer
+  field owner: Player
+  field kind: AntKind
+  field position: Hex
+  field previous_position: Optional[Hex]
+  field trail: Sequence[Hex]
+  field path_length: Integer
+  field health: Number
+  field max_health: Number
+  field age: Integer
+  field level: Integer
+  field shield: Integer
+  field evasion_stacks: Integer
+  field evasion_grants_control_free: Boolean
+  field defending: Boolean
+  field frozen: Boolean
+  field invincible: Boolean
+  field behavior: Behavior
+  field behavior_rounds: Integer
+  field behavior_expiry: Integer
+  field pending_behavior: Optional[Behavior]
+  field bewitch_target: Optional[Hex]
+  field move_weights: MoveWeights
+
+entity Tower:
+  field identifier: Integer
+  field owner: Player
+  field kind: TowerKind
+  field position: Hex
+  field level: Integer
+  field health: Number
+  field max_health: Number
+  field range: Integer
+  field damage: Number
+  field speed: Number
+  field timer: Number
+  field changed_this_round: Boolean
+  field attacked_ants: Sequence[Integer]
+
+entity TimedItem:
+  field owner: Player
+  field kind: ItemKind
+  field position: Hex
+  field cooldown: Integer
+  field remaining: Integer
+  field last_trigger_round: Integer
+
+action BuildTower:
+  field player: Player
+  field kind: TowerKind
+  field position: Hex
+
+action UpgradeTower:
+  field player: Player
+  field tower: Tower
+  field new_kind: TowerKind
+
+action DestroyTower:
+  field player: Player
+  field tower: Tower
+
+action UseItem:
+  field player: Player
+  field kind: ItemKind
+  field position: Hex
+
+action UpgradeHeadquarters:
+  field player: Player
+  field attribute: HeadquartersAttribute
+
+action EndRound:
+  field player: Player
+
+observation PublicState:
+  field round: Integer
+  field map: HexMap
+  field pheromone: Map[Player, Map[Hex, Number]]
+  field ants: Sequence[Ant]
+  field towers: Sequence[Tower]
+  field headquarters: Sequence[Headquarters]
+  field coins: Map[Player, Integer]
+  field active_items: Sequence[TimedItem]
+
+setup initial_match:
+  choose seed from match_seed:
+    create Match(round=0, map=generate_hex_map(seed), random_state=seed, movement_policy=ENHANCED, pheromone=initialize_pheromone(seed, PHEROMONE_BASE), damage_risk=zero_field(), control_risk=zero_field(), effect_pull=zero_field())
+  for player in all_players:
+    create PlayerState(player=player, coins=initial_coins(), headquarters=create_headquarters(player), item_cooldown=zero_item_cooldowns())
+  reveal PublicState(match.round, match.map, match.pheromone, all_ants, all_towers, all_headquarters, coins_by_player(), all_timed_items)
+
+rule next_random(limit):
+  update match.random_state = deterministic_prng_step(match.random_state)
+  return match.random_state % limit
+
+rule build_tower(action):
+  require action.position in buildable_cells(match.map)
+  require unoccupied_by_tower(action.position)
+  require enough_coins(action.player, tower_build_cost(action.kind))
+  require not affected_by_enemy_emp(action.position, action.player)
+  update state(action.player).coins = state(action.player).coins - tower_build_cost(action.kind)
+  create Tower(identifier=next_tower_id(), owner=action.player, kind=action.kind, position=action.position, level=0, health=tower_health(action.kind), max_health=tower_health(action.kind), range=tower_range(action.kind), damage=tower_damage(action.kind), speed=tower_speed(action.kind), timer=0, changed_this_round=True, attacked_ants=[])
+  apply invalidate_risk_fields()
+
+rule upgrade_tower(action):
+  require action.tower.owner == action.player
+  require not action.tower.changed_this_round
+  require permitted_upgrade(action.tower.kind, action.new_kind)
+  require enough_coins(action.player, tower_upgrade_cost(action.new_kind))
+  require not affected_by_enemy_emp(action.tower.position, action.player)
+  update state(action.player).coins = state(action.player).coins - tower_upgrade_cost(action.new_kind)
+  update action.tower.kind = action.new_kind
+  update action.tower.level = action.tower.level + 1
+  apply refresh_tower_attributes(action.tower)
+  update action.tower.changed_this_round = True
+  apply invalidate_risk_fields()
+
+rule destroy_tower(action):
+  require action.tower.owner == action.player
+  require not action.tower.changed_this_round
+  require not affected_by_enemy_emp(action.tower.position, action.player)
+  update state(action.player).coins = state(action.player).coins + tower_destroy_refund(action.tower)
+  delete action.tower
+  apply invalidate_risk_fields()
+
+rule upgrade_headquarters(action):
+  require enough_coins(action.player, headquarters_upgrade_cost(action.attribute))
+  update state(action.player).coins = state(action.player).coins - headquarters_upgrade_cost(action.attribute)
+  when action.attribute == ant_level:
+    update state(action.player).headquarters.ant_level = state(action.player).headquarters.ant_level + 1
+  when action.attribute == production_level:
+    update state(action.player).headquarters.production_level = state(action.player).headquarters.production_level + 1
+
+rule use_item(action):
+  require action.position in match.map
+  require state(action.player).item_cooldown[action.kind] <= 0
+  require enough_coins(action.player, item_cost(action.kind))
+  update state(action.player).coins = state(action.player).coins - item_cost(action.kind)
+  update state(action.player).item_cooldown[action.kind] = item_cooldown(action.kind)
+  create TimedItem(owner=action.player, kind=action.kind, position=action.position, cooldown=item_cooldown(action.kind), remaining=item_duration(action.kind), last_trigger_round=-1)
+  apply immediate_item_effect(action.kind, action.player, action.position)
+  apply invalidate_risk_fields()
+
+rule spawn_ant(owner, position, kind, behavior):
+  create Ant(identifier=next_ant_id(), owner=owner, kind=kind, position=position, previous_position=None, trail=[position], path_length=0, health=ant_health(kind, headquarters(owner).ant_level), max_health=ant_health(kind, headquarters(owner).ant_level), age=0, level=headquarters(owner).ant_level, shield=0, evasion_stacks=0, evasion_grants_control_free=False, defending=False, frozen=False, invincible=False, behavior=behavior, behavior_rounds=0, behavior_expiry=default_behavior_expiry(behavior), pending_behavior=None, bewitch_target=None, move_weights=weights_for(kind, behavior))
+
+rule produce_headquarters_ant(headquarters):
+  update headquarters.production_timer = headquarters.production_timer + 1
+  require headquarters.production_timer >= headquarters_interval(headquarters.production_level)
+  apply spawn_ant(headquarters.owner, headquarters.position, WORKER, DEFAULT)
+  update headquarters.production_timer = 0
+
+rule producer_tower(tower):
+  require tower.kind in [PRODUCER, PRODUCER_FAST, PRODUCER_SIEGE, PRODUCER_MEDIC]
+  update tower.timer = tower.timer + 1
+  require tower.timer >= producer_interval(tower.kind)
+  when tower.kind == PRODUCER:
+    apply spawn_ant(tower.owner, tower.position, WORKER, DEFAULT)
+  when tower.kind == PRODUCER_FAST:
+    apply spawn_ant(tower.owner, tower.position, WORKER, RANDOMIZED)
+  when tower.kind == PRODUCER_SIEGE:
+    choose roll from next_random(100):
+      when roll < integer(100 * siege_spawn_chance(tower)):
+        apply spawn_ant(tower.owner, tower.position, COMBAT, DEFAULT)
+  when tower.kind == PRODUCER_MEDIC:
+    for ant in friendly_ants_in_range(tower):
+      update ant.health = min(ant.max_health, ant.health + medic_heal(tower))
+  update tower.timer = 0
+
+rule set_behavior(ant, behavior, force):
+  when ant.behavior == CONTROL_FREE:
+    require force or behavior == CONTROL_FREE
+  update ant.behavior = behavior
+  update ant.behavior_rounds = 0
+  update ant.behavior_expiry = default_behavior_expiry(behavior)
+  update ant.move_weights = weights_for(ant.kind, behavior)
+  when behavior != BEWITCHED:
+    update ant.bewitch_target = None
+
+rule apply_control(ant, behavior, target):
+  when ant.behavior == CONTROL_FREE:
+    pass
+  otherwise:
+    apply set_behavior(ant, behavior, False)
+    when behavior == BEWITCHED:
+      update ant.bewitch_target = target
+  when control_effect_ended(ant):
+    update ant.pending_behavior = CONTROL_FREE
+
+rule apply_pending_behavior(ant):
+  require ant.pending_behavior is not None
+  apply set_behavior(ant, ant.pending_behavior, True)
+  update ant.pending_behavior = None
+
+rule grant_evasion(ant, stacks, grant_control_free):
+  update ant.evasion_stacks = ant.evasion_stacks + stacks
+  update ant.evasion_grants_control_free = grant_control_free
+
+rule consume_evasion(ant):
+  require ant.evasion_stacks > 0
+  update ant.evasion_stacks = ant.evasion_stacks - 1
+  when ant.evasion_stacks == 0:
+    require ant.evasion_grants_control_free
+    update ant.pending_behavior = CONTROL_FREE
+
+rule rebuild_risk_fields():
+  update match.damage_risk = tower_damage_field(enemy_towers())
+  update match.control_risk = tower_control_field(enemy_control_towers())
+  update match.effect_pull = active_effect_pull_field(all_timed_items)
+
+rule enhanced_move_cost(ant, destination):
+  let weights = ant.move_weights
+  let cost = -weights.progress * progress_to_target(ant, destination)
+  update cost = cost - weights.pheromone * match.pheromone[ant.owner][destination]
+  update cost = cost + weights.crowding * friendly_reservation(destination)
+  update cost = cost + weights.expected_damage * match.damage_risk[destination]
+  update cost = cost + weights.control_risk * match.control_risk[destination]
+  update cost = cost - weights.tower_pull * tower_target_pull(ant, destination)
+  update cost = cost - weights.effect_pull * match.effect_pull[destination]
+  return cost
+
+rule legal_ant_destinations(ant):
+  let candidates = neighbors(ant.position)
+  when ant.behavior not in [RANDOMIZED, BEWITCHED]:
+    update candidates = candidates - [ant.previous_position]
+  return traversable_cells(candidates)
+
+rule choose_ant_step(ant):
+  let candidates = legal_ant_destinations(ant)
+  when ant.frozen:
+    return ant.position
+  when ant.behavior == RANDOMIZED:
+    choose destination from candidates:
+      return destination
+  when ant.behavior == BEWITCHED:
+    return stochastic_softmin(candidates, enhanced_move_cost(ant), bewitch_temperature())
+  when match.movement_policy == LEGACY:
+    return deterministic_argmax(legacy_pheromone_desirability(ant, candidates))
+  return deterministic_argmin_with_reservations(enhanced_move_cost(ant), candidates)
+
+rule move_ant(ant):
+  let destination = choose_ant_step(ant)
+  update ant.previous_position = ant.position
+  update ant.position = destination
+  update ant.trail = append(ant.trail, destination)
+  update ant.path_length = ant.path_length + 1
+  update ant.age = ant.age + 1
+  update ant.behavior_rounds = ant.behavior_rounds + 1
+  when ant.bewitch_target == destination:
+    apply set_behavior(ant, DEFAULT, True)
+  when ant.behavior_rounds >= ant.behavior_expiry:
+    apply set_behavior(ant, DEFAULT, True)
+  when ant.position == enemy_headquarters(ant.owner).position:
+    apply ant_arrives(ant)
+
+rule ant_arrives(ant):
+  apply damage(enemy_headquarters(ant.owner), ant_arrival_damage(ant))
+  update state(ant.owner).coins = state(ant.owner).coins + ant_arrival_income(ant)
+  apply reinforce_pheromone(ant.trail, success_pheromone(ant))
+  delete ant
+
+rule select_tower_target(tower):
+  let candidates = enemy_ants_in_range(tower)
+  when tower.kind == SNIPER:
+    return highest_health(candidates)
+  when tower.kind in [MORTAR, MORTAR_PLUS, MISSILE]:
+    return densest_cluster_member(candidates)
+  when tower.kind == BEWITCH:
+    return controllable_ant(candidates)
+  return closest_progressing_ant(candidates)
+
+rule attack_tower(tower):
+  require not producer_tower_kind(tower.kind)
+  update tower.timer = tower.timer + 1
+  require tower.timer >= tower.speed
+  let target = select_tower_target(tower)
+  require target is not None
+  when tower.kind == ICE:
+    update target.pending_behavior = CONSERVATIVE
+  when tower.kind == BEWITCH:
+    apply apply_control(target, BEWITCHED, random_bewitch_target(target.owner))
+  when tower.kind in [MORTAR, MORTAR_PLUS, MISSILE]:
+    for ant in ants_near(target.position):
+      apply damage(ant, splash_damage(tower))
+  when tower.kind == DOUBLE:
+    for ant in first_targets(enemy_ants_in_range(tower), 2):
+      apply damage(ant, tower.damage)
+  otherwise:
+    apply damage(target, tower.damage)
+  update tower.attacked_ants = append(tower.attacked_ants, target.identifier)
+  update tower.timer = 0
+
+rule combat_ant_attack(ant):
+  require ant.kind == COMBAT
+  let tower = selected_enemy_tower(ant)
+  require tower is not None
+  apply damage(tower, combat_ant_damage(ant))
+  when ant.health * 2 < ant.max_health:
+    apply damage(ant, ant.health)
+
+rule damage(entity, amount):
+  when entity.invincible:
+    pass
+  when is_ant(entity):
+    when entity.shield > 0:
+      update entity.shield = entity.shield - amount
+    when entity.evasion_stacks > 0:
+      apply consume_evasion(entity)
+    otherwise:
+      update entity.health = entity.health - amount
+  otherwise:
+    update entity.health = entity.health - amount
+  when entity.health <= 0:
+    apply destroy(entity)
+
+rule destroy(entity):
+  when is_ant(entity):
+    update state(other_player(entity.owner)).coins = state(other_player(entity.owner)).coins + ant_kill_income(entity)
+    apply reinforce_pheromone(entity.trail, death_pheromone(entity))
+  when is_tower(entity):
+    update state(other_player(entity.owner)).coins = state(other_player(entity.owner)).coins + tower_kill_income(entity)
+  delete entity
+  apply invalidate_risk_fields()
+
+rule lightning_storm(item):
+  require item.kind == LIGHTNING_STORM
+  for entity in enemy_entities_in_radius(item.owner, item.position, item_radius(item.kind)):
+    apply damage(entity, lightning_damage())
+
+rule emp_blaster(item):
+  require item.kind == EMP_BLASTER
+  for tower in enemy_towers_in_radius(item.owner, item.position, item_radius(item.kind)):
+    update tower.timer = tower.timer - emp_delay()
+
+rule deflectors(item):
+  require item.kind == DEFLECTORS
+  for ant in friendly_ants_in_radius(item.owner, item.position, item_radius(item.kind)):
+    update ant.shield = max(ant.shield, deflector_shield())
+
+rule emergency_evasion(item):
+  require item.kind == EMERGENCY_EVASION
+  for ant in friendly_ants_in_radius(item.owner, item.position, item_radius(item.kind)):
+    apply grant_evasion(ant, evasion_stacks(item), True)
+
+rule update_ant_status(ant):
+  when ant.health <= 0:
+    return FAIL
+  when ant.position == enemy_headquarters(ant.owner).position:
+    return SUCCESS
+  when ant.kind == WORKER:
+    require ant.age > ANT_AGE_LIMIT
+    return TOO_OLD
+  when ant.frozen:
+    return FROZEN
+  return ALIVE
+
+rule update_pheromone():
+  for cell in match.map:
+    for player in all_players:
+      update match.pheromone[player][cell] = PHEROMONE_BASE + PHEROMONE_DECAY * (match.pheromone[player][cell] - PHEROMONE_BASE)
+  for ant in all_ants:
+    apply reinforce_pheromone(ant.trail, age_pheromone(ant))
+
+rule update_economy():
+  for player in all_players:
+    let delta = basic_income(player) - upkeep_penalty(player)
+    when state(player).coins + delta >= 0:
+      update state(player).coins = state(player).coins + delta
+    otherwise:
+      apply damage(headquarters(player), -(state(player).coins + delta))
+      update state(player).coins = 0
+
+rule round(joint_operations):
+  for operation in joint_operations:
+    apply resolve(operation)
+  apply rebuild_risk_fields()
+  for headquarters in all_headquarters:
+    apply produce_headquarters_ant(headquarters)
+  for tower in producer_towers:
+    apply producer_tower(tower)
+  for ant in ordered_ants:
+    apply move_ant(ant)
+    apply combat_ant_attack(ant)
+  for tower in defensive_towers:
+    apply attack_tower(tower)
+  for item in all_timed_items:
+    apply persistent_item_effect(item)
+    update item.last_trigger_round = match.round
+    update item.remaining = item.remaining - 1
+    when item.remaining <= 0:
+      delete item
+  for ant in all_ants:
+    apply apply_pending_behavior(ant)
+    when update_ant_status(ant) in [FAIL, TOO_OLD]:
+      apply destroy(ant)
+  apply update_pheromone()
+  apply update_economy()
+  for player in all_players:
+    update state(player).item_cooldown = decrement_positive(state(player).item_cooldown)
+  update match.round = match.round + 1
+  reveal PublicState(match.round, match.map, match.pheromone, all_ants, all_towers, all_headquarters, coins_by_player(), all_timed_items)
+
+terminal headquarters_or_round_limit:
+  when headquarters(player_zero).health <= 0:
+    return player_one
+  when headquarters(player_one).health <= 0:
+    return player_zero
+  when match.round >= MAX_ROUND:
+    return compare_headquarters_then_coins_then_ant_progress_with_seeded_tiebreak()

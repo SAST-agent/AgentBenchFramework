@@ -1,0 +1,264 @@
+# provenance: b581bca3ba3d2d7d58a2f8c6bbddd060fc7fdc87
+# source-root: backend_sources/corpus/23_doto/logic/public_Arena-Doto-AI/Arena-Doto-AI-master/server
+# reviewed: Arguments.py, BaseClass.py, main.py, server.py, Maps/0.json
+# includes: arena state, real-time joint actions, movement, skills, collisions, ball, goals, bonuses, death, respawn, scoring, timeout
+# excludes: websocket protocol, serialization, rendering, logs, tournament process control
+game 23_doto
+players 2
+
+constant TICKS_PER_SECOND = 20
+constant MATCH_SECONDS = 300
+constant ARENA_WIDTH = 320
+constant ARENA_HEIGHT = 320
+constant HUMANS_PER_FACTION = 5
+constant HUMAN_MAX_HEALTH = 100
+constant HUMAN_SPEED = 0.6
+constant DEATH_SCORE = 1
+constant GOAL_SCORE = 80
+constant BONUS_SCORE = 10
+constant RESPAWN_SECONDS = 8
+constant INVINCIBLE_SECONDS = 2
+constant FIREBALL_SPEED = 3
+constant FIREBALL_RADIUS = 3
+constant FIREBALL_DAMAGE = 5
+constant FIREBALL_COOLDOWN_SECONDS = 0.5
+constant METEOR_RANGE = 30
+constant METEOR_DELAY_SECONDS = 2
+constant METEOR_RADIUS = 3
+constant METEOR_DAMAGE = 100
+constant METEOR_COOLDOWN_SECONDS = 8
+constant FLASH_DISTANCE = 20
+constant FLASH_COOLDOWN_SECONDS = 3
+constant BALL_RADIUS = 3
+constant TARGET_RADIUS = 5
+constant BONUS_RADIUS = 6
+constant BONUS_RESPAWN_MIN_SECONDS = 8
+constant BONUS_RESPAWN_MAX_SECONDS = 12
+constant FRIENDLY_FIRE = False
+
+enum SkillKind:
+  value FIREBALL
+  value METEOR
+  value FLASH
+
+entity Arena:
+  field width: Number
+  field height: Number
+  field walls: Set[Cell]
+  field targets: Sequence[Target]
+  field tick: Integer
+  field tick_limit: Integer
+  field score: Map[Faction, Integer]
+
+entity Human:
+  field identifier: Integer
+  field faction: Faction
+  field position: Point
+  field velocity: Vector
+  field health: Number
+  field alive: Boolean
+  field respawn_tick: Integer
+  field invincible_until: Integer
+  field cooldown_until: Map[SkillKind, Integer]
+
+entity Ball:
+  field position: Point
+  field birth_position: Point
+  field faction: Faction
+  field carrier: Optional[Human]
+
+entity Fireball:
+  field owner: Human
+  field position: Point
+  field velocity: Vector
+
+entity Meteor:
+  field owner: Human
+  field target: Point
+  field impact_tick: Integer
+
+entity Bonus:
+  field position: Point
+  field active: Boolean
+  field respawn_tick: Integer
+
+entity Target:
+  field faction: Faction
+  field position: Point
+
+action SetVelocity:
+  field human: Human
+  field velocity: Vector
+
+action CastFireball:
+  field human: Human
+  field direction: Vector
+
+action CastMeteor:
+  field human: Human
+  field target: Point
+
+action CastFlash:
+  field human: Human
+  field target: Point
+
+observation PublicFrame:
+  field tick: Integer
+  field humans: Sequence[Human]
+  field balls: Sequence[Ball]
+  field fireballs: Sequence[Fireball]
+  field meteors: Sequence[Meteor]
+  field bonuses: Sequence[Bonus]
+  field targets: Sequence[Target]
+  field score: Map[Faction, Integer]
+
+setup initial_state:
+  choose arena_map from configured_maps:
+    create Arena(width=ARENA_WIDTH, height=ARENA_HEIGHT, walls=arena_map.walls, targets=arena_map.targets, tick=0, tick_limit=MATCH_SECONDS * TICKS_PER_SECOND, score=zero_scores(players))
+  for identifier in range(players * HUMANS_PER_FACTION):
+    create Human(identifier=identifier, faction=identifier % players, position=spawn_point(identifier), velocity=zero_vector(), health=HUMAN_MAX_HEALTH, alive=True, respawn_tick=0, invincible_until=0, cooldown_until=zero_cooldowns())
+  for ball_spawn in arena_map.ball_spawns:
+    create Ball(position=ball_spawn.position, birth_position=ball_spawn.position, faction=ball_spawn.faction, carrier=None)
+  for bonus_spawn in arena_map.bonus_spawns:
+    create Bonus(position=bonus_spawn, active=True, respawn_tick=0)
+
+rule accept_velocity(action):
+  require action.human.alive
+  require magnitude(action.velocity) <= 1
+  update action.human.velocity = action.velocity * HUMAN_SPEED
+
+rule cast_fireball(action):
+  require action.human.alive
+  require ready(action.human, FIREBALL, arena.tick)
+  create Fireball(owner=action.human, position=action.human.position, velocity=normalize(action.direction) * FIREBALL_SPEED)
+  update action.human.cooldown_until[FIREBALL] = arena.tick + FIREBALL_COOLDOWN_SECONDS * TICKS_PER_SECOND
+
+rule cast_meteor(action):
+  require action.human.alive
+  require ready(action.human, METEOR, arena.tick)
+  require distance(action.human.position, action.target) <= METEOR_RANGE
+  create Meteor(owner=action.human, target=action.target, impact_tick=arena.tick + METEOR_DELAY_SECONDS * TICKS_PER_SECOND)
+  update action.human.cooldown_until[METEOR] = arena.tick + METEOR_COOLDOWN_SECONDS * TICKS_PER_SECOND
+
+rule cast_flash(action):
+  require action.human.alive
+  require ready(action.human, FLASH, arena.tick)
+  require distance(action.human.position, action.target) <= FLASH_DISTANCE
+  require traversable_segment(action.human.position, action.target, arena.walls)
+  update action.human.position = action.target
+  update action.human.cooldown_until[FLASH] = arena.tick + FLASH_COOLDOWN_SECONDS * TICKS_PER_SECOND
+
+rule move_human(human):
+  require human.alive
+  let destination = human.position + human.velocity
+  when traversable_segment(human.position, destination, arena.walls):
+    update human.position = destination
+  otherwise:
+    update human.position = nearest_unblocked_point(human.position, destination, arena.walls)
+
+rule move_fireball(fireball):
+  update fireball.position = fireball.position + fireball.velocity
+  when outside(fireball.position, arena):
+    delete fireball
+  when intersects_wall(fireball.position, FIREBALL_RADIUS, arena.walls):
+    delete fireball
+
+rule fireball_hit(fireball, human):
+  require human.alive
+  require overlaps(fireball.position, FIREBALL_RADIUS, human.position)
+  require FRIENDLY_FIRE or fireball.owner.faction != human.faction
+  apply damage(human, FIREBALL_DAMAGE, fireball.owner)
+  delete fireball
+
+rule meteor_impact(meteor):
+  require arena.tick >= meteor.impact_tick
+  for human in humans_within(meteor.target, METEOR_RADIUS):
+    require FRIENDLY_FIRE or meteor.owner.faction != human.faction
+    apply damage(human, METEOR_DAMAGE, meteor.owner)
+  delete meteor
+
+rule damage(human, amount, attacker):
+  require human.alive
+  require arena.tick >= human.invincible_until
+  update human.health = human.health - amount
+  when human.health <= 0:
+    apply kill(human, attacker)
+
+rule kill(human, attacker):
+  update human.alive = False
+  update human.velocity = zero_vector()
+  update human.respawn_tick = arena.tick + RESPAWN_SECONDS * TICKS_PER_SECOND
+  update arena.score[attacker.faction] = arena.score[attacker.faction] + DEATH_SCORE
+  for ball in carried_balls(human):
+    update ball.carrier = None
+    update ball.position = human.position
+
+rule respawn(human):
+  require not human.alive
+  require arena.tick >= human.respawn_tick
+  update human.position = spawn_point(human.identifier)
+  update human.health = HUMAN_MAX_HEALTH
+  update human.alive = True
+  update human.invincible_until = arena.tick + INVINCIBLE_SECONDS * TICKS_PER_SECOND
+
+rule acquire_ball(human, ball):
+  require human.alive
+  require ball.carrier is None
+  require overlaps(human.position, BALL_RADIUS, ball.position)
+  update ball.carrier = human
+
+rule carry_ball(ball):
+  require ball.carrier is not None
+  update ball.position = ball.carrier.position
+
+rule score_goal(ball, target):
+  require ball.carrier is not None
+  require target.faction != ball.carrier.faction
+  require overlaps(ball.position, BALL_RADIUS, target.position, TARGET_RADIUS)
+  update arena.score[ball.carrier.faction] = arena.score[ball.carrier.faction] + GOAL_SCORE
+  update ball.position = ball.birth_position
+  update ball.carrier = None
+
+rule collect_bonus(human, bonus):
+  require human.alive
+  require bonus.active
+  require overlaps(human.position, BONUS_RADIUS, bonus.position)
+  update arena.score[human.faction] = arena.score[human.faction] + BONUS_SCORE
+  update bonus.active = False
+  choose delay from uniform(BONUS_RESPAWN_MIN_SECONDS, BONUS_RESPAWN_MAX_SECONDS):
+    update bonus.respawn_tick = arena.tick + delay * TICKS_PER_SECOND
+
+rule respawn_bonus(bonus):
+  require not bonus.active
+  require arena.tick >= bonus.respawn_tick
+  update bonus.active = True
+
+rule frame(joint_actions):
+  for action in joint_actions:
+    apply resolve(action)
+  for human in all_humans:
+    apply move_human(human)
+  for fireball in all_fireballs:
+    apply move_fireball(fireball)
+  for collision in fireball_human_collisions:
+    apply fireball_hit(collision.fireball, collision.human)
+  for meteor in all_meteors:
+    apply meteor_impact(meteor)
+  for human in all_humans:
+    apply respawn(human)
+  for ball in all_balls:
+    apply carry_ball(ball)
+  for contact in free_ball_contacts:
+    apply acquire_ball(contact.human, contact.ball)
+  for contact in ball_target_contacts:
+    apply score_goal(contact.ball, contact.target)
+  for contact in bonus_contacts:
+    apply collect_bonus(contact.human, contact.bonus)
+  for bonus in all_bonuses:
+    apply respawn_bonus(bonus)
+  update arena.tick = arena.tick + 1
+  reveal PublicFrame(arena.tick, all_humans, all_balls, all_fireballs, all_meteors, all_bonuses, arena.targets, arena.score)
+
+terminal time_limit:
+  when arena.tick >= arena.tick_limit:
+    return rank_descending(arena.score)

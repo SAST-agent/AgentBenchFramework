@@ -1,0 +1,228 @@
+# provenance: b581bca3ba3d2d7d58a2f8c6bbddd060fc7fdc87
+# source-root: backend_sources/corpus/29_rollman/logic/gamecode_logic/PacmanLogic
+# reviewed: README.md, core/GymEnvironment.py, core/board.py, core/gamedata.py, core/ghost.py, core/pacman.py, core/utils.py, logic/utils.py, main.py
+# includes: asymmetric Pacman and three-ghost roles, three random levels, simultaneous movement, path collision, beans, five timed skills, scores, shield, capture, respawn, portals, level completion, timeout and match result
+# excludes: Gym wrappers, judge transport, NumPy representation details, rendering, logs, wall-clock limits
+game 29_rollman
+players 2
+
+constant LEVEL_COUNT = 3
+constant LEVEL_BOARD_SIZES = [41, 32, 22]
+constant LEVEL_MAX_ROUNDS = [500, 400, 300]
+constant PORTAL_ROUNDS = [60, 50]
+constant GHOST_COUNT = 3
+constant SKILL_DURATION = 8
+constant FREEZE_DURATION = 2
+constant PACMAN_SURVIVAL_THRESHOLD = 100
+constant PACMAN_SURVIVAL_BONUS = 50
+constant PACMAN_CAPTURE_SCORE = -60
+constant GHOST_CAPTURE_SCORE = 50
+constant GHOST_CAPTURE_THRESHOLD = 5
+constant GHOST_CAPTURE_BONUS = 20
+constant GHOST_TIMEOUT_BONUS = 25
+constant SHIELD_BREAK_SCORE = 10
+constant EAT_ALL_BEANS_SCORE = 50
+constant REMAINING_ROUND_FACTOR = 0.43
+
+enum Direction:
+  value STAY
+  value UP
+  value LEFT
+  value DOWN
+  value RIGHT
+
+enum Space:
+  value WALL
+  value EMPTY
+  value REGULAR_BEAN
+  value BONUS_BEAN
+  value SPEED_BEAN
+  value MAGNET_BEAN
+  value SHIELD_BEAN
+  value DOUBLE_BEAN
+  value FREEZE_BEAN
+  value PORTAL
+
+enum Skill:
+  value DOUBLE_SCORE
+  value SPEED_UP
+  value MAGNET
+  value SHIELD
+  value FREEZE
+
+entity Match:
+  field level: Integer
+  field round: Integer
+  field board: Board
+  field portal_available: Boolean
+  field portal_position: Position
+  field pacman_score: Integer
+  field ghosts_score: Integer
+
+entity Pacman:
+  field position: Position
+  field spawn: Position
+  field skill_remaining: Map[Skill, Integer]
+  field eaten_beans: Integer
+  field capture_count: Integer
+  field invincible_remaining: Integer
+
+entity Ghost:
+  field identifier: Integer
+  field position: Position
+  field spawn: Position
+  field score: Integer
+  field capture_count: Integer
+
+entity Board:
+  field size: Integer
+  field spaces: Map[Position, Space]
+  field remaining_beans: Integer
+
+action MovePacman:
+  field direction: Direction
+
+action MoveGhosts:
+  field directions: Sequence[Direction]
+
+observation FullGameState:
+  field level: Integer
+  field round: Integer
+  field board: Board
+  field pacman_position: Position
+  field ghost_positions: Sequence[Position]
+  field skill_remaining: Map[Skill, Integer]
+  field scores: Map[Role, Integer]
+  field portal_available: Boolean
+  field portal_position: Position
+
+setup initial_match:
+  create Match(level=1, round=0, board=generate_connected_board(LEVEL_BOARD_SIZES[0]), portal_available=False, portal_position=generated_portal(), pacman_score=0, ghosts_score=0)
+  choose corner_assignment from permutations(board_corners(match.board)):
+    create Pacman(position=corner_assignment[0], spawn=corner_assignment[0], skill_remaining=zero_skills(), eaten_beans=0, capture_count=0, invincible_remaining=0)
+  for identifier in range(GHOST_COUNT):
+    create Ghost(identifier=identifier, position=corner_assignment[identifier + 1], spawn=corner_assignment[identifier + 1], score=0, capture_count=0)
+  reveal FullGameState(match.level, match.round, match.board, pacman.position, ghost_positions(), pacman.skill_remaining, role_scores(), match.portal_available, match.portal_position)
+
+rule legal_step(position, direction):
+  let destination = position + direction_offset(direction)
+  require destination in match.board.spaces
+  require match.board.spaces[destination] != WALL
+  return destination
+
+rule move_ghost(ghost, direction):
+  when pacman.skill_remaining[FREEZE] > 0:
+    update ghost.position = ghost.position
+  otherwise:
+    update ghost.position = legal_step(ghost.position, direction)
+
+rule move_pacman(action):
+  let step_count = 1
+  when pacman.skill_remaining[SPEED_UP] > 0:
+    update step_count = 2
+  for step in range(step_count):
+    update pacman.position = legal_step(pacman.position, action.direction)
+    apply eat_bean(pacman.position)
+
+rule eat_bean(position):
+  let bean = match.board.spaces[position]
+  require bean in bean_spaces()
+  update match.board.spaces[position] = EMPTY
+  update match.board.remaining_beans = match.board.remaining_beans - 1
+  update pacman.eaten_beans = pacman.eaten_beans + 1
+  update match.pacman_score = match.pacman_score + bean_score(bean) * double_score_multiplier(pacman)
+  when bean in skill_bean_spaces():
+    apply activate_skill(skill_for_bean(bean))
+  when pacman.skill_remaining[MAGNET] > 0:
+    apply eat_adjacent_regular_beans(position)
+
+rule activate_skill(skill):
+  when skill == FREEZE:
+    update pacman.skill_remaining[skill] = FREEZE_DURATION
+  otherwise:
+    update pacman.skill_remaining[skill] = SKILL_DURATION
+
+rule detect_collision(pacman_path, ghost_paths):
+  for ghost in all_ghosts:
+    when paths_intersect_simultaneously(pacman_path, ghost_paths[ghost.identifier]):
+      apply collide(ghost)
+
+rule collide(ghost):
+  when pacman.skill_remaining[SHIELD] > 0:
+    update pacman.skill_remaining[SHIELD] = 0
+    update ghost.score = ghost.score + SHIELD_BREAK_SCORE
+  otherwise:
+    apply capture_pacman(ghost)
+
+rule capture_pacman(ghost):
+  update match.pacman_score = match.pacman_score + PACMAN_CAPTURE_SCORE
+  update ghost.score = ghost.score + GHOST_CAPTURE_SCORE
+  update ghost.capture_count = ghost.capture_count + 1
+  update pacman.capture_count = pacman.capture_count + 1
+  update pacman.position = farthest_respawn_from_ghosts(match.board)
+  update pacman.skill_remaining = zero_skills()
+  update pacman.invincible_remaining = respawn_invincibility()
+  when ghost.capture_count == GHOST_CAPTURE_THRESHOLD:
+    update ghost.score = ghost.score + GHOST_CAPTURE_BONUS
+
+rule enable_portal():
+  require match.level < LEVEL_COUNT
+  require match.round >= PORTAL_ROUNDS[match.level - 1]
+  update match.portal_available = True
+  update match.board.spaces[match.portal_position] = PORTAL
+
+rule finish_level(eaten_all_beans):
+  when eaten_all_beans:
+    update match.pacman_score = match.pacman_score + EAT_ALL_BEANS_SCORE
+  update match.pacman_score = match.pacman_score + integer((LEVEL_MAX_ROUNDS[match.level - 1] - match.round) * REMAINING_ROUND_FACTOR)
+  update match.level = match.level + 1
+  when match.level <= LEVEL_COUNT:
+    apply generate_next_level()
+
+rule generate_next_level():
+  update match.round = 0
+  update match.board = generate_connected_board(LEVEL_BOARD_SIZES[match.level - 1])
+  update match.portal_position = generated_portal()
+  update match.portal_available = False
+  update pacman.position = generated_pacman_spawn()
+  update pacman.spawn = pacman.position
+  update pacman.skill_remaining = zero_skills()
+  update pacman.eaten_beans = 0
+  for ghost in all_ghosts:
+    update ghost.position = generated_ghost_spawn(ghost.identifier)
+    update ghost.spawn = ghost.position
+
+rule timeout_level():
+  for ghost in all_ghosts:
+    update ghost.score = ghost.score + GHOST_TIMEOUT_BONUS
+  update match.level = match.level + 1
+  when match.level <= LEVEL_COUNT:
+    apply generate_next_level()
+
+rule round(pacman_action, ghost_action):
+  require length(ghost_action.directions) == GHOST_COUNT
+  let pacman_path = predicted_pacman_path(pacman_action)
+  let ghost_paths = predicted_ghost_paths(ghost_action)
+  for ghost in all_ghosts:
+    apply move_ghost(ghost, ghost_action.directions[ghost.identifier])
+  apply move_pacman(pacman_action)
+  apply detect_collision(pacman_path, ghost_paths)
+  update pacman.skill_remaining = decrement_positive(pacman.skill_remaining)
+  update pacman.invincible_remaining = max(0, pacman.invincible_remaining - 1)
+  update match.ghosts_score = sum_ghost_scores()
+  update match.round = match.round + 1
+  apply enable_portal()
+  when match.portal_available:
+    require pacman.position == match.portal_position
+    apply finish_level(match.board.remaining_beans == 0)
+  when match.board.remaining_beans == 0:
+    apply finish_level(True)
+  when match.round >= LEVEL_MAX_ROUNDS[match.level - 1]:
+    apply timeout_level()
+  reveal FullGameState(match.level, match.round, match.board, pacman.position, ghost_positions(), pacman.skill_remaining, role_scores(), match.portal_available, match.portal_position)
+
+terminal three_levels_complete:
+  when match.level > LEVEL_COUNT:
+    when pacman.eaten_beans >= PACMAN_SURVIVAL_THRESHOLD:
+      update match.pacman_score = match.pacman_score + PACMAN_SURVIVAL_BONUS
+    return rank_descending(role_scores())

@@ -1,0 +1,196 @@
+# provenance: b581bca3ba3d2d7d58a2f8c6bbddd060fc7fdc87
+# source-root: backend_sources/corpus/26_snakego/logic/gamecode_logic
+# reviewed: logic/communication.py, logic/constants.py, logic/formatter.py, logic/infrastructure.py, logic/operate.py, logic/result.py, logic/spawn.py, main.py
+# includes: alternating turns, multiple snakes, ordered bodies, movement, growth, split, fire, item spawning and expiry, collisions, enclosure walls, death, territory scoring, first-item tie break, round limit
+# excludes: communication protocol, formatting, rendering, logs
+game 26_snakego
+players 2
+
+constant BOARD_SIZE = 16
+constant MAX_ROUND = 512
+constant MAX_SNAKES_PER_PLAYER = 4
+constant ITEM_EXPIRE_TIME = 16
+constant TERRITORY_CELL_SCORE = 2
+constant FIRST_ITEM_SCORE = 1
+
+enum Direction:
+  value UP
+  value DOWN
+  value LEFT
+  value RIGHT
+
+enum ItemKind:
+  value GROWTH
+  value SPLIT
+  value FIRE
+
+entity Match:
+  field turn: Integer
+  field active_player: Player
+  field board: Board
+  field first_item_player: Optional[Player]
+  field spawn_schedule: Sequence[SpawnEvent]
+
+entity Board:
+  field cells: Set[Cell]
+  field walls: Map[Cell, Optional[Player]]
+  field items: Map[Cell, Item]
+
+entity Snake:
+  field identifier: Integer
+  field owner: Player
+  field body: Sequence[Cell]
+  field direction: Direction
+  field length_bank: Integer
+  field inventory: Multiset[ItemKind]
+  field alive: Boolean
+
+entity Item:
+  field kind: ItemKind
+  field position: Cell
+  field expires_at: Integer
+
+entity SpawnEvent:
+  field round: Integer
+  field kind: ItemKind
+  field position: Cell
+
+action Move:
+  field snake: Snake
+  field direction: Direction
+
+action UseGrowth:
+  field snake: Snake
+
+action Split:
+  field snake: Snake
+  field split_index: Integer
+
+action UseFire:
+  field snake: Snake
+  field direction: Direction
+
+observation BoardView:
+  field turn: Integer
+  field active_player: Player
+  field snakes: Sequence[Snake]
+  field walls: Map[Cell, Optional[Player]]
+  field items: Map[Cell, Item]
+  field first_item_player: Optional[Player]
+
+setup initial_match:
+  create Match(turn=0, active_player=first_player, board=empty_board(BOARD_SIZE), first_item_player=None, spawn_schedule=seeded_spawn_schedule())
+  for player in all_players:
+    create Snake(identifier=initial_snake_id(player), owner=player, body=initial_body(player), direction=initial_direction(player), length_bank=0, inventory=empty_multiset(), alive=True)
+  reveal BoardView(match.turn, match.active_player, all_snakes, match.board.walls, match.board.items, match.first_item_player)
+
+rule legal_direction(snake, direction):
+  require snake.alive
+  require direction != opposite(snake.direction)
+  return True
+
+rule move(action):
+  require action.snake.owner == match.active_player
+  require legal_direction(action.snake, action.direction)
+  let destination = neighbor(head(action.snake.body), action.direction)
+  update action.snake.direction = action.direction
+  when outside(destination, match.board.cells):
+    apply kill(action.snake)
+  when destination in match.board.walls:
+    apply kill(action.snake)
+  when destination in occupied_snake_cells():
+    apply resolve_snake_collision(action.snake, destination)
+  when action.snake.alive:
+    update action.snake.body = prepend(destination, action.snake.body)
+    apply consume_growth(action.snake)
+    apply collect_item(action.snake, item_at(destination))
+    apply solidify_enclosure(action.snake)
+
+rule consume_growth(snake):
+  when snake.length_bank > 0:
+    update snake.length_bank = snake.length_bank - 1
+  otherwise:
+    update snake.body = drop_last(snake.body)
+
+rule collect_item(snake, item):
+  require item is not None
+  update snake.inventory = add(snake.inventory, item.kind)
+  delete item
+  when match.first_item_player is None:
+    update match.first_item_player = snake.owner
+
+rule use_growth(action):
+  require action.snake.owner == match.active_player
+  require GROWTH in action.snake.inventory
+  update action.snake.inventory = remove_one(action.snake.inventory, GROWTH)
+  update action.snake.length_bank = action.snake.length_bank + growth_amount()
+
+rule split(action):
+  require action.snake.owner == match.active_player
+  require SPLIT in action.snake.inventory
+  require snake_count(action.snake.owner) < MAX_SNAKES_PER_PLAYER
+  require valid_split_index(action.snake.body, action.split_index)
+  let new_body = suffix(action.snake.body, action.split_index)
+  update action.snake.body = prefix(action.snake.body, action.split_index)
+  update action.snake.inventory = remove_one(action.snake.inventory, SPLIT)
+  create Snake(identifier=next_snake_id(), owner=action.snake.owner, body=new_body, direction=action.snake.direction, length_bank=0, inventory=split_inventory(action.snake.inventory), alive=True)
+
+rule use_fire(action):
+  require action.snake.owner == match.active_player
+  require FIRE in action.snake.inventory
+  update action.snake.inventory = remove_one(action.snake.inventory, FIRE)
+  for cell in fire_ray(head(action.snake.body), action.direction):
+    update match.board.walls[cell] = None
+
+rule resolve_snake_collision(mover, destination):
+  for snake in snakes_occupying(destination):
+    apply kill(snake)
+  apply kill(mover)
+
+rule solidify_enclosure(snake):
+  let enclosed = enclosed_cells(snake.body, match.board.cells)
+  require not empty(enclosed)
+  for cell in snake.body:
+    update match.board.walls[cell] = snake.owner
+  for victim in snakes_intersecting(snake.body):
+    apply kill(victim)
+  delete snake
+
+rule kill(snake):
+  update snake.alive = False
+  for cell in snake.body:
+    update match.board.walls[cell] = None
+  delete snake
+
+rule spawn_items():
+  for event in events_at(match.spawn_schedule, match.turn):
+    require unoccupied(event.position)
+    create Item(kind=event.kind, position=event.position, expires_at=match.turn + ITEM_EXPIRE_TIME)
+
+rule expire_items():
+  for item in match.board.items:
+    when match.turn >= item.expires_at:
+      delete item
+
+rule end_player_turn():
+  for snake in ordered_snakes(match.active_player):
+    require acted_this_turn(snake)
+  apply spawn_items()
+  apply expire_items()
+  update match.active_player = other_player(match.active_player)
+  update match.turn = match.turn + turn_wraps(match.active_player)
+  reveal BoardView(match.turn, match.active_player, all_snakes, match.board.walls, match.board.items, match.first_item_player)
+
+rule final_score(player):
+  let score = TERRITORY_CELL_SCORE * controlled_cells(player)
+  when match.first_item_player == player:
+    update score = score + FIRST_ITEM_SCORE
+  return score
+
+terminal elimination_or_round_limit:
+  when snake_count(player_zero) == 0:
+    return rank_descending(final_scores())
+  when snake_count(player_one) == 0:
+    return rank_descending(final_scores())
+  when match.turn > MAX_ROUND:
+    return rank_descending_with_player_zero_winning_ties(final_scores())

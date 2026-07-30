@@ -1,0 +1,294 @@
+# provenance: b581bca3ba3d2d7d58a2f8c6bbddd060fc7fdc87
+# source-root: backend_sources/corpus/28_generals/logic/gamecode_logic
+# reviewed: logic/call_generals.py, logic/computation.py, logic/constant.py, logic/execute.py, logic/gamedata.py, logic/gamestate.py, logic/general_skills.py, logic/movement.py, logic/super_weapons.py, logic/upgrade.py, main.py
+# includes: random connected map, terrain, ownership, armies, generals, movement and capture, production, coins, general upgrades and skills, technologies, super-weapons, cooldowns, durations, bog damage, victory and 500-round tie break
+# excludes: judge communication, replay formatting, rendering, logs, AI wall-clock limits
+game 28_generals
+players 2
+
+constant BOARD_ROWS = 15
+constant BOARD_COLUMNS = 15
+constant MAX_ROUND = 500
+constant FARMER_COUNT = 10
+constant SUBGENERAL_COUNT = 4
+constant BOG_FRACTION = 0.15
+constant MOUNTAIN_FRACTION = 0.4
+constant SKILL_START_COOLDOWN = 10
+constant SKILL_USE_COOLDOWN = 50
+
+enum Terrain:
+  value PLAIN
+  value BOG
+  value MOUNTAIN
+
+enum GeneralKind:
+  value MAIN
+  value SUBGENERAL
+  value FARMER
+
+enum SkillKind:
+  value SURPRISE_ATTACK
+  value ROUT
+  value COMMAND
+  value DEFENCE
+  value WEAKEN
+
+enum Technology:
+  value ARMY_MOBILITY
+  value MOUNTAINEERING
+  value BOG_IMMUNITY
+  value SUPER_WEAPON
+
+enum WeaponKind:
+  value NUCLEAR_BOMB
+  value ATTACK_ENHANCE
+  value TRANSMISSION
+  value TIME_STOP
+
+entity Match:
+  field round: Integer
+  field active_player: Player
+  field board: Board
+  field coins: Map[Player, Integer]
+  field technology: Map[Player, Map[Technology, Integer]]
+  field weapon_cooldown: Map[Player, Integer]
+  field active_effects: Sequence[TimedEffect]
+
+entity Cell:
+  field position: Position
+  field terrain: Terrain
+  field owner: Optional[Player]
+  field army: Integer
+  field general: Optional[General]
+
+entity General:
+  field identifier: Integer
+  field owner: Optional[Player]
+  field kind: GeneralKind
+  field position: Position
+  field production_level: Integer
+  field defence_level: Integer
+  field mobility_level: Integer
+  field movement_left: Integer
+  field skill_cooldown: Map[SkillKind, Integer]
+  field alive: Boolean
+
+entity TimedEffect:
+  field owner: Player
+  field kind: EffectKind
+  field target: Entity
+  field magnitude: Number
+  field duration: Integer
+
+action MoveArmy:
+  field player: Player
+  field source: Position
+  field destination: Position
+  field amount: Integer
+
+action MoveGeneral:
+  field player: Player
+  field general: General
+  field destination: Position
+
+action UpgradeGeneral:
+  field player: Player
+  field general: General
+  field attribute: GeneralAttribute
+
+action UseSkill:
+  field player: Player
+  field general: General
+  field kind: SkillKind
+  field target: Entity
+
+action UpgradeTechnology:
+  field player: Player
+  field technology: Technology
+
+action UseSuperWeapon:
+  field player: Player
+  field kind: WeaponKind
+  field source: Optional[Position]
+  field target: Position
+
+action RecruitSubgeneral:
+  field player: Player
+  field position: Position
+
+action EndTurn:
+  field player: Player
+
+observation FullBoardView:
+  field round: Integer
+  field active_player: Player
+  field cells: Sequence[Cell]
+  field generals: Sequence[General]
+  field coins: Map[Player, Integer]
+  field technology: Map[Player, Map[Technology, Integer]]
+  field active_effects: Sequence[TimedEffect]
+
+setup initial_match:
+  choose seed from match_seed:
+    create Match(round=0, active_player=first_player, board=generate_connected_board(seed, BOARD_ROWS, BOARD_COLUMNS, BOG_FRACTION, MOUNTAIN_FRACTION), coins=zero_coins(players), technology=zero_technologies(players), weapon_cooldown=zero_weapon_cooldowns(players), active_effects=[])
+  choose main_positions from distant_connected_positions(match.board, 18):
+    for player in all_players:
+      create General(identifier=main_general_id(player), owner=player, kind=MAIN, position=main_positions[player], production_level=1, defence_level=1, mobility_level=1, movement_left=base_general_movement(), skill_cooldown=initial_skill_cooldowns(SKILL_START_COOLDOWN), alive=True)
+  for position in sample_empty_positions(FARMER_COUNT):
+    create General(identifier=next_general_id(), owner=None, kind=FARMER, position=position, production_level=1, defence_level=1, mobility_level=0, movement_left=0, skill_cooldown=zero_skill_cooldowns(), alive=True)
+  for position in sample_empty_positions(SUBGENERAL_COUNT):
+    create General(identifier=next_general_id(), owner=None, kind=SUBGENERAL, position=position, production_level=1, defence_level=1, mobility_level=1, movement_left=base_general_movement(), skill_cooldown=zero_skill_cooldowns(), alive=True)
+  for cell in match.board.cells:
+    update cell.army = initial_army(cell)
+  reveal FullBoardView(match.round, match.active_player, match.board.cells, all_generals, match.coins, match.technology, match.active_effects)
+
+rule legal_army_move(action):
+  require action.player == match.active_player
+  require cell(action.source).owner == action.player
+  require action.amount > 0
+  require action.amount < cell(action.source).army
+  require action.destination in reachable_neighbors(action.source, army_mobility(action.player))
+  require terrain_passable(action.player, cell(action.destination).terrain)
+  require not time_stopped(action.player)
+  return True
+
+rule move_army(action):
+  require legal_army_move(action)
+  update cell(action.source).army = cell(action.source).army - action.amount
+  when cell(action.destination).owner == action.player:
+    update cell(action.destination).army = cell(action.destination).army + action.amount
+  otherwise:
+    apply resolve_battle(action.player, action.destination, action.amount)
+
+rule resolve_battle(attacker, destination, amount):
+  let defence = effective_defence(cell(destination))
+  when amount > defence:
+    update cell(destination).army = amount - defence
+    update cell(destination).owner = attacker
+    apply capture_general(attacker, cell(destination).general)
+  otherwise:
+    update cell(destination).army = defence - amount
+
+rule capture_general(attacker, general):
+  require general is not None
+  when general.kind == MAIN:
+    update general.alive = False
+  otherwise:
+    update general.owner = attacker
+
+rule move_general(action):
+  require action.player == match.active_player
+  require action.general.owner == action.player
+  require action.general.alive
+  require action.general.movement_left > 0
+  require action.destination in neighbors(action.general.position)
+  require cell(action.destination).owner == action.player
+  require terrain_passable(action.player, cell(action.destination).terrain)
+  update cell(action.general.position).general = None
+  update action.general.position = action.destination
+  update cell(action.destination).general = action.general
+  update action.general.movement_left = action.general.movement_left - 1
+
+rule upgrade_general(action):
+  require action.general.owner == action.player
+  require enough_coins(action.player, general_upgrade_cost(action.general, action.attribute))
+  update match.coins[action.player] = match.coins[action.player] - general_upgrade_cost(action.general, action.attribute)
+  apply increase_general_attribute(action.general, action.attribute)
+
+rule use_skill(action):
+  require action.general.owner == action.player
+  require action.general.skill_cooldown[action.kind] <= 0
+  require enough_coins(action.player, skill_cost(action.kind))
+  require valid_skill_target(action.general, action.kind, action.target)
+  update match.coins[action.player] = match.coins[action.player] - skill_cost(action.kind)
+  update action.general.skill_cooldown[action.kind] = SKILL_USE_COOLDOWN
+  apply skill_effect(action.kind, action.general, action.target)
+
+rule surprise_attack(general, target):
+  require target in surprise_range(general)
+  apply transfer_general_and_army(general, target)
+  apply resolve_battle(general.owner, target, surprise_army(general))
+
+rule rout(general, target):
+  require hostile(general.owner, target.owner)
+  update target.army = max(0, target.army - rout_amount(general))
+
+rule command(general, target):
+  require target.owner == general.owner
+  create TimedEffect(owner=general.owner, kind=ATTACK_BONUS, target=target, magnitude=command_bonus(general), duration=skill_duration(COMMAND))
+
+rule defence(general, target):
+  require target.owner == general.owner
+  create TimedEffect(owner=general.owner, kind=DEFENCE_BONUS, target=target, magnitude=defence_bonus(general), duration=skill_duration(DEFENCE))
+
+rule weaken(general, target):
+  require hostile(general.owner, target.owner)
+  create TimedEffect(owner=general.owner, kind=DEFENCE_PENALTY, target=target, magnitude=weaken_amount(general), duration=skill_duration(WEAKEN))
+
+rule upgrade_technology(action):
+  require enough_coins(action.player, technology_cost(action.technology, match.technology[action.player]))
+  update match.coins[action.player] = match.coins[action.player] - technology_cost(action.technology, match.technology[action.player])
+  update match.technology[action.player][action.technology] = match.technology[action.player][action.technology] + 1
+
+rule use_super_weapon(action):
+  require match.technology[action.player][SUPER_WEAPON] > 0
+  require match.weapon_cooldown[action.player] <= 0
+  require valid_weapon_target(action.kind, action.source, action.target)
+  apply weapon_effect(action.kind, action.player, action.source, action.target)
+  update match.weapon_cooldown[action.player] = weapon_cooldown(action.kind)
+
+rule nuclear_bomb(player, target):
+  for cell_value in weapon_area(target):
+    update cell_value.army = nuclear_remaining_army(cell_value.army)
+    apply damage_general(cell_value.general, nuclear_general_damage())
+  update cell(target).terrain = PLAIN
+
+rule attack_enhance(player, target):
+  create TimedEffect(owner=player, kind=ATTACK_BONUS, target=target, magnitude=weapon_attack_bonus(), duration=weapon_duration(ATTACK_ENHANCE))
+
+rule transmission(player, source, target):
+  require cell(source).owner == player
+  require cell(target).owner == player
+  update cell(target).army = cell(target).army + cell(source).army - 1
+  update cell(source).army = 1
+
+rule time_stop(player, target):
+  create TimedEffect(owner=player, kind=TIME_STOPPED, target=target, magnitude=1, duration=weapon_duration(TIME_STOP))
+
+rule recruit_subgeneral(action):
+  require cell(action.position).owner == action.player
+  require cell(action.position).general is None
+  require enough_coins(action.player, subgeneral_recruit_cost())
+  update match.coins[action.player] = match.coins[action.player] - subgeneral_recruit_cost()
+  create General(identifier=next_general_id(), owner=action.player, kind=SUBGENERAL, position=action.position, production_level=1, defence_level=1, mobility_level=1, movement_left=base_general_movement(), skill_cooldown=initial_skill_cooldowns(SKILL_START_COOLDOWN), alive=True)
+
+rule update_round():
+  for cell_value in match.board.cells:
+    when cell_value.owner is not None:
+      update cell_value.army = cell_value.army + cell_production(cell_value)
+    when match.round % 10 == 0:
+      update cell_value.army = cell_value.army + periodic_army(cell_value)
+    when cell_value.terrain == BOG:
+      require not has_technology(cell_value.owner, BOG_IMMUNITY)
+      update cell_value.army = max(0, cell_value.army - bog_damage(cell_value.army))
+  for player in all_players:
+    update match.coins[player] = match.coins[player] + coin_income(player)
+    update match.weapon_cooldown[player] = max(0, match.weapon_cooldown[player] - 1)
+  for general in all_generals:
+    update general.movement_left = general_movement(general)
+    update general.skill_cooldown = decrement_positive(general.skill_cooldown)
+  for effect in match.active_effects:
+    update effect.duration = effect.duration - 1
+    when effect.duration <= 0:
+      delete effect
+  update match.active_player = other_player(match.active_player)
+  update match.round = match.round + turn_wraps(match.active_player)
+  reveal FullBoardView(match.round, match.active_player, match.board.cells, all_generals, match.coins, match.technology, match.active_effects)
+
+terminal main_general_or_round_limit:
+  when not main_general(player_zero).alive:
+    return player_one
+  when not main_general(player_one).alive:
+    return player_zero
+  when match.round > MAX_ROUND:
+    return compare_cells_then_armies_then_generals_with_player_zero_tiebreak()

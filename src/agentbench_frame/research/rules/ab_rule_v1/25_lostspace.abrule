@@ -1,0 +1,261 @@
+# provenance: b581bca3ba3d2d7d58a2f8c6bbddd060fc7fdc87
+# source-root: backend_sources/corpus/25_lostspace/logic/gamecode_logic
+# reviewed: main.py, src/GameController.py, src/MapGen/Map.g4, src/MapGen/MapGen.py, src/config.py, src/interactive_props.py, src/map.py, src/mapconf2.map, src/player.py, src/position.py, src/toolbag.py, src/tools.py, src/traps.py
+# includes: four-player turns, generated multi-floor map, local observation, movement, inventory, crafting and tools, keys and doors, traps, delayed recovery, damage, death, respawn, shrinking hazards, escape countdown, ranking
+# excludes: HTTP routing, communication encoding, replay serialization, rendering, logs
+game 25_lostspace
+players 4
+
+constant ESCAPE_COUNTDOWN = 3
+constant PLAYER_MAX_HEALTH = 100
+
+enum Terrain:
+  value FLOOR
+  value WALL
+  value DOOR
+  value ELEVATOR
+  value VOID
+
+enum PlayerStatus:
+  value ACTIVE
+  value ESCAPING
+  value ESCAPED
+  value LOST
+
+enum TrapKind:
+  value LANDMINE
+  value STICKY
+
+entity Expedition:
+  field round: Integer
+  field active_player: Player
+  field map: SpaceMap
+  field safe_region: Set[Position]
+  field winners: Sequence[Player]
+  field losers: Sequence[Player]
+  field delayed_events: PriorityQueue[DelayedEvent]
+
+entity SpaceMap:
+  field floors: Sequence[Floor]
+  field cells: Map[Position, Terrain]
+  field doors: Map[Position, Door]
+  field elevators: Map[Position, Elevator]
+  field capsule: EscapeCapsule
+
+entity Explorer:
+  field player: Player
+  field position: Position
+  field spawn: Position
+  field health: Number
+  field status: PlayerStatus
+  field inventory: Multiset[Item]
+  field tools: Sequence[Tool]
+  field keys: Multiset[Key]
+  field escape_remaining: Optional[Integer]
+  field immobilized_until: Integer
+
+entity Item:
+  field kind: ItemKind
+  field position: Optional[Position]
+
+entity Tool:
+  field kind: ToolKind
+  field durability: Integer
+
+entity Key:
+  field kind: KeyKind
+  field position: Optional[Position]
+
+entity Door:
+  field position: Position
+  field key_kind: KeyKind
+  field open: Boolean
+
+entity Trap:
+  field owner: Player
+  field kind: TrapKind
+  field position: Position
+  field armed: Boolean
+
+entity DelayedEvent:
+  field due_round: Integer
+  field kind: EventKind
+  field target: Explorer
+  field payload: Map[String, Value]
+
+entity EscapeCapsule:
+  field position: Position
+  field required_keys: Multiset[KeyKind]
+
+action Move:
+  field explorer: Explorer
+  field destination: Position
+
+action PickUp:
+  field explorer: Explorer
+  field item: Item
+
+action UseTool:
+  field explorer: Explorer
+  field tool: Tool
+  field target: Entity
+
+action PlaceTrap:
+  field explorer: Explorer
+  field kind: TrapKind
+  field position: Position
+
+action Interact:
+  field explorer: Explorer
+  field target: Entity
+
+action EndTurn:
+  field explorer: Explorer
+
+observation LocalView:
+  field self_state: Explorer
+  field visible_cells: Map[Position, Terrain]
+  field visible_players: Sequence[Explorer]
+  field visible_items: Sequence[Item]
+  field visible_traps: Sequence[Trap]
+  field public_round: Integer
+  field public_ranked_players: Sequence[Player]
+
+setup initial_expedition:
+  choose seed from match_seed:
+    create Expedition(round=0, active_player=first_player, map=generate_connected_multifloor_map(seed), safe_region=initial_safe_region(), winners=[], losers=[], delayed_events=empty_priority_queue())
+  for player in all_players:
+    create Explorer(player=player, position=spawn_for(player), spawn=spawn_for(player), health=PLAYER_MAX_HEALTH, status=ACTIVE, inventory=empty_multiset(), tools=[], keys=empty_multiset(), escape_remaining=None, immobilized_until=0)
+  for placement in generated_item_placements(expedition.map):
+    create Item(kind=placement.kind, position=placement.position)
+  for placement in generated_key_placements(expedition.map):
+    create Key(kind=placement.kind, position=placement.position)
+  hide cells_outside_each_explorer_vision()
+
+rule legal_move(action):
+  require action.explorer.status == ACTIVE
+  require expedition.round >= action.explorer.immobilized_until
+  require action.destination in neighbors(action.explorer.position)
+  require traversable(action.destination, expedition.map)
+  require unoccupied(action.destination)
+  return True
+
+rule move(action):
+  require legal_move(action)
+  update action.explorer.position = action.destination
+  apply trigger_trap(action.explorer, trap_at(action.destination))
+  apply apply_unsafe_region_damage(action.explorer)
+  reveal LocalView(action.explorer, visible_cells(action.explorer), visible_players(action.explorer), visible_items(action.explorer), visible_traps(action.explorer), expedition.round, expedition.winners + expedition.losers)
+
+rule pick_up(action):
+  require action.explorer.status == ACTIVE
+  require action.item.position == action.explorer.position
+  require inventory_has_capacity(action.explorer.inventory, action.item)
+  update action.explorer.inventory = add(action.explorer.inventory, action.item.kind)
+  update action.item.position = None
+  when is_key(action.item):
+    update action.explorer.keys = add(action.explorer.keys, action.item.kind)
+
+rule open_door(explorer, door):
+  require explorer.position in neighbors(door.position)
+  require not door.open
+  require door.key_kind in explorer.keys
+  update explorer.keys = remove_one(explorer.keys, door.key_kind)
+  update door.open = True
+
+rule use_tool(action):
+  require action.explorer.status == ACTIVE
+  require action.tool in action.explorer.tools
+  require action.tool.durability > 0
+  require valid_tool_target(action.tool.kind, action.target)
+  apply tool_effect(action.tool.kind, action.explorer, action.target)
+  update action.tool.durability = action.tool.durability - 1
+  when action.tool.durability <= 0:
+    delete action.tool
+
+rule place_trap(action):
+  require action.explorer.status == ACTIVE
+  require action.position == action.explorer.position
+  require trap_materials(action.kind) in action.explorer.inventory
+  update action.explorer.inventory = consume(action.explorer.inventory, trap_materials(action.kind))
+  create Trap(owner=action.explorer.player, kind=action.kind, position=action.position, armed=True)
+
+rule trigger_trap(explorer, trap):
+  require trap is not None
+  require trap.armed
+  require trap.owner != explorer.player
+  update trap.armed = False
+  when trap.kind == LANDMINE:
+    apply damage(explorer, landmine_damage())
+  when trap.kind == STICKY:
+    update explorer.immobilized_until = expedition.round + sticky_duration()
+    create DelayedEvent(due_round=explorer.immobilized_until, kind=recover_mobility, target=explorer, payload={})
+
+rule damage(explorer, amount):
+  require explorer.status in [ACTIVE, ESCAPING]
+  update explorer.health = explorer.health - amount
+  when explorer.health <= 0:
+    apply die(explorer)
+
+rule die(explorer):
+  update explorer.status = LOST
+  update explorer.escape_remaining = None
+  for key in explorer.keys:
+    create Key(kind=key, position=explorer.position)
+  update explorer.keys = empty_multiset()
+  update expedition.losers = append(expedition.losers, explorer.player)
+
+rule respawn(explorer):
+  require explorer.status == LOST
+  require respawn_permitted(explorer)
+  update explorer.position = explorer.spawn
+  update explorer.health = respawn_health()
+  update explorer.status = ACTIVE
+  update expedition.losers = remove(expedition.losers, explorer.player)
+
+rule apply_unsafe_region_damage(explorer):
+  require explorer.status in [ACTIVE, ESCAPING]
+  when explorer.position not in expedition.safe_region:
+    apply damage(explorer, unsafe_damage(expedition.round))
+
+rule shrink_safe_region():
+  update expedition.safe_region = region_for_round(expedition.round)
+  for explorer in living_explorers:
+    apply apply_unsafe_region_damage(explorer)
+
+rule start_escape(explorer):
+  require explorer.status == ACTIVE
+  require explorer.position == expedition.map.capsule.position
+  require contains(explorer.keys, expedition.map.capsule.required_keys)
+  update explorer.status = ESCAPING
+  update explorer.escape_remaining = ESCAPE_COUNTDOWN
+
+rule cancel_escape(explorer):
+  require explorer.status == ESCAPING
+  update explorer.status = ACTIVE
+  update explorer.escape_remaining = None
+
+rule advance_escape(explorer):
+  require explorer.status == ESCAPING
+  require explorer.position == expedition.map.capsule.position
+  update explorer.escape_remaining = explorer.escape_remaining - 1
+  when explorer.escape_remaining <= 0:
+    update explorer.status = ESCAPED
+    update expedition.winners = append(expedition.winners, explorer.player)
+
+rule resolve_delayed_events():
+  for event in due_events(expedition.delayed_events, expedition.round):
+    apply delayed_effect(event.kind, event.target, event.payload)
+    delete event
+
+rule end_turn(action):
+  require action.explorer.player == expedition.active_player
+  apply advance_escape(action.explorer)
+  apply resolve_delayed_events()
+  apply shrink_safe_region()
+  update expedition.active_player = next_active_player(expedition.active_player)
+  update expedition.round = expedition.round + turn_wraps(expedition.active_player)
+
+terminal all_players_ranked:
+  require length(expedition.winners) + length(expedition.losers) == players
+  return expedition.winners + reverse(expedition.losers)
