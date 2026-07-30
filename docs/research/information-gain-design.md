@@ -4,6 +4,22 @@
 >
 > 状态：核心 framework 计算、记录、Provider 边界和本地 snapshot 接口已实现；具体 Provider 进程接入和完整 CI 展示仍待外部适配。
 
+## 24_miracle game-specific scope
+
+本文的 Generals command-list macro-action 定义继续仅对 Generals 有效；它
+不会为 24_miracle 创造 runtime 中不存在的 command-list 层。24_miracle 的
+一次游戏 action 是一次 observation 后的单个 atomic Judge operation，合法
+动作表示为状态局部、完整、有序、可验证的 `ActionSupport + support_id`，而
+不是固定全局 Boolean/0-1 mask。
+
+本文其余 `KL(new||old)`、epsilon smoothing 和 episode local-KL sum 内容是
+当前 generic implementation 的设计记录，现对 24_miracle 标记为 legacy。
+24_miracle 的目标合同为 `KL(old||new)`、自然对数、无 smoothing、new-policy
+occupancy、trajectory arithmetic mean、`nats / decision`、阈值 `0.01`；参见
+[24_miracle KL contract authority v1](../games/24_miracle_kl_contract_authority.v1.md)。
+这项 game-specific 裁决不改变其他游戏，也不表示 framework、runtime、
+tracking 或 report 已经迁移。
+
 ## 1. 目标与术语
 
 RL 和 HL（heuristic learning，规则/启发式 agent 迭代）需要使用同一量纲、同一概率空间下的指标进行比较。

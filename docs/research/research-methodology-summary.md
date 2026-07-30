@@ -4,6 +4,22 @@
 >
 > 主题：在统一的 MDP、概率和评测框架下，比较 RL 与 HL（heuristic learning，规则 agent 迭代）的行为变化、性能提升和资源效率。
 
+## 24_miracle game-specific scope
+
+本文对 Generals 的 environment step 和 command-list macro-action 说明继续
+有效，但不适用于 24_miracle。24_miracle 已裁决为 atomic-only：
+`hl_iteration_step`、`game_agent_decision_step` 和 `judge_operation_step` 是
+不同层级；后两者当前对被测策略一一对应，双方合计的 `ai_operation` 数不能
+替代被测策略 decision 数。
+
+本文其余 `KL(new||old)`、epsilon smoothing 和 episode local-KL sum 方法是
+当前 generic legacy 口径。24_miracle 的目标合同改为 `KL(old||new)`、自然
+对数、无 smoothing、new-policy occupancy、trajectory arithmetic mean、
+`nats / decision`、阈值 `0.01`；其动作表示是状态局部、完整、有序的
+`ActionSupport + support_id`，不是固定全局 Boolean mask。权威裁决见
+[24_miracle KL contract authority v1](../games/24_miracle_kl_contract_authority.v1.md)。
+这不表示 schema、runtime、tracking、report 或真实执行已完成迁移。
+
 ## 1. 研究对象与术语
 
 本研究比较两类 agent 的迭代过程：

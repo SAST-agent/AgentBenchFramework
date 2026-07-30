@@ -1,5 +1,16 @@
 # Trajectory KL 下游接入指南
 
+> **24_miracle 作用域与迁移状态。** 本文记录的是当前 generic legacy
+> trajectory-KL 接口：`KL(new||old)`、epsilon regularization 和 episode
+> local-KL sum。它继续适用于仍采用该接口的通用/其他游戏接入，但不再是
+> 24_miracle 的目标合同。24_miracle 已裁决为 atomic Judge operation、状态
+> 局部完整有序的 `ActionSupport + support_id`，以及 `KL(old||new)`、自然
+> 对数、无 smoothing、new-policy occupancy、trajectory arithmetic mean、
+> `nats / decision`、阈值 `0.01`。参见
+> [24_miracle KL contract authority v1](../games/24_miracle_kl_contract_authority.v1.md)。
+> 当前 generic runtime、tracking 和 downstream integration 尚未迁移；本文
+> 不构成迁移完成声明。
+
 本文面向接入具体 Saiblo 游戏、RL agent、HL（heuristic learning，
 rule-based agent iteration）agent 或自定义对局 runner 的开发者。目标是让
 下游只提供游戏和策略事实，framework 统一完成校验、KL 计算、一手数据记录

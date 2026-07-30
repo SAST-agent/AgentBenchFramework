@@ -1,5 +1,9 @@
 # 24_miracle Decision Space + KL Core v1
 
+Authority: [24_miracle KL contract authority v1](24_miracle_kl_contract_authority.v1.md).
+That decision fixes the target contract while keeping this committed core an
+isolated synthetic/fake-only mechanism; it does not assert runtime migration.
+
 ## Scope
 
 This fake-only core defines one decision space and a pure trusted KL
@@ -25,12 +29,24 @@ observation. Public operation families are:
 Parser-internal `forbid`, `select`, and `startround` are not decisions. There
 is no separate `continue` action.
 
+For Checklist terminology, one complete Miracle game action is this one atomic
+Judge operation. `hl_iteration_step` is the outer learning/coding lifecycle,
+`game_agent_decision_step` is the measured agent's choice after an observation,
+and `judge_operation_step` is the submitted atomic command. The last two are
+currently one-to-one for the measured agent. Miracle has no command-list
+macro-action runtime; the Generals command-list definition is out of scope.
+
 `build_trusted_action_support(observation)` wraps the existing game-rule
 enumerator. The calculator does not trust a policy or evidence producer to
 declare legal actions. Each canonical command is validated, serialized with
 stable key order, hashed into its versioned action ID, checked for uniqueness,
 and sorted by that ID. The supplied support identity must exactly match the
 trusted schema version, support digest, and ordered action-ID sequence.
+
+For Miracle, this state-local, complete, ordered `ActionSupport + support_id` is
+the Checklist action-mask representation. It is not a fixed global index or a
+Boolean/0-1 vector. Failure to prove complete finite support fails closed, and
+membership in the legal support does not imply tactical value or rationale.
 
 The initial support retains all 840 ordered-card choices, including the
 Inferno creature. Runtime artifact domains remain those of the existing
@@ -93,3 +109,7 @@ real old/new policy binding, controlled Judge randomness, opponent
 qualification, benchmark completion, or authoritative readiness. Formal
 evaluation, tracking persistence, report rendering, Results integration, and
 real strategy execution are explicitly deferred.
+
+Active generic and lifecycle code that still uses `KL(new||old)`, epsilon
+smoothing, or an episode sum is legacy for the 24_miracle target contract; see
+the authority document. This file does not claim that code has been migrated.
