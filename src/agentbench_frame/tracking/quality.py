@@ -33,6 +33,9 @@ KNOWN_EVENT_TYPES = frozenset({
     "action_space_count",
     "historical_policy_action",
     "controlled_reference_policy_kl",
+    "champion_validation_gate",
+    "champion_sealed_claim",
+    "recovery_import",
 })
 
 
