@@ -531,7 +531,126 @@ python -m agentbench_frame.hl.reference_seed --out nu.json --spec-id hl-v1
 
 ---
 
-## 11. Smoke check (no real claude / no real logic)
+## 11. Raw-API multi-model runs
+
+The HL framework now supports direct LLM API calls (no `claude` CLI required)
+with multi-model comparison and KL-overlap plotting. This replaces the old
+`ClaudeCodeRunner` — the claude CLI flags (`--claude-path`,
+`--dangerously-skip-permissions`, `--model`) are **gone**. (The legacy runner
+remains in `runner.py` for reference.)
+
+### 11.1 Model configuration (`.env`)
+
+All models are configured in a single `.env` file at the framework root. Adding
+a model is a config edit only — no code change. The format:
+
+```bash
+# .env (at AgentBenchFramework/.env)
+MODELS=glm,deepseek,my-custom-model
+
+GLM_PROVIDER=openai
+GLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4/
+GLM_MODEL=glm-4-plus
+GLM_API_KEY=your-glm-key-here
+
+DEEPSEEK_PROVIDER=openai
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_API_KEY=your-deepseek-key-here
+
+MY-CUSTOM-MODEL_PROVIDER=anthropic
+MY-CUSTOM-MODEL_MODEL=claude-3-5-sonnet-20241022
+MY-CUSTOM-MODEL_API_KEY=your-anthropic-key-here
+```
+
+- `MODELS=`: comma-separated run-set (keys to run; also the curve labels and
+  per-model round dir names).
+- Per-key fields: `<KEY>_PROVIDER` (default `openai`), `<KEY>_BASE_URL`
+  (optional), `<KEY>_MODEL` (required), `<KEY>_API_KEY` (required).
+- Supported providers: `openai`, `anthropic`.
+- Misconfigured entries (missing `_MODEL` or `_API_KEY`, or unknown provider)
+  are **skipped with a logged warning** — they never abort the batch.
+- API key values are **never logged**.
+
+### 11.2 Single-model run
+
+```bash
+# bash / Git Bash
+PYTHONPATH=src uv run --extra hl python -m agentbench_frame.hl \
+  --model-key glm \
+  --reference ./agentbench_data/reference/nu-v1.json \
+  --logic "cd /d \"$BACKEND\" && python main.py" \
+  --ladder-opponent rank=6 \
+  --acts 5 --pairs 3 --seats 0 --timeout 15
+```
+
+```powershell
+# PowerShell
+$env:PYTHONPATH="src"
+uv run --extra hl python -m agentbench_frame.hl `
+  --model-key glm `
+  --reference ./agentbench_data/reference/nu-v1.json `
+  --logic "cd /d `"$BACKEND`" && python main.py" `
+  --ladder-opponent rank=6 `
+  --acts 5 --pairs 3 --seats 0 --timeout 15
+```
+
+This runs the full HL loop (coding agent → eval → KL probe) using the `glm`
+model configuration from `.env`. All other flags (`--logic`, `--reference`,
+`--ladder-opponent`, `--acts`, etc.) work identically to the old CLI runner.
+
+### 11.3 Multi-model compare + KL overlay
+
+```bash
+# bash / Git Bash
+PYTHONPATH=src uv run --extra hl python -m agentbench_frame.hl.compare \
+  --models all \
+  --experiment exp1 \
+  --reference ./agentbench_data/reference/nu-v1.json \
+  --logic "cd /d \"$BACKEND\" && python main.py" \
+  --ladder-opponent rank=6 \
+  --acts 5 --pairs 3 --seats 0 --timeout 15
+```
+
+```powershell
+# PowerShell
+$env:PYTHONPATH="src"
+uv run --extra hl python -m agentbench_frame.hl.compare `
+  --models all `
+  --experiment exp1 `
+  --reference ./agentbench_data/reference/nu-v1.json `
+  --logic "cd /d `"$BACKEND`" && python main.py" `
+  --ladder-opponent rank=6 `
+  --acts 5 --pairs 3 --seats 0 --timeout 15
+```
+
+This runs the **same** HL experiment (identical `--reference` + `--logic` +
+opponents) for **all** models in `MODELS=` under isolated per-model directories:
+`.hl_codebase/<experiment>/<model>/`. Each model gets its own `events.jsonl`
+and KL measurement.
+
+Then overlay the KL curves:
+
+```bash
+# bash / Git Bash
+PYTHONPATH=src uv run --extra hl python -m agentbench_frame.hl.plot_kl_compare \
+  --experiment exp1
+```
+
+```powershell
+# PowerShell
+$env:PYTHONPATH="src"
+uv run --extra hl python -m agentbench_frame.hl.plot_kl_compare `
+  --experiment exp1
+```
+
+This reads every model's `events.jsonl`, extracts the `policy_kl` traces, and
+plots one curve per model aligned by act step. Missing points (act 1 has no
+prior version, or a model's run failed) are rendered as gaps or ✗ markers.
+
+---
+
+## 12. Smoke check (no real claude / no real logic)
 
 Before pointing the loop at the real CLI, sanity-check the wiring end-to-end
 with stubs (the test suite does this):
