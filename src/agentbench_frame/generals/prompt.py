@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from collections.abc import Sequence
+from dataclasses import dataclass, field
+from collections.abc import Mapping, Sequence
 import json
 
 from .measurement import DecisionClassSummary
@@ -35,6 +35,7 @@ class PromptBuildResult:
     feedback_episodes_read: int = 0
     feedback_decision_records_read: int = 0
     feedback_serialized_bytes_read: int = 0
+    manifest: Mapping[str, object] = field(default_factory=dict)
 
 
 def build_codex_prompt(
