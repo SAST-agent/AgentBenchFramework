@@ -45,7 +45,7 @@
         <td><a href="agent_{{ run.agent|replace('/', '_')|replace(' ', '_') }}.html">{{ run.agent }}</a></td>
         <td>{{ run.total_episodes }}</td>
         <td>{{ "%.1f"|format(run.win_rate * 100) }}%</td>
-        <td>{{ "%.2f"|format(run.avg_reward_per_episode) }}</td>
+        <td>{{ "%.2f"|format(run.avg_reward_per_episode | default(0.0)) }}</td>
     </tr>
     {% endfor %}
 </table>
