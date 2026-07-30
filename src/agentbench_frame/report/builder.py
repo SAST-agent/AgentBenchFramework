@@ -14,6 +14,7 @@ Usage:
 
 import json
 import hashlib
+import math
 import os
 from collections import Counter
 from typing import Any, Dict, List, Optional
@@ -589,6 +590,7 @@ class ReportBuilder:
         feedback_read_event = None
         version_rollback_event = None
         critical_window_selections = []
+        controlled_reference_support_by_state = {}
         for index, event in enumerate(events, start=1):
             event_type = event.get("event_type", event.get("event"))
             if event_type == "policy_kl_trace":
@@ -771,6 +773,35 @@ class ReportBuilder:
                     ),
                     "reasons": event.get("reasons", {}),
                 })
+            elif event_type == "action_space_count":
+                state_id = event.get("measurement_state_id")
+                if state_id:
+                    support_size = event.get("support_size")
+                    log10_support_size = None
+                    if support_size is not None:
+                        digits = str(support_size)
+                        if digits.isdigit() and digits.strip("0"):
+                            leading = int(digits[:16])
+                            mantissa = leading / (
+                                10 ** (len(digits[:16]) - 1)
+                            )
+                            log10_support_size = (
+                                len(digits) - 1 + math.log10(mantissa)
+                            )
+                    controlled_reference_support_by_state[state_id] = {
+                        "measurement_state_id": state_id,
+                        "seed": event.get("seed"),
+                        "seat": event.get("seat"),
+                        "decision_number": event.get(
+                            "decision_number"
+                        ),
+                        "support_size": support_size,
+                        "log10_support_size": log10_support_size,
+                        "status": event.get("status"),
+                        "elapsed_time_s": event.get("elapsed_time_s"),
+                        "expanded_states": event.get("expanded_states"),
+                        "error": event.get("error"),
+                    }
         for aggregate in action_disagreement_history:
             episodes = [
                 item
@@ -796,6 +827,98 @@ class ReportBuilder:
                 aggregate["decision_balanced_action_disagreement"] = (
                     sum(decisions) / len(decisions) if decisions else None
                 )
+        controlled_reference_metric = summary.get(
+            "controlled_reference_policy_kl"
+        )
+        if not isinstance(controlled_reference_metric, dict):
+            controlled_reference_metric = {}
+        controlled_reference_history = []
+        controlled_reference_sensitivity = []
+        for point_index, transition in enumerate(
+            controlled_reference_metric.get("transitions") or []
+        ):
+            before = transition.get("version_before")
+            after = transition.get("version_after")
+            coverage = transition.get("coverage")
+            if not isinstance(coverage, dict):
+                coverage = {}
+            controlled_reference_history.append({
+                "index": point_index,
+                "version_before": before,
+                "version_after": after,
+                "label": f"{before}→{after}",
+                "mean_kl_nats": transition.get("mean_kl_nats"),
+                "mean_kl_nats_decimal": transition.get(
+                    "mean_kl_nats_decimal"
+                ),
+                "coverage_complete": coverage.get("complete"),
+                "coverage_total": coverage.get("total"),
+                "action_disagreement_rate": transition.get(
+                    "action_disagreement_rate"
+                ),
+            })
+            sensitivity = transition.get("sensitivity")
+            if not isinstance(sensitivity, dict):
+                sensitivity = {}
+            for epsilon in controlled_reference_metric.get(
+                "epsilons",
+                ("0.001", "0.01", "0.05", "0.1"),
+            ):
+                value = sensitivity.get(epsilon)
+                if not isinstance(value, dict):
+                    value = {}
+                epsilon_coverage = value.get("coverage")
+                if not isinstance(epsilon_coverage, dict):
+                    epsilon_coverage = {}
+                controlled_reference_sensitivity.append({
+                    "version_before": before,
+                    "version_after": after,
+                    "label": f"{before}→{after}",
+                    "epsilon": epsilon,
+                    "mean_kl_nats": value.get("mean_kl_nats"),
+                    "mean_kl_nats_decimal": value.get(
+                        "mean_kl_nats_decimal"
+                    ),
+                    "coverage_complete": epsilon_coverage.get(
+                        "complete"
+                    ),
+                    "coverage_total": epsilon_coverage.get("total"),
+                })
+        complete_values = [
+            float(point["mean_kl_nats"])
+            for point in controlled_reference_history
+            if point["mean_kl_nats"] is not None
+        ]
+        chart_min = min(complete_values) if complete_values else 0.0
+        chart_max = max(complete_values) if complete_values else 0.0
+        chart_range = chart_max - chart_min
+        chart_denominator = max(
+            1, len(controlled_reference_history) - 1
+        )
+        controlled_reference_segments = []
+        current_segment = []
+        for point in controlled_reference_history:
+            value = point["mean_kl_nats"]
+            if value is None:
+                if current_segment:
+                    controlled_reference_segments.append(current_segment)
+                    current_segment = []
+                continue
+            display_point = {
+                **point,
+                "x": 60 + 520 * point["index"] / chart_denominator,
+                "y": (
+                    100.0
+                    if chart_range == 0
+                    else 170
+                    - 140
+                    * (float(value) - chart_min)
+                    / chart_range
+                ),
+            }
+            current_segment.append(display_point)
+        if current_segment:
+            controlled_reference_segments.append(current_segment)
         raw_score = summary.get("raw_score")
         evo_score = summary.get(
             "evo_score_5",
@@ -870,6 +993,22 @@ class ReportBuilder:
             "score_history": score_history,
             "auc": auc,
             "ig_history": ig_history,
+            "controlled_reference_policy_kl": (
+                controlled_reference_metric
+            ),
+            "controlled_reference_policy_kl_history": (
+                controlled_reference_history
+            ),
+            "controlled_reference_policy_kl_sensitivity": (
+                controlled_reference_sensitivity
+            ),
+            "controlled_reference_policy_kl_svg_segments": (
+                controlled_reference_segments
+            ),
+            "controlled_reference_support_states": sorted(
+                controlled_reference_support_by_state.values(),
+                key=lambda item: item["measurement_state_id"],
+            ),
             "occupancy_history": occupancy_history,
             "action_disagreement_history": action_disagreement_history,
             "calibration": calibration,

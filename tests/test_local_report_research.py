@@ -898,6 +898,156 @@ class LocalResearchReportTests(unittest.TestCase):
         self.assertIn(">0.25<", html)
         self.assertIn(">0.50<", html)
 
+    def test_controlled_reference_policy_kl_keeps_missing_curve_gap_out_of_ig(self):
+        from agentbench_frame.report.builder import ReportBuilder
+
+        def transition(before, after, mean, complete):
+            sensitivity = {
+                epsilon: {
+                    "mean_kl_nats": (
+                        None if mean is None else mean * multiplier
+                    ),
+                    "coverage": {"complete": complete, "total": 12},
+                }
+                for epsilon, multiplier in (
+                    ("0.001", 1.2),
+                    ("0.01", 1.0),
+                    ("0.05", 0.8),
+                    ("0.1", 0.6),
+                )
+            }
+            return {
+                "version_before": before,
+                "version_after": after,
+                "mean_kl_nats": mean,
+                "coverage": {"complete": complete, "total": 12},
+                "sensitivity": sensitivity,
+            }
+
+        research = ReportBuilder._derive_research(
+            {
+                "controlled_reference_policy_kl": {
+                    "primary_epsilon": "0.01",
+                    "reference_state_count": 12,
+                    "transitions": [
+                        transition("v0", "v1", 1.0, 12),
+                        transition("v1", "v2", None, 11),
+                        transition("v2", "v3", 3.0, 12),
+                        transition("v3", "v4", 4.0, 12),
+                    ],
+                },
+            },
+            [
+                {
+                    "event_type": "action_space_count",
+                    "measurement_state_id": "seed289101-seat0-decision2",
+                    "support_size": "123456789012345678901234567890",
+                    "status": "complete",
+                    "elapsed_time_s": 1.5,
+                }
+            ],
+            "/missing/events.jsonl",
+        )
+
+        self.assertEqual(research["ig_history"], [])
+        self.assertEqual(
+            [
+                point["mean_kl_nats"]
+                for point in research[
+                    "controlled_reference_policy_kl_history"
+                ]
+            ],
+            [1.0, None, 3.0, 4.0],
+        )
+        self.assertEqual(
+            [
+                [point["label"] for point in segment]
+                for segment in research[
+                    "controlled_reference_policy_kl_svg_segments"
+                ]
+            ],
+            [["v0→v1"], ["v2→v3", "v3→v4"]],
+        )
+        self.assertEqual(
+            len(
+                research[
+                    "controlled_reference_policy_kl_sensitivity"
+                ]
+            ),
+            16,
+        )
+        support = research["controlled_reference_support_states"][0]
+        self.assertEqual(
+            support["support_size"],
+            "123456789012345678901234567890",
+        )
+        self.assertAlmostEqual(support["log10_support_size"], 29.0915, 4)
+
+    def test_controlled_reference_policy_kl_panel_states_scope_and_coverage(self):
+        from agentbench_frame.report.builder import ReportBuilder
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = (
+                root
+                / "runs"
+                / "28_generals"
+                / "generals-policy-kl"
+                / "measurement-1"
+            )
+            run_dir.mkdir(parents=True)
+            sensitivity = {
+                epsilon: {
+                    "mean_kl_nats": value,
+                    "coverage": {"complete": 11, "total": 12},
+                }
+                for epsilon, value in (
+                    ("0.001", 5.0),
+                    ("0.01", 4.0),
+                    ("0.05", 3.0),
+                    ("0.1", 2.0),
+                )
+            }
+            (run_dir / "summary.json").write_text(json.dumps({
+                "run_id": "measurement-1",
+                "game": "28_generals",
+                "agent": "generals-policy-kl",
+                "run_type": "measurement",
+                "status": "incomplete_policy_measurement",
+                "controlled_reference_policy_kl": {
+                    "primary_epsilon": "0.01",
+                    "reference_state_count": 12,
+                    "transitions": [{
+                        "version_before": "v0",
+                        "version_after": "v1",
+                        "mean_kl_nats": None,
+                        "coverage": {"complete": 11, "total": 12},
+                        "sensitivity": sensitivity,
+                    }],
+                },
+            }))
+            (run_dir / "events.jsonl").write_text(json.dumps({
+                "event_type": "action_space_count",
+                "measurement_state_id": "seed289101-seat0-decision2",
+                "support_size": "1000000000000000000000000000000",
+                "status": "complete",
+                "elapsed_time_s": 2.0,
+            }) + "\n")
+
+            output = root / "site"
+            ReportBuilder(
+                data_dir=str(root),
+                output_dir=str(output),
+            ).build()
+            html = (output / "index.html").read_text()
+
+        self.assertIn("Controlled-reference policy KL", html)
+        self.assertIn("epsilon = 0.01", html)
+        self.assertIn("early controlled real states", html)
+        self.assertIn("not epistemic information gain", html)
+        self.assertIn("11 / 12", html)
+        self.assertIn("seed289101-seat0-decision2", html)
+
 
 if __name__ == "__main__":
     unittest.main()
