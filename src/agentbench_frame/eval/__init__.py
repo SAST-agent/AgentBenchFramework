@@ -17,6 +17,7 @@ from agentbench_frame.eval.benchmark import (
 )
 from agentbench_frame.eval.curves import trapezoid_auc
 from agentbench_frame.eval.information_gain import (
+    deterministic_measurement_distribution,
     epsilon_regularize,
     episode_policy_kl_trace,
     occupancy_histogram,
@@ -25,6 +26,7 @@ from agentbench_frame.eval.information_gain import (
     trajectory_kl_from_trace,
 )
 from agentbench_frame.eval.measurement import (
+    ActionSupport,
     PolicyDistributionProvider,
     StateIdProvider,
     canonical_state_id,
@@ -40,6 +42,7 @@ __all__ = [
     "GameResult",
     "evaluate_benchmark",
     "trapezoid_auc",
+    "deterministic_measurement_distribution",
     "epsilon_regularize",
     "episode_policy_kl_trace",
     "occupancy_histogram",
@@ -47,6 +50,7 @@ __all__ = [
     "policy_kl",
     "trajectory_kl_from_trace",
     "PolicyDistributionProvider",
+    "ActionSupport",
     "StateIdProvider",
     "canonical_state_id",
     "canonical_state_payload",

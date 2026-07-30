@@ -9,6 +9,21 @@ from enum import Enum
 from typing import Any, Iterable, Protocol, Sequence, runtime_checkable
 
 
+@dataclasses.dataclass(frozen=True)
+class ActionSupport:
+    """Complete, ordered action IDs for one measured decision context."""
+
+    action_ids: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        normalized = tuple(str(action_id) for action_id in self.action_ids)
+        if not normalized:
+            raise ValueError("action support cannot be empty")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("action support IDs must be unique")
+        object.__setattr__(self, "action_ids", normalized)
+
+
 def _canonical_value(value: Any) -> Any:
     if dataclasses.is_dataclass(value) and not isinstance(value, type):
         return _canonical_value(dataclasses.asdict(value))

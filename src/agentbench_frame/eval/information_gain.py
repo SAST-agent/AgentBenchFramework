@@ -9,6 +9,31 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
+from agentbench_frame.eval.measurement import ActionSupport
+
+
+def deterministic_measurement_distribution(
+    chosen_action: Any,
+    support: ActionSupport,
+    epsilon: float,
+) -> Dict[str, float]:
+    """Measure a deterministic decision on an explicit complete support.
+
+    The uniform mass is a measurement convention. It does not change the
+    candidate policy and does not introduce high-level or inferred actions.
+    """
+
+    if not 0.0 <= epsilon <= 1.0:
+        raise ValueError("epsilon must be in [0, 1]")
+    chosen_id = str(chosen_action)
+    if chosen_id not in support.action_ids:
+        raise ValueError(f"chosen action {chosen_id!r} is outside the declared support")
+    uniform = epsilon / len(support.action_ids)
+    return {
+        action_id: uniform + (1.0 - epsilon if action_id == chosen_id else 0.0)
+        for action_id in support.action_ids
+    }
+
 
 def _normalize(values: Sequence[float]) -> List[float]:
     if not values:

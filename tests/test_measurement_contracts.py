@@ -65,6 +65,32 @@ class BenchmarkContractTests(unittest.TestCase):
 
 
 class InformationGainContractTests(unittest.TestCase):
+    def test_deterministic_action_uses_only_the_complete_declared_support(self):
+        from agentbench_frame.eval.information_gain import (
+            deterministic_measurement_distribution,
+            policy_kl,
+        )
+        from agentbench_frame.eval.measurement import ActionSupport
+
+        support = ActionSupport(("0", "1", "2", "3", "4"))
+        old = deterministic_measurement_distribution("1", support, epsilon=0.05)
+        same = deterministic_measurement_distribution("1", support, epsilon=0.05)
+        new = deterministic_measurement_distribution("4", support, epsilon=0.05)
+
+        self.assertEqual(
+            old,
+            {"0": 0.01, "1": 0.96, "2": 0.01, "3": 0.01, "4": 0.01},
+        )
+        self.assertAlmostEqual(
+            policy_kl(list(same.values()), list(old.values())),
+            0.0,
+        )
+        self.assertGreater(policy_kl(list(new.values()), list(old.values())), 0.0)
+        self.assertLess(policy_kl(list(new.values()), list(old.values())), float("inf"))
+
+        with self.assertRaises(ValueError):
+            deterministic_measurement_distribution("target-nearest-bean", support, epsilon=0.05)
+
     def test_epsilon_regularization_gives_finite_common_support(self):
         from agentbench_frame.eval.information_gain import epsilon_regularize, policy_kl
 
