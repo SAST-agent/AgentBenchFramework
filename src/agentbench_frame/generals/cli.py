@@ -26,6 +26,7 @@ from .pipeline_v3 import GeneralsHLRound3Pipeline
 from .pipeline_v4 import GeneralsHLRound4Pipeline
 from .pipeline_v5 import GeneralsHLRound5Pipeline
 from .pipeline_v6 import GeneralsHLRound6Pipeline
+from .pipeline_v7 import GeneralsHLRound7Pipeline
 from .policy_kl_pipeline import GeneralsPolicyKLPipeline
 
 
@@ -71,6 +72,14 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
             "Recover an audited v6 prompt, provider, or evaluation failure",
         ),
         (
+            "iterate-v7",
+            "Run v6 champion learning → one planner act → v7 challenge",
+        ),
+        (
+            "recover-v7",
+            "Recover an audited v7 provider or evaluation failure",
+        ),
+        (
             "measure-policy-kl",
             "Measure exact controlled-reference v0-v6 policy KL",
         ),
@@ -95,8 +104,15 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
             "iterate-v5",
             "iterate-v6",
             "recover-v6",
+            "iterate-v7",
+            "recover-v7",
         }:
-            explicit_provider = name in {"iterate-v6", "recover-v6"}
+            explicit_provider = name in {
+                "iterate-v6",
+                "recover-v6",
+                "iterate-v7",
+                "recover-v7",
+            }
             command.add_argument(
                 "--codex-executable",
                 default="codex",
@@ -125,6 +141,20 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
         if name in {"iterate-v6", "recover-v6"}:
             command.add_argument(
                 "--learning-manifest",
+                type=Path,
+                required=True,
+            )
+            command.add_argument(
+                "--replay-skill",
+                type=Path,
+                required=True,
+                help="Path relative to --agentbench-root",
+            )
+            command.add_argument("--parent-run", type=Path, required=True)
+            command.add_argument("--expected-parent-hash", required=True)
+        if name in {"iterate-v7", "recover-v7"}:
+            command.add_argument(
+                "--challenge-manifest",
                 type=Path,
                 required=True,
             )
@@ -170,6 +200,8 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
         if name == "recover-v2":
             command.add_argument("--failed-run", type=Path, required=True)
         if name == "recover-v6":
+            command.add_argument("--failed-run", type=Path, required=True)
+        if name == "recover-v7":
             command.add_argument("--failed-run", type=Path, required=True)
         if name in {"measure-policy-kl", "recover-policy-kl"}:
             command.add_argument(
@@ -417,6 +449,36 @@ def handle(args) -> int:
                 "evo_score_5": result.evo_score_5,
                 "evo_score_6": result.evo_score_6,
                 "gain_6": result.gain_6,
+                "global_act_count": result.global_act_count,
+                "round_act_count": result.round_act_count,
+                "runnable": result.runnable,
+            }, sort_keys=True))
+            return 0 if result.status == "complete" else 1
+        if args.generals_command in {"iterate-v7", "recover-v7"}:
+            pipeline = GeneralsHLRound7Pipeline.from_paths(
+                agentbench_root=args.agentbench_root,
+                manifest_path=args.manifest,
+                challenge_manifest_path=args.challenge_manifest,
+                replay_skill_path=args.replay_skill,
+                parent_run_dir=args.parent_run,
+                expected_parent_hash=args.expected_parent_hash,
+                data_dir=args.data_dir,
+                provider=provider,
+            )
+            result = (
+                pipeline.run()
+                if args.generals_command == "iterate-v7"
+                else pipeline.recover(args.failed_run)
+            )
+            print(json.dumps({
+                "status": result.status,
+                "run_dir": str(result.run_dir),
+                "raw_score": result.raw_score,
+                "evo_score_7": result.evo_score_7,
+                "gain_7": result.gain_7,
+                "validation_passed": result.validation_passed,
+                "sealed_status": result.sealed_status,
+                "champion_claim": result.champion_claim,
                 "global_act_count": result.global_act_count,
                 "round_act_count": result.round_act_count,
                 "runnable": result.runnable,
