@@ -7,20 +7,22 @@ translate every public AgentBench game except DeepClue into that language, and
 publish reproducible rule-complexity measurements.
 
 The primary quantity is not compiled size, runtime implementation size, or
-exact Kolmogorov complexity. It is the length of a verified formal rule
-description under one frozen vocabulary:
+exact Kolmogorov complexity. It is the canonical abstract-syntax-tree size of
+a verified formal rule description under one frozen vocabulary:
 
 \[
-\widehat C_{\mathcal L}(G)=|\mathcal A(d_G)|
+\widehat C_{\mathrm{AST},\mathcal L}(G)
+=N_{\mathrm{structure}}(d_G)+N_{\mathrm{expression}}(d_G)
 \]
 
-where \(d_G\) is the committed AB-Rule/1 description of game \(G\), and
-\(\mathcal A(d_G)\) is the set of tagged occurrences of atomic rule
-propositions in that description. A proposition is atomic when one part of
-its meaning can be changed without necessarily changing another part. For
-example, "a fireball deals damage and disappears on impact" contains two
-propositions: the damage effect and the removal effect. This quantity is a
-language-relative upper bound on the minimum conceptual rule description.
+where \(d_G\) is the committed AB-Rule/1 description of game \(G\).
+\(N_{\mathrm{structure}}\) counts AB-Rule declaration, block, and statement
+nodes except the identifying `game` header. \(N_{\mathrm{expression}}\)
+counts canonical expression nodes, excluding the parser wrapper, expression
+contexts such as `Load`, and CPython operator-marker objects such as `Add`,
+`Eq`, and `And`. The secondary `rule_atoms` quantity remains the cardinality
+of the disjoint semantic-proposition partition. Both are language-relative
+description measures.
 
 ## Scope
 
@@ -125,9 +127,11 @@ The statement vocabulary is:
 Expressions use a restricted Python-like notation for literals, references,
 attribute access, calls, indexing, collections, arithmetic, comparisons, and
 Boolean composition. This notation is only a concise mathematical surface
-syntax; CPython execution semantics are not part of AB-Rule/1. An expression
-belongs to the proposition containing it: its compiler parse-tree nodes,
-operators, identifier lengths, and punctuation are never counted separately.
+syntax; CPython execution semantics are not part of AB-Rule/1. The canonical
+expression AST counts calls, names, attributes, literals, collections,
+subscripts, keywords, comparisons, and Boolean/arithmetic expression nodes.
+Identifier spelling, punctuation, and CPython-only wrapper/context/operator
+marker objects are not counted.
 
 ### Atomic-proposition discipline
 
@@ -162,11 +166,29 @@ reuse without hiding its definition.
 
 ## Measurement
 
-The parser constructs a semantic rule tree solely to validate the controlled
-pseudocode and identify proposition occurrences. Compiler AST shape is not a
-scientific quantity and does not participate in the measurement.
+The parser constructs a canonical AB-Rule AST. Its size is the primary
+scientific quantity. This is not the raw node count returned by CPython
+`ast.walk`: implementation-only wrapper, context, and operator-marker nodes
+are excluded by the frozen AB-Rule/1 reference counter.
 
 ### Primary metric
+
+The primary metric is:
+
+\[
+\texttt{ast\_nodes}
+=\texttt{structural\_ast\_nodes}
++\texttt{expression\_ast\_nodes}.
+\]
+
+`structural_ast_nodes` counts every parsed AB-Rule declaration, block, and
+statement except `game`. `expression_ast_nodes` counts the canonical
+expression nodes attached to those structural nodes. Reusing a named advanced
+operation does not duplicate its definition tree, but each static invocation
+contributes its own call-site expression subtree. Runtime execution frequency
+does not affect either count.
+
+### Secondary metric
 
 Each counted occurrence has a stable tag containing its semantic section and
 source position, so repeated propositions in different rule contexts remain
@@ -181,7 +203,7 @@ distinct set members. The proposition set is partitioned into:
   propositions;
 - `outcome`: termination, ranking, winner, and score propositions.
 
-The primary metric is
+The secondary metric is
 
 \[
 \texttt{rule\_atoms}
@@ -200,14 +222,15 @@ propositions, while the `game` header identifies the document; those headers
 do not add rule atoms. Entity, action, and observation declarations do add
 atoms because the existence of each concept is itself a rule proposition.
 Names, comments, indentation width, punctuation, line wrapping, expression
-operators, and AST shape do not change the count.
+operators, and AST shape do not change `rule_atoms`.
 
 ### Explanatory output
 
-The report publishes the seven partition cardinalities as
-`atom_breakdown`. It also publishes source bytes, SHA-256, and provenance for
-reproduction. Nesting depth, lexical token count, source line count, literal
-count, and compiler AST node count are not game-complexity outputs.
+The report publishes `structural_ast_nodes`, `expression_ast_nodes`, total
+`ast_nodes`, `rule_atoms`, and the seven `atom_breakdown` cardinalities. It
+also publishes source bytes, SHA-256, and provenance for reproduction.
+Nesting depth, lexical token count, source line count, and raw CPython AST
+node count are not game-complexity outputs.
 
 ## Fairness Rules
 
@@ -220,8 +243,7 @@ count, and compiler AST node count are not game-complexity outputs.
    instance is not.
 6. A fixed map essential to the game is reported separately as instance
    content and is not allowed to disappear from provenance.
-7. Equivalent formatting and identifier renaming do not affect the primary
-   metric.
+7. Equivalent formatting and identifier renaming do not affect either metric.
 8. Every description carries the exact source commit and a source-path
    coverage manifest.
 9. The result is a best-known verified description, not a proof of global
@@ -263,9 +285,9 @@ canonical identifier mapping, and syntax diagnostics.
 
 ### Metric
 
-`agentbench_frame.research.rule_complexity` constructs the proposition
-partition, validates the nine-game corpus, hashes descriptions and provenance,
-and renders JSON and Markdown reports.
+`agentbench_frame.research.rule_complexity` counts the canonical AST,
+constructs the proposition partition, validates the nine-game corpus, hashes
+descriptions and provenance, and renders JSON and Markdown reports.
 
 ### Corpus
 
@@ -288,12 +310,12 @@ network after installation.
 
 Tests demonstrate:
 
-- comments, whitespace, expression spelling, and alpha-renaming do not change
-  `rule_atoms`;
+- comments, whitespace, and alpha-renaming do not change either metric;
+- adding a canonical expression node increases `ast_nodes` without
+  necessarily changing `rule_atoms`;
+- `ast_nodes` equals `structural_ast_nodes + expression_ast_nodes`;
 - adding an independently changeable declaration, condition, transition, or
   outcome proposition increases `rule_atoms`;
-- expression operators and AST nesting do not independently increase
-  `rule_atoms`;
 - `rule_atoms` equals the sum of the disjoint `atom_breakdown` partitions;
 - malformed indentation and unsupported syntax fail closed;
 - all required semantic sections are present;
@@ -306,8 +328,7 @@ Tests demonstrate:
 
 ## Published Interpretation
 
-The report uses the name **Ludemic Rule Description Complexity** and the unit
-**rule atoms (RA)**. It states explicitly that RA measures formal conceptual
-description length under AB-Rule/1. It does not measure state-space size,
-strategic depth, learning difficulty, implementation size, or information
-gain.
+The report uses the name **Ludemic Rule Description Complexity**. Its primary
+unit is canonical **AST nodes**; **rule atoms (RA)** remain a secondary
+semantic breakdown. Neither measures state-space size, strategic depth,
+learning difficulty, implementation size, or information gain.

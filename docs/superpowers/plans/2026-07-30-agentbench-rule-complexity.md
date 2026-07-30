@@ -4,7 +4,7 @@
 
 **Goal:** Define AB-Rule/1, translate the nine non-DeepClue AgentBench games, and publish deterministic Ludemic Rule Description Complexity measurements.
 
-**Architecture:** A small indentation parser converts formal pseudocode into a semantic rule tree without compiling it. A separate metric module partitions atomic rule propositions by semantic role, validates a packaged nine-game corpus, and renders frozen JSON/Markdown artifacts through the existing CLI.
+**Architecture:** A small indentation parser converts formal pseudocode into a canonical semantic AST without compiling it. A separate metric module counts structural and expression AST nodes, retains the semantic rule-proposition partition, validates a packaged nine-game corpus, and renders frozen JSON/Markdown artifacts through the existing CLI.
 
 **Tech Stack:** Python 3.10+, standard-library `ast`, `tokenize`, `dataclasses`, `importlib.resources`, pytest, Hatch packaging.
 
@@ -12,9 +12,10 @@
 
 - DeepClue is excluded.
 - The source provenance commit is `b581bca3ba3d2d7d58a2f8c6bbddd060fc7fdc87`.
-- `rule_atoms` is the only primary ranking metric.
-- `rule_atoms` is the cardinality of the disjoint semantic-proposition
-  partition; expression operators and AST shape are not counted.
+- `ast_nodes` is the primary ranking metric.
+- `ast_nodes` is `structural_ast_nodes + expression_ast_nodes` under the
+  frozen canonical-node exclusions.
+- `rule_atoms` and `atom_breakdown` remain secondary outputs.
 - No compilation or bytecode length participates in any AB-Rule/1 metric.
 - Existing AB-Ludi/1 implementation-complexity output remains unchanged.
 - Execution is inline in the existing `codex/ludi-k-complexity` worktree; no subagents.
@@ -82,8 +83,7 @@ The implementation must:
 - require two-space indentation and reject skipped indentation levels;
 - use `ast.parse(..., mode="eval")` only to analyze restricted expressions;
 - reject comprehensions, lambdas, assignment expressions, imports, and arbitrary statements;
-- validate restricted expressions without treating their AST structure as
-  game complexity;
+- validate restricted expressions and expose their canonical AST structure;
 - preserve source line numbers and comments beginning with `# provenance:`,
   `# source-root:`, `# reviewed:`, `# includes:`, and `# excludes:`.
 
@@ -125,12 +125,13 @@ def test_rule_atoms_ignore_comments_and_identifier_names():
     assert metric(left)["rule_atoms"] == metric(right)["rule_atoms"]
 
 
-def test_expression_ast_shape_does_not_increase_rule_atoms():
+def test_expression_ast_shape_increases_ast_nodes_but_not_rule_atoms():
     base = "game A\nplayers 2\nrule r(x):\n  return occupied(x)\n"
     richer = (
         "game A\nplayers 2\nrule r(x):\n"
         "  return occupied(x) and hostile(x)\n"
     )
+    assert metric(richer)["ast_nodes"] > metric(base)["ast_nodes"]
     assert metric(richer)["rule_atoms"] == metric(base)["rule_atoms"]
 
 
@@ -153,6 +154,12 @@ Expected: collection fails because `rule_complexity` does not exist.
 
 Use these exact rules:
 
+- each parsed AB-Rule node except `game` contributes one
+  `structural_ast_nodes`;
+- each restricted-expression AST node contributes one
+  `expression_ast_nodes`, except `ast.Expression`, expression-context nodes,
+  and operator-marker nodes;
+- `ast_nodes` is the sum and is the primary ranking value;
 - block headers group propositions and do not contribute rule atoms;
 - player, constant, enum value, entity, field, and action/observation member
   declarations contribute one proposition each;
@@ -161,8 +168,7 @@ Use these exact rules:
 - each proposition belongs to exactly one of `state`, `action`,
   `observation`, `setup`, `condition`, `transition`, or `outcome`;
 - `rule_atoms` equals the sum of those seven partition cardinalities;
-- expression calls, operators, literals, token count, and AST nesting do not
-  independently contribute to any metric.
+- expression structure does not contribute to `rule_atoms`.
 
 - [ ] **Step 4: Add fail-closed corpus checks**
 
@@ -328,7 +334,7 @@ agentbench complexity rules \
 ```
 
 Expected: both reports contain exactly nine results sorted primarily by
-`rule_atoms`.
+`ast_nodes`, with `rule_atoms` retained.
 
 - [ ] **Step 6: Run focused tests**
 
@@ -373,7 +379,8 @@ complexity and links to the new rule-complexity report without mixing units.
 Explain:
 
 - AB-Ludi/1 `k_upper_bits` is implementation-description complexity;
-- AB-Rule/1 `rule_atoms` is formal conceptual rule-description complexity;
+- AB-Rule/1 `ast_nodes` is the primary formal description complexity;
+- AB-Rule/1 `rule_atoms` is a retained semantic auxiliary measure;
 - neither metric is strategic depth, state-space size, learning difficulty, or
   information gain.
 
