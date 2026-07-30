@@ -9,8 +9,9 @@ def _workspace(root: Path) -> Path:
 
 
 class FakeProvider:
-    def __init__(self, edits):
+    def __init__(self, edits, experience_updates=None):
         self.edits = iter(edits)
+        self.experience_updates = iter(experience_updates or [])
         self.calls = []
 
     def invoke(self, *, prompt, workspace, raw_output_path, session_id=None):
@@ -18,6 +19,16 @@ class FakeProvider:
 
         edit = next(self.edits)
         Path(workspace, "agent.py").write_text(edit, encoding="utf-8")
+        try:
+            update = next(self.experience_updates)
+        except StopIteration:
+            update = None
+        if update is not None:
+            import json
+
+            update_path = Path(workspace, ".agentbench/experience_update.json")
+            update_path.parent.mkdir(parents=True, exist_ok=True)
+            update_path.write_text(json.dumps(update), encoding="utf-8")
         Path(raw_output_path).parent.mkdir(parents=True, exist_ok=True)
         Path(raw_output_path).write_text('{"type":"turn.completed"}\n', encoding="utf-8")
         self.calls.append(
@@ -50,7 +61,7 @@ class FakeEvaluator:
         return CandidateEvaluation(status="complete", score=value)
 
 
-def _controller(tmp_path, provider, evaluator, *, k=1, patience=3):
+def _controller(tmp_path, provider, evaluator, *, k=1, patience=3, experience=None):
     from agentbench_frame.hl.codebase import VersionStore
     from agentbench_frame.hl.config import IterationConfig, RollbackConfig
     from agentbench_frame.hl.controller import HLController
@@ -74,6 +85,7 @@ def _controller(tmp_path, provider, evaluator, *, k=1, patience=3):
         prompt_factory=lambda **values: (
             f"act={values['act_id']} branch={values['branch_index']}/{values['branch_count']}"
         ),
+        experience_manager=experience,
     )
     return controller
 
@@ -96,6 +108,9 @@ def test_k_candidates_are_siblings_and_gate_selects_best_complete_score(tmp_path
     assert result.selected.version.version_id == result.candidates[1].version.version_id
     assert controller.lineage.lineage_head_version_id == result.selected.version.version_id
     assert len({candidate.version.content_hash for candidate in result.candidates}) == 3
+    checkpoint = tmp_path / "checkpoints" / f"{result.candidates[0].act_id}.json"
+    assert checkpoint.is_file()
+    assert "branch=0/3" in checkpoint.read_text(encoding="utf-8")
 
 
 def test_each_invocation_gets_logical_version_and_incomplete_score_stays_missing(tmp_path):
@@ -143,3 +158,121 @@ def test_open_ended_config_has_no_implicit_iteration_cap(tmp_path):
     assert controller.iteration.max_acts is None
     assert controller.reached_iteration_limit() is False
 
+
+def test_controller_ingests_structured_experience_update_outside_version(tmp_path):
+    from agentbench_frame.hl.experience import ExperienceManager
+
+    experience = ExperienceManager(tmp_path / "experience")
+    provider = FakeProvider(
+        ["VALUE = 1\n"],
+        experience_updates=[
+            {
+                "stable_knowledge": ["Replay-complete collision evidence is reusable."],
+                "failed_hypotheses": [],
+                "replay_evidence": ["replay-x level 1 round 3"],
+                "active_questions": [],
+            }
+        ],
+    )
+    controller = _controller(
+        tmp_path,
+        provider,
+        FakeEvaluator([0.5]),
+        experience=experience,
+    )
+    controller.initialize()
+    result = controller.run_act()
+
+    assert "collision evidence" in experience.path.read_text(encoding="utf-8")
+    assert ".agentbench/experience_update.json" not in result.selected.version.files
+
+
+def test_completed_matches_emit_win_rate_inputs_and_role_elo(tmp_path):
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+    from agentbench_frame.hl.events import read_events
+
+    class MatchEvaluator:
+        def evaluate(self, version):
+            return CandidateEvaluation(
+                status="complete",
+                score=0.5,
+                matches=(
+                    {
+                        "status": "complete",
+                        "opponent": "rank01",
+                        "seed": 7,
+                        "result": "win",
+                        "rollman_score": 4,
+                        "ghosts_score": 2,
+                    },
+                    {
+                        "status": "complete",
+                        "opponent": "rank01",
+                        "seed": 8,
+                        "result": "loss",
+                        "rollman_score": 1,
+                        "ghosts_score": 3,
+                    },
+                ),
+            )
+
+    controller = _controller(
+        tmp_path,
+        FakeProvider(["VALUE = 1\n"]),
+        MatchEvaluator(),
+    )
+    controller.initialize()
+    controller.run_act()
+    events = read_events(tmp_path / "events.jsonl")
+
+    evaluation = [
+        event for event in events if event["event_type"] == "evaluation_completed"
+    ][0]
+    assert (evaluation["wins"], evaluation["draws"], evaluation["losses"]) == (
+        1,
+        0,
+        1,
+    )
+    assert len(
+        [event for event in events if event["event_type"] == "elo_updated"]
+    ) == 2
+
+
+def test_resume_restores_act_counter_and_parent_session(tmp_path):
+    from agentbench_frame.hl.events import read_events
+    from agentbench_frame.hl.lineage import LineageManager
+
+    first = _controller(
+        tmp_path,
+        FakeProvider(["VALUE = 1\n"]),
+        FakeEvaluator([0.5]),
+    )
+    first.initialize()
+    first_result = first.run_act()
+    history = read_events(tmp_path / "events.jsonl")
+
+    resumed_lineage = LineageManager.from_events(history)
+    from agentbench_frame.hl.codebase import VersionStore
+    from agentbench_frame.hl.config import IterationConfig, RollbackConfig
+    from agentbench_frame.hl.controller import HLController
+    from agentbench_frame.hl.events import HLEventWriter
+
+    provider = FakeProvider(["VALUE = 2\n"])
+    resumed = HLController(
+        workspace=first.workspace,
+        run_root=tmp_path,
+        provider=provider,
+        evaluator=FakeEvaluator([0.6]),
+        version_store=VersionStore(first.workspace, tmp_path / "versions"),
+        lineage=resumed_lineage,
+        events=HLEventWriter(tmp_path / "events.jsonl", run_id="run-test"),
+        iteration=IterationConfig(),
+        rollback=RollbackConfig(),
+        prompt_factory=lambda **values: values["act_id"],
+    )
+    resumed.resume(history)
+    second_result = resumed.run_act()
+
+    assert second_result.parent_version_id == first_result.selected.version.version_id
+    assert second_result.selected.act_id.startswith("act-000002")
+    assert provider.calls[0]["session_id"] == "thread-1"

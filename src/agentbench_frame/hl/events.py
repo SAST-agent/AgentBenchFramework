@@ -17,11 +17,13 @@ SCHEMA_VERSION = "1.0"
 KNOWN_EVENT_TYPES = frozenset(
     {
         "run_started",
+        "run_resumed",
         "act_completed",
         "version_created",
         "candidate_selected",
         "match_completed",
         "evaluation_completed",
+        "certification_completed",
         "policy_kl_measured",
         "occupancy_measured",
         "elo_updated",

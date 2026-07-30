@@ -72,3 +72,45 @@ def test_k_siblings_are_retained_but_only_selected_candidate_advances_lineage():
     assert lineage.latest_attempt_version_id == "v3"
     assert set(lineage.versions) == {"v1", "v2", "v3"}
     assert lineage.select_next_parent().to_version_id == "v2"
+
+
+def test_lineage_can_be_rebuilt_from_finalized_events():
+    from agentbench_frame.hl.lineage import LineageManager
+
+    events = [
+        {
+            "event_type": "version_created",
+            "version_id": "v0",
+            "parent_version_id": None,
+            "evaluation_status": "complete",
+            "benchmark_score": 0.8,
+        },
+        {"event_type": "candidate_selected", "version_id": "v0"},
+        {
+            "event_type": "version_created",
+            "version_id": "v1",
+            "parent_version_id": "v0",
+            "evaluation_status": "complete",
+            "benchmark_score": 0.6,
+        },
+        {"event_type": "candidate_selected", "version_id": "v1"},
+        {
+            "event_type": "version_created",
+            "version_id": "v2",
+            "parent_version_id": "v1",
+            "evaluation_status": "complete",
+            "benchmark_score": 0.61,
+        },
+        {"event_type": "candidate_selected", "version_id": "v2"},
+    ]
+
+    lineage = LineageManager.from_events(
+        events,
+        rollback_patience=2,
+        rollback_margin=0.05,
+    )
+
+    decision = lineage.select_next_parent()
+    assert decision.rollback is True
+    assert decision.from_version_id == "v2"
+    assert decision.to_version_id == "v0"

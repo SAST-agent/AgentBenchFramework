@@ -59,3 +59,31 @@ def test_experience_rejects_secrets_and_source_code_blobs(tmp_path):
             ExperienceUpdate(stable_knowledge=("```python\ndef act(s):\n return 1\n```",)),
         )
 
+
+def test_experience_update_file_is_strict_and_survives_resume(tmp_path):
+    from agentbench_frame.hl.experience import ExperienceManager
+
+    root = tmp_path / "experience"
+    manager = ExperienceManager(root)
+    update_path = tmp_path / "experience_update.json"
+    update_path.write_text(
+        json.dumps(
+            {
+                "stable_knowledge": ["A complete replay is required for causal diagnosis."],
+                "failed_hypotheses": [],
+                "replay_evidence": ["replay-1 level 1 round 3: EATEN_BY_GHOST"],
+                "active_questions": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manager.apply_file("act-0001", update_path)
+
+    resumed = ExperienceManager(root)
+    text = resumed.path.read_text(encoding="utf-8")
+    assert "complete replay" in text
+    assert "level 1 round 3" in text
+
+    update_path.write_text('{"unknown":[]}', encoding="utf-8")
+    with pytest.raises(ValueError, match="unknown experience"):
+        resumed.apply_file("act-0002", update_path)

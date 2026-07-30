@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import re
 from pathlib import Path
+from typing import Any, Mapping
 
 
 _SECRET = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}")
@@ -40,11 +42,23 @@ class ExperienceManager:
         self.root = Path(root)
         self.history = self.root / "history"
         self.path = self.root / "SKILL.md"
+        self.state_path = self.root / "state.json"
         self.root.mkdir(parents=True, exist_ok=True)
         self.history.mkdir(parents=True, exist_ok=True)
         self.compress_every_acts = compress_every_acts
         self.max_entries_per_section = max_entries_per_section
         self._entries = {field: [] for _, field in self._SECTIONS}
+        if self.state_path.is_file():
+            value = json.loads(self.state_path.read_text(encoding="utf-8"))
+            allowed = set(self._entries)
+            if not isinstance(value, dict) or set(value) != allowed:
+                raise ValueError("invalid persisted experience state")
+            for field in allowed:
+                if not isinstance(value[field], list):
+                    raise ValueError("invalid persisted experience entries")
+                self._entries[field] = [
+                    self._validate_entry(item) for item in value[field]
+                ]
         self._write()
 
     @staticmethod
@@ -72,6 +86,27 @@ class ExperienceManager:
         )
         return self.path
 
+    def apply_file(self, act_id: str, path: str | Path) -> Path:
+        value = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(value, Mapping):
+            raise ValueError("experience update must be an object")
+        allowed = {field for _, field in self._SECTIONS}
+        unknown = sorted(set(value) - allowed)
+        missing = sorted(allowed - set(value))
+        if unknown:
+            raise ValueError(f"unknown experience fields: {unknown}")
+        if missing:
+            raise ValueError(f"missing experience fields: {missing}")
+        normalized: dict[str, tuple[str, ...]] = {}
+        for field in allowed:
+            items = value[field]
+            if not isinstance(items, list) or not all(
+                isinstance(item, str) for item in items
+            ):
+                raise ValueError(f"experience {field} must be a list of strings")
+            normalized[field] = tuple(items)
+        return self.update(act_id, ExperienceUpdate(**normalized))
+
     def _write(self) -> None:
         lines = [
             "# HL Experience Skill",
@@ -85,3 +120,13 @@ class ExperienceManager:
             if not entries:
                 lines.append("- (none)")
         self.path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        self.state_path.write_text(
+            json.dumps(
+                self._entries,
+                ensure_ascii=False,
+                sort_keys=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )

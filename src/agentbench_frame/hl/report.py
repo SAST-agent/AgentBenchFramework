@@ -105,6 +105,19 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
         wins = evaluation.get("wins")
         losses = evaluation.get("losses")
         draws = evaluation.get("draws")
+        if not all(isinstance(value, int) for value in (wins, losses, draws)):
+            matches = evaluation.get("matches")
+            if isinstance(matches, list):
+                valid_results = [
+                    match.get("result")
+                    for match in matches
+                    if isinstance(match, Mapping)
+                    and match.get("status", "complete") == "complete"
+                    and match.get("result") in {"win", "draw", "loss"}
+                ]
+                wins = sum(result == "win" for result in valid_results)
+                draws = sum(result == "draw" for result in valid_results)
+                losses = sum(result == "loss" for result in valid_results)
         win_rate = None
         if all(isinstance(value, int) for value in (wins, losses, draws)):
             games = wins + losses + draws

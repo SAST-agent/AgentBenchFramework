@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+from agentbench_frame.arena.rating import RoleEloLedger
 from agentbench_frame.hl.codebase import Version, VersionStore
 from agentbench_frame.hl.config import IterationConfig, RollbackConfig
 from agentbench_frame.hl.evaluator import CandidateEvaluation
 from agentbench_frame.hl.events import HLEventWriter
+from agentbench_frame.hl.experience import ExperienceManager
 from agentbench_frame.hl.lineage import LineageManager, ParentDecision
 from agentbench_frame.tracking.provider import ProviderInvocation
 
@@ -48,6 +51,10 @@ class HLController:
         iteration: IterationConfig,
         rollback: RollbackConfig,
         prompt_factory: Callable[..., str],
+        experience_manager: ExperienceManager | None = None,
+        elo_ledger: RoleEloLedger | None = None,
+        elo_candidate_id: str = "hl-run",
+        anchor_human_opponents: bool = True,
     ) -> None:
         self.workspace = Path(workspace)
         self.run_root = Path(run_root)
@@ -59,6 +66,10 @@ class HLController:
         self.iteration = iteration
         self.rollback = rollback
         self.prompt_factory = prompt_factory
+        self.experience_manager = experience_manager
+        self.elo_ledger = elo_ledger or RoleEloLedger()
+        self.elo_candidate_id = elo_candidate_id
+        self.anchor_human_opponents = anchor_human_opponents
         self._iteration_count = 0
         self._coding_agent_acts = 0
         self._sessions: dict[str, str] = {}
@@ -99,6 +110,43 @@ class HLController:
         self._started = True
         return version
 
+    def resume(self, historical_events: list[dict[str, Any]]) -> None:
+        if self._started:
+            raise RuntimeError("controller already initialized")
+        if self.lineage.lineage_head_version_id is None:
+            raise ValueError("resume requires lineage rebuilt from events")
+        threads_by_act = {
+            str(event["act_id"]): str(event["thread_id"])
+            for event in historical_events
+            if event.get("event_type") == "act_completed"
+            and event.get("thread_id")
+        }
+        for event in historical_events:
+            if event.get("event_type") != "version_created":
+                continue
+            thread_id = threads_by_act.get(str(event.get("act_id")))
+            if thread_id:
+                self._sessions[str(event["version_id"])] = thread_id
+        self._coding_agent_acts = sum(
+            event.get("event_type") == "act_completed"
+            for event in historical_events
+        )
+        selected_iterations = {
+            str(event.get("iteration_id"))
+            for event in historical_events
+            if event.get("event_type") == "candidate_selected"
+            and event.get("iteration_id") != "iter-000000"
+        }
+        self._iteration_count = len(selected_iterations)
+        self._started = True
+        self.events.write(
+            "run_resumed",
+            coding_agent_acts=self._coding_agent_acts,
+            iterations=self._iteration_count,
+            lineage_head_version_id=self.lineage.lineage_head_version_id,
+            champion_version_id=self.lineage.champion_version_id,
+        )
+
     def run_act(self) -> IterationResult:
         if not self._started:
             raise RuntimeError("initialize must be called before run_act")
@@ -115,10 +163,16 @@ class HLController:
         self._iteration_count += 1
         iteration_id = f"iter-{self._iteration_count:06d}"
         results: list[CandidateResult] = []
+        pending_experience: dict[str, Path] = {}
         branch_count = self.iteration.candidates_per_act
 
         for branch_index in range(branch_count):
             self.version_store.checkout(parent_id)
+            experience_update = (
+                self.workspace / ".agentbench" / "experience_update.json"
+            )
+            if experience_update.exists():
+                experience_update.unlink()
             act_id = f"act-{self._coding_agent_acts + 1:06d}-b{branch_index:02d}"
             prompt = self.prompt_factory(
                 act_id=act_id,
@@ -139,7 +193,25 @@ class HLController:
                 raw_output_path=raw_path,
                 session_id=session_id,
             )
+            self._write_checkpoint(
+                act_id=act_id,
+                iteration_id=iteration_id,
+                branch_index=branch_index,
+                parent_version_id=parent_id,
+                prompt=prompt,
+                invocation=invocation,
+            )
             self._coding_agent_acts += 1
+            if experience_update.is_file():
+                pending_path = (
+                    self.run_root
+                    / "experience"
+                    / "pending"
+                    / f"{act_id}.json"
+                )
+                pending_path.parent.mkdir(parents=True, exist_ok=True)
+                pending_path.write_bytes(experience_update.read_bytes())
+                pending_experience[act_id] = pending_path
             version = self.version_store.snapshot(
                 parent_version_id=parent_id,
                 act_id=act_id,
@@ -198,6 +270,18 @@ class HLController:
             version_id=selected.version.version_id,
             act_id=selected.act_id,
         )
+        selected_experience = pending_experience.get(selected.act_id)
+        if self.experience_manager is not None and selected_experience is not None:
+            path = self.experience_manager.apply_file(
+                selected.act_id,
+                selected_experience,
+            )
+            self.events.write(
+                "experience_updated",
+                act_id=selected.act_id,
+                version_id=selected.version.version_id,
+                experience_path=str(path),
+            )
         return IterationResult(
             iteration_id=iteration_id,
             parent_version_id=parent_id,
@@ -245,6 +329,53 @@ class HLController:
             total_tokens=usage.total_tokens,
             elapsed_time_s=result.provider.elapsed_time_s,
             raw_output_ref=result.provider.raw_output_ref,
+            thread_id=result.provider.metadata.get("thread_id"),
+        )
+
+    def _write_checkpoint(
+        self,
+        *,
+        act_id: str,
+        iteration_id: str,
+        branch_index: int,
+        parent_version_id: str,
+        prompt: str,
+        invocation: ProviderInvocation,
+    ) -> None:
+        path = self.run_root / "checkpoints" / f"{act_id}.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        record = {
+            "schema_version": "1.0",
+            "act_id": act_id,
+            "iteration_id": iteration_id,
+            "branch_index": branch_index,
+            "parent_version_id": parent_version_id,
+            "prompt": prompt,
+            "provider_status": invocation.status,
+            "thread_id": invocation.metadata.get("thread_id"),
+            "provider_fingerprint": invocation.metadata.get(
+                "provider_fingerprint"
+            ),
+            "raw_output_ref": invocation.raw_output_ref,
+            "usage": dataclasses.asdict(invocation.usage),
+        }
+        path.write_text(
+            json.dumps(
+                record,
+                ensure_ascii=False,
+                sort_keys=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        self.events.write(
+            "checkpoint_created",
+            act_id=act_id,
+            iteration_id=iteration_id,
+            path=str(path),
+            parent_version_id=parent_version_id,
+            thread_id=invocation.metadata.get("thread_id"),
         )
 
     def _write_version_event(
@@ -266,10 +397,61 @@ class HLController:
             selected=selected,
         )
         if evaluation.status == "complete":
+            match_records = [
+                dict(match)
+                for match in evaluation.matches
+                if match.get("status", "complete") == "complete"
+                and match.get("result") in {"win", "draw", "loss"}
+            ]
+            for index, match in enumerate(match_records):
+                match_id = str(
+                    match.get(
+                        "match_id",
+                        f"{version.version_id}-{index:04d}",
+                    )
+                )
+                self.events.write(
+                    "match_completed",
+                    match_id=match_id,
+                    version_id=version.version_id,
+                    act_id=version.act_id,
+                    opponent=match.get("opponent"),
+                    seed=match.get("seed"),
+                    result=match.get("result"),
+                    rollman_score=match.get("rollman_score"),
+                    ghosts_score=match.get("ghosts_score"),
+                    valid=True,
+                    replay=match.get("replay"),
+                    trace=match.get("trace"),
+                )
+                elo_record = self.elo_ledger.update_game(
+                    role="rollman",
+                    candidate=self.elo_candidate_id,
+                    opponent=str(match.get("opponent")),
+                    result=str(match["result"]),
+                    act_id=version.act_id,
+                    version_id=version.version_id,
+                    seed=int(match["seed"]),
+                    anchor_opponent=self.anchor_human_opponents,
+                )
+                self.events.write(
+                    "elo_updated",
+                    version_id=version.version_id,
+                    act_id=version.act_id,
+                    opponent=elo_record.opponent,
+                    seed=elo_record.seed,
+                    result=elo_record.result,
+                    rating=elo_record.rating_after,
+                    opponent_rating=elo_record.opponent_rating_after,
+                    role=elo_record.role,
+                )
             self.events.write(
                 "evaluation_completed",
                 version_id=version.version_id,
                 status=evaluation.status,
                 benchmark_score=evaluation.score,
+                wins=sum(match["result"] == "win" for match in match_records),
+                draws=sum(match["result"] == "draw" for match in match_records),
+                losses=sum(match["result"] == "loss" for match in match_records),
                 matches=list(evaluation.matches),
             )

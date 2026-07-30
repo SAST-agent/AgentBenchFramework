@@ -15,6 +15,7 @@ Usage:
 import json
 import os
 from collections import Counter
+from html import escape
 from typing import Any, Dict, List, Optional
 
 from agentbench_frame.eval.curves import multi_axis_auc
@@ -358,6 +359,30 @@ class ReportBuilder:
                     f"<td>{wr:.1%}</td></tr>"
                 )
             lines.append("</table>")
+
+        research = ctx.get("latest_research") or {}
+        if research:
+            lines.append("<h2>Research measurements</h2>")
+            lines.append("<dl>")
+            lines.append(
+                f"<dt>Information gain</dt><dd>{escape(str(research.get('ig_history', [])))}</dd>"
+            )
+            lines.append(
+                f"<dt>AUC / act</dt><dd>{escape(str((research.get('auc') or {}).get('AUC_coding_agent_act', '—')))}</dd>"
+            )
+            lines.append(
+                f"<dt>raw event records</dt><dd>{int(research.get('raw_event_count', 0))}</dd>"
+            )
+            lines.append("</dl>")
+            benchmark_results = research.get("benchmark_results") or []
+            if benchmark_results:
+                lines.append("<h3>Benchmark cases</h3><ul>")
+                for case in benchmark_results:
+                    lines.append(
+                        f"<li>{escape(str(case.get('case_id', '?')))}: "
+                        f"{escape(str(case.get('outcome', '?')))}</li>"
+                    )
+                lines.append("</ul>")
 
         lines.append("</body></html>")
         return "\n".join(lines)

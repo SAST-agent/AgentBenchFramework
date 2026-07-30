@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
-from typing import Optional
+from typing import Any, Iterable, Mapping, Optional
 
 
 @dataclasses.dataclass(frozen=True)
@@ -46,6 +46,47 @@ class LineageManager:
         self._champion_score: Optional[float] = None
         self._degradation_streak = 0
         self._rollback_pending = False
+
+    @classmethod
+    def from_events(
+        cls,
+        events: Iterable[Mapping[str, Any]],
+        *,
+        rollback_patience: int = 3,
+        rollback_margin: float = 0.05,
+        rollback_enabled: bool = True,
+    ) -> "LineageManager":
+        manager = cls(
+            rollback_patience=rollback_patience,
+            rollback_margin=rollback_margin,
+            rollback_enabled=rollback_enabled,
+        )
+        for event in events:
+            event_type = event.get("event_type")
+            if event_type == "version_created":
+                manager.register_candidate(
+                    str(event["version_id"]),
+                    parent_version_id=(
+                        None
+                        if event.get("parent_version_id") is None
+                        else str(event["parent_version_id"])
+                    ),
+                    status=str(event["evaluation_status"]),
+                    score=(
+                        None
+                        if event.get("benchmark_score") is None
+                        else float(event["benchmark_score"])
+                    ),
+                )
+            elif event_type == "candidate_selected":
+                manager.select_version(str(event["version_id"]))
+            elif event_type == "rollback_selected":
+                decision = manager.select_next_parent()
+                if not decision.rollback:
+                    raise ValueError("rollback event is inconsistent with lineage state")
+                if decision.to_version_id != str(event["to_version_id"]):
+                    raise ValueError("rollback target does not match rebuilt lineage")
+        return manager
 
     def record_evaluation(
         self,

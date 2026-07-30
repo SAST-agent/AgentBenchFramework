@@ -1,0 +1,22 @@
+{
+  "rank01": {
+    "kind": "cpp",
+    "entrypoint": "main_ghost.cpp",
+    "compiler_flags": ["-Wno-c++11-narrowing"]
+  },
+  "rank02": {"kind": "python", "entrypoint": "main/main.py"},
+  "rank03": {"kind": "python", "entrypoint": "GhostsSDK-python/main.py"},
+  "rank04": {"kind": "python", "entrypoint": "TinyGhost/main.py"},
+  "rank05": {"kind": "python", "entrypoint": "GhostsSDK-python/main.py"},
+  "rank06": {"kind": "python", "entrypoint": "main.py"},
+  "rank07": {"kind": "python", "entrypoint": "GhostsSDK-python/main.py"},
+  "rank08": {"kind": "python", "entrypoint": "GhostsSDK-python/main.py"},
+  "rank09": {"kind": "python", "entrypoint": "GhostsSDK-python/main.py"},
+  "rank10": {"kind": "python", "entrypoint": "Rollman/main.py"},
+  "rank11": {"kind": "python", "entrypoint": "Ghost/GhostsSDK-python/main.py"},
+  "rank12": {"kind": "python", "entrypoint": "GGbomb/main.py"},
+  "rank13": {"kind": "python", "entrypoint": "GhostsSDK-python-main/GhostsSDK-python-main/main.py"},
+  "rank14": {"kind": "cargo", "entrypoint": "Cargo.toml", "binary": "main"},
+  "rank15": {"kind": "python", "entrypoint": "roll-man-ghost/main.py"},
+  "rank16": {"kind": "python", "entrypoint": "GhostsSDK-python/main.py"}
+}

@@ -118,7 +118,7 @@ class IterationContext:
 5. 若一轮有多个候选，本候选必须与同轮其他候选机制上不同，不能只是换阈值。
 6. 压缩或整合被替代的策略，避免持续堆叠分支；保留清晰回滚边界。
 7. 不读取、搜索或推断人类对手源码。只能从合法比赛回放学习。
-8. 完成框架指定的静态检查和 smoke test，并更新 Experience Skill 的稳定经验、失败反例与未决问题。
+8. 完成框架指定的静态检查和 smoke test。不要直接修改 Experience Skill；将四个字符串数组 stable_knowledge、failed_hypotheses、replay_evidence、active_questions 写入 workspace/.agentbench/experience_update.json，由 Framework 在候选入选后合并。
 """
 
 
