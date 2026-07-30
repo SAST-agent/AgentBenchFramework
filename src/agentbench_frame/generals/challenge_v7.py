@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 import tomllib
+from typing import Mapping, Sequence
+
+from agentbench_frame.eval.benchmark import BenchmarkCase, GameResult
 
 from .assets import (
     AssetValidationError,
@@ -41,6 +45,20 @@ ROUND7_SEALED_THRESHOLD = (11, 5)
 FROZEN_BEFORE_ROUND7 = (
     FROZEN_BEFORE_POLICY_KL | frozenset(POLICY_KL_REFERENCE_SEEDS)
 )
+
+
+@dataclass(frozen=True)
+class ChampionGate:
+    status: str
+    passed: bool
+    score: float | None
+    wins: int
+    losses: int
+    draws: int
+    per_seat_wins: Mapping[int, int]
+    expected_games: int
+    valid_games: int
+    reasons: tuple[str, ...]
 
 
 def _integer_tuple(raw: object, field: str) -> tuple[int, ...]:
@@ -175,3 +193,150 @@ def load_round7_challenge_config(
             "round-7 replay skill digest does not match the resolved skill"
         )
     return config
+
+
+def _challenge_cases(
+    pilot: PilotConfig,
+    challenge: Round7ChallengeConfig,
+    seeds: Sequence[int],
+    phase: str,
+) -> tuple[BenchmarkCase, ...]:
+    opponent = next(
+        item
+        for item in pilot.opponents
+        if item.opponent_id == challenge.opponent_id
+    )
+    return tuple(
+        BenchmarkCase(
+            case_id=(
+                f"{phase}-{opponent.tier}-{opponent.opponent_id}"
+                f"-s{seed}-p{seat}"
+            ),
+            opponent=opponent.opponent_id,
+            seed=seed,
+            first_player=seat,
+            metadata={"tier": opponent.tier, "phase": phase},
+        )
+        for seed in seeds
+        for seat in challenge.seats
+    )
+
+
+def build_round7_learning_cases(
+    pilot: PilotConfig,
+    challenge: Round7ChallengeConfig,
+) -> tuple[BenchmarkCase, ...]:
+    return _challenge_cases(
+        pilot,
+        challenge,
+        challenge.learning_seeds,
+        "learn7",
+    )
+
+
+def build_round7_validation_cases(
+    pilot: PilotConfig,
+    challenge: Round7ChallengeConfig,
+) -> tuple[BenchmarkCase, ...]:
+    return _challenge_cases(
+        pilot,
+        challenge,
+        challenge.validation_seeds,
+        "validate7",
+    )
+
+
+def build_round7_sealed_cases(
+    pilot: PilotConfig,
+    challenge: Round7ChallengeConfig,
+) -> tuple[BenchmarkCase, ...]:
+    return _challenge_cases(
+        pilot,
+        challenge,
+        challenge.sealed_seeds,
+        "sealed7",
+    )
+
+
+def evaluate_champion_gate(
+    *,
+    results: Sequence[GameResult],
+    cases: Sequence[BenchmarkCase],
+    minimum_wins: int,
+    minimum_wins_per_seat: int,
+) -> ChampionGate:
+    """Evaluate an exact dual-seat suite without manufacturing missing data."""
+    case_by_id = {case.case_id: case for case in cases}
+    result_ids = [result.case_id for result in results]
+    duplicate = len(result_ids) != len(set(result_ids))
+    unexpected = any(case_id not in case_by_id for case_id in result_ids)
+    expected_results = [
+        result
+        for result in results
+        if result.case_id in case_by_id
+    ]
+    valid_results = [result for result in expected_results if result.valid]
+
+    reason: str | None = None
+    status: str | None = None
+    if duplicate:
+        status, reason = "invalid", "duplicate_result"
+    elif unexpected:
+        status, reason = "invalid", "unexpected_case"
+    elif any(not result.valid for result in expected_results):
+        status, reason = "invalid", "invalid_result"
+    elif set(result_ids) != set(case_by_id):
+        status, reason = "incomplete", "missing_expected_case"
+
+    wins = sum(result.outcome == "win" for result in valid_results)
+    losses = sum(result.outcome == "loss" for result in valid_results)
+    draws = sum(result.outcome == "draw" for result in valid_results)
+    per_seat_wins = {
+        seat: sum(
+            result.outcome == "win"
+            and case_by_id[result.case_id].first_player == seat
+            for result in valid_results
+        )
+        for seat in (0, 1)
+    }
+    if status is not None:
+        return ChampionGate(
+            status=status,
+            passed=False,
+            score=None,
+            wins=wins,
+            losses=losses,
+            draws=draws,
+            per_seat_wins=per_seat_wins,
+            expected_games=len(cases),
+            valid_games=len(valid_results),
+            reasons=(reason,) if reason is not None else (),
+        )
+
+    passed = (
+        wins >= minimum_wins
+        and all(
+            per_seat_wins[seat] >= minimum_wins_per_seat
+            for seat in (0, 1)
+        )
+    )
+    failed_reasons = []
+    if wins < minimum_wins:
+        failed_reasons.append("overall_threshold")
+    if any(
+        per_seat_wins[seat] < minimum_wins_per_seat
+        for seat in (0, 1)
+    ):
+        failed_reasons.append("per_seat_threshold")
+    return ChampionGate(
+        status="passed" if passed else "failed",
+        passed=passed,
+        score=wins / len(cases),
+        wins=wins,
+        losses=losses,
+        draws=draws,
+        per_seat_wins=per_seat_wins,
+        expected_games=len(cases),
+        valid_games=len(valid_results),
+        reasons=tuple(failed_reasons),
+    )
