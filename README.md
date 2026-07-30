@@ -295,13 +295,15 @@ agentbench data list --data-dir ./data                   # 列出所有 run
 
 框架把两种不同的描述长度分开报告：
 
-- **规则复杂度**：AB-Rule/1 把游戏规则写成受控伪码，以规范原子规则命题
-  `rule atoms (RA)` 为单位。总 RA 是状态、动作、观察、初始化、条件、转移和
-  终局七个互斥命题集合的并集大小，不计算表达式 AST 节点。
+- **规则复杂度**：AB-Rule/1 把游戏规则写成受控伪码，主指标
+  `ast_nodes` 以规范 AST 节点（canonical AST nodes）为单位，等于结构节点数与
+  表达式节点数之和。框架同时保留 `rule atoms (RA)` 作为辅助指标；RA 是状态、
+  动作、观察、初始化、条件、转移和终局七个互斥命题集合的并集大小。
 - **实现复杂度**：AB-Ludi/1 对公开后端源码构造可执行描述，以
   `k_upper_bits` 为单位。
 
-二者量纲不同，不允许数值混算或直接比较。规则报告排除 DeepClue，冻结结果见
+规范 AST 节点、RA 和 bit 的量纲不同，不允许数值混算或直接比较。规则报告排除
+DeepClue，冻结结果见
 [`agentbench-rule-complexity-v1.md`](docs/research/agentbench-rule-complexity-v1.md)。
 它不需要 AgentBench checkout：
 

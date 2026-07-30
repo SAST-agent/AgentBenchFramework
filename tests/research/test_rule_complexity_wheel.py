@@ -74,6 +74,7 @@ sys.path.insert(0, {str(install_dir)!r})
 from agentbench_frame.research.rule_complexity import measure_rule_corpus
 report = measure_rule_corpus()
 assert len(report["games"]) == 9
+assert all(game["ast_nodes"] > 0 for game in report["games"])
 assert all(game["rule_atoms"] > 0 for game in report["games"])
 """
     subprocess.run(

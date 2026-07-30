@@ -29,7 +29,7 @@ The measurement reads the exact Git blobs at the pinned commit for the path/SHA-
 
 This is implementation-description complexity. It is not game-tree size, strategic depth, learning difficulty, or information gain.
 
-The separate [AB-Rule/1 report](agentbench-rule-complexity-v1.md) measures formal game-rule description length in rule atoms (RA). Bits and RA have different units and must not be compared numerically or combined into one score.
+The separate [AB-Rule/1 report](agentbench-rule-complexity-v1.md) measures formal game-rule description length primarily in canonical AST nodes, while retaining rule atoms (RA) as a secondary metric. Bits, canonical AST nodes, and RA have different units and must not be compared numerically or combined into one score.
 
 ## Method references
 

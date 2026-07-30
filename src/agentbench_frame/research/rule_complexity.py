@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 from collections import Counter
 from hashlib import sha256
@@ -15,7 +16,9 @@ from .rule_language import RuleDocument, RuleNode, parse_rule_description
 SCHEMA_VERSION = "agentbench.rule-complexity.v1"
 LANGUAGE_ID = "AB-Rule/1"
 METRIC_NAME = "Ludemic Rule Description Complexity"
-METRIC_UNIT = "rule atoms (RA)"
+METRIC_UNIT = "canonical AST nodes"
+SECONDARY_METRIC = "rule_atoms"
+SECONDARY_UNIT = "rule atoms (RA)"
 EXPECTED_RULE_GAMES: dict[str, str] = {
     "23_doto": "DOTO",
     "24_miracle": "Miracle",
@@ -64,6 +67,14 @@ _TRANSITION_KINDS = frozenset(
     }
 )
 _GROUP_KINDS = frozenset({"game", "setup", "rule", "terminal"})
+_EXCLUDED_EXPRESSION_AST_NODES = (
+    ast.Expression,
+    ast.expr_context,
+    ast.operator,
+    ast.unaryop,
+    ast.boolop,
+    ast.cmpop,
+)
 
 
 class RuleCorpusError(ValueError):
@@ -130,6 +141,27 @@ def _proposition_breakdown(document: RuleDocument) -> dict[str, int]:
     return {category: counts[category] for category in _ATOM_CATEGORIES}
 
 
+def _canonical_expression_ast_node_count(source: str) -> int:
+    tree = ast.parse(source, mode="eval")
+    return sum(
+        not isinstance(node, _EXCLUDED_EXPRESSION_AST_NODES)
+        for node in ast.walk(tree)
+    )
+
+
+def _ast_breakdown(document: RuleDocument) -> tuple[int, int]:
+    structural_nodes = sum(
+        node.kind != "game"
+        for node in document.walk()
+    )
+    expression_nodes = sum(
+        _canonical_expression_ast_node_count(node.expression.source)
+        for node in document.walk()
+        if node.expression is not None
+    )
+    return structural_nodes, expression_nodes
+
+
 def measure_rule_document(
     document: RuleDocument,
     source: str,
@@ -137,10 +169,14 @@ def measure_rule_document(
     """Measure one parsed formal rule description without compiling it."""
 
     breakdown = _proposition_breakdown(document)
+    structural_ast_nodes, expression_ast_nodes = _ast_breakdown(document)
 
     return {
         "game_id": document.game_id,
         "language": LANGUAGE_ID,
+        "ast_nodes": structural_ast_nodes + expression_ast_nodes,
+        "structural_ast_nodes": structural_ast_nodes,
+        "expression_ast_nodes": expression_ast_nodes,
         "rule_atoms": sum(breakdown.values()),
         "atom_breakdown": breakdown,
         "description_bytes": len(source.encode("utf-8")),
@@ -230,15 +266,22 @@ def measure_rule_corpus() -> dict[str, Any]:
     games_by_id.sort(key=lambda game: game["game_id"])
     ranked = sorted(
         games_by_id,
-        key=lambda game: (game["rule_atoms"], game["game_id"]),
+        key=lambda game: (game["ast_nodes"], game["game_id"]),
     )
     return {
         "schema_version": SCHEMA_VERSION,
         "metric": {
             "name": METRIC_NAME,
             "language": LANGUAGE_ID,
-            "primary": "rule_atoms",
+            "primary": "ast_nodes",
             "unit": METRIC_UNIT,
+            "secondary": SECONDARY_METRIC,
+            "secondary_unit": SECONDARY_UNIT,
+            "ast_excludes": [
+                "Expression wrapper",
+                "expression contexts",
+                "operator marker nodes",
+            ],
             "compiled": False,
         },
         "source": {
@@ -264,10 +307,17 @@ def render_rule_markdown(report: dict[str, Any]) -> str:
         ),
         "",
         (
-            "The primary value is the cardinality of the disjoint set of "
-            "atomic rule-proposition occurrences in each formal AB-Rule/1 "
-            "description. Descriptions are parsed but not compiled, and "
-            "expression AST shape is not counted."
+            "The primary value is the canonical AST node count of each "
+            "formal AB-Rule/1 description: structural declarations and "
+            "statements plus canonical expression nodes. Parser wrappers, "
+            "expression contexts, and CPython operator-marker nodes are "
+            "excluded. Descriptions are parsed but not compiled."
+        ),
+        "",
+        (
+            "Rule atoms (RA) remain a secondary semantic measure. They are "
+            "the cardinality of the disjoint state, action, observation, "
+            "setup, condition, transition, and outcome proposition sets."
         ),
         "",
         (
@@ -277,15 +327,19 @@ def render_rule_markdown(report: dict[str, Any]) -> str:
             "learning difficulty, or information gain."
         ),
         "",
-        "| Rank | Game ID | Game | Rule atoms | State | Actions | "
-        "Observations | Setup | Conditions | Transitions | Outcomes |",
-        "|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Rank | Game ID | Game | AST nodes | Structural AST | "
+        "Expression AST | Rule atoms | State | Actions | Observations | "
+        "Setup | Conditions | Transitions | Outcomes |",
+        "|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|"
+        "---:|---:|",
     ]
     for rank, game in enumerate(report["games"], start=1):
         atoms = game["atom_breakdown"]
         lines.append(
             f"| {rank} | `{game['game_id']}` | {game['title']} | "
-            f"{game['rule_atoms']} | {atoms['state']} | {atoms['action']} | "
+            f"{game['ast_nodes']} | {game['structural_ast_nodes']} | "
+            f"{game['expression_ast_nodes']} | {game['rule_atoms']} | "
+            f"{atoms['state']} | {atoms['action']} | "
             f"{atoms['observation']} | {atoms['setup']} | "
             f"{atoms['condition']} | {atoms['transition']} | "
             f"{atoms['outcome']} |"
@@ -306,7 +360,7 @@ def render_rule_markdown(report: dict[str, Any]) -> str:
             (
                 "AB-Ludi/1 `k_upper_bits` remains a separate implementation-"
                 "description metric and must not be compared numerically with "
-                "AB-Rule/1 rule atoms."
+                "AB-Rule/1 AST nodes or rule atoms."
             ),
             "",
         ]

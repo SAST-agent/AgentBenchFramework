@@ -11,6 +11,7 @@ def test_rule_corpus_has_exact_expected_games():
         EXPECTED_RULE_GAMES
     )
     assert all(game["rule_atoms"] > 0 for game in report["games_by_id"])
+    assert all(game["ast_nodes"] > 0 for game in report["games_by_id"])
     assert all(game["description_sha256"] for game in report["games_by_id"])
 
 
@@ -32,6 +33,10 @@ def test_every_game_has_complete_semantic_boundary_and_provenance():
         assert game["includes"]
         assert game["excludes"]
         assert game["rule_atoms"] == sum(game["atom_breakdown"].values())
+        assert game["ast_nodes"] == (
+            game["structural_ast_nodes"] + game["expression_ast_nodes"]
+        )
+        assert game["ast_nodes"] > game["rule_atoms"]
         assert set(game["atom_breakdown"]) == {
             "state",
             "action",

@@ -31,17 +31,22 @@ rule renamed(long_identifier):
     left_metric = metric(left)
     right_metric = metric(right)
 
+    assert left_metric["ast_nodes"] == right_metric["ast_nodes"]
     assert left_metric["rule_atoms"] == right_metric["rule_atoms"]
     assert left_metric["atom_breakdown"] == right_metric["atom_breakdown"]
 
 
-def test_expression_ast_shape_does_not_increase_rule_atoms():
+def test_expression_ast_shape_increases_ast_nodes_but_not_rule_atoms():
     base = "game A\nplayers 2\nrule r(x):\n  return occupied(x)\n"
     richer = (
         "game A\nplayers 2\nrule r(x):\n"
         "  return occupied(x) and hostile(x)\n"
     )
 
+    assert metric(base)["structural_ast_nodes"] == 3
+    assert metric(base)["expression_ast_nodes"] == 4
+    assert metric(base)["ast_nodes"] == 7
+    assert metric(richer)["ast_nodes"] == metric(base)["ast_nodes"] + 4
     assert metric(richer)["rule_atoms"] == metric(base)["rule_atoms"]
 
 
@@ -53,6 +58,13 @@ def test_new_atomic_statement_increases_rule_atoms():
         "  return occupied(x)\n"
     )
 
+    assert metric(richer)["structural_ast_nodes"] == (
+        metric(base)["structural_ast_nodes"] + 1
+    )
+    assert metric(richer)["expression_ast_nodes"] == (
+        metric(base)["expression_ast_nodes"] + 3
+    )
+    assert metric(richer)["ast_nodes"] == metric(base)["ast_nodes"] + 4
     assert metric(richer)["rule_atoms"] == metric(base)["rule_atoms"] + 1
 
 
@@ -91,6 +103,10 @@ terminal finished:
         "outcome": 2,
     }
     assert result["rule_atoms"] == sum(result["atom_breakdown"].values())
+    assert result["ast_nodes"] == (
+        result["structural_ast_nodes"] + result["expression_ast_nodes"]
+    )
+    assert result["ast_nodes"] > result["rule_atoms"]
     assert set(result) >= {
         "description_bytes",
         "description_sha256",

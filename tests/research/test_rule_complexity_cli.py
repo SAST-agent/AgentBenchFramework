@@ -24,9 +24,12 @@ def test_complexity_rules_cli_writes_nine_game_reports(tmp_path, capsys):
     report = json.loads(json_output.read_text())
     output = capsys.readouterr().out
     assert len(report["games"]) == 9
-    assert report["metric"]["primary"] == "rule_atoms"
-    assert "AB-Rule/1 semantic proposition counts" in output
-    assert output.count(" RA  ") == 9
+    assert report["metric"]["primary"] == "ast_nodes"
+    assert report["metric"]["secondary"] == "rule_atoms"
+    assert "AB-Rule/1 canonical AST complexity" in output
+    assert output.count(" AST  ") == 9
+    assert output.count(" RA") == 9
+    assert "AST nodes" in markdown_output.read_text()
     assert "Rule atoms" in markdown_output.read_text()
     assert str(json_output) in output
     assert str(markdown_output) in output

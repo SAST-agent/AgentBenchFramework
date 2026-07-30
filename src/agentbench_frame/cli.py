@@ -233,13 +233,14 @@ def _cmd_rule_complexity(args):
 
     report = write_rule_reports(args.json_output, args.markdown_output)
 
-    print("AB-Rule/1 semantic proposition counts:")
+    print("AB-Rule/1 canonical AST complexity:")
     for rank, game in enumerate(report["games"], start=1):
         print(
             f"  {rank:2d}. {game['game_id']:<16} "
-            f"{game['rule_atoms']:>5} RA  "
-            f"state={game['atom_breakdown']['state']} "
-            f"transition={game['atom_breakdown']['transition']}"
+            f"{game['ast_nodes']:>5} AST  "
+            f"{game['rule_atoms']:>4} RA  "
+            f"structure={game['structural_ast_nodes']} "
+            f"expression={game['expression_ast_nodes']}"
         )
     print(f"JSON: {Path(args.json_output).resolve()}")
     print(f"Markdown: {Path(args.markdown_output).resolve()}")
