@@ -621,6 +621,7 @@ class GeneralsHLRound7Pipeline(GeneralsHLRound6Pipeline):
         return hashlib.sha256(encoded).hexdigest()
 
     def run(self) -> Round7PipelineResult:
+        fresh_recovery = getattr(self, "_fresh_recovery", None)
         lineage = load_round7_parent(
             self.parent_run_dir,
             self.expected_parent_hash,
@@ -638,6 +639,14 @@ class GeneralsHLRound7Pipeline(GeneralsHLRound6Pipeline):
                 "engine_hash": self.assets.engine_hash,
                 "round": 7,
                 "lineage_mode": "v6_to_sealed_champion_v7",
+                **(
+                    {
+                        "failed_run_id": fresh_recovery["run_id"],
+                        "recovery_mode": "fresh_retry",
+                    }
+                    if fresh_recovery is not None
+                    else {}
+                ),
             },
         )
         run_dir = Path(run.run_dir)
@@ -1491,6 +1500,21 @@ class GeneralsHLRound7Pipeline(GeneralsHLRound6Pipeline):
                 "parent_version": "v6",
                 "starting_version": "v6",
                 "parent_content_hash": lineage.v6_manifest.content_hash,
+                "failed_run_id": (
+                    fresh_recovery["run_id"]
+                    if fresh_recovery is not None
+                    else None
+                ),
+                "recovery_mode": (
+                    "fresh_retry"
+                    if fresh_recovery is not None
+                    else None
+                ),
+                "source_learning_budget": (
+                    fresh_recovery["local_learning_budget"]
+                    if fresh_recovery is not None
+                    else None
+                ),
                 "runnable": runnable,
                 "feedback_read": feedback_summary,
                 "action_profiles": action_profiles,
@@ -1518,3 +1542,645 @@ class GeneralsHLRound7Pipeline(GeneralsHLRound6Pipeline):
             global_act_count=global_act_count,
             round_act_count=round_act_count,
         )
+
+    def _validate_recovery_prompt(
+        self,
+        failed_run: Path,
+    ) -> dict[str, object]:
+        provider_dir = failed_run / "provider"
+        prompt_path = provider_dir / "codex-act-v7.prompt.md"
+        manifest = self._read_json_object(
+            provider_dir / "prompt-manifest.json",
+            "v7 prompt manifest",
+        )
+        try:
+            prompt = prompt_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise ValueError(
+                f"recovery v7 prompt is unavailable: {exc}"
+            ) from exc
+        observed = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+        if manifest.get("prompt_sha256") != observed:
+            raise ValueError("recovery v7 prompt digest changed")
+        if manifest.get("replay_skill_sha256") != self.replay_skill.sha256:
+            raise ValueError("recovery v7 prompt replay-skill digest changed")
+        expected_ids = [
+            f"learn7-high-s{seed}-p{seat}"
+            for seed in self.challenge.learning_seeds
+            for seat in self.challenge.seats
+        ]
+        episode_ids = manifest.get(
+            "episode_ids",
+            manifest.get("included_episode_ids"),
+        )
+        if episode_ids != expected_ids:
+            raise ValueError(
+                "recovery v7 prompt learning episode set changed"
+            )
+        forbidden = (
+            *self.challenge.validation_seeds,
+            *self.challenge.sealed_seeds,
+        )
+        if any(str(seed) in prompt for seed in forbidden):
+            raise ValueError(
+                "recovery v7 prompt contains held-out challenge data"
+            )
+        return manifest
+
+    def _validate_recovery_specs(self, failed_run: Path) -> None:
+        expected = {
+            "v7-learning-spec.json": [
+                asdict(case)
+                for case in build_round7_learning_cases(
+                    self.config,
+                    self.challenge,
+                )
+            ],
+            "v7-validation-spec.json": [
+                asdict(case)
+                for case in build_round7_validation_cases(
+                    self.config,
+                    self.challenge,
+                )
+            ],
+            "v7-sealed-spec.json": [
+                asdict(case)
+                for case in build_round7_sealed_cases(
+                    self.config,
+                    self.challenge,
+                )
+            ],
+        }
+        for filename, cases in expected.items():
+            payload = self._read_json_object(
+                failed_run / "benchmark" / filename,
+                filename,
+            )
+            if (
+                payload.get("challenge_id")
+                != self.challenge.challenge_id
+                or payload.get("engine_hash") != self.assets.engine_hash
+                or payload.get("cases") != cases
+            ):
+                raise ValueError(
+                    f"recovery {filename} changed from frozen contract"
+                )
+        formal_payload = self._read_json_object(
+            failed_run / "benchmark" / "formal-spec.json",
+            "formal spec",
+        )
+        formal_cases = [
+            asdict(case)
+            for case in build_evaluation_spec(self.config).cases
+        ]
+        if (
+            formal_payload.get("benchmark_id")
+            != self.config.benchmark_id
+            or formal_payload.get("engine_hash") != self.assets.engine_hash
+            or formal_payload.get("evaluation_cases") != formal_cases
+        ):
+            raise ValueError("recovery formal spec changed")
+
+    def _load_recovery_summary(
+        self,
+        failed_run_dir: Path,
+    ) -> tuple[Path, dict[str, object]]:
+        failed_run = Path(failed_run_dir).resolve()
+        summary = self._read_json_object(
+            failed_run / "summary.json",
+            "v7 summary",
+        )
+        if summary.get("challenge_id") != self.challenge.challenge_id:
+            raise ValueError("recovery challenge ID changed")
+        if summary.get("parent_content_hash") != self.expected_parent_hash:
+            raise ValueError("recovery parent content hash changed")
+        if summary.get("act_count") not in {
+            7,
+            8,
+        }:
+            raise ValueError("recovery global act count is invalid")
+        self._validate_recovery_specs(failed_run)
+        if (failed_run / "provider/prompt-manifest.json").is_file():
+            self._validate_recovery_prompt(failed_run)
+        return failed_run, summary
+
+    def _load_frozen_recovery_source(
+        self,
+        failed_run: Path,
+        summary: Mapping[str, object],
+    ) -> WorkspaceManifest | None:
+        if summary.get("runnable") is not True:
+            return None
+        source = failed_run / "versions" / "v7" / "source"
+        manifest_path = failed_run / "versions" / "v7" / "manifest.json"
+        if not source.is_dir() or not manifest_path.is_file():
+            raise ValueError("recovery runnable v7 source is missing")
+        manifest = self._read_workspace_manifest(
+            manifest_path,
+            "v7 source manifest",
+        )
+        actual = self.snapshotter.capture(source)
+        if (
+            actual.content_hash != manifest.content_hash
+            or actual.files != manifest.files
+        ):
+            raise ValueError(
+                "recovery v7 source does not match its manifest"
+            )
+        return manifest
+
+    def _recover_frozen_v7(
+        self,
+        failed_run: Path,
+        failed_summary: Mapping[str, object],
+        manifest: WorkspaceManifest,
+    ) -> Round7PipelineResult:
+        lineage = load_round7_parent(
+            self.parent_run_dir,
+            self.expected_parent_hash,
+        )
+        run = Run.start(
+            game="28_generals",
+            agent="generals-hl",
+            run_type="rule_iter",
+            data_dir=str(self.data_dir),
+            config={
+                "benchmark_id": self.config.benchmark_id,
+                "challenge_id": self.challenge.challenge_id,
+                "provider": self.provider.provider_name,
+                "budget_phase": "learning",
+                "engine_hash": self.assets.engine_hash,
+                "round": 7,
+                "failed_run_id": failed_run.name,
+                "recovery_mode": "frozen_v7",
+            },
+        )
+        run_dir = Path(run.run_dir)
+        imported_v6 = import_round7_source(
+            lineage,
+            run_dir,
+            self.snapshotter,
+        )
+        source = failed_run / "versions" / "v7" / "source"
+        frozen_v7 = run_dir / "versions" / "v7" / "source"
+        self.snapshotter.materialize_manifest(
+            source,
+            frozen_v7,
+            manifest,
+        )
+        self.snapshotter.write_manifest(
+            manifest,
+            run_dir / "versions" / "v7" / "manifest.json",
+        )
+        self.snapshotter.write_unified_patch(
+            run_dir / "versions" / "v6" / "source",
+            frozen_v7,
+            run_dir / "versions" / "v6-to-v7.patch",
+        )
+        for directory in (
+            "benchmark",
+            "provider",
+            "learning-evidence",
+        ):
+            source_dir = failed_run / directory
+            target_dir = run_dir / directory
+            if source_dir.is_dir():
+                shutil.copytree(
+                    source_dir,
+                    target_dir,
+                    dirs_exist_ok=True,
+                )
+        run.write(
+            "recovery_import",
+            failed_run_id=failed_run.name,
+            recovery_mode="frozen_v7",
+            reused_provider_act=True,
+            new_provider_act=False,
+            source_manifest_hash=manifest.content_hash,
+            source_learning_budget=failed_summary.get(
+                "local_learning_budget"
+            ),
+        )
+        run.write(
+            "lineage_import",
+            parent_run_id=lineage.parent_run_id,
+            parent_version="v6",
+            starting_version="v6",
+            version="v6",
+            manifest_hash=imported_v6.content_hash,
+            prior_score_history=list(lineage.prior_score_history),
+            global_coding_agent_act=8,
+        )
+        run.write(
+            "version",
+            version="v7",
+            version_before="v6",
+            status="recovered_frozen",
+            manifest_hash=manifest.content_hash,
+            changed_files=manifest.changed_files,
+            runnable=True,
+        )
+
+        learning_cases = build_round7_learning_cases(
+            self.config,
+            self.challenge,
+        )
+        validation_cases = build_round7_validation_cases(
+            self.config,
+            self.challenge,
+        )
+        formal_cases = tuple(
+            build_evaluation_spec(self.config).cases
+        )
+        sealed_cases = build_round7_sealed_cases(
+            self.config,
+            self.challenge,
+        )
+        evaluator = self.evaluator or self._production_evaluator(run_dir)
+        validation: GeneralsEvaluation | None = None
+        formal: GeneralsEvaluation | None = None
+        sealed: GeneralsEvaluation | None = None
+        validation_error: str | None = None
+        formal_error: str | None = None
+        sealed_error: str | None = None
+        validation_passed = False
+        champion_claim = False
+        sealed_status = "not_opened"
+        status = "failed"
+        evo_score_7: float | None = None
+        gain_7: float | None = None
+        validation_payload: dict[str, object]
+        sealed_payload: dict[str, object]
+        action_profiles: dict[str, object | None] = {
+            "learning": (
+                (failed_summary.get("action_profiles") or {}).get(
+                    "learning"
+                )
+                if isinstance(
+                    failed_summary.get("action_profiles"),
+                    Mapping,
+                )
+                else None
+            ),
+            "validation": None,
+            "formal": None,
+            "sealed": None,
+        }
+        try:
+            test_workspace = self._materialize_verified_source(
+                frozen_v7,
+                run_dir / "isolated-workspaces/v7-recovery-tests",
+                manifest,
+            )
+            tests_ok, test_output = self._run_candidate_tests(
+                test_workspace
+            )
+            tests_path = run_dir / "versions" / "v7" / "tests.log"
+            tests_path.write_text(test_output, encoding="utf-8")
+            if not tests_ok:
+                raise _Round7Abort(
+                    "invalid_version",
+                    "recovered frozen v7 candidate tests failed",
+                )
+
+            validation_workspace = self._materialize_verified_source(
+                frozen_v7,
+                run_dir / "isolated-workspaces/v7-validation",
+                manifest,
+            )
+            self._verify_runtime_source_v7(
+                run,
+                validation_workspace,
+                manifest,
+                phase="validation",
+            )
+            try:
+                validation = evaluator.evaluate(
+                    validation_workspace,
+                    "v7",
+                    "validation",
+                    run,
+                    cases=validation_cases,
+                )
+                action_profiles["validation"] = (
+                    self._persist_action_profile_v7(
+                        run,
+                        validation,
+                        phase="validation",
+                        artifact_path=(
+                            run_dir
+                            / "diagnostics"
+                            / "v7-validation-action-profile.json"
+                        ),
+                        required=False,
+                    )
+                )
+                validation_gate = evaluate_champion_gate(
+                    results=validation.results,
+                    cases=validation_cases,
+                    minimum_wins=self.challenge.validation_min_wins,
+                    minimum_wins_per_seat=(
+                        self.challenge.validation_min_wins_per_seat
+                    ),
+                )
+                validation_passed = validation_gate.passed
+                validation_payload = self._gate_payload(
+                    validation_gate,
+                    source_hash=manifest.content_hash,
+                    engine_hash=self.assets.engine_hash,
+                    minimum_wins=self.challenge.validation_min_wins,
+                    minimum_wins_per_seat=(
+                        self.challenge.validation_min_wins_per_seat
+                    ),
+                    suite_digest=self._suite_digest(validation_cases),
+                    claim_field="sealed_suite_opened",
+                )
+            except Exception as exc:
+                validation_error = f"{type(exc).__name__}: {exc}"
+                validation_payload = {
+                    "status": "error",
+                    "passed": False,
+                    "sealed_suite_opened": False,
+                    "score": None,
+                    "reason": "validation_evaluation_error",
+                    "error": validation_error,
+                    "source_hash": manifest.content_hash,
+                    "engine_hash": self.assets.engine_hash,
+                    "suite_digest": self._suite_digest(validation_cases),
+                }
+            self._write_json(
+                run_dir / "validation-gate.json",
+                validation_payload,
+            )
+            run.write("champion_validation_gate", **validation_payload)
+
+            try:
+                formal_workspace = self._materialize_verified_source(
+                    frozen_v7,
+                    run_dir / "isolated-workspaces/v7-formal",
+                    manifest,
+                )
+                self._verify_runtime_source_v7(
+                    run,
+                    formal_workspace,
+                    manifest,
+                    phase="formal",
+                )
+                formal = evaluator.evaluate(
+                    formal_workspace,
+                    "v7",
+                    "formal",
+                    run,
+                    cases=formal_cases,
+                )
+                action_profiles["formal"] = (
+                    self._persist_action_profile_v7(
+                        run,
+                        formal,
+                        phase="formal",
+                        artifact_path=(
+                            run_dir
+                            / "diagnostics"
+                            / "v7-formal-action-profile.json"
+                        ),
+                        required=False,
+                    )
+                )
+                evo_score_7 = formal.score
+                gain_7 = (
+                    evo_score_7 - lineage.raw_score
+                    if evo_score_7 is not None
+                    else None
+                )
+                run.write(
+                    "evaluation",
+                    phase="evolved_7",
+                    version="v7",
+                    status=formal.status,
+                    score=formal.score,
+                    gain=gain_7,
+                    global_coding_agent_act=8,
+                    per_tier=dict(formal.per_tier),
+                    seat_gap=formal.seat_gap,
+                )
+            except Exception as exc:
+                formal_error = f"{type(exc).__name__}: {exc}"
+
+            if validation_passed:
+                try:
+                    sealed_workspace = self._materialize_verified_source(
+                        frozen_v7,
+                        run_dir / "isolated-workspaces/v7-sealed",
+                        manifest,
+                    )
+                    self._verify_runtime_source_v7(
+                        run,
+                        sealed_workspace,
+                        manifest,
+                        phase="sealed",
+                    )
+                    sealed = evaluator.evaluate(
+                        sealed_workspace,
+                        "v7",
+                        "sealed",
+                        run,
+                        cases=sealed_cases,
+                    )
+                    action_profiles["sealed"] = (
+                        self._persist_action_profile_v7(
+                            run,
+                            sealed,
+                            phase="sealed",
+                            artifact_path=(
+                                run_dir
+                                / "diagnostics"
+                                / "v7-sealed-action-profile.json"
+                            ),
+                            required=False,
+                        )
+                    )
+                    sealed_gate = evaluate_champion_gate(
+                        results=sealed.results,
+                        cases=sealed_cases,
+                        minimum_wins=self.challenge.sealed_min_wins,
+                        minimum_wins_per_seat=(
+                            self.challenge.sealed_min_wins_per_seat
+                        ),
+                    )
+                    sealed_status = sealed_gate.status
+                    champion_claim = sealed_gate.passed
+                    sealed_payload = self._gate_payload(
+                        sealed_gate,
+                        source_hash=manifest.content_hash,
+                        engine_hash=self.assets.engine_hash,
+                        minimum_wins=self.challenge.sealed_min_wins,
+                        minimum_wins_per_seat=(
+                            self.challenge.sealed_min_wins_per_seat
+                        ),
+                        suite_digest=self._suite_digest(sealed_cases),
+                        claim_field="champion_claim",
+                    )
+                except Exception as exc:
+                    sealed_error = f"{type(exc).__name__}: {exc}"
+                    sealed_status = "error"
+                    sealed_payload = {
+                        "status": "error",
+                        "score": None,
+                        "champion_claim": False,
+                        "error": sealed_error,
+                    }
+            else:
+                sealed_payload = {
+                    "status": "not_opened",
+                    "score": None,
+                    "champion_claim": False,
+                    "reason": (
+                        "validation_evaluation_error"
+                        if validation_error is not None
+                        else "validation_gate_failed"
+                    ),
+                }
+            self._write_json(
+                run_dir / "sealed-claim.json",
+                sealed_payload,
+            )
+            run.write("champion_sealed_claim", **sealed_payload)
+            if formal is None:
+                status = "formal_failed"
+            elif validation_error is not None:
+                status = "validation_incomplete"
+            elif sealed_status in {"error", "invalid", "incomplete"}:
+                status = "sealed_incomplete"
+            else:
+                status = "complete"
+        except _Round7Abort as exc:
+            status = exc.status
+        finally:
+            run.writer.flush()
+            quality = inspect_event_file(
+                run_dir / "events.jsonl"
+            ).to_dict()
+            self._write_json(run_dir / "quality.json", quality)
+            local_budget = {
+                key: value
+                for key, value in run.budget_snapshot().items()
+                if key.startswith("learning_")
+            }
+            source_learning_budget = failed_summary.get(
+                "local_learning_budget"
+            )
+            inherited_cumulative = failed_summary.get(
+                "cumulative_learning_budget"
+            )
+            formal_scores = {
+                tier: (
+                    formal.per_tier.get(tier)
+                    if formal is not None
+                    else None
+                )
+                for tier in ("high", "medium", "low")
+            }
+            run.finish({
+                "total_episodes": None,
+                "total_steps": None,
+                "total_reward": None,
+                "win_rate": None,
+                "wins": None,
+                "losses": None,
+                "draws": None,
+                "status": status,
+                "benchmark_id": self.config.benchmark_id,
+                "challenge_id": self.challenge.challenge_id,
+                "raw_score": lineage.raw_score,
+                "evo_score": evo_score_7,
+                "evo_score_1": lineage.evo_score_1,
+                "evo_score_2": lineage.evo_score_2,
+                "evo_score_3": lineage.evo_score_3,
+                "evo_score_4": lineage.evo_score_4,
+                "evo_score_5": lineage.evo_score_5,
+                "evo_score_6": lineage.evo_score_6,
+                "evo_score_7": evo_score_7,
+                "gain": gain_7,
+                "gain_7": gain_7,
+                "benchmark_score": evo_score_7,
+                "formal_score": (
+                    formal.score if formal is not None else None
+                ),
+                "formal_scores": formal_scores,
+                "evaluation_status": (
+                    formal.status if formal is not None else "error"
+                ),
+                "formal_attempted": True,
+                "champion_validation": validation_payload,
+                "champion_sealed": sealed_payload,
+                "champion_claim": champion_claim,
+                "validation_passed": validation_passed,
+                "sealed_status": sealed_status,
+                "score_history": [
+                    *lineage.prior_score_history,
+                    evo_score_7,
+                ],
+                "act_count": 8,
+                "round_act_count": 0,
+                "parent_run_id": lineage.parent_run_id,
+                "parent_version": "v6",
+                "starting_version": "v6",
+                "parent_content_hash": lineage.v6_manifest.content_hash,
+                "failed_run_id": failed_run.name,
+                "recovery_mode": "frozen_v7",
+                "source_learning_budget": source_learning_budget,
+                "runnable": True,
+                "action_profiles": action_profiles,
+                "validation_error": validation_error,
+                "formal_error": formal_error,
+                "sealed_error": sealed_error,
+                "local_learning_budget": local_budget,
+                "cumulative_learning_budget": inherited_cumulative,
+                "learning_results": failed_summary.get(
+                    "learning_results",
+                    [],
+                ),
+                "validation_results": self._result_rows((validation,)),
+                "formal_results": self._result_rows((formal,)),
+                "sealed_results": self._result_rows((sealed,)),
+                "benchmark_results": self._result_rows((formal,)),
+            })
+        return Round7PipelineResult(
+            run_dir=run_dir,
+            status=status,
+            runnable=True,
+            raw_score=lineage.raw_score,
+            evo_score_7=evo_score_7,
+            gain_7=gain_7,
+            validation_passed=validation_passed,
+            sealed_status=sealed_status,
+            champion_claim=champion_claim,
+            global_act_count=8,
+            round_act_count=0,
+        )
+
+    def recover(self, failed_run_dir: Path) -> Round7PipelineResult:
+        failed_run, summary = self._load_recovery_summary(
+            failed_run_dir
+        )
+        manifest = self._load_frozen_recovery_source(
+            failed_run,
+            summary,
+        )
+        if manifest is not None:
+            return self._recover_frozen_v7(
+                failed_run,
+                summary,
+                manifest,
+            )
+        local_learning_budget = summary.get("local_learning_budget")
+        if not isinstance(local_learning_budget, Mapping):
+            local_learning_budget = {}
+        self._fresh_recovery = {
+            "run_id": failed_run.name,
+            "local_learning_budget": dict(local_learning_budget),
+        }
+        try:
+            return self.run()
+        finally:
+            del self._fresh_recovery
