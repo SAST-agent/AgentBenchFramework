@@ -206,6 +206,7 @@ def test_figure_cli_writes_both_explicit_outputs(tmp_path):
     )
 
     assert completed.returncode == 0, completed.stderr
+    assert completed.stderr == ""
     assert str(output_prefix.with_suffix(".svg")) in completed.stdout
     assert str(output_prefix.with_suffix(".png")) in completed.stdout
     assert output_prefix.with_suffix(".svg").is_file()

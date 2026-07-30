@@ -5,7 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import math
+import os
 from pathlib import Path
+import tempfile
 from typing import Any
 
 
@@ -257,6 +259,13 @@ def render_policy_kl_three_panel(
 ) -> tuple[Path, Path]:
     """Render the publication figure as editable SVG and 300 DPI PNG."""
 
+    if "MPLCONFIGDIR" not in os.environ:
+        matplotlib_config = (
+            Path(tempfile.gettempdir()) / "agentbench-matplotlib"
+        )
+        matplotlib_config.mkdir(parents=True, exist_ok=True)
+        os.environ["MPLCONFIGDIR"] = str(matplotlib_config)
+
     try:
         import matplotlib
 
@@ -304,7 +313,7 @@ def render_policy_kl_three_panel(
         "font.family": "DejaVu Sans",
         "font.size": 11,
         "axes.titlesize": 14,
-        "axes.titleweight": "semibold",
+        "axes.titleweight": "bold",
         "axes.labelsize": 11,
         "legend.fontsize": 9.5,
         "svg.fonttype": "none",
@@ -359,7 +368,7 @@ def render_policy_kl_three_panel(
                 va="bottom",
                 fontsize=9.5,
                 color=colors["navy"],
-                fontweight="semibold",
+                fontweight="bold",
             )
         primary_axis.legend(
             handles=[
@@ -543,7 +552,7 @@ def render_policy_kl_three_panel(
         figure.suptitle(
             "Generals Heuristic-Learning Policy Change",
             fontsize=17,
-            fontweight="semibold",
+            fontweight="bold",
         )
         figure.savefig(
             svg_path,
