@@ -227,6 +227,24 @@ def _cmd_ludi_complexity(args):
     print(f"Markdown: {markdown_path}")
 
 
+def _cmd_rule_complexity(args):
+    """Measure the packaged AB-Rule/1 semantic proposition corpus."""
+    from agentbench_frame.research.rule_complexity import write_rule_reports
+
+    report = write_rule_reports(args.json_output, args.markdown_output)
+
+    print("AB-Rule/1 semantic proposition counts:")
+    for rank, game in enumerate(report["games"], start=1):
+        print(
+            f"  {rank:2d}. {game['game_id']:<16} "
+            f"{game['rule_atoms']:>5} RA  "
+            f"state={game['atom_breakdown']['state']} "
+            f"transition={game['atom_breakdown']['transition']}"
+        )
+    print(f"JSON: {Path(args.json_output).resolve()}")
+    print(f"Markdown: {Path(args.markdown_output).resolve()}")
+
+
 def main(argv: Optional[List[str]] = None):
     parser = argparse.ArgumentParser(
         prog="agentbench",
@@ -306,6 +324,20 @@ def main(argv: Optional[List[str]] = None):
         required=True,
         help="Human-readable report path",
     )
+    p_rules = p_complexity_sub.add_parser(
+        "rules",
+        help="Measure AB-Rule/1 semantic rule propositions",
+    )
+    p_rules.add_argument(
+        "--json-output",
+        required=True,
+        help="Machine-readable report path",
+    )
+    p_rules.add_argument(
+        "--markdown-output",
+        required=True,
+        help="Human-readable report path",
+    )
 
     args = parser.parse_args(argv)
 
@@ -331,6 +363,8 @@ def main(argv: Optional[List[str]] = None):
     elif args.command == "complexity":
         if args.complexity_command == "ludi":
             _cmd_ludi_complexity(args)
+        elif args.complexity_command == "rules":
+            _cmd_rule_complexity(args)
         else:
             p_complexity.print_help()
     else:

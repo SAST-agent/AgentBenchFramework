@@ -1,0 +1,397 @@
+{
+  "games": [
+    {
+      "atom_breakdown": {
+        "action": 11,
+        "condition": 33,
+        "observation": 8,
+        "outcome": 6,
+        "setup": 4,
+        "state": 42,
+        "transition": 41
+      },
+      "description_bytes": 6847,
+      "description_sha256": "6cd725dcc7802b8bc21e9d65240f893c1fefe49adb907c4ae4b7630eece2d7a3",
+      "excludes": "communication protocol, formatting, rendering, logs",
+      "game_id": "26_snakego",
+      "includes": "alternating turns, multiple snakes, ordered bodies, movement, growth, split, fire, item spawning and expiry, collisions, enclosure walls, death, territory scoring, first-item tie break, round limit",
+      "language": "AB-Rule/1",
+      "reviewed": "logic/communication.py, logic/constants.py, logic/formatter.py, logic/infrastructure.py, logic/operate.py, logic/result.py, logic/spawn.py, main.py",
+      "rule_atoms": 145,
+      "source_root": "backend_sources/corpus/26_snakego/logic/gamecode_logic",
+      "title": "SnakeGo"
+    },
+    {
+      "atom_breakdown": {
+        "action": 12,
+        "condition": 39,
+        "observation": 11,
+        "outcome": 7,
+        "setup": 4,
+        "state": 43,
+        "transition": 55
+      },
+      "description_bytes": 7511,
+      "description_sha256": "1d63eb64316b90efc12706d1910ae12f6466969576d06a1bae03fe0e1f911385",
+      "excludes": "C ABI transport, JSON parsing, logs, wall-clock enforcement outside game outcomes",
+      "game_id": "25_aquawar",
+      "includes": "hidden fish selection, assertions, three rounds, alternating actions, fish health, active skills, passives, buffs, random damage, deaths, round and match scoring",
+      "language": "AB-Rule/1",
+      "reviewed": "src/aqua_sdk.cpp, src/fish.cpp, src/fish.h, src/fishset.cpp, src/fishset.h, src/game.cpp, src/game.h, src/player.cpp, src/player.h, src/timer.h",
+      "rule_atoms": 171,
+      "source_root": "backend_sources/corpus/25_aquawar/logic/gamecode_logic",
+      "title": "AquaWar"
+    },
+    {
+      "atom_breakdown": {
+        "action": 4,
+        "condition": 29,
+        "observation": 11,
+        "outcome": 4,
+        "setup": 6,
+        "state": 66,
+        "transition": 61
+      },
+      "description_bytes": 8621,
+      "description_sha256": "127b2cd6220839178b20ce01926286f8fc659c22a943a6205d1db6423a26f6e9",
+      "excludes": "Gym wrappers, judge transport, NumPy representation details, rendering, logs, wall-clock limits",
+      "game_id": "29_rollman",
+      "includes": "asymmetric Pacman and three-ghost roles, three random levels, simultaneous movement, path collision, beans, five timed skills, scores, shield, capture, respawn, portals, level completion, timeout and match result",
+      "language": "AB-Rule/1",
+      "reviewed": "README.md, core/GymEnvironment.py, core/board.py, core/gamedata.py, core/ghost.py, core/pacman.py, core/utils.py, logic/utils.py, main.py",
+      "rule_atoms": 181,
+      "source_root": "backend_sources/corpus/29_rollman/logic/gamecode_logic/PacmanLogic",
+      "title": "Rollman"
+    },
+    {
+      "atom_breakdown": {
+        "action": 19,
+        "condition": 43,
+        "observation": 9,
+        "outcome": 2,
+        "setup": 9,
+        "state": 68,
+        "transition": 46
+      },
+      "description_bytes": 9237,
+      "description_sha256": "81f71eb8da292d24d0b78c6ea6d43207d637c80072da4df1b3aecda7103f1927",
+      "excludes": "HTTP routing, communication encoding, replay serialization, rendering, logs",
+      "game_id": "25_lostspace",
+      "includes": "four-player turns, generated multi-floor map, local observation, movement, inventory, crafting and tools, keys and doors, traps, delayed recovery, damage, death, respawn, shrinking hazards, escape countdown, ranking",
+      "language": "AB-Rule/1",
+      "reviewed": "main.py, src/GameController.py, src/MapGen/Map.g4, src/MapGen/MapGen.py, src/config.py, src/interactive_props.py, src/map.py, src/mapconf2.map, src/player.py, src/position.py, src/toolbag.py, src/tools.py, src/traps.py",
+      "rule_atoms": 196,
+      "source_root": "backend_sources/corpus/25_lostspace/logic/gamecode_logic",
+      "title": "LostSpace"
+    },
+    {
+      "atom_breakdown": {
+        "action": 14,
+        "condition": 43,
+        "observation": 7,
+        "outcome": 4,
+        "setup": 7,
+        "state": 74,
+        "transition": 54
+      },
+      "description_bytes": 9970,
+      "description_sha256": "8f95e4bd43298026e91ffed2ce9bb23a8b88021d5967483de94d2d149d1acdfd",
+      "excludes": "transport protocol, JSON encoding, UI, logs, process supervision",
+      "game_id": "24_miracle",
+      "includes": "alternating tactical turns, hex geometry, units, barracks, mana, summons, movement, combat, events, listeners, buffs, artifacts, miracle health, score, round limit",
+      "language": "AB-Rule/1",
+      "reviewed": "Data.json, Geometry/calculator.py, PlayerLegality/operations.py, PlayerLegality/player_legality.py, StateSystem/Artifact.py, StateSystem/Barrack.py, StateSystem/Buff.py, StateSystem/Event.py, StateSystem/EventHeap.py, StateSystem/EventListener.py, StateSystem/Map.py, StateSystem/Miracle.py, StateSystem/Obstacle.py, StateSystem/Player.py, StateSystem/StateSystem.py, StateSystem/Unit.py, StateSystem/UnitData.py, main.py",
+      "rule_atoms": 203,
+      "source_root": "backend_sources/corpus/24_miracle/logic/gamecode_logic",
+      "title": "Miracle"
+    },
+    {
+      "atom_breakdown": {
+        "action": 12,
+        "condition": 52,
+        "observation": 10,
+        "outcome": 2,
+        "setup": 8,
+        "state": 72,
+        "transition": 50
+      },
+      "description_bytes": 9285,
+      "description_sha256": "55b7af3c678dd65f20c3777598beb3d08cf23e2892237969df27ef5253ac683c",
+      "excludes": "websocket protocol, serialization, rendering, logs, tournament process control",
+      "game_id": "23_doto",
+      "includes": "arena state, real-time joint actions, movement, skills, collisions, ball, goals, bonuses, death, respawn, scoring, timeout",
+      "language": "AB-Rule/1",
+      "reviewed": "Arguments.py, BaseClass.py, main.py, server.py, Maps/0.json",
+      "rule_atoms": 206,
+      "source_root": "backend_sources/corpus/23_doto/logic/public_Arena-Doto-AI/Arena-Doto-AI-master/server",
+      "title": "DOTO"
+    },
+    {
+      "atom_breakdown": {
+        "action": 19,
+        "condition": 49,
+        "observation": 10,
+        "outcome": 6,
+        "setup": 5,
+        "state": 58,
+        "transition": 64
+      },
+      "description_bytes": 10722,
+      "description_sha256": "03ec8fee012c6e27e75dab79f9187f5b17adf36aa38073e7c560c81029b905c8",
+      "excludes": "judge transport, JSON library, output formatting, logs, process control",
+      "game_id": "27_antwar",
+      "includes": "hex map, pheromone initialization and decay, autonomous ants, headquarters production, towers, combat, coins, building and headquarters upgrades, four items, automatic rounds, headquarters and round-limit outcomes",
+      "language": "AB-Rule/1",
+      "reviewed": "include/ant.h, include/building.h, include/coin.h, include/game.hpp, include/item.h, include/map.h, include/operation.h, include/player.h, include/pos.h, src/aco.cpp, src/ant.cpp, src/building.cpp, src/coin.cpp, src/game.cpp, src/item.cpp, src/map.cpp, src/operation.cpp",
+      "rule_atoms": 211,
+      "source_root": "backend_sources/corpus/27_antwar/logic/gamecode_logic/ant_game - deploy",
+      "title": "AntWar"
+    },
+    {
+      "atom_breakdown": {
+        "action": 31,
+        "condition": 52,
+        "observation": 9,
+        "outcome": 6,
+        "setup": 12,
+        "state": 65,
+        "transition": 50
+      },
+      "description_bytes": 12416,
+      "description_sha256": "d4700229fbf39a8c48f84a8dd3e2537737a4b80eb1d4d734ae99f88c7162e009",
+      "excludes": "judge communication, replay formatting, rendering, logs, AI wall-clock limits",
+      "game_id": "28_generals",
+      "includes": "random connected map, terrain, ownership, armies, generals, movement and capture, production, coins, general upgrades and skills, technologies, super-weapons, cooldowns, durations, bog damage, victory and 500-round tie break",
+      "language": "AB-Rule/1",
+      "reviewed": "logic/call_generals.py, logic/computation.py, logic/constant.py, logic/execute.py, logic/gamedata.py, logic/gamestate.py, logic/general_skills.py, logic/movement.py, logic/super_weapons.py, logic/upgrade.py, main.py",
+      "rule_atoms": 225,
+      "source_root": "backend_sources/corpus/28_generals/logic/gamecode_logic",
+      "title": "Generals"
+    },
+    {
+      "atom_breakdown": {
+        "action": 20,
+        "condition": 102,
+        "observation": 10,
+        "outcome": 6,
+        "setup": 5,
+        "state": 120,
+        "transition": 142
+      },
+      "description_bytes": 19134,
+      "description_sha256": "c50517bc8c24f3b358857d04f71baebae17c5036c1e3dde2892d5815f07f0b98",
+      "excludes": "judge transport, JSON library, output formatting, mini-replay, logs, protocol error policy",
+      "game_id": "30_antwar2",
+      "includes": "AntWar economy and headquarters, deterministic PRNG, worker and combat ants, five behaviors, weighted risk-aware movement, control immunity, evasion, bewitching, expanded tower tree, producers, siege and medic spawning, items, combat, pheromone, outcomes",
+      "language": "AB-Rule/1",
+      "reviewed": "include/ant.h, include/building.h, include/coin.h, include/game.hpp, include/item.h, include/map.h, include/operation.h, include/player.h, include/pos.h, src/aco.cpp, src/ant.cpp, src/building.cpp, src/coin.cpp, src/game.cpp, src/item.cpp, src/map.cpp, src/operation.cpp",
+      "rule_atoms": 405,
+      "source_root": "backend_sources/corpus/30_antwar2/logic/gamecode_logic/game",
+      "title": "AntWar2"
+    }
+  ],
+  "games_by_id": [
+    {
+      "atom_breakdown": {
+        "action": 12,
+        "condition": 52,
+        "observation": 10,
+        "outcome": 2,
+        "setup": 8,
+        "state": 72,
+        "transition": 50
+      },
+      "description_bytes": 9285,
+      "description_sha256": "55b7af3c678dd65f20c3777598beb3d08cf23e2892237969df27ef5253ac683c",
+      "excludes": "websocket protocol, serialization, rendering, logs, tournament process control",
+      "game_id": "23_doto",
+      "includes": "arena state, real-time joint actions, movement, skills, collisions, ball, goals, bonuses, death, respawn, scoring, timeout",
+      "language": "AB-Rule/1",
+      "reviewed": "Arguments.py, BaseClass.py, main.py, server.py, Maps/0.json",
+      "rule_atoms": 206,
+      "source_root": "backend_sources/corpus/23_doto/logic/public_Arena-Doto-AI/Arena-Doto-AI-master/server",
+      "title": "DOTO"
+    },
+    {
+      "atom_breakdown": {
+        "action": 14,
+        "condition": 43,
+        "observation": 7,
+        "outcome": 4,
+        "setup": 7,
+        "state": 74,
+        "transition": 54
+      },
+      "description_bytes": 9970,
+      "description_sha256": "8f95e4bd43298026e91ffed2ce9bb23a8b88021d5967483de94d2d149d1acdfd",
+      "excludes": "transport protocol, JSON encoding, UI, logs, process supervision",
+      "game_id": "24_miracle",
+      "includes": "alternating tactical turns, hex geometry, units, barracks, mana, summons, movement, combat, events, listeners, buffs, artifacts, miracle health, score, round limit",
+      "language": "AB-Rule/1",
+      "reviewed": "Data.json, Geometry/calculator.py, PlayerLegality/operations.py, PlayerLegality/player_legality.py, StateSystem/Artifact.py, StateSystem/Barrack.py, StateSystem/Buff.py, StateSystem/Event.py, StateSystem/EventHeap.py, StateSystem/EventListener.py, StateSystem/Map.py, StateSystem/Miracle.py, StateSystem/Obstacle.py, StateSystem/Player.py, StateSystem/StateSystem.py, StateSystem/Unit.py, StateSystem/UnitData.py, main.py",
+      "rule_atoms": 203,
+      "source_root": "backend_sources/corpus/24_miracle/logic/gamecode_logic",
+      "title": "Miracle"
+    },
+    {
+      "atom_breakdown": {
+        "action": 12,
+        "condition": 39,
+        "observation": 11,
+        "outcome": 7,
+        "setup": 4,
+        "state": 43,
+        "transition": 55
+      },
+      "description_bytes": 7511,
+      "description_sha256": "1d63eb64316b90efc12706d1910ae12f6466969576d06a1bae03fe0e1f911385",
+      "excludes": "C ABI transport, JSON parsing, logs, wall-clock enforcement outside game outcomes",
+      "game_id": "25_aquawar",
+      "includes": "hidden fish selection, assertions, three rounds, alternating actions, fish health, active skills, passives, buffs, random damage, deaths, round and match scoring",
+      "language": "AB-Rule/1",
+      "reviewed": "src/aqua_sdk.cpp, src/fish.cpp, src/fish.h, src/fishset.cpp, src/fishset.h, src/game.cpp, src/game.h, src/player.cpp, src/player.h, src/timer.h",
+      "rule_atoms": 171,
+      "source_root": "backend_sources/corpus/25_aquawar/logic/gamecode_logic",
+      "title": "AquaWar"
+    },
+    {
+      "atom_breakdown": {
+        "action": 19,
+        "condition": 43,
+        "observation": 9,
+        "outcome": 2,
+        "setup": 9,
+        "state": 68,
+        "transition": 46
+      },
+      "description_bytes": 9237,
+      "description_sha256": "81f71eb8da292d24d0b78c6ea6d43207d637c80072da4df1b3aecda7103f1927",
+      "excludes": "HTTP routing, communication encoding, replay serialization, rendering, logs",
+      "game_id": "25_lostspace",
+      "includes": "four-player turns, generated multi-floor map, local observation, movement, inventory, crafting and tools, keys and doors, traps, delayed recovery, damage, death, respawn, shrinking hazards, escape countdown, ranking",
+      "language": "AB-Rule/1",
+      "reviewed": "main.py, src/GameController.py, src/MapGen/Map.g4, src/MapGen/MapGen.py, src/config.py, src/interactive_props.py, src/map.py, src/mapconf2.map, src/player.py, src/position.py, src/toolbag.py, src/tools.py, src/traps.py",
+      "rule_atoms": 196,
+      "source_root": "backend_sources/corpus/25_lostspace/logic/gamecode_logic",
+      "title": "LostSpace"
+    },
+    {
+      "atom_breakdown": {
+        "action": 11,
+        "condition": 33,
+        "observation": 8,
+        "outcome": 6,
+        "setup": 4,
+        "state": 42,
+        "transition": 41
+      },
+      "description_bytes": 6847,
+      "description_sha256": "6cd725dcc7802b8bc21e9d65240f893c1fefe49adb907c4ae4b7630eece2d7a3",
+      "excludes": "communication protocol, formatting, rendering, logs",
+      "game_id": "26_snakego",
+      "includes": "alternating turns, multiple snakes, ordered bodies, movement, growth, split, fire, item spawning and expiry, collisions, enclosure walls, death, territory scoring, first-item tie break, round limit",
+      "language": "AB-Rule/1",
+      "reviewed": "logic/communication.py, logic/constants.py, logic/formatter.py, logic/infrastructure.py, logic/operate.py, logic/result.py, logic/spawn.py, main.py",
+      "rule_atoms": 145,
+      "source_root": "backend_sources/corpus/26_snakego/logic/gamecode_logic",
+      "title": "SnakeGo"
+    },
+    {
+      "atom_breakdown": {
+        "action": 19,
+        "condition": 49,
+        "observation": 10,
+        "outcome": 6,
+        "setup": 5,
+        "state": 58,
+        "transition": 64
+      },
+      "description_bytes": 10722,
+      "description_sha256": "03ec8fee012c6e27e75dab79f9187f5b17adf36aa38073e7c560c81029b905c8",
+      "excludes": "judge transport, JSON library, output formatting, logs, process control",
+      "game_id": "27_antwar",
+      "includes": "hex map, pheromone initialization and decay, autonomous ants, headquarters production, towers, combat, coins, building and headquarters upgrades, four items, automatic rounds, headquarters and round-limit outcomes",
+      "language": "AB-Rule/1",
+      "reviewed": "include/ant.h, include/building.h, include/coin.h, include/game.hpp, include/item.h, include/map.h, include/operation.h, include/player.h, include/pos.h, src/aco.cpp, src/ant.cpp, src/building.cpp, src/coin.cpp, src/game.cpp, src/item.cpp, src/map.cpp, src/operation.cpp",
+      "rule_atoms": 211,
+      "source_root": "backend_sources/corpus/27_antwar/logic/gamecode_logic/ant_game - deploy",
+      "title": "AntWar"
+    },
+    {
+      "atom_breakdown": {
+        "action": 31,
+        "condition": 52,
+        "observation": 9,
+        "outcome": 6,
+        "setup": 12,
+        "state": 65,
+        "transition": 50
+      },
+      "description_bytes": 12416,
+      "description_sha256": "d4700229fbf39a8c48f84a8dd3e2537737a4b80eb1d4d734ae99f88c7162e009",
+      "excludes": "judge communication, replay formatting, rendering, logs, AI wall-clock limits",
+      "game_id": "28_generals",
+      "includes": "random connected map, terrain, ownership, armies, generals, movement and capture, production, coins, general upgrades and skills, technologies, super-weapons, cooldowns, durations, bog damage, victory and 500-round tie break",
+      "language": "AB-Rule/1",
+      "reviewed": "logic/call_generals.py, logic/computation.py, logic/constant.py, logic/execute.py, logic/gamedata.py, logic/gamestate.py, logic/general_skills.py, logic/movement.py, logic/super_weapons.py, logic/upgrade.py, main.py",
+      "rule_atoms": 225,
+      "source_root": "backend_sources/corpus/28_generals/logic/gamecode_logic",
+      "title": "Generals"
+    },
+    {
+      "atom_breakdown": {
+        "action": 4,
+        "condition": 29,
+        "observation": 11,
+        "outcome": 4,
+        "setup": 6,
+        "state": 66,
+        "transition": 61
+      },
+      "description_bytes": 8621,
+      "description_sha256": "127b2cd6220839178b20ce01926286f8fc659c22a943a6205d1db6423a26f6e9",
+      "excludes": "Gym wrappers, judge transport, NumPy representation details, rendering, logs, wall-clock limits",
+      "game_id": "29_rollman",
+      "includes": "asymmetric Pacman and three-ghost roles, three random levels, simultaneous movement, path collision, beans, five timed skills, scores, shield, capture, respawn, portals, level completion, timeout and match result",
+      "language": "AB-Rule/1",
+      "reviewed": "README.md, core/GymEnvironment.py, core/board.py, core/gamedata.py, core/ghost.py, core/pacman.py, core/utils.py, logic/utils.py, main.py",
+      "rule_atoms": 181,
+      "source_root": "backend_sources/corpus/29_rollman/logic/gamecode_logic/PacmanLogic",
+      "title": "Rollman"
+    },
+    {
+      "atom_breakdown": {
+        "action": 20,
+        "condition": 102,
+        "observation": 10,
+        "outcome": 6,
+        "setup": 5,
+        "state": 120,
+        "transition": 142
+      },
+      "description_bytes": 19134,
+      "description_sha256": "c50517bc8c24f3b358857d04f71baebae17c5036c1e3dde2892d5815f07f0b98",
+      "excludes": "judge transport, JSON library, output formatting, mini-replay, logs, protocol error policy",
+      "game_id": "30_antwar2",
+      "includes": "AntWar economy and headquarters, deterministic PRNG, worker and combat ants, five behaviors, weighted risk-aware movement, control immunity, evasion, bewitching, expanded tower tree, producers, siege and medic spawning, items, combat, pheromone, outcomes",
+      "language": "AB-Rule/1",
+      "reviewed": "include/ant.h, include/building.h, include/coin.h, include/game.hpp, include/item.h, include/map.h, include/operation.h, include/player.h, include/pos.h, src/aco.cpp, src/ant.cpp, src/building.cpp, src/coin.cpp, src/game.cpp, src/item.cpp, src/map.cpp, src/operation.cpp",
+      "rule_atoms": 405,
+      "source_root": "backend_sources/corpus/30_antwar2/logic/gamecode_logic/game",
+      "title": "AntWar2"
+    }
+  ],
+  "metric": {
+    "compiled": false,
+    "language": "AB-Rule/1",
+    "name": "Ludemic Rule Description Complexity",
+    "primary": "rule_atoms",
+    "unit": "rule atoms (RA)"
+  },
+  "schema_version": "agentbench.rule-complexity.v1",
+  "source": {
+    "commit": "b581bca3ba3d2d7d58a2f8c6bbddd060fc7fdc87",
+    "deepclue_included": false,
+    "repository": "https://github.com/Aoraku/AgentBench"
+  }
+}
