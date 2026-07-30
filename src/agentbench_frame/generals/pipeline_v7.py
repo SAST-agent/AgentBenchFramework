@@ -1803,6 +1803,7 @@ class GeneralsHLRound7Pipeline(GeneralsHLRound6Pipeline):
         validation_error: str | None = None
         formal_error: str | None = None
         sealed_error: str | None = None
+        formal_attempted = False
         validation_passed = False
         champion_claim = False
         sealed_status = "not_opened"
@@ -1937,6 +1938,7 @@ class GeneralsHLRound7Pipeline(GeneralsHLRound6Pipeline):
                     manifest,
                     phase="formal",
                 )
+                formal_attempted = True
                 formal = evaluator.evaluate(
                     formal_workspace,
                     "v7",
@@ -2124,9 +2126,13 @@ class GeneralsHLRound7Pipeline(GeneralsHLRound6Pipeline):
                 ),
                 "formal_scores": formal_scores,
                 "evaluation_status": (
-                    formal.status if formal is not None else "error"
+                    formal.status
+                    if formal is not None
+                    else "error"
+                    if formal_attempted
+                    else "not_run"
                 ),
-                "formal_attempted": True,
+                "formal_attempted": formal_attempted,
                 "champion_validation": validation_payload,
                 "champion_sealed": sealed_payload,
                 "champion_claim": champion_claim,

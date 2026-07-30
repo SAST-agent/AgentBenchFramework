@@ -76,6 +76,8 @@ def test_v7_frozen_recovery_retains_candidate_test_failure(
     summary = _summary(recovered.run_dir)
     assert summary["status"] == "invalid_version"
     assert summary["runnable"] is False
+    assert summary["formal_attempted"] is False
+    assert summary["evaluation_status"] == "not_run"
     assert summary["champion_validation"]["status"] == "not_run"
     assert summary["champion_sealed"]["status"] == "not_opened"
     assert (
