@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import io
 import json
-import token
-import tokenize
+from collections import Counter
 from hashlib import sha256
 from importlib.resources import files
 from pathlib import Path
@@ -43,94 +41,108 @@ _REQUIRED_KINDS = frozenset(
         "terminal",
     }
 )
-_TOKEN_TYPES = frozenset(
-    {token.NAME, token.NUMBER, token.STRING, token.OP}
+_ATOM_CATEGORIES = (
+    "state",
+    "action",
+    "observation",
+    "setup",
+    "condition",
+    "transition",
+    "outcome",
 )
+_CONDITION_KINDS = frozenset({"require", "when", "otherwise", "for", "choose"})
+_TRANSITION_KINDS = frozenset(
+    {
+        "let",
+        "update",
+        "apply",
+        "create",
+        "delete",
+        "emit",
+        "return",
+        "pass",
+    }
+)
+_GROUP_KINDS = frozenset({"game", "setup", "rule", "terminal"})
 
 
 class RuleCorpusError(ValueError):
     """Raised when the frozen formal-rule corpus is incomplete or ambiguous."""
 
 
-def _lexical_token_count(fragment: str) -> int:
-    if not fragment:
-        return 0
-    try:
-        stream = tokenize.generate_tokens(io.StringIO(fragment).readline)
-        return sum(item.type in _TOKEN_TYPES for item in stream)
-    except (IndentationError, tokenize.TokenError):
-        # Type annotations and parameter lists can be fragments rather than
-        # complete Python expressions. A stable punctuation-aware fallback is
-        # sufficient because identifier spelling never affects token count.
-        return sum(
-            1
-            for item in tokenize.generate_tokens(
-                io.StringIO(f"f({fragment})").readline
-            )
-            if item.type in _TOKEN_TYPES
-        ) - 3
+def _collect_propositions(
+    node: RuleNode,
+    counts: Counter[str],
+    *,
+    section: str | None = None,
+) -> None:
+    """Place each semantic proposition in exactly one public partition."""
 
+    child_section = section
+    if node.kind == "setup":
+        child_section = "setup"
+    elif node.kind == "terminal":
+        child_section = "outcome"
+    elif node.kind in {"entity", "enum"}:
+        child_section = "state"
+    elif node.kind == "action":
+        child_section = "action"
+    elif node.kind == "observation":
+        child_section = "observation"
 
-def _node_depth(node: RuleNode, depth: int) -> int:
-    own_depth = depth
-    if node.expression is not None:
-        own_depth = max(own_depth, depth + node.expression.depth)
+    category: str | None = None
+    if section in {"setup", "outcome"} and node.kind not in _GROUP_KINDS:
+        category = section
+    elif node.kind in {"players", "constant", "entity", "enum"}:
+        category = "state"
+    elif node.kind in {"value", "field"} and section == "state":
+        category = "state"
+    elif node.kind == "action":
+        category = "action"
+    elif node.kind == "field" and section == "action":
+        category = "action"
+    elif node.kind == "observation":
+        category = "observation"
+    elif (
+        node.kind == "field" and section == "observation"
+    ) or node.kind in {"reveal", "hide"}:
+        category = "observation"
+    elif node.kind in _CONDITION_KINDS:
+        category = "condition"
+    elif node.kind in _TRANSITION_KINDS:
+        category = "transition"
+    elif node.kind not in _GROUP_KINDS:
+        raise RuleCorpusError(
+            f"cannot classify AB-Rule proposition {node.kind!r} "
+            f"at line {node.line}"
+        )
+
+    if category is not None:
+        counts[category] += 1
     for child in node.children:
-        own_depth = max(own_depth, _node_depth(child, depth + 1))
-    return own_depth
+        _collect_propositions(child, counts, section=child_section)
 
 
-def _canonical_token_count(document: RuleDocument) -> int:
-    count = 0
-    for node in document.walk():
-        count += 1  # frozen AB-Rule keyword
-        if node.name is not None:
-            count += 1  # alpha-normalized identifier
-        if node.detail:
-            count += _lexical_token_count(node.detail)
-        if node.expression is not None:
-            count += _lexical_token_count(node.expression.source)
-    return count
+def _proposition_breakdown(document: RuleDocument) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for node in document.nodes:
+        _collect_propositions(node, counts)
+    return {category: counts[category] for category in _ATOM_CATEGORIES}
 
 
 def measure_rule_document(
     document: RuleDocument,
     source: str,
-) -> dict[str, int | str]:
+) -> dict[str, Any]:
     """Measure one parsed formal rule description without compiling it."""
 
-    nodes = tuple(document.walk())
-    semantic_nodes = tuple(node for node in nodes if node.kind != "game")
-    expression_atoms = sum(
-        node.expression.calls + node.expression.operators
-        for node in semantic_nodes
-        if node.expression is not None
-    )
-    parameters = sum(
-        node.expression.literals
-        for node in semantic_nodes
-        if node.expression is not None
-    )
-    rule_lines = sum(
-        bool(line.strip()) and not line.lstrip().startswith("#")
-        for line in source.splitlines()
-    )
+    breakdown = _proposition_breakdown(document)
 
     return {
         "game_id": document.game_id,
         "language": LANGUAGE_ID,
-        "rule_atoms": len(semantic_nodes) + expression_atoms,
-        "composition_depth": max(
-            (_node_depth(node, 1) for node in document.nodes),
-            default=0,
-        ),
-        "branch_count": sum(
-            node.kind in {"when", "otherwise", "choose"}
-            for node in semantic_nodes
-        ),
-        "parameter_count": parameters,
-        "canonical_tokens": _canonical_token_count(document),
-        "rule_lines": rule_lines,
+        "rule_atoms": sum(breakdown.values()),
+        "atom_breakdown": breakdown,
         "description_bytes": len(source.encode("utf-8")),
         "description_sha256": sha256(source.encode("utf-8")).hexdigest(),
     }
@@ -252,9 +264,10 @@ def render_rule_markdown(report: dict[str, Any]) -> str:
         ),
         "",
         (
-            "The primary value is the number of semantic rule-atom "
-            "occurrences in each formal AB-Rule/1 pseudocode description. "
-            "Descriptions are parsed but not compiled."
+            "The primary value is the cardinality of the disjoint set of "
+            "atomic rule-proposition occurrences in each formal AB-Rule/1 "
+            "description. Descriptions are parsed but not compiled, and "
+            "expression AST shape is not counted."
         ),
         "",
         (
@@ -264,16 +277,18 @@ def render_rule_markdown(report: dict[str, Any]) -> str:
             "learning difficulty, or information gain."
         ),
         "",
-        "| Rank | Game ID | Game | Rule atoms | Depth | Branches | "
-        "Parameters | Canonical tokens | Rule lines |",
-        "|---:|---|---|---:|---:|---:|---:|---:|---:|",
+        "| Rank | Game ID | Game | Rule atoms | State | Actions | "
+        "Observations | Setup | Conditions | Transitions | Outcomes |",
+        "|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for rank, game in enumerate(report["games"], start=1):
+        atoms = game["atom_breakdown"]
         lines.append(
             f"| {rank} | `{game['game_id']}` | {game['title']} | "
-            f"{game['rule_atoms']} | {game['composition_depth']} | "
-            f"{game['branch_count']} | {game['parameter_count']} | "
-            f"{game['canonical_tokens']} | {game['rule_lines']} |"
+            f"{game['rule_atoms']} | {atoms['state']} | {atoms['action']} | "
+            f"{atoms['observation']} | {atoms['setup']} | "
+            f"{atoms['condition']} | {atoms['transition']} | "
+            f"{atoms['outcome']} |"
         )
     lines.extend(
         [

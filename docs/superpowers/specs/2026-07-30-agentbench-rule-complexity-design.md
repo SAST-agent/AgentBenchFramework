@@ -195,10 +195,12 @@ The primary metric is
 \]
 
 The sum has a set-theoretic meaning: it is the cardinality of a disjoint union,
-not a weighted score. Block names group propositions and the `game` header
-identifies the document; neither adds a rule atom. Names, comments,
-indentation width, punctuation, line wrapping, expression operators, and AST
-shape do not change the count.
+not a weighted score. `setup`, `rule`, and `terminal` block names group
+propositions, while the `game` header identifies the document; those headers
+do not add rule atoms. Entity, action, and observation declarations do add
+atoms because the existence of each concept is itself a rule proposition.
+Names, comments, indentation width, punctuation, line wrapping, expression
+operators, and AST shape do not change the count.
 
 ### Explanatory output
 

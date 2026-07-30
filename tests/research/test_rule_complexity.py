@@ -32,40 +32,78 @@ rule renamed(long_identifier):
     right_metric = metric(right)
 
     assert left_metric["rule_atoms"] == right_metric["rule_atoms"]
-    assert left_metric["parameter_count"] == right_metric["parameter_count"]
-    assert left_metric["canonical_tokens"] == right_metric["canonical_tokens"]
+    assert left_metric["atom_breakdown"] == right_metric["atom_breakdown"]
 
 
-def test_new_relation_and_boolean_composition_increase_rule_atoms():
+def test_expression_ast_shape_does_not_increase_rule_atoms():
     base = "game A\nplayers 2\nrule r(x):\n  return occupied(x)\n"
     richer = (
         "game A\nplayers 2\nrule r(x):\n"
         "  return occupied(x) and hostile(x)\n"
     )
 
-    assert metric(richer)["rule_atoms"] == metric(base)["rule_atoms"] + 2
+    assert metric(richer)["rule_atoms"] == metric(base)["rule_atoms"]
 
 
-def test_explanatory_metrics_describe_branching_depth_and_parameters():
+def test_new_atomic_statement_increases_rule_atoms():
+    base = "game A\nplayers 2\nrule r(x):\n  return occupied(x)\n"
+    richer = (
+        "game A\nplayers 2\nrule r(x):\n"
+        "  require hostile(x)\n"
+        "  return occupied(x)\n"
+    )
+
+    assert metric(richer)["rule_atoms"] == metric(base)["rule_atoms"] + 1
+
+
+def test_rule_atoms_are_disjoint_semantic_proposition_partitions():
     source = """\
 game A
 players 2
-constant LIMITS = [3, 5]
+constant LIMIT = 3
+entity Token:
+  field owner: Player
+action Move:
+  field target: Cell
+observation View:
+  field visible: Set[Cell]
+setup initial:
+  create Token(owner=first_player)
 rule resolve(x):
-  when active(x):
-    choose damage from [1, 2, 3]:
-      update x.health = x.health - damage
-  otherwise:
-    pass
+  require active(x)
+  when occupied(x):
+    update x.health = x.health - 1
+  reveal visible_to(x, x.owner)
+terminal finished:
+  when x.health <= 0:
+    return winner(x.owner)
 """
 
     result = metric(source)
 
-    assert result["branch_count"] == 3
-    assert result["parameter_count"] == 6
-    assert result["composition_depth"] >= 4
-    assert result["rule_lines"] == 9
-    assert result["canonical_tokens"] > result["rule_atoms"]
+    assert result["atom_breakdown"] == {
+        "state": 4,
+        "action": 2,
+        "observation": 3,
+        "setup": 1,
+        "condition": 2,
+        "transition": 1,
+        "outcome": 2,
+    }
+    assert result["rule_atoms"] == sum(result["atom_breakdown"].values())
+    assert set(result) >= {
+        "description_bytes",
+        "description_sha256",
+    }
+    assert set(result).isdisjoint(
+        {
+            "composition_depth",
+            "branch_count",
+            "parameter_count",
+            "canonical_tokens",
+            "rule_lines",
+        }
+    )
 
 
 def test_rule_document_validation_requires_provenance_and_semantic_sections():
