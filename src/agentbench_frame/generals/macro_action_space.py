@@ -114,6 +114,9 @@ class GeneralsMacroActionSpaceV1:
         """Yield the finite complete primitive request domain in stable order."""
 
         raw = self._raw_state(state)
+        actor = state.get("actor")
+        if type(actor) is not int or actor not in (0, 1):
+            raise ActionSpaceError("measurement state actor must be 0 or 1")
         board = sorted(
             raw["board"],
             key=lambda item: tuple(item["position"]),
@@ -122,11 +125,27 @@ class GeneralsMacroActionSpaceV1:
             (int(item["position"][0]), int(item["position"][1]))
             for item in board
         )
-        generals = tuple(
-            sorted(int(item["id"]) for item in raw["generals"])
+        owned_cells = tuple(
+            item for item in board if int(item["player"]) == actor
+        )
+        owned_generals = tuple(
+            sorted(
+                (
+                    item
+                    for item in raw["generals"]
+                    if int(item["player"]) == actor
+                ),
+                key=lambda item: int(item["id"]),
+            )
         )
 
-        for cell in board:
+        if int(raw["rest_move_step"][actor]) > 0:
+            army_sources = (
+                cell for cell in owned_cells if int(cell["army"]) > 1
+            )
+        else:
+            army_sources = ()
+        for cell in army_sources:
             row, column = (
                 int(cell["position"][0]),
                 int(cell["position"][1]),
@@ -135,42 +154,97 @@ class GeneralsMacroActionSpaceV1:
                 for amount in range(1, max(1, int(cell["army"]))):
                     yield (1, row, column, direction, amount)
 
-        for general_id in generals:
-            for row, column in positions:
-                yield (2, general_id, row, column)
+        movable_destinations = tuple(
+            (
+                int(cell["position"][0]),
+                int(cell["position"][1]),
+            )
+            for cell in owned_cells
+            if cell["general_id"] is None
+            and (
+                int(cell["type"]) != 2
+                or bool(raw["tech_level"][actor][1])
+            )
+        )
+        for general in owned_generals:
+            if int(general["rest_move"]) > 0:
+                for row, column in movable_destinations:
+                    yield (2, int(general["id"]), row, column)
 
-        for general_id in generals:
+        for general in owned_generals:
             for quality in range(1, 4):
-                yield (3, general_id, quality)
+                yield (3, int(general["id"]), quality)
 
-        for general_id in generals:
+        for general in owned_generals:
+            if general["type"] == "Farmer":
+                continue
+            general_id = int(general["id"])
+            source_row, source_column = (
+                int(general["position"][0]),
+                int(general["position"][1]),
+            )
             for skill in (1, 2):
                 for row, column in positions:
-                    yield (4, general_id, skill, row, column)
+                    if (
+                        abs(row - source_row) <= 2
+                        and abs(column - source_column) <= 2
+                    ):
+                        yield (4, general_id, skill, row, column)
             for skill in (3, 4, 5):
                 yield (4, general_id, skill)
 
         for technology in range(1, 5):
             yield (5, technology)
 
-        for weapon in (1, 2):
-            for row, column in positions:
-                yield (6, weapon, row, column)
-        for target_row, target_column in positions:
-            for source_row, source_column in positions:
-                yield (
-                    6,
-                    3,
-                    target_row,
-                    target_column,
-                    source_row,
-                    source_column,
+        weapon_ready = (
+            bool(raw["super_weapon_unlocked"][actor])
+            and int(raw["super_weapon_cd"][actor]) == 0
+        )
+        if weapon_ready:
+            for weapon in (1, 2):
+                for row, column in positions:
+                    yield (6, weapon, row, column)
+            transmission_sources = tuple(
+                (
+                    int(cell["position"][0]),
+                    int(cell["position"][1]),
                 )
-        for row, column in positions:
-            yield (6, 4, row, column)
+                for cell in owned_cells
+                if int(cell["army"]) > 1
+            )
+            transmission_targets = tuple(
+                (
+                    int(cell["position"][0]),
+                    int(cell["position"][1]),
+                )
+                for cell in board
+                if cell["general_id"] is None
+                and (
+                    int(cell["type"]) != 2
+                    or bool(raw["tech_level"][actor][1])
+                )
+            )
+            for target_row, target_column in transmission_targets:
+                for source_row, source_column in transmission_sources:
+                    yield (
+                        6,
+                        3,
+                        target_row,
+                        target_column,
+                        source_row,
+                        source_column,
+                    )
+            for row, column in positions:
+                yield (6, 4, row, column)
 
-        for row, column in positions:
-            yield (7, row, column)
+        if int(raw["coin"][actor]) >= 50:
+            for cell in owned_cells:
+                if cell["general_id"] is None:
+                    row, column = (
+                        int(cell["position"][0]),
+                        int(cell["position"][1]),
+                    )
+                    yield (7, row, column)
 
     @staticmethod
     def _matches_filter(

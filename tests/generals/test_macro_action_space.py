@@ -240,6 +240,44 @@ def test_candidate_order_is_stable(action_space, controlled_state):
     assert first == sorted(first)
 
 
+def test_early_state_candidate_domain_prunes_only_impossible_requests(
+    action_space,
+    engine_root,
+    tmp_path,
+):
+    engine = OfficialGeneralsEngine(
+        engine_root,
+        289101,
+        tmp_path / "early.jsonl",
+    )
+    state = engine.measurement_state(actor=0)
+    candidates = list(action_space.primitive_candidates(state))
+    raw = state["state"]
+    owned_general_ids = {
+        item["id"]
+        for item in raw["generals"]
+        if item["player"] == 0
+    }
+    board_by_position = {
+        tuple(item["position"]): item for item in raw["board"]
+    }
+
+    assert all(
+        command[1] in owned_general_ids
+        for command in candidates
+        if command[0] in (2, 3, 4)
+    )
+    assert all(
+        board_by_position[(command[1], command[2])]["player"] == 0
+        and board_by_position[(command[1], command[2])]["army"] > 1
+        for command in candidates
+        if command[0] == 1
+    )
+    assert all(command[0] != 6 for command in candidates)
+    assert all(command[0] != 7 for command in candidates)
+    assert len(candidates) < 1_000
+
+
 @pytest.mark.parametrize(
     "action",
     (
