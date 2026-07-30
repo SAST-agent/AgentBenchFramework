@@ -96,7 +96,20 @@ def test_main_runs_acts_with_stubbed_runner_and_eval(monkeypatch, tmp_path):
                 run_dir = tmp_path
             return R()
 
-    monkeypatch.setattr("agentbench_frame.hl.runner.ClaudeCodeRunner", _StubRunner)
+    # Stub model loading
+    from agentbench_frame.hl.models_config import ModelEntry
+    def _stub_load_models(*a, **k):
+        return {"stub": ModelEntry(label="stub", provider="stub", model="stub-model",
+                                   api_key="stub", base_url="http://stub")}
+    monkeypatch.setattr("agentbench_frame.hl.models_config.load_models", _stub_load_models)
+
+    # Stub build_client to return a dummy client
+    class _StubClient:
+        def __init__(self, entry): pass
+        def generate(self, **kw): raise AssertionError("should not be called")
+    monkeypatch.setattr("agentbench_frame.hl.llm.build_client", _StubClient)
+
+    monkeypatch.setattr("agentbench_frame.hl.runner.ApiCodingRunner", _StubRunner)
     monkeypatch.setattr(hl_cli, "LostSpaceEvaluator", lambda *a, **k: _StubEval())
     monkeypatch.setattr(hl_cli, "_resolve_opponents",
                         lambda args: [hl_cli.Opponent(name="rank06", command="echo")])
@@ -122,7 +135,6 @@ def test_main_runs_acts_with_stubbed_runner_and_eval(monkeypatch, tmp_path):
         "--acts", "2", "--pairs", "1", "--seats", "0", "--timeout", "5",
         "--data-dir", str(data_root),
         "--codebase-root", str(tmp_path / "cb"),
-        "--dangerously-skip-permissions",
     ])
     assert code == 0
     assert calls["n"] == 2
@@ -271,7 +283,21 @@ def _stub_for_main(monkeypatch, tmp_path):
                 run_dir = tmp_path
             return R()
 
-    monkeypatch.setattr("agentbench_frame.hl.runner.ClaudeCodeRunner", _StubRunner)
+    # Stub model loading
+    from agentbench_frame.hl.models_config import ModelEntry
+    def _stub_load_models(*a, **k):
+        return {"stub": ModelEntry(label="stub", provider="stub", model="stub-model",
+                                   api_key="stub", base_url="http://stub")}
+    monkeypatch.setattr("agentbench_frame.hl.models_config.load_models", _stub_load_models)
+
+    # Stub build_client to return a dummy client
+    class _StubClient:
+        def __init__(self, entry): pass
+        def generate(self, **kw): raise AssertionError("should not be called")
+    monkeypatch.setattr("agentbench_frame.hl.llm.build_client", _StubClient)
+
+    # Stub the new ApiCodingRunner
+    monkeypatch.setattr("agentbench_frame.hl.runner.ApiCodingRunner", _StubRunner)
     monkeypatch.setattr(hl_cli, "LostSpaceEvaluator", lambda *a, **k: _StubEval())
     monkeypatch.setattr(hl_cli, "_resolve_opponents",
                         lambda args: [hl_cli.Opponent(name="rank06", command="echo")])

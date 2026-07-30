@@ -299,15 +299,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--data-dir", type=Path, default=None)
     p.add_argument("--codebase-root", type=Path, default=None,
                    help="default: ./.hl_codebase/<name>")
-    p.add_argument("--claude-path", default="claude")
-    p.add_argument("--model", default=None)
-    p.add_argument("--permission-mode", default="acceptEdits",
-                   choices=("default", "acceptEdits", "bypassPermissions", "plan"))
-    p.add_argument("--dangerously-skip-permissions", action="store_true",
-                   help="fully autonomous (no permission prompts); use only in "
-                        "a trusted sandbox")
+    p.add_argument("--model-key", default=None,
+                   help="model key from .env MODELS= to run (default: first in MODELS)")
+    p.add_argument("--max-turns", type=int, default=6,
+                   help="max tool-use turns per act for the API runner (default 6)")
     p.add_argument("--claude-timeout", type=float, default=600.0,
-                   help="per-act claude CLI timeout (seconds)")
+                   help="per-act API runner wall-clock timeout (seconds)")
     return p
 
 
@@ -317,7 +314,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from agentbench_frame.hl.controller import HLIterationController
     from agentbench_frame.hl.context import ContextBuilder
     from agentbench_frame.hl.reference import BenchmarkSpec, ReferenceStateSet
-    from agentbench_frame.hl.runner import ClaudeCodeRunner
     from agentbench_frame.hl.events import read_events
 
     args = build_parser().parse_args(argv)
@@ -396,11 +392,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         consolidate_every=args.consolidate_every,
         max_growth_pct=args.max_growth_pct,
     )
-    runner = ClaudeCodeRunner(
-        claude_path=args.claude_path, model=args.model,
-        permission_mode=args.permission_mode,
-        dangerously_skip_permissions=args.dangerously_skip_permissions,
+    from agentbench_frame.hl.models_config import load_models
+    from agentbench_frame.hl.llm import build_client
+    from agentbench_frame.hl.runner import ApiCodingRunner
+    models = load_models()
+    if not models:
+        raise SystemExit("[hl] no models configured (check .env / MODELS=)")
+    key = args.model_key or next(iter(models))
+    if key not in models:
+        raise SystemExit(f"[hl] model key {key!r} not in MODELS={list(models)}")
+    entry = models[key]
+    print(f"[hl] model         = {key} ({entry.provider}/{entry.model})", file=sys.stderr)
+    runner = ApiCodingRunner(
+        client=build_client(entry),
         system_prompt=_system_prompt(),
+        max_turns=args.max_turns,
     )
     eval_factory = _evaluator_factory(
         logic_command, opponents, filler,
