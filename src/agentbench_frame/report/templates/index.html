@@ -6,6 +6,24 @@
 {% set lr = latest_research %}{% set lb = lr.get('cumulative_learning_budget') or lr.get('budget', {}) %}{% set campaign_receipt = lr.get('campaign_budget_receipt') %}
 <section class="metric-grid"><article class="metric"><div class="metric-head">{{ icon('trophy') }} Raw score</div><strong class="metric-value">{{ fmt_pct(lr.get('raw_score')) }}</strong><span class="metric-foot">frozen v0 benchmark</span></article><article class="metric"><div class="metric-head">{{ icon('trophy') }} Evo score</div><strong class="metric-value mint">{{ fmt_pct(lr.get('evo_score')) }}</strong><span class="metric-foot">same formal cases at latest version</span></article><article class="metric"><div class="metric-head">{{ icon('spark') }} Gain</div><strong class="metric-value">{{ fmt_pct(lr.get('gain')) }}</strong><span class="metric-foot">evo score − raw score</span></article><article class="metric"><div class="metric-head">{{ icon('budget') }} Learning acts</div><strong class="metric-value">{{ fmt_num(lb.get('learning_coding_agent_acts')) }}</strong><span class="metric-foot">{% if lr.get('cumulative_learning_budget') %}cumulative global budget{% else %}current-run efficiency budget{% endif %}</span></article></section>
 {% if latest %}<div class="note">{{ latest.game }} · {{ latest.agent }} · <span class="status status-{{ status_class(lr.get('evaluation_status')) }}">{{ lr.get('evaluation_status') }}</span></div>{% endif %}
+{% set champion = lr.get('champion') %}
+{% if champion %}
+{% set validation = champion.get('validation', {}) %}{% set sealed = champion.get('sealed', {}) %}
+<section class="panel">
+  <div class="panel-header">
+    <div><h2>{{ icon('trophy') }} Champion challenge</h2><p class="panel-subtitle">A separate frozen challenge claim; the formal benchmark remains independent.</p></div>
+    <div class="panel-meta">{% if champion.get('claim') %}<span class="status status-success">champion claim passed</span>{% else %}<span class="status status-warning">no champion claim</span>{% endif %}</div>
+  </div>
+  <div class="budget-grid">
+    <div class="budget-cell"><span class="budget-label">validation status</span><strong class="budget-value">{{ (validation.get('status') or 'missing')|replace('_', ' ') }}</strong></div>
+    <div class="budget-cell"><span class="budget-label">validation wins</span><strong class="budget-value">{% if validation.get('wins') is none or validation.get('expected_games') is none %}<span class="missing">missing</span>{% else %}{{ validation.get('wins') }} / {{ validation.get('expected_games') }}{% endif %}</strong></div>
+    <div class="budget-cell"><span class="budget-label">validation seat wins</span><strong class="budget-value">{% if validation.get('per_seat_wins') %}{{ validation.get('per_seat_wins').get('0', validation.get('per_seat_wins').get(0, 'missing')) }} / {{ validation.get('per_seat_wins').get('1', validation.get('per_seat_wins').get(1, 'missing')) }}{% else %}<span class="missing">missing</span>{% endif %}</strong></div>
+    <div class="budget-cell"><span class="budget-label">sealed status</span><strong class="budget-value">{{ (champion.get('sealed_status') or sealed.get('status') or 'missing')|replace('_', ' ') }}</strong></div>
+    <div class="budget-cell"><span class="budget-label">sealed wins</span><strong class="budget-value">{% if sealed.get('wins') is none or sealed.get('expected_games') is none %}<span class="missing">missing</span>{% else %}{{ sealed.get('wins') }} / {{ sealed.get('expected_games') }}{% endif %}</strong></div>
+    <div class="budget-cell"><span class="budget-label">sealed seat wins</span><strong class="budget-value">{% if sealed.get('per_seat_wins') %}{{ sealed.get('per_seat_wins').get('0', sealed.get('per_seat_wins').get(0, 'missing')) }} / {{ sealed.get('per_seat_wins').get('1', sealed.get('per_seat_wins').get(1, 'missing')) }}{% else %}<span class="missing">missing</span>{% endif %}</strong></div>
+  </div>
+</section>
+{% endif %}
 {% set rollback = lr.get('version_rollback') %}
 {% if rollback %}
 <section class="panel">

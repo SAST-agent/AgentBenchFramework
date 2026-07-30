@@ -26,7 +26,7 @@
 
 <h2>Performance History</h2>
 <table>
-    <tr><th>Run</th><th>Game</th><th>Episodes</th><th>Steps</th><th>Win Rate</th><th>Avg Reward</th><th>Duration</th></tr>
+    <tr><th>Run</th><th>Game</th><th>Episodes</th><th>Steps</th><th>Win Rate</th><th>Avg Reward</th><th>Duration</th><th>Champion challenge</th></tr>
     {% for run in agent.runs[:50] %}
     <tr>
         <td><code>{{ run._dir }}</code></td>
@@ -40,6 +40,7 @@
         </td>
         <td>{{ "%.2f"|format(run.avg_reward_per_episode) }}</td>
         <td>{{ "%.0f"|format(run.duration_s) }}s</td>
+        <td>{% if run.research.get('champion') %}{% if run.research.champion.get('claim') %}passed{% else %}{{ (run.research.champion.get('sealed_status') or 'not claimed')|replace('_', ' ') }}{% endif %}{% else %}—{% endif %}</td>
     </tr>
     {% endfor %}
 </table>

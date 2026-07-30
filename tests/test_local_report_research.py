@@ -1048,6 +1048,117 @@ class LocalResearchReportTests(unittest.TestCase):
         self.assertIn("11 / 12", html)
         self.assertIn("seed289101-seat0-decision2", html)
 
+    def test_round7_latest_formal_score_and_champion_claim_remain_separate(self):
+        from agentbench_frame.report.builder import ReportBuilder
+
+        validation = {
+            "status": "passed",
+            "passed": True,
+            "score": 7 / 12,
+            "wins": 7,
+            "losses": 5,
+            "draws": 0,
+            "per_seat_wins": {"0": 4, "1": 3},
+            "expected_games": 12,
+            "valid_games": 12,
+            "minimum_wins": 7,
+            "minimum_wins_per_seat": 3,
+        }
+        sealed = {
+            "status": "passed",
+            "passed": True,
+            "score": 11 / 20,
+            "wins": 11,
+            "losses": 9,
+            "draws": 0,
+            "per_seat_wins": {"0": 6, "1": 5},
+            "expected_games": 20,
+            "valid_games": 20,
+            "minimum_wins": 11,
+            "minimum_wins_per_seat": 5,
+            "champion_claim": True,
+        }
+        research = ReportBuilder._derive_research(
+            {
+                "raw_score": 0.1,
+                "evo_score_6": 0.66,
+                "evo_score_7": 0.4,
+                "gain_6": 0.56,
+                "gain_7": 0.3,
+                "champion_validation": validation,
+                "champion_sealed": sealed,
+                "champion_claim": True,
+                "validation_passed": True,
+                "sealed_status": "passed",
+            },
+            [],
+            "/missing/events.jsonl",
+        )
+
+        self.assertEqual(research["benchmark_score"], 0.4)
+        self.assertEqual(research["evo_score"], 0.4)
+        self.assertEqual(research["gain"], 0.3)
+        self.assertEqual(research["champion"]["validation"], validation)
+        self.assertEqual(research["champion"]["sealed"], sealed)
+        self.assertTrue(research["champion"]["claim"])
+
+    def test_round7_report_shows_gates_without_interpolating_unopened_sealed(self):
+        from agentbench_frame.report.builder import ReportBuilder
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = (
+                root / "runs" / "28_generals" / "generals-hl" / "run-v7"
+            )
+            run_dir.mkdir(parents=True)
+            (run_dir / "summary.json").write_text(json.dumps({
+                "run_id": "run-v7",
+                "game": "28_generals",
+                "agent": "generals-hl",
+                "run_type": "rule_iter",
+                "status": "complete",
+                "raw_score": 0.0,
+                "evo_score_7": 0.4,
+                "gain_7": 0.4,
+                "champion_validation": {
+                    "status": "failed",
+                    "passed": False,
+                    "score": 0.5,
+                    "wins": 6,
+                    "losses": 6,
+                    "draws": 0,
+                    "per_seat_wins": {"0": 3, "1": 3},
+                    "expected_games": 12,
+                    "valid_games": 12,
+                    "minimum_wins": 7,
+                    "minimum_wins_per_seat": 3,
+                },
+                "champion_sealed": {
+                    "status": "not_opened",
+                    "score": None,
+                    "champion_claim": False,
+                    "reason": "validation_gate_failed",
+                },
+                "champion_claim": False,
+                "validation_passed": False,
+                "sealed_status": "not_opened",
+            }))
+            (run_dir / "events.jsonl").write_text("")
+
+            output = root / "site"
+            ReportBuilder(
+                data_dir=str(root),
+                output_dir=str(output),
+            ).build()
+            html = (output / "index.html").read_text()
+
+        self.assertIn("Champion challenge", html)
+        self.assertIn("formal benchmark remains independent", html)
+        self.assertIn("6 / 12", html)
+        self.assertIn("not opened", html)
+        self.assertIn("missing", html)
+        self.assertNotIn("0 / 20", html)
+
     def test_comparison_report_accepts_measurement_run_without_win_rate(self):
         from agentbench_frame.report.builder import ReportBuilder
 

@@ -919,33 +919,26 @@ class ReportBuilder:
             current_segment.append(display_point)
         if current_segment:
             controlled_reference_segments.append(current_segment)
+        def latest_numbered(prefix: str):
+            numbered = []
+            for key, value in summary.items():
+                if not key.startswith(prefix):
+                    continue
+                suffix = key[len(prefix):]
+                if suffix.isdigit():
+                    numbered.append((int(suffix), value))
+            return (True, max(numbered)[1]) if numbered else (False, None)
+
         raw_score = summary.get("raw_score")
-        evo_score = summary.get(
-            "evo_score_5",
-            summary.get(
-                "evo_score_4",
-                summary.get(
-                    "evo_score_3",
-                    summary.get(
-                        "evo_score_2",
-                        summary.get(
-                            "evo_score",
-                            summary.get("benchmark_score"),
-                        ),
-                    ),
-                ),
-            ),
-        )
-        gain = summary.get(
-            "gain_5",
-            summary.get(
-                "gain_4",
-                summary.get(
-                    "gain_3",
-                    summary.get("gain_2", summary.get("gain")),
-                ),
-            ),
-        )
+        has_numbered_evo, evo_score = latest_numbered("evo_score_")
+        if not has_numbered_evo:
+            evo_score = summary.get(
+                "evo_score",
+                summary.get("benchmark_score"),
+            )
+        has_numbered_gain, gain = latest_numbered("gain_")
+        if not has_numbered_gain:
+            gain = summary.get("gain")
         if gain is None and raw_score is not None and evo_score is not None:
             gain = float(evo_score) - float(raw_score)
         quality = inspect_event_file(events_path).to_dict() if os.path.exists(events_path) else {
@@ -979,6 +972,35 @@ class ReportBuilder:
                 "calibration_in_target_range"
             ),
         }
+        champion = None
+        if any(
+            key in summary
+            for key in (
+                "champion_validation",
+                "champion_sealed",
+                "champion_claim",
+                "validation_passed",
+                "sealed_status",
+            )
+        ):
+            champion = {
+                "challenge_id": summary.get("challenge_id"),
+                "validation": (
+                    dict(summary["champion_validation"])
+                    if isinstance(
+                        summary.get("champion_validation"), dict
+                    )
+                    else {}
+                ),
+                "sealed": (
+                    dict(summary["champion_sealed"])
+                    if isinstance(summary.get("champion_sealed"), dict)
+                    else {}
+                ),
+                "claim": summary.get("champion_claim"),
+                "validation_passed": summary.get("validation_passed"),
+                "sealed_status": summary.get("sealed_status"),
+            }
         return {
             "benchmark_score": benchmark_score,
             "raw_score": raw_score,
@@ -1012,6 +1034,7 @@ class ReportBuilder:
             "occupancy_history": occupancy_history,
             "action_disagreement_history": action_disagreement_history,
             "calibration": calibration,
+            "champion": champion,
             "dense_history": dense_history,
             "dense_pairs": ReportBuilder._pair_dense_history(dense_history),
             "decision_class_history": decision_class_history,
