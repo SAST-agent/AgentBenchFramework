@@ -1048,6 +1048,35 @@ class LocalResearchReportTests(unittest.TestCase):
         self.assertIn("11 / 12", html)
         self.assertIn("seed289101-seat0-decision2", html)
 
+    def test_comparison_report_accepts_measurement_run_without_win_rate(self):
+        from agentbench_frame.report.builder import ReportBuilder
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            run_dir = root / "runs" / "game" / "measurement" / "run-1"
+            run_dir.mkdir(parents=True)
+            (run_dir / "summary.json").write_text(json.dumps({
+                "run_id": "run-1",
+                "game": "game",
+                "agent": "measurement",
+                "run_type": "measurement",
+                "status": "complete",
+                "win_rate": None,
+                "total_episodes": None,
+            }))
+            (run_dir / "events.jsonl").write_text("")
+
+            output = root / "site"
+            ReportBuilder(
+                data_dir=str(root),
+                output_dir=str(output),
+            ).build()
+
+            compare_html = (output / "compare.html").read_text()
+
+        self.assertIn("measurement", compare_html)
+        self.assertIn("0.0%", compare_html)
+
 
 if __name__ == "__main__":
     unittest.main()

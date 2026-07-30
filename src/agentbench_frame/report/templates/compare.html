@@ -12,13 +12,13 @@
     {% for name, data in agents.items() %}
     {% set best_wr = namespace(value=0.0) %}
     {% for run in data.runs %}
-        {% if run.win_rate > best_wr.value %}
+        {% if run.win_rate is not none and run.win_rate > best_wr.value %}
             {% set best_wr.value = run.win_rate %}
         {% endif %}
     {% endfor %}
     {% set total_eps = namespace(value=0) %}
     {% for run in data.runs %}
-        {% set total_eps.value = total_eps.value + run.total_episodes %}
+        {% set total_eps.value = total_eps.value + (run.total_episodes or 0) %}
     {% endfor %}
     <tr>
         <td><a href="agent_{{ name|replace('/', '_')|replace(' ', '_') }}.html">{{ name }}</a></td>
