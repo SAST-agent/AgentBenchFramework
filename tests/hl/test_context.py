@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 
 def _static_files(root: Path) -> dict[str, Path]:
     values = {
@@ -63,6 +65,70 @@ def test_prompt_requires_replay_grounded_causal_change_and_blocks_grid_search(tm
     assert "机制上不同" in prompt
     assert "候选 2/3" in prompt
     assert "压缩或整合" in prompt
+
+
+def test_curriculum_prompt_names_target_and_locked_pool(tmp_path):
+    from agentbench_frame.hl.context import ContextBundle, IterationContext
+
+    bundle = ContextBundle.create(
+        tmp_path / "bundle",
+        _static_files(tmp_path / "assets"),
+    )
+    prompt = IterationContext(bundle).build_prompt(
+        act_id="act-0003",
+        branch_index=0,
+        branch_count=1,
+        parent_version_id="v000001",
+        workspace=tmp_path / "candidate",
+        replay_evidence=[
+            {
+                "opponent": "rank15",
+                "seed": 101,
+                "replay": "/matches/rank15/replay.jsonl",
+            }
+        ],
+        previous_measurements={"benchmark_score": 0.0},
+        experience_path=tmp_path / "experience.md",
+        active_target="rank15",
+        locked_opponents=("rank01", "rank16"),
+    )
+
+    assert "当前学习目标：rank15" in prompt
+    assert "rank01" in prompt
+    assert "rank16" in prompt
+    assert "if/else" in prompt
+    assert "固定回放坐标" in prompt
+    assert "grid search" in prompt
+    assert "只针对当前目标" in prompt
+
+
+def test_curriculum_prompt_rejects_evidence_from_another_opponent(tmp_path):
+    from agentbench_frame.hl.context import ContextBundle, IterationContext
+
+    bundle = ContextBundle.create(
+        tmp_path / "bundle",
+        _static_files(tmp_path / "assets"),
+    )
+
+    with pytest.raises(ValueError, match="active target"):
+        IterationContext(bundle).build_prompt(
+            act_id="act-0003",
+            branch_index=0,
+            branch_count=1,
+            parent_version_id="v000001",
+            workspace=tmp_path / "candidate",
+            replay_evidence=[
+                {
+                    "opponent": "rank14",
+                    "seed": 101,
+                    "replay": "/matches/rank14/replay.jsonl",
+                }
+            ],
+            previous_measurements={"benchmark_score": 0.0},
+            experience_path=tmp_path / "experience.md",
+            active_target="rank15",
+            locked_opponents=("rank01",),
+        )
 
 
 def test_bootstrap_prompt_creates_interpretable_origin_without_fake_replay(tmp_path):

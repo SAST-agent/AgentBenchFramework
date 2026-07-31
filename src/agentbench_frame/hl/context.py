@@ -6,7 +6,7 @@ import dataclasses
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Mapping, Optional
+from typing import Any, Mapping, Optional, Sequence
 
 
 def _sha256(path: Path) -> str:
@@ -114,9 +114,24 @@ class IterationContext:
         replay_evidence: list[Mapping[str, Any]],
         previous_measurements: Mapping[str, Any],
         experience_path: str | Path,
+        active_target: Optional[str] = None,
+        locked_opponents: Sequence[str] = (),
     ) -> str:
         if not 0 <= branch_index < branch_count:
             raise ValueError("branch_index must be inside branch_count")
+        if active_target is not None:
+            wrong_opponents = sorted(
+                {
+                    str(item.get("opponent"))
+                    for item in replay_evidence
+                    if item.get("opponent") != active_target
+                }
+            )
+            if wrong_opponents:
+                raise ValueError(
+                    "replay evidence must match the active target: "
+                    f"{wrong_opponents}"
+                )
         evidence = json.dumps(
             replay_evidence, ensure_ascii=False, sort_keys=True, separators=(",", ":")
         )
@@ -126,6 +141,21 @@ class IterationContext:
             sort_keys=True,
             separators=(",", ":"),
         )
+        curriculum = ""
+        if active_target is not None:
+            locked = json.dumps(
+                list(locked_opponents),
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+            curriculum = f"""
+课程阶段：
+- 当前学习目标：{active_target}
+- 已锁定通过的对手：{locked}
+- 本轮诊断和策略改动只针对当前目标；全池认证负责检查已锁定对手是否退化。
+- 允许以可观测状态为依据的 if/else、状态机、路径规划、图搜索和有限记忆。
+- 禁止针对 seed、固定回放坐标或对手身份硬编码，禁止人工战术标签。
+"""
         return f"""# HL iteration {act_id} — 候选 {branch_index + 1}/{branch_count}
 
 目标：在冻结评测协议下提升游戏 agent，保持程序可解释、可运行、可复现。
@@ -135,6 +165,7 @@ class IterationContext:
 - candidate workspace: {Path(workspace).resolve()}
 - Experience Skill: {Path(experience_path).resolve()}
 - parent version: {parent_version_id}
+{curriculum}
 
 上一轮测量：{measurements}
 必须核查的回放证据：{evidence}
