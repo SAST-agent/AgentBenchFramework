@@ -90,7 +90,9 @@ def _measure_candidate(
         )
     except Exception as error:
         message = " ".join(str(error).split()) or "measurement failed"
-        message = _SECRET_LIKE.sub("[REDACTED]", message)[:800]
+        message = _SECRET_LIKE.sub("[REDACTED]", message)
+        if len(message) > 800:
+            message = message[:200] + " ... " + message[-595:]
         writer.write(
             "measurement_failed",
             version_id=candidate_version.version_id,

@@ -198,6 +198,39 @@ def test_measurement_failure_is_recorded_and_returns_false(tmp_path):
     assert "reference state 17" in event["error_message"]
 
 
+def test_measurement_failure_summary_retains_root_cause_at_end(tmp_path):
+    from types import SimpleNamespace
+
+    from agentbench_frame.hl.cli import _measure_candidate
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+    from agentbench_frame.hl.events import HLEventWriter, read_events
+
+    class NoisyFailingRunner:
+        def measure(self, **kwargs):
+            raise RuntimeError(
+                ("compatibility warning " * 100)
+                + "TypeError: cannot compare int and tuple"
+            )
+
+    completed = CandidateEvaluation(status="complete", score=0.0, matches=())
+    writer = HLEventWriter(tmp_path / "events.jsonl", run_id="run-test")
+
+    _measure_candidate(
+        measurement_runner=NoisyFailingRunner(),
+        version_store=object(),
+        writer=writer,
+        candidate_version=SimpleNamespace(version_id="v000001"),
+        parent_version=SimpleNamespace(version_id="v000000"),
+        candidate_evaluation=completed,
+        parent_evaluation=completed,
+    )
+
+    message = read_events(tmp_path / "events.jsonl")[0]["error_message"]
+    assert len(message) <= 800
+    assert message.startswith("compatibility warning")
+    assert message.endswith("TypeError: cannot compare int and tuple")
+
+
 def test_resume_detects_selected_candidate_with_unfinished_measurement():
     from agentbench_frame.hl.cli import _pending_measurement_candidate
 
