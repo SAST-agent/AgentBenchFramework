@@ -212,6 +212,58 @@ class HLController:
         self._started = True
         return result
 
+    def initialize_imported(
+        self,
+        *,
+        source_run: str | Path,
+        source_version_id: str,
+    ) -> Version:
+        """Register a verified external snapshot without a provider call."""
+
+        if self._started:
+            raise RuntimeError("controller already initialized")
+        source_root = Path(source_run)
+        self.events.write(
+            "run_started",
+            iteration_config=dataclasses.asdict(self.iteration),
+        )
+        source, version = self.version_store.import_version(
+            source_root / "versions",
+            source_version_id,
+        )
+        evaluation = CandidateEvaluation(
+            status="incomplete",
+            score=None,
+            error="imported origin has not been evaluated",
+        )
+        self.lineage.record_evaluation(
+            version.version_id,
+            parent_version_id=None,
+            status=evaluation.status,
+            score=evaluation.score,
+        )
+        self._write_version_event(
+            version,
+            evaluation,
+            selected=True,
+            record_evaluation=False,
+        )
+        self.events.write(
+            "candidate_selected",
+            iteration_id="iter-000000",
+            version_id=version.version_id,
+            act_id=version.act_id,
+        )
+        self.events.write(
+            "origin_imported",
+            source_run_id=source_root.name,
+            source_version_id=source.version_id,
+            source_content_hash=source.content_hash,
+            version_id=version.version_id,
+        )
+        self._started = True
+        return version
+
     def resume(self, historical_events: list[dict[str, Any]]) -> None:
         if self._started:
             raise RuntimeError("controller already initialized")

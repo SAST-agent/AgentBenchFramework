@@ -118,3 +118,71 @@ def test_partial_existing_object_is_never_accepted_as_snapshot(tmp_path):
 
     with pytest.raises(ValueError, match="snapshot object"):
         store.snapshot(parent_version_id=None, act_id="act-0000")
+
+
+def test_import_version_restores_exact_content_as_fresh_origin(tmp_path):
+    from agentbench_frame.hl.codebase import VersionStore
+
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    source_workspace = _workspace(source_root)
+    source_store = VersionStore(
+        source_workspace,
+        source_root / "run-source" / "versions",
+    )
+    source = source_store.snapshot(
+        parent_version_id=None,
+        act_id="source-act",
+    )
+    target_root = tmp_path / "target"
+    target_root.mkdir()
+    target_workspace = _workspace(target_root)
+    (target_workspace / "agent.py").write_text(
+        "def act(state):\n    return 999\n",
+        encoding="utf-8",
+    )
+    target_store = VersionStore(
+        target_workspace,
+        target_root / "versions",
+    )
+
+    imported_source, imported = target_store.import_version(
+        source_root / "run-source" / "versions",
+        source.version_id,
+    )
+
+    assert imported_source == source
+    assert imported.version_id == "v000000"
+    assert imported.content_hash == source.content_hash
+    assert imported.parent_version_id is None
+    assert imported.edit_type == "imported_origin"
+    assert target_store.current_content_hash() == source.content_hash
+
+
+def test_import_version_rejects_tampered_source_object(tmp_path):
+    from agentbench_frame.hl.codebase import VersionStore
+
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    source_workspace = _workspace(source_root)
+    source_versions = source_root / "run-source" / "versions"
+    source_store = VersionStore(source_workspace, source_versions)
+    source = source_store.snapshot(
+        parent_version_id=None,
+        act_id="source-act",
+    )
+    (
+        source_versions
+        / "objects"
+        / source.content_hash
+        / "agent.py"
+    ).write_text("corrupted = True\n", encoding="utf-8")
+    target_root = tmp_path / "target"
+    target_root.mkdir()
+    target_store = VersionStore(
+        _workspace(target_root),
+        target_root / "versions",
+    )
+
+    with pytest.raises(ValueError, match="content hash mismatch"):
+        target_store.import_version(source_versions, source.version_id)

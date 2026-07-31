@@ -84,6 +84,43 @@ def _verify_object(
         raise ValueError(f"snapshot object content hash mismatch: {content_hash}")
 
 
+def _load_version(root: Path, version_id: str) -> Version:
+    path = root / "manifests" / f"{version_id}.json"
+    if not path.is_file():
+        raise KeyError(version_id)
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value["files"] = tuple(value["files"])
+    version = Version(**value)
+    if version.version_id != version_id:
+        raise ValueError(f"manifest version id mismatch: {version_id}")
+    object_root = root / "objects" / version.content_hash
+    if not object_root.is_dir():
+        raise FileNotFoundError(
+            f"missing snapshot object: {version.content_hash}"
+        )
+    _verify_object(
+        object_root,
+        content_hash=version.content_hash,
+        expected_files=version.files,
+    )
+    return version
+
+
+def _replace_workspace(workspace: Path, object_root: Path) -> None:
+    workspace.mkdir(parents=True, exist_ok=True)
+    for child in workspace.iterdir():
+        if child.name in IGNORED_DIRS:
+            continue
+        if child.is_symlink() or child.is_file():
+            child.unlink()
+        else:
+            shutil.rmtree(child)
+    for relative, content in _read_tree(object_root):
+        destination = workspace / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(content)
+
+
 class VersionStore:
     """Snapshot and restore one candidate workspace without nested Git."""
 
@@ -153,7 +190,11 @@ class VersionStore:
             content_hash=content_hash,
             parent_version_id=parent_version_id,
             act_id=act_id,
-            edit_type="initial" if parent_version_id is None else edit_type,
+            edit_type=(
+                "initial"
+                if parent_version_id is None and edit_type == "candidate"
+                else edit_type
+            ),
             created_at=_now(),
             files=expected_files,
         )
@@ -177,23 +218,31 @@ class VersionStore:
         return version
 
     def get(self, version_id: str) -> Version:
-        path = self.manifests / f"{version_id}.json"
-        if not path.is_file():
-            raise KeyError(version_id)
-        value = json.loads(path.read_text(encoding="utf-8"))
-        value["files"] = tuple(value["files"])
-        version = Version(**value)
-        if version.version_id != version_id:
-            raise ValueError(f"manifest version id mismatch: {version_id}")
-        object_root = self.objects / version.content_hash
-        if not object_root.is_dir():
-            raise FileNotFoundError(f"missing snapshot object: {version.content_hash}")
-        _verify_object(
-            object_root,
-            content_hash=version.content_hash,
-            expected_files=version.files,
+        return _load_version(self.root, version_id)
+
+    def import_version(
+        self,
+        source_versions_root: str | Path,
+        source_version_id: str,
+        *,
+        act_id: str = "imported-origin",
+    ) -> tuple[Version, Version]:
+        """Restore and snapshot a verified version from another run."""
+
+        source_root = Path(source_versions_root)
+        source = _load_version(source_root, source_version_id)
+        _replace_workspace(
+            self.workspace,
+            source_root / "objects" / source.content_hash,
         )
-        return version
+        imported = self.snapshot(
+            parent_version_id=None,
+            act_id=act_id,
+            edit_type="imported_origin",
+        )
+        if imported.content_hash != source.content_hash:
+            raise ValueError("imported origin content hash mismatch")
+        return source, imported
 
     def restore(
         self,
@@ -214,15 +263,4 @@ class VersionStore:
 
         source = self.get(version_id)
         object_root = self.objects / source.content_hash
-        self.workspace.mkdir(parents=True, exist_ok=True)
-        for child in self.workspace.iterdir():
-            if child.name in IGNORED_DIRS:
-                continue
-            if child.is_symlink() or child.is_file():
-                child.unlink()
-            else:
-                shutil.rmtree(child)
-        for relative, content in _read_tree(object_root):
-            destination = self.workspace / relative
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            destination.write_bytes(content)
+        _replace_workspace(self.workspace, object_root)

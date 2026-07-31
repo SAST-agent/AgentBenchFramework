@@ -17,6 +17,7 @@ SCHEMA_VERSION = "1.0"
 KNOWN_EVENT_TYPES = frozenset(
     {
         "run_started",
+        "origin_imported",
         "run_resumed",
         "act_completed",
         "version_created",
@@ -41,6 +42,15 @@ _COMMON_FIELDS = {
 }
 _EVENT_FIELDS = {
     "run_started": ({"iteration_config"}, {"game"}),
+    "origin_imported": (
+        {
+            "source_run_id",
+            "source_version_id",
+            "source_content_hash",
+            "version_id",
+        },
+        set(),
+    ),
     "run_resumed": ({"coding_agent_acts", "iterations", "lineage_head_version_id"}, {"champion_version_id"}),
     "act_completed": ({"act_id", "iteration_id", "status"}, {"branch_index", "prompt_tokens", "cached_input_tokens", "completion_tokens", "reasoning_output_tokens", "total_tokens", "elapsed_time_s", "raw_output_ref", "thread_id"}),
     "version_created": ({"version_id", "parent_version_id", "act_id", "content_hash", "edit_type", "evaluation_status", "benchmark_score", "selected"}, set()),
@@ -84,7 +94,8 @@ def _validate_record(record: Mapping[str, Any]) -> None:
         "opponent", "candidate", "reason", "status", "content_hash",
         "edit_type", "evaluation_status", "path", "experience_path",
         "raw_output_ref", "thread_id", "replay", "trace",
-        "reference_manifest",
+        "reference_manifest", "source_run_id", "source_version_id",
+        "source_content_hash",
     ):
         if field in record and record[field] is not None and not isinstance(record[field], str):
             raise ValueError(f"{event_type}.{field} must be a string or null")

@@ -145,6 +145,52 @@ def test_bootstrap_registers_only_provider_written_algorithm_as_origin(tmp_path)
     assert controller.summary()["coding_agent_acts"] == 2
 
 
+def test_imported_origin_is_registered_without_a_provider_call(tmp_path):
+    from agentbench_frame.hl.codebase import VersionStore
+    from agentbench_frame.hl.events import read_events
+
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    source_workspace = _workspace(source_root)
+    source_run = source_root / "run-source"
+    source_store = VersionStore(source_workspace, source_run / "versions")
+    source = source_store.snapshot(
+        parent_version_id=None,
+        act_id="source-act",
+    )
+    target_root = tmp_path / "target"
+    target_root.mkdir()
+    provider = FakeProvider([])
+    controller = _controller(
+        target_root,
+        provider,
+        FakeEvaluator([]),
+    )
+
+    imported = controller.initialize_imported(
+        source_run=source_run,
+        source_version_id=source.version_id,
+    )
+    events = read_events(target_root / "events.jsonl")
+
+    assert imported.version_id == "v000000"
+    assert imported.content_hash == source.content_hash
+    assert imported.edit_type == "imported_origin"
+    assert provider.calls == []
+    assert controller.summary()["coding_agent_acts"] == 0
+    assert controller.lineage.lineage_head_version_id == imported.version_id
+    origin_events = [
+        event
+        for event in events
+        if event["event_type"] == "origin_imported"
+    ]
+    assert len(origin_events) == 1
+    assert origin_events[0]["source_run_id"] == "run-source"
+    assert origin_events[0]["source_version_id"] == source.version_id
+    assert origin_events[0]["source_content_hash"] == source.content_hash
+    assert origin_events[0]["version_id"] == imported.version_id
+
+
 def test_bootstrap_rejects_unchanged_scaffold_without_creating_origin(tmp_path):
     import pytest
 
