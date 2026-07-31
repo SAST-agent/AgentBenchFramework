@@ -141,6 +141,27 @@ def _frozen_run_config(config: LocalHLConfig) -> dict[str, Any]:
     return json.loads(json.dumps(value, ensure_ascii=False, sort_keys=True))
 
 
+def _eligible_certification_version_id(
+    *,
+    lineage_head_version_id: str | None,
+    evaluations_by_version: dict[str, Any],
+    completed_certifications: set[str],
+    required_score: float,
+) -> str | None:
+    version_id = lineage_head_version_id
+    if version_id is None or version_id in completed_certifications:
+        return None
+    evaluation = evaluations_by_version.get(version_id)
+    if (
+        evaluation is None
+        or evaluation.status != "complete"
+        or evaluation.score is None
+        or evaluation.score < required_score
+    ):
+        return None
+    return version_id
+
+
 def _cmd_validate(args: argparse.Namespace) -> int:
     _json(_validate(_load(args.config)))
     return 0
@@ -558,18 +579,15 @@ def _run_real(
     )
     certification_pool_prepared = False
 
-    def certify_eligible_champion() -> bool:
+    def certify_eligible_head() -> bool:
         nonlocal certification_pool_prepared
-        champion_id = controller.lineage.champion_version_id
-        if champion_id is None or champion_id in completed_certifications:
-            return False
-        evaluation = evaluations_by_version.get(champion_id)
-        if (
-            evaluation is None
-            or evaluation.status != "complete"
-            or evaluation.score is None
-            or evaluation.score < config.run.evaluation.required_win_rate
-        ):
+        version_id = _eligible_certification_version_id(
+            lineage_head_version_id=controller.lineage.lineage_head_version_id,
+            evaluations_by_version=evaluations_by_version,
+            completed_certifications=completed_certifications,
+            required_score=config.run.evaluation.required_win_rate,
+        )
+        if version_id is None:
             return False
         if not certification_pool_prepared:
             evaluator.human_pool = prepare_human_pool(
@@ -577,11 +595,11 @@ def _run_real(
                 build_root=config.paths.opponent_build_root,
             )
             certification_pool_prepared = True
-        champion = version_store.get(champion_id)
-        certification = evaluator.certify(champion)
+        selected_version = version_store.get(version_id)
+        certification = evaluator.certify(selected_version)
         controller.record_matches(
-            version=champion,
-            act_id=champion.act_id,
+            version=selected_version,
+            act_id=selected_version.act_id,
             phase="certification",
             matches=certification.matches,
         )
@@ -600,8 +618,8 @@ def _run_real(
             passing += rate >= config.run.evaluation.required_win_rate
         writer.write(
             "certification_completed",
-            version_id=champion.version_id,
-            act_id=champion.act_id,
+            version_id=selected_version.version_id,
+            act_id=selected_version.act_id,
             status=certification.status,
             score=certification.score,
             passing_human_opponents=passing,
@@ -611,7 +629,7 @@ def _run_real(
             matches=list(certification.matches),
         )
         if certification.status == "complete":
-            completed_certifications.add(champion.version_id)
+            completed_certifications.add(selected_version.version_id)
         if (
             certification.status == "complete"
             and passing >= config.run.evaluation.required_human_opponents
@@ -619,14 +637,14 @@ def _run_real(
             writer.write(
                 "run_completed",
                 reason="human_pool_target_reached",
-                version_id=champion.version_id,
+                version_id=selected_version.version_id,
                 passing_human_opponents=passing,
             )
             return True
         return False
 
     if not certified:
-        certified = certify_eligible_champion()
+        certified = certify_eligible_head()
     completed_here = 0 if resume else 1
     while not certified and (acts is None or completed_here < acts):
         if controller.reached_iteration_limit():
@@ -668,7 +686,7 @@ def _run_real(
                 parent_version_id=parent_version.version_id,
                 occupancy_shift=metrics["occupancy_shift"],
             )
-        certified = certify_eligible_champion()
+        certified = certify_eligible_head()
     _json(
         {
             "run_dir": str(run_dir),
@@ -722,8 +740,10 @@ def main(argv: list[str] | None = None) -> int:
     report.add_argument("--run-dir", required=True)
     report.set_defaults(handler=_cmd_report)
     args = parser.parse_args(argv)
-    if getattr(args, "acts", None) is not None and args.acts < 1:
-        parser.error("--acts must be >= 1")
+    if getattr(args, "acts", None) is not None:
+        minimum = 0 if args.command == "resume" else 1
+        if args.acts < minimum:
+            parser.error(f"--acts must be >= {minimum} for {args.command}")
     return int(args.handler(args))
 
 

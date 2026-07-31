@@ -186,7 +186,7 @@ cp .env.example .env
   --run-dir .agentbench/29_rollman/runs/RUN_ID
 ```
 
-`--acts N` 只用于 smoke test、调试和迭代轮数消融。新 run 的 `--acts 1` 只执行一次 bootstrap 模型调用并评测 origin；resume 的 `--acts 1` 执行一次基于回放的改进调用。正式目标运行省略该参数。
+`--acts N` 只用于 smoke test、调试和迭代轮数消融。新 run 的 `--acts 1` 只执行一次 bootstrap 模型调用并评测 origin；resume 的 `--acts 0` 只完成本地重评与认证，`--acts 1` 最多再执行一次基于回放的改进调用。正式目标运行省略该参数。
 
 ## 8. 冻结与裁判一致性
 
@@ -198,7 +198,7 @@ cp .env.example .env
 
 事件日志按事件类型校验必需字段、允许字段、类型、schema version 和 event ID 唯一性。代码版本对象以临时目录写入、fsync、原子重命名，并在读取和回滚前重新核对文件清单与内容哈希。`rollback_selected` 是持久 head 转移，因此中断恢复仍从选定历史 champion 继续。
 
-每个满足 rank-1 门槛但尚未完成认证的 champion 都会接受认证，包括 origin 和 resume 恢复出的 champion。已完成但未达标的版本不重复认证；不完整认证允许重试。
+每个满足 rank-1 门槛但尚未完成认证的入选版本都会接受认证，包括 gate 分数饱和时与 champion 同分的新版本。已完成但未达标的版本不重复认证；不完整认证允许重试。
 
 ## 9. 新游戏接入
 

@@ -123,3 +123,41 @@ def test_frozen_run_config_is_json_native_and_round_trips():
 
     assert isinstance(snapshot["run"]["evaluation"]["fixed_gate_seeds"], list)
     assert json.loads(json.dumps(snapshot)) == snapshot
+
+
+def test_gate_saturated_selected_head_is_still_eligible_for_certification():
+    from agentbench_frame.hl.cli import _eligible_certification_version_id
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+
+    eligible = _eligible_certification_version_id(
+        lineage_head_version_id="v000001",
+        evaluations_by_version={
+            "v000000": CandidateEvaluation(status="complete", score=1.0),
+            "v000001": CandidateEvaluation(status="complete", score=1.0),
+        },
+        completed_certifications={"v000000"},
+        required_score=0.5,
+    )
+
+    assert eligible == "v000001"
+
+
+def test_resume_accepts_zero_new_model_acts(monkeypatch):
+    from agentbench_frame.hl import cli
+
+    monkeypatch.setattr(cli, "_cmd_resume", lambda args: args.acts)
+
+    assert (
+        cli.main(
+            [
+                "resume",
+                "--config",
+                str(CONFIG),
+                "--run-dir",
+                "unused",
+                "--acts",
+                "0",
+            ]
+        )
+        == 0
+    )
