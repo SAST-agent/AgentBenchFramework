@@ -301,6 +301,26 @@ def test_sustained_degradation_makes_next_act_start_from_historical_champion(tmp
     assert fourth.rollback.to_version_id == initial.version_id
 
 
+def test_explicit_safe_parent_overrides_latest_curriculum_candidate(tmp_path):
+    provider = FakeProvider(["VALUE = 1\n", "VALUE = 2\n"])
+    controller = _controller(
+        tmp_path,
+        provider,
+        FakeEvaluator([0.8, 0.6, 0.7]),
+    )
+    initial = controller.initialize(evaluate=True)
+    first = controller.run_act()
+
+    second = controller.run_act(parent_version_id=initial.version_id)
+
+    assert first.selected.version.version_id != initial.version_id
+    assert second.parent_version_id == initial.version_id
+    assert second.rollback is not None
+    assert second.rollback.from_version_id == first.selected.version.version_id
+    assert second.rollback.to_version_id == initial.version_id
+    assert second.rollback.reason == "curriculum_regression"
+
+
 def test_open_ended_config_has_no_implicit_iteration_cap(tmp_path):
     controller = _controller(
         tmp_path,

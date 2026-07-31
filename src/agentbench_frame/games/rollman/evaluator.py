@@ -109,6 +109,13 @@ class RollmanEvaluator:
         )
         return self.last_evaluation
 
+    def set_learning_opponent(self, opponent: Opponent) -> None:
+        """Switch the fixed-seed gate target without rebuilding the runtime."""
+
+        if opponent.process is None:
+            raise ValueError("learning opponent has not been prepared")
+        self.learning_opponent = opponent
+
     def certify(self, version: Version) -> CandidateEvaluation:
         if len(self.human_pool) != 16:
             raise ValueError("certification requires all 16 ranked humans")

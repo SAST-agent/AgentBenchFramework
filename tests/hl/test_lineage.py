@@ -188,3 +188,77 @@ def test_finalized_rollback_event_restores_target_as_durable_lineage_head():
     decision = lineage.select_next_parent()
     assert decision.rollback is False
     assert decision.to_version_id == "v0"
+
+
+def test_begin_stage_resets_noncomparable_champion_score():
+    from agentbench_frame.hl.lineage import LineageManager
+
+    lineage = LineageManager()
+    lineage.record_evaluation(
+        "v0",
+        parent_version_id=None,
+        status="complete",
+        score=1.0,
+    )
+
+    lineage.begin_stage("v0", score=0.0)
+    lineage.record_evaluation(
+        "v1",
+        parent_version_id="v0",
+        status="complete",
+        score=1 / 3,
+    )
+
+    assert lineage.champion_version_id == "v1"
+    assert lineage.select_next_parent().to_version_id == "v1"
+
+
+def test_force_parent_rolls_back_immediately_and_survives_event_rebuild():
+    from agentbench_frame.hl.lineage import LineageManager
+
+    lineage = LineageManager()
+    lineage.record_evaluation(
+        "v0",
+        parent_version_id=None,
+        status="complete",
+        score=0.0,
+    )
+    lineage.record_evaluation(
+        "v1",
+        parent_version_id="v0",
+        status="complete",
+        score=1.0,
+    )
+
+    decision = lineage.force_parent("v0")
+
+    assert decision.rollback is True
+    assert decision.from_version_id == "v1"
+    assert decision.to_version_id == "v0"
+    assert decision.reason == "curriculum_regression"
+    events = [
+        {
+            "event_type": "version_created",
+            "version_id": "v0",
+            "parent_version_id": None,
+            "evaluation_status": "complete",
+            "benchmark_score": 0.0,
+        },
+        {"event_type": "candidate_selected", "version_id": "v0"},
+        {
+            "event_type": "version_created",
+            "version_id": "v1",
+            "parent_version_id": "v0",
+            "evaluation_status": "complete",
+            "benchmark_score": 1.0,
+        },
+        {"event_type": "candidate_selected", "version_id": "v1"},
+        {
+            "event_type": "rollback_selected",
+            "from_version_id": "v1",
+            "to_version_id": "v0",
+            "reason": "curriculum_regression",
+        },
+    ]
+    rebuilt = LineageManager.from_events(events)
+    assert rebuilt.lineage_head_version_id == "v0"

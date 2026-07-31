@@ -94,7 +94,12 @@ class LineageManager:
                         ),
                     )
             elif event_type == "rollback_selected":
-                decision = manager.select_next_parent()
+                if event.get("reason") == "curriculum_regression":
+                    decision = manager.force_parent(
+                        str(event["to_version_id"])
+                    )
+                else:
+                    decision = manager.select_next_parent()
                 if not decision.rollback:
                     raise ValueError("rollback event is inconsistent with lineage state")
                 if decision.from_version_id != str(event["from_version_id"]):
@@ -192,6 +197,47 @@ class LineageManager:
                 self._degradation_streak = 0
                 self._rollback_pending = False
         return promoted
+
+    def begin_stage(self, version_id: str, *, score: float) -> None:
+        """Reset score comparison when the learning opponent changes."""
+
+        if version_id not in self.versions:
+            raise KeyError(version_id)
+        if not 0.0 <= score <= 1.0:
+            raise ValueError("stage score must be in [0, 1]")
+        existing = self.versions[version_id]
+        if existing.status != "complete":
+            raise ValueError("stage origin requires a complete evaluation")
+        self.versions[version_id] = VersionEvaluation(
+            version_id=existing.version_id,
+            parent_version_id=existing.parent_version_id,
+            status="complete",
+            score=float(score),
+        )
+        self.lineage_head_version_id = version_id
+        self.champion_version_id = version_id
+        self._champion_score = float(score)
+        self._degradation_streak = 0
+        self._rollback_pending = False
+
+    def force_parent(self, version_id: str) -> ParentDecision:
+        """Move to an explicit safe parent after curriculum regression."""
+
+        if version_id not in self.versions:
+            raise KeyError(version_id)
+        if self.lineage_head_version_id is None:
+            raise ValueError("cannot select parent before any version")
+        from_version_id = self.lineage_head_version_id
+        decision = ParentDecision(
+            rollback=from_version_id != version_id,
+            from_version_id=from_version_id,
+            to_version_id=version_id,
+            reason="curriculum_regression",
+        )
+        self.lineage_head_version_id = version_id
+        self._degradation_streak = 0
+        self._rollback_pending = False
+        return decision
 
     def select_next_parent(self) -> ParentDecision:
         if self.lineage_head_version_id is None:

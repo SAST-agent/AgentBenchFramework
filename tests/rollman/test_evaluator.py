@@ -96,6 +96,51 @@ def test_learning_evaluation_uses_rank1_and_fixed_seeds(tmp_path):
     assert len(result.matches) == 2
 
 
+def test_learning_target_switches_without_rebuilding_evaluator(tmp_path):
+    calls = []
+
+    def runner(**kwargs):
+        calls.append(kwargs["ghosts"].argv[0])
+        return _Match(
+            status="complete",
+            seed=kwargs["seed"],
+            rollman_score=1,
+            ghosts_score=0,
+            result="win",
+        )
+
+    rank15 = Opponent(
+        opponent_id="rank15",
+        rank=15,
+        archive=Path("rank15.zip"),
+        process=ProcessSpec(("ghost-15",)),
+    )
+    rank14 = Opponent(
+        opponent_id="rank14",
+        rank=14,
+        archive=Path("rank14.zip"),
+        process=ProcessSpec(("ghost-14",)),
+    )
+    evaluator = RollmanEvaluator(
+        logic=ProcessSpec(("logic",)),
+        candidate_factory=lambda version: ProcessSpec(("candidate",)),
+        learning_opponent=rank15,
+        human_pool=(),
+        fixed_gate_seeds=(11,),
+        certification_seeds=(33,),
+        artifact_root=tmp_path,
+        match_runner=runner,
+    )
+
+    first = evaluator.evaluate(_version())
+    evaluator.set_learning_opponent(rank14)
+    second = evaluator.evaluate(_version())
+
+    assert {match["opponent"] for match in first.matches} == {"rank15"}
+    assert {match["opponent"] for match in second.matches} == {"rank14"}
+    assert calls == ["ghost-15", "ghost-14"]
+
+
 def test_any_invalid_fixed_case_makes_aggregate_score_missing(tmp_path):
     calls = 0
 

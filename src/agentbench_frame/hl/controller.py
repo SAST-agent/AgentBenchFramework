@@ -413,10 +413,18 @@ class HLController:
             )
         return len(match_records)
 
-    def run_act(self) -> IterationResult:
+    def run_act(
+        self,
+        *,
+        parent_version_id: str | None = None,
+    ) -> IterationResult:
         if not self._started:
             raise RuntimeError("initialize must be called before run_act")
-        parent_decision = self.lineage.select_next_parent()
+        parent_decision = (
+            self.lineage.select_next_parent()
+            if parent_version_id is None
+            else self.lineage.force_parent(parent_version_id)
+        )
         rollback = parent_decision if parent_decision.rollback else None
         parent_id = parent_decision.to_version_id
         if rollback is not None:
