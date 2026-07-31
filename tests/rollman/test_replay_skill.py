@@ -11,6 +11,7 @@ SKILL_ROOT = (
 )
 SCRIPT = SKILL_ROOT / "scripts/summarize_replay.py"
 WINDOW_SCRIPT = SKILL_ROOT / "scripts/inspect_trace_window.py"
+DISTILL_SCRIPT = SKILL_ROOT / "scripts/distill_opponent_policy.py"
 
 
 def test_replay_script_emits_exact_round_level_and_event_evidence():
@@ -203,3 +204,51 @@ def test_trace_window_rejects_unbounded_requests(tmp_path):
     assert completed.returncode != 0
     assert completed.stdout == ""
     assert "at most 20" in completed.stderr
+
+
+def test_opponent_distillation_is_bounded_and_coordinate_free(tmp_path):
+    trace = tmp_path / "trace.jsonl"
+    records = []
+    for round_number, ghost_actions in enumerate(([3, 3, 2], [3, 4, 2])):
+        records.extend(
+            [
+                {
+                    "type": "action",
+                    "player": 0,
+                    "action": 4,
+                    "decision": {
+                        "state": {
+                            "level": 1,
+                            "round": round_number,
+                            "board": [[1] * 7 for _ in range(7)],
+                            "pacman_coord": [1, 1],
+                            "ghosts_coord": [[5, 5], [5, 1], [1, 5]],
+                            "pacman_skill_status": [0, 0, 0, 0, 0],
+                        }
+                    },
+                },
+                {"type": "action", "player": 1, "action": ghost_actions},
+            ]
+        )
+    trace.write_text(
+        "".join(json.dumps(record) + "\n" for record in records),
+        encoding="utf-8",
+    )
+
+    completed = subprocess.run(
+        [sys.executable, str(DISTILL_SCRIPT), str(trace), "--max-patterns", "10"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    result = json.loads(completed.stdout)
+
+    assert result["ghost_decision_samples"] == 6
+    assert result["action_counts"]["DOWN"] == 3
+    assert result["action_counts"]["LEFT"] == 2
+    assert result["coarse_backoff_patterns"]
+    assert result["fine_patterns"]
+    assert "pacman_coord" not in completed.stdout
+    assert "ghosts_coord" not in completed.stdout
+    assert "seed" not in completed.stdout.lower()
+    assert len(completed.stdout.encode("utf-8")) < 64 * 1024

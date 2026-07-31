@@ -196,6 +196,24 @@ class IterationContext:
             / "scripts"
             / "inspect_trace_window.py"
         )
+        distillation_tool = (
+            self.bundle.files["replay_skill"].parent
+            / "scripts"
+            / "distill_opponent_policy.py"
+        )
+        stagnation_count = int(
+            previous_measurements.get("curriculum_stagnation_count") or 0
+        )
+        distillation = ""
+        if stagnation_count >= 3:
+            distillation = f"""
+停滞干预（连续无提升 {stagnation_count} 轮）：
+- 禁止继续堆叠局部逃逸/阈值例外；必须检验“可预测的 Ghost 行为能否支持 best response”。
+- 对 evidence 中全部 trace 一次性运行 `{distillation_tool} TRACE1 TRACE2 TRACE3`。
+- 蒸馏输出只含相对几何和原子 Ghost 动作统计；用 fine table + coarse backoff 构造可解释预测器。
+- 我方角色是 Rollman，不能复制 Ghost 动作；应预测 Ghost 下一步路径后选择 Rollman 动作。
+- 不得把 seed、绝对坐标、对手身份或 replay ID 写入策略；Rollman 的 KL 决策空间保持不变。
+"""
         curriculum = ""
         if active_target is not None:
             locked = json.dumps(
@@ -224,6 +242,7 @@ class IterationContext:
 
 上一轮测量：{measurements}
 必须核查的回放证据：{evidence}
+{distillation}
 
 科研隔离边界：
 - 只允许读取上述 context manifest 及其 files、candidate workspace、Experience Skill，以及“必须核查的回放证据”明确列出的 replay/trace。
@@ -235,7 +254,7 @@ Act 预算：
 - 最多 14 次工具调用；优先批量读取，禁止用许多小命令反复查看同一材料。
 - 必须先读取 evidence 中的 `summary`；不得打印完整 replay、完整 trace、完整棋盘或全量事件流。
 - 只允许对最多 2 个可证伪假设做定点探针；trace 必须用 `{trace_window_tool} TRACE --level L --round R --radius 1` 读取。
-- 禁止用 cat、sed、head、tail、rg 或自行脚本读取 trace。定点工具每次输出不超过 64 KiB，单条 trace 最多请求 20 个中心回合。
+- 除停滞干预指定的 `{distillation_tool}` 外，禁止用 cat、sed、head、tail、rg 或自行脚本读取 trace。两个工具单次输出均不超过 64 KiB，单条定点 trace 最多请求 20 个中心回合。
 - 完成一次证据诊断后立即实现最小机制改动并验证；禁止在同一 act 内形成参数搜索循环。
 
 执行约束：

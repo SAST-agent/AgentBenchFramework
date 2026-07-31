@@ -93,6 +93,34 @@ def test_prompt_requires_replay_grounded_causal_change_and_blocks_grid_search(tm
     assert "压缩或整合" in prompt
 
 
+def test_prompt_triggers_opponent_distillation_after_three_stagnant_rollouts(tmp_path):
+    from agentbench_frame.hl.context import ContextBundle, IterationContext
+
+    files = _static_files(tmp_path / "assets")
+    scripts = files["replay_skill"].parent / "scripts"
+    scripts.mkdir()
+    (scripts / "inspect_trace_window.py").write_text("", encoding="utf-8")
+    (scripts / "distill_opponent_policy.py").write_text("", encoding="utf-8")
+    bundle = ContextBundle.create(tmp_path / "bundle", files)
+
+    prompt = IterationContext(bundle).build_prompt(
+        act_id="act-0004",
+        branch_index=0,
+        branch_count=1,
+        parent_version_id="v000003",
+        workspace=tmp_path / "candidate",
+        replay_evidence=[{"opponent": "rank15", "trace": "trace.jsonl"}],
+        previous_measurements={"curriculum_stagnation_count": 3},
+        experience_path=tmp_path / "experience.md",
+        active_target="rank15",
+    )
+
+    assert "停滞干预（连续无提升 3 轮）" in prompt
+    assert "distill_opponent_policy.py" in prompt
+    assert "不能复制 Ghost 动作" in prompt
+    assert "KL 决策空间保持不变" in prompt
+
+
 def test_curriculum_prompt_names_target_and_locked_pool(tmp_path):
     from agentbench_frame.hl.context import ContextBundle, IterationContext
 

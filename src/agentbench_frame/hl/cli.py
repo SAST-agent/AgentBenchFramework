@@ -926,6 +926,11 @@ def _run_real(
                 "evaluation_status": (
                     None if evaluation is None else evaluation.status
                 ),
+                "curriculum_stagnation_count": (
+                    0
+                    if curriculum_manager is None
+                    else curriculum_manager.state.stagnation_count
+                ),
             },
             experience_path=experience.path,
             active_target=(

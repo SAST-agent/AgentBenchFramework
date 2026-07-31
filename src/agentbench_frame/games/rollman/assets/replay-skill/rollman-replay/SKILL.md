@@ -32,6 +32,22 @@ Use this Skill to translate a frozen-backend replay into auditable decision evid
 9. Propose the smallest code-level policy change that generalizes to an explicit visible-state condition.
 10. State what replay evidence would falsify the hypothesis. Prefer one causal edit over a parameter sweep.
 
+## Opponent-policy distillation after repeated stagnation
+
+When the harness explicitly reports repeated non-improving rollouts, do not keep
+stacking local exceptions. Distill the observed Ghost role as an opponent model:
+
+```bash
+python scripts/distill_opponent_policy.py TRACE1.jsonl TRACE2.jsonl TRACE3.jsonl
+```
+
+The bounded output contains only relative geometry, wall-masked legal actions,
+previous submitted action, and aggregate action counts. It excludes seeds,
+absolute coordinates, replay identity, and opponent source. Use its fine table
+with coarse backoff to predict each Ghost's next primitive action, then plan the
+Rollman best response. Because the roles differ, never copy a Ghost action as a
+Rollman action. The opponent model does not alter the Rollman KL action space.
+
 ## Frame semantics
 
 - A level initialization frame supplies the board and state before that level's first decision.
