@@ -21,6 +21,7 @@ from agentbench_frame.games.rollman.contract import (
 from agentbench_frame.games.rollman.evaluator import load_human_pool
 from agentbench_frame.hl.context import ContextBundle
 from agentbench_frame.hl.config import HLRunConfig
+from agentbench_frame.hl.evaluator import CandidateEvaluation
 from agentbench_frame.hl.experience import ExperienceManager
 from agentbench_frame.hl.local_config import LocalHLConfig
 
@@ -34,6 +35,8 @@ def _load(path: str) -> LocalHLConfig:
 
 
 def _validate(config: LocalHLConfig) -> dict[str, Any]:
+    from agentbench_frame.hl.codebase import _load_version
+
     contract = RollmanContract.from_agentbench(config.paths.agentbench_root)
     pool = load_human_pool(config.paths.human_manifest)
     if not config.paths.official_logic_root.is_dir():
@@ -47,7 +50,7 @@ def _validate(config: LocalHLConfig) -> dict[str, Any]:
     )
     if not source_audit["valid"]:
         raise ValueError("Rollman frozen source audit failed")
-    return {
+    result = {
         "valid": True,
         "game": config.run.game,
         "max_acts": config.run.iteration.max_acts,
@@ -59,7 +62,25 @@ def _validate(config: LocalHLConfig) -> dict[str, Any]:
         "human_opponents": len(pool),
         "learning_opponent": config.run.evaluation.learning_opponent,
         "required_human_opponents": config.run.evaluation.required_human_opponents,
+        "origin_mode": config.run.origin.mode,
+        "curriculum_mode": config.run.curriculum.mode,
     }
+    if config.run.origin.mode == "imported_version":
+        assert config.run.origin.source_run is not None
+        assert config.run.origin.source_version is not None
+        source = _load_version(
+            Path(config.run.origin.source_run) / "versions",
+            config.run.origin.source_version,
+        )
+        result.update(
+            source_run=str(Path(config.run.origin.source_run).resolve()),
+            source_version=source.version_id,
+            source_content_hash=source.content_hash,
+            required_human_opponents=(
+                config.run.curriculum.required_human_opponents
+            ),
+        )
+    return result
 
 
 def _ensure_candidate(workspace: Path) -> None:
@@ -184,6 +205,84 @@ def _iteration_stop_reason(iteration_result: Any) -> str | None:
     return None
 
 
+def _curriculum_evaluation_from_events(
+    events: list[dict[str, Any]],
+    *,
+    version_id: str,
+    active_target: str,
+) -> CandidateEvaluation | None:
+    """Recover the latest complete gate for one version and target."""
+
+    for event in reversed(events):
+        if str(event.get("version_id")) != version_id:
+            continue
+        event_type = event.get("event_type")
+        if event_type not in {
+            "evaluation_completed",
+            "curriculum_gate_completed",
+        }:
+            continue
+        matches = tuple(event.get("matches") or ())
+        if not matches or any(
+            match.get("opponent") != active_target for match in matches
+        ):
+            continue
+        status = str(event.get("status"))
+        score_value = (
+            event.get("score")
+            if event_type == "curriculum_gate_completed"
+            else event.get("benchmark_score")
+        )
+        return CandidateEvaluation(
+            status=status,
+            score=(
+                float(score_value)
+                if status == "complete" and score_value is not None
+                else None
+            ),
+            error=(
+                None
+                if status == "complete"
+                else "historical curriculum gate is incomplete"
+            ),
+            matches=matches,
+        )
+    return None
+
+
+def _curriculum_resume_parent(
+    events: list[dict[str, Any]],
+    *,
+    state: Any,
+    lineage_head_version_id: str,
+) -> str:
+    """Choose the safe parent implied by the latest curriculum decision."""
+
+    boundary_types = {
+        "candidate_selected",
+        "curriculum_candidate_rejected",
+        "curriculum_stagnated",
+        "curriculum_resumed",
+        "curriculum_stage_promoted",
+    }
+    latest = next(
+        (
+            event
+            for event in reversed(events)
+            if event.get("event_type") in boundary_types
+        ),
+        None,
+    )
+    if latest is not None:
+        if latest.get("event_type") == "curriculum_candidate_rejected":
+            return str(state.stage_origin_version_id)
+        if latest.get("event_type") == "curriculum_stagnated":
+            return str(state.stage_best_version_id)
+        if latest.get("event_type") == "curriculum_resumed":
+            return str(latest["stage_best_version_id"])
+    return lineage_head_version_id
+
+
 def _cmd_validate(args: argparse.Namespace) -> int:
     _json(_validate(_load(args.config)))
     return 0
@@ -214,8 +313,16 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if args.dry_run:
         _json(_dry_run(config, run_dir=run_dir, workspace=workspace))
         return 0
-    provider_environment = _provider_environment(config)
-    if provider_environment is None:
+    if args.acts == 0 and config.run.origin.mode != "imported_version":
+        print(
+            "run --acts 0 requires origin.mode=imported_version",
+            file=sys.stderr,
+        )
+        return 2
+    provider_environment = (
+        None if args.acts == 0 else _provider_environment(config)
+    )
+    if args.acts != 0 and provider_environment is None:
         print(
             f"missing provider credential: {config.run.provider.env_key}",
             file=sys.stderr,
@@ -233,8 +340,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
 def _cmd_resume(args: argparse.Namespace) -> int:
     config = _load(args.config)
-    provider_environment = _provider_environment(config)
-    if provider_environment is None:
+    provider_environment = (
+        None if args.acts == 0 else _provider_environment(config)
+    )
+    if args.acts != 0 and provider_environment is None:
         print(
             f"missing provider credential: {config.run.provider.env_key}",
             file=sys.stderr,
@@ -302,7 +411,7 @@ def _run_real(
     workspace: Path,
     acts: int | None,
     resume: bool,
-    provider_environment: dict[str, str],
+    provider_environment: dict[str, str] | None,
 ) -> int:
     # Imported lazily so validate and dry-run never initialize model/runtime state.
     from agentbench_frame.games.rollman.candidate_runner import __file__ as candidate_runner
@@ -320,11 +429,13 @@ def _run_real(
     from agentbench_frame.hl.codebase import VersionStore
     from agentbench_frame.hl.context import IterationContext
     from agentbench_frame.hl.controller import HLController
+    from agentbench_frame.hl.curriculum import (
+        CurriculumManager,
+        summarize_certification,
+    )
     from agentbench_frame.hl.events import HLEventWriter, read_events
     from agentbench_frame.hl.lineage import LineageManager
     from agentbench_frame.hl.provider import CodexSessionProvider
-    from agentbench_frame.hl.evaluator import CandidateEvaluation
-
     _validate(config)
     if resume:
         if not run_dir.is_dir():
@@ -367,15 +478,28 @@ def _run_real(
         )
     _ensure_candidate(workspace)
     pool = load_human_pool(config.paths.human_manifest)
-    rank1_raw = next(
-        opponent
-        for opponent in pool
-        if opponent.opponent_id == config.run.evaluation.learning_opponent
+    curriculum_mode = config.run.curriculum.mode == "weakest_failed"
+    prepared_pool = (
+        prepare_human_pool(
+            pool,
+            build_root=config.paths.opponent_build_root,
+        )
+        if curriculum_mode
+        else ()
     )
-    rank1 = prepare_opponent(
-        rank1_raw,
-        build_root=config.paths.opponent_build_root,
-    )
+    if curriculum_mode:
+        initial_learning_opponent = prepared_pool[0]
+    else:
+        rank1_raw = next(
+            opponent
+            for opponent in pool
+            if opponent.opponent_id
+            == config.run.evaluation.learning_opponent
+        )
+        initial_learning_opponent = prepare_opponent(
+            rank1_raw,
+            build_root=config.paths.opponent_build_root,
+        )
     logic_root = (
         config.paths.agentbench_root
         / "backend_sources/corpus/29_rollman/logic/gamecode_logic/PacmanLogic"
@@ -410,8 +534,8 @@ def _run_real(
     evaluator = RollmanEvaluator(
         logic=logic,
         candidate_factory=candidate_factory,
-        learning_opponent=rank1,
-        human_pool=(),
+        learning_opponent=initial_learning_opponent,
+        human_pool=prepared_pool,
         fixed_gate_seeds=config.run.evaluation.fixed_gate_seeds,
         certification_seeds=config.run.evaluation.certification_seeds,
         artifact_root=run_dir / "matches",
@@ -433,10 +557,14 @@ def _run_real(
         run_dir / "experience",
         compress_every_acts=config.run.experience.compress_every_acts,
     )
-    provider = CodexSessionProvider(
-        config.run.provider,
-        run_root=run_dir,
-        environ=provider_environment,
+    provider = (
+        None
+        if provider_environment is None
+        else CodexSessionProvider(
+            config.run.provider,
+            run_root=run_dir,
+            environ=provider_environment,
+        )
     )
     events_path = run_dir / "events.jsonl"
     historical = read_events(events_path)
@@ -502,6 +630,8 @@ def _run_real(
                 ),
             )
 
+    curriculum_manager: CurriculumManager | None = None
+
     def prompt_factory(**values):
         if values.get("bootstrap"):
             return iteration_context.build_bootstrap_prompt(
@@ -537,6 +667,16 @@ def _run_real(
                 ),
             },
             experience_path=experience.path,
+            active_target=(
+                None
+                if curriculum_manager is None
+                else curriculum_manager.state.active_target
+            ),
+            locked_opponents=(
+                ()
+                if curriculum_manager is None
+                else curriculum_manager.state.locked_opponents
+            ),
         )
 
     controller = HLController(
@@ -552,6 +692,560 @@ def _run_real(
         prompt_factory=prompt_factory,
         experience_manager=experience,
     )
+
+    def measure_iteration(iteration_result: Any) -> None:
+        parent_evaluation = evaluations_by_version.get(
+            iteration_result.parent_version_id
+        )
+        parent_version = version_store.get(
+            iteration_result.parent_version_id
+        )
+        for candidate in iteration_result.candidates:
+            evaluations_by_version[
+                candidate.version.version_id
+            ] = candidate.evaluation
+            if (
+                parent_evaluation is None
+                or parent_evaluation.status != "complete"
+                or candidate.evaluation.status != "complete"
+            ):
+                continue
+            metrics = measurement_runner.measure(
+                new_version=candidate.version,
+                old_version=parent_version,
+                version_store=version_store,
+                new_evaluation=candidate.evaluation,
+                old_evaluation=parent_evaluation,
+            )
+            writer.write(
+                "policy_kl_measured",
+                version_id=candidate.version.version_id,
+                parent_version_id=parent_version.version_id,
+                epsilon=metrics["epsilon"],
+                action_support=metrics["action_support"],
+                local_policy_kl_trace=metrics[
+                    "local_policy_kl_trace"
+                ],
+                episode_local_policy_kl=metrics[
+                    "episode_local_policy_kl"
+                ],
+                reference_manifest=metrics["reference_manifest"],
+            )
+            writer.write(
+                "occupancy_measured",
+                version_id=candidate.version.version_id,
+                parent_version_id=parent_version.version_id,
+                occupancy_shift=metrics["occupancy_shift"],
+            )
+
+    if curriculum_mode:
+        opponent_by_id = {
+            opponent.opponent_id: opponent
+            for opponent in prepared_pool
+        }
+
+        def certify_curriculum_version(version: Any):
+            version_store.checkout(version.version_id)
+            certification = evaluator.certify(version)
+            controller.record_matches(
+                version=version,
+                act_id=version.act_id,
+                phase="certification",
+                matches=certification.matches,
+            )
+            summary = (
+                summarize_certification(
+                    certification.matches,
+                    required_win_rate=(
+                        config.run.evaluation.required_win_rate
+                    ),
+                    expected_opponents=len(pool),
+                )
+                if certification.status == "complete"
+                else None
+            )
+            writer.write(
+                "certification_completed",
+                version_id=version.version_id,
+                act_id=version.act_id,
+                status=certification.status,
+                score=certification.score,
+                passing_human_opponents=(
+                    0 if summary is None else summary.passing_opponents
+                ),
+                required_human_opponents=(
+                    config.run.curriculum.required_human_opponents
+                ),
+                matches=list(certification.matches),
+            )
+            return certification, summary
+
+        def write_curriculum_gate(
+            *,
+            version: Any,
+            evaluation: CandidateEvaluation,
+            baseline: bool,
+            improved: bool,
+        ) -> None:
+            assert curriculum_manager is not None
+            assert curriculum_manager.state.active_target is not None
+            assert curriculum_manager.state.stage_best_score is not None
+            writer.write(
+                "curriculum_gate_completed",
+                version_id=version.version_id,
+                active_target=curriculum_manager.state.active_target,
+                status=evaluation.status,
+                score=evaluation.score,
+                matches=list(evaluation.matches),
+                baseline=baseline,
+                improved=improved,
+                stagnation_count=(
+                    curriculum_manager.state.stagnation_count
+                ),
+                stage_best_version_id=(
+                    curriculum_manager.state.stage_best_version_id
+                ),
+                stage_best_score=(
+                    curriculum_manager.state.stage_best_score
+                ),
+            )
+
+        certified = any(
+            event.get("event_type") == "run_completed"
+            and event.get("reason") == "all_human_opponents_defeated"
+            for event in historical
+        )
+        if resume:
+            controller.resume(historical)
+            curriculum_manager = CurriculumManager.from_events(
+                historical,
+                required_human_opponents=(
+                    config.run.curriculum.required_human_opponents
+                ),
+                stagnation_patience=(
+                    config.run.curriculum.stagnation_patience
+                ),
+            )
+            if certified:
+                _json(
+                    {
+                        "run_dir": str(run_dir),
+                        "certified": True,
+                        "status": "all_human_opponents_defeated",
+                        **controller.summary(),
+                    }
+                )
+                return 0
+            active_target = curriculum_manager.state.active_target
+            if active_target is None:
+                raise ValueError(
+                    "active curriculum run is missing a target"
+                )
+            latest_curriculum_boundary = next(
+                (
+                    event
+                    for event in reversed(historical)
+                    if event.get("event_type")
+                    in {
+                        "curriculum_stagnated",
+                        "curriculum_resumed",
+                        "curriculum_stage_promoted",
+                        "curriculum_target_selected",
+                    }
+                ),
+                None,
+            )
+            if (
+                latest_curriculum_boundary is not None
+                and latest_curriculum_boundary.get("event_type")
+                == "curriculum_stagnated"
+                and (acts is None or acts > 0)
+            ):
+                resumed_parent = (
+                    curriculum_manager.resume_after_stagnation()
+                )
+                writer.write(
+                    "curriculum_resumed",
+                    version_id=resumed_parent,
+                    active_target=active_target,
+                    stage_best_version_id=resumed_parent,
+                    stage_best_score=(
+                        curriculum_manager.state.stage_best_score
+                    ),
+                )
+            evaluator.set_learning_opponent(
+                opponent_by_id[active_target]
+            )
+            head = controller.lineage.lineage_head_version_id
+            if head is None:
+                raise ValueError("curriculum resume has no lineage head")
+            next_parent = _curriculum_resume_parent(
+                historical,
+                state=curriculum_manager.state,
+                lineage_head_version_id=head,
+            )
+            evaluator.last_evaluation = (
+                _curriculum_evaluation_from_events(
+                    historical,
+                    version_id=next_parent,
+                    active_target=active_target,
+                )
+            )
+            if (
+                evaluator.last_evaluation is None
+                or evaluator.last_evaluation.status != "complete"
+            ):
+                _json(
+                    {
+                        "run_dir": str(run_dir),
+                        "status": "incomplete_curriculum_state",
+                        "version_id": next_parent,
+                        **controller.summary(),
+                    }
+                )
+                return 2
+            evaluations_by_version[
+                next_parent
+            ] = evaluator.last_evaluation
+            if not measurement_runner.manifest_path.is_file():
+                measurement_runner.freeze_reference(
+                    evaluator.last_evaluation
+                )
+        else:
+            if config.run.origin.mode != "imported_version":
+                raise ValueError(
+                    "weakest_failed curriculum requires imported_version origin"
+                )
+            assert config.run.origin.source_run is not None
+            assert config.run.origin.source_version is not None
+            origin = controller.initialize_imported(
+                source_run=config.run.origin.source_run,
+                source_version_id=config.run.origin.source_version,
+            )
+            certification, origin_summary = certify_curriculum_version(
+                origin
+            )
+            if (
+                certification.status != "complete"
+                or origin_summary is None
+            ):
+                _json(
+                    {
+                        "run_dir": str(run_dir),
+                        "status": "incomplete_certification",
+                        "version_id": origin.version_id,
+                        **controller.summary(),
+                    }
+                )
+                return 2
+            curriculum_manager = CurriculumManager.start(
+                version_id=origin.version_id,
+                summary=origin_summary,
+                required_human_opponents=(
+                    config.run.curriculum.required_human_opponents
+                ),
+                stagnation_patience=(
+                    config.run.curriculum.stagnation_patience
+                ),
+            )
+            active_target = curriculum_manager.state.active_target
+            writer.write(
+                "curriculum_started",
+                version_id=origin.version_id,
+                active_target=active_target,
+                active_target_rank=(
+                    None
+                    if active_target is None
+                    else opponent_by_id[active_target].rank
+                ),
+                locked_opponents=list(
+                    curriculum_manager.state.locked_opponents
+                ),
+                required_human_opponents=(
+                    config.run.curriculum.required_human_opponents
+                ),
+                stage_origin_version_id=origin.version_id,
+            )
+            if curriculum_manager.state.completed:
+                writer.write(
+                    "run_completed",
+                    reason="all_human_opponents_defeated",
+                    version_id=origin.version_id,
+                    passing_human_opponents=(
+                        origin_summary.passing_opponents
+                    ),
+                )
+                _json(
+                    {
+                        "run_dir": str(run_dir),
+                        "certified": True,
+                        "status": "all_human_opponents_defeated",
+                        **controller.summary(),
+                    }
+                )
+                return 0
+            assert active_target is not None
+            writer.write(
+                "curriculum_target_selected",
+                version_id=origin.version_id,
+                active_target=active_target,
+                active_target_rank=opponent_by_id[active_target].rank,
+                locked_opponents=list(
+                    curriculum_manager.state.locked_opponents
+                ),
+                stage_origin_version_id=origin.version_id,
+            )
+            evaluator.set_learning_opponent(
+                opponent_by_id[active_target]
+            )
+            evaluator.last_evaluation = controller.retry_head_evaluation()
+            if evaluator.last_evaluation.status != "complete":
+                _json(
+                    {
+                        "run_dir": str(run_dir),
+                        "status": "incomplete_evaluation",
+                        "version_id": origin.version_id,
+                        **controller.summary(),
+                    }
+                )
+                return 2
+            evaluations_by_version[
+                origin.version_id
+            ] = evaluator.last_evaluation
+            assert evaluator.last_evaluation.score is not None
+            curriculum_manager.begin_stage_gate(
+                version_id=origin.version_id,
+                score=evaluator.last_evaluation.score,
+            )
+            write_curriculum_gate(
+                version=origin,
+                evaluation=evaluator.last_evaluation,
+                baseline=True,
+                improved=True,
+            )
+            measurement_runner.freeze_reference(
+                evaluator.last_evaluation
+            )
+            next_parent = origin.version_id
+
+        completed_here = 0
+        while not certified and (
+            acts is None or completed_here < acts
+        ):
+            if controller.reached_iteration_limit():
+                break
+            if provider is None:
+                raise RuntimeError(
+                    "provider credential is required for a model act"
+                )
+            iteration_result = controller.run_act(
+                parent_version_id=next_parent
+            )
+            completed_here += 1
+            stop_reason = _iteration_stop_reason(iteration_result)
+            if stop_reason is not None:
+                _json(
+                    {
+                        "run_dir": str(run_dir),
+                        "status": stop_reason,
+                        **controller.summary(),
+                    }
+                )
+                return 2
+            measure_iteration(iteration_result)
+            selected = iteration_result.selected
+            assert selected.evaluation.score is not None
+            gate_decision = curriculum_manager.observe_gate(
+                version_id=selected.version.version_id,
+                score=selected.evaluation.score,
+            )
+            write_curriculum_gate(
+                version=selected.version,
+                evaluation=selected.evaluation,
+                baseline=False,
+                improved=gate_decision.kind == "improved",
+            )
+            next_parent = gate_decision.parent_version_id
+            if gate_decision.kind == "stagnated":
+                writer.write(
+                    "curriculum_stagnated",
+                    version_id=selected.version.version_id,
+                    active_target=(
+                        curriculum_manager.state.active_target
+                    ),
+                    stage_best_version_id=(
+                        curriculum_manager.state.stage_best_version_id
+                    ),
+                    stage_best_score=(
+                        curriculum_manager.state.stage_best_score
+                    ),
+                    stagnation_count=(
+                        curriculum_manager.state.stagnation_count
+                    ),
+                )
+                _json(
+                    {
+                        "run_dir": str(run_dir),
+                        "certified": False,
+                        "status": "stagnated",
+                        "active_target": (
+                            curriculum_manager.state.active_target
+                        ),
+                        **controller.summary(),
+                    }
+                )
+                return 0
+            if (
+                selected.evaluation.score
+                < config.run.evaluation.required_win_rate
+            ):
+                continue
+            certification, summary = certify_curriculum_version(
+                selected.version
+            )
+            if certification.status != "complete" or summary is None:
+                _json(
+                    {
+                        "run_dir": str(run_dir),
+                        "status": "incomplete_certification",
+                        "version_id": selected.version.version_id,
+                        **controller.summary(),
+                    }
+                )
+                return 2
+            completed_target = (
+                curriculum_manager.state.active_target
+            )
+            certification_decision = (
+                curriculum_manager.observe_certification(
+                    version_id=selected.version.version_id,
+                    summary=summary,
+                )
+            )
+            if certification_decision.kind == "reject":
+                writer.write(
+                    "curriculum_candidate_rejected",
+                    version_id=selected.version.version_id,
+                    stage_origin_version_id=(
+                        curriculum_manager.state.stage_origin_version_id
+                    ),
+                    active_target=completed_target,
+                    lost_locked_opponents=list(
+                        certification_decision.lost_locked_opponents
+                    ),
+                    failed_active_target=(
+                        completed_target
+                        not in summary.passed_opponents
+                    ),
+                )
+                next_parent = (
+                    certification_decision.parent_version_id
+                )
+                parent_evaluation = (
+                    _curriculum_evaluation_from_events(
+                        read_events(events_path),
+                        version_id=next_parent,
+                        active_target=str(completed_target),
+                    )
+                )
+                if parent_evaluation is None:
+                    raise ValueError(
+                        "rejected curriculum candidate has no safe-parent gate"
+                    )
+                evaluator.last_evaluation = parent_evaluation
+                evaluations_by_version[next_parent] = parent_evaluation
+                continue
+            writer.write(
+                "curriculum_stage_promoted",
+                version_id=selected.version.version_id,
+                completed_target=completed_target,
+                next_target=certification_decision.next_target,
+                locked_opponents=list(
+                    curriculum_manager.state.locked_opponents
+                ),
+                passing_human_opponents=summary.passing_opponents,
+            )
+            if certification_decision.kind == "complete":
+                certified = True
+                writer.write(
+                    "run_completed",
+                    reason="all_human_opponents_defeated",
+                    version_id=selected.version.version_id,
+                    passing_human_opponents=summary.passing_opponents,
+                )
+                break
+            active_target = certification_decision.next_target
+            assert active_target is not None
+            writer.write(
+                "curriculum_target_selected",
+                version_id=selected.version.version_id,
+                active_target=active_target,
+                active_target_rank=opponent_by_id[active_target].rank,
+                locked_opponents=list(
+                    curriculum_manager.state.locked_opponents
+                ),
+                stage_origin_version_id=selected.version.version_id,
+            )
+            evaluator.set_learning_opponent(
+                opponent_by_id[active_target]
+            )
+            version_store.checkout(selected.version.version_id)
+            baseline = evaluator.evaluate(selected.version)
+            controller.record_matches(
+                version=selected.version,
+                act_id=selected.version.act_id,
+                phase="learning",
+                matches=baseline.matches,
+            )
+            if baseline.status != "complete" or baseline.score is None:
+                _json(
+                    {
+                        "run_dir": str(run_dir),
+                        "status": "incomplete_evaluation",
+                        "version_id": selected.version.version_id,
+                        **controller.summary(),
+                    }
+                )
+                return 2
+            curriculum_manager.begin_stage_gate(
+                version_id=selected.version.version_id,
+                score=baseline.score,
+            )
+            controller.lineage.begin_stage(
+                selected.version.version_id,
+                score=baseline.score,
+            )
+            evaluations_by_version[
+                selected.version.version_id
+            ] = baseline
+            evaluator.last_evaluation = baseline
+            write_curriculum_gate(
+                version=selected.version,
+                evaluation=baseline,
+                baseline=True,
+                improved=True,
+            )
+            next_parent = selected.version.version_id
+
+        _json(
+            {
+                "run_dir": str(run_dir),
+                "certified": certified,
+                "status": (
+                    "all_human_opponents_defeated"
+                    if certified
+                    else "running"
+                ),
+                "active_target": (
+                    None
+                    if curriculum_manager is None
+                    else curriculum_manager.state.active_target
+                ),
+                **controller.summary(),
+            }
+        )
+        return 0
+
     if resume:
         controller.resume(historical)
         head = controller.lineage.lineage_head_version_id
@@ -775,7 +1469,7 @@ def main(argv: list[str] | None = None) -> int:
     report.set_defaults(handler=_cmd_report)
     args = parser.parse_args(argv)
     if getattr(args, "acts", None) is not None:
-        minimum = 0 if args.command == "resume" else 1
+        minimum = 0
         if args.acts < minimum:
             parser.error(f"--acts must be >= {minimum} for {args.command}")
     return int(args.handler(args))

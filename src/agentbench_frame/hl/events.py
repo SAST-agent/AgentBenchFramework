@@ -24,6 +24,7 @@ KNOWN_EVENT_TYPES = frozenset(
         "curriculum_stage_promoted",
         "curriculum_candidate_rejected",
         "curriculum_stagnated",
+        "curriculum_resumed",
         "run_resumed",
         "act_completed",
         "version_created",
@@ -120,6 +121,15 @@ _EVENT_FIELDS = {
             "stage_best_version_id",
             "stage_best_score",
             "stagnation_count",
+        },
+        set(),
+    ),
+    "curriculum_resumed": (
+        {
+            "version_id",
+            "active_target",
+            "stage_best_version_id",
+            "stage_best_score",
         },
         set(),
     ),

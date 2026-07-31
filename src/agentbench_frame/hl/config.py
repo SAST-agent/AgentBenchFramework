@@ -184,6 +184,19 @@ class HLRunConfig:
     def __post_init__(self) -> None:
         if not self.game:
             raise ValueError("game is required")
+        if self.curriculum.mode == "weakest_failed":
+            if self.origin.mode != "imported_version":
+                raise ValueError(
+                    "weakest_failed curriculum requires imported_version origin"
+                )
+            if not self.origin.reset_session:
+                raise ValueError(
+                    "weakest_failed curriculum requires origin.reset_session"
+                )
+            if not self.origin.reset_experience:
+                raise ValueError(
+                    "weakest_failed curriculum requires origin.reset_experience"
+                )
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, Any]) -> "HLRunConfig":

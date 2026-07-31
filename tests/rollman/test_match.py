@@ -2,6 +2,30 @@ import sys
 import json
 from pathlib import Path
 
+
+def test_process_cleanup_does_not_mask_broken_pipe_error():
+    from agentbench_frame.games.rollman.match import _stop
+
+    class BrokenStream:
+        def close(self):
+            raise BrokenPipeError("child already closed stdin")
+
+    class ExitedProcess:
+        pid = 123456
+        stdin = BrokenStream()
+        stdout = None
+        stderr = None
+
+        @staticmethod
+        def poll():
+            return 1
+
+        @staticmethod
+        def wait(timeout=None):
+            return 1
+
+    _stop(ExitedProcess())
+
 import pytest
 
 from agentbench_frame.games.rollman.match import ProcessSpec, run_match

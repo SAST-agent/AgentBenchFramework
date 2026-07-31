@@ -264,7 +264,10 @@ def _stop(process: subprocess.Popen[bytes]) -> None:
             pass
     for stream in (process.stdin, process.stdout, process.stderr):
         if stream is not None:
-            stream.close()
+            try:
+                stream.close()
+            except OSError:
+                pass
     scratch = getattr(process, "_agentbench_scratch", None)
     if scratch is not None:
         shutil.rmtree(scratch, ignore_errors=True)

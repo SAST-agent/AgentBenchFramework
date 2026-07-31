@@ -224,6 +224,15 @@ class CurriculumManager:
                     stagnation_count=0,
                     completed=next_target is None,
                 )
+            elif event_type == "curriculum_resumed":
+                manager._state = dataclasses.replace(
+                    manager._state,
+                    stage_best_version_id=str(
+                        event["stage_best_version_id"]
+                    ),
+                    stage_best_score=float(event["stage_best_score"]),
+                    stagnation_count=0,
+                )
         if manager is None:
             raise ValueError("curriculum events do not contain a start event")
         return manager
@@ -276,6 +285,19 @@ class CurriculumManager:
             kind="continue",
             parent_version_id=version_id,
         )
+
+    def resume_after_stagnation(self) -> str:
+        if self._state.completed or self._state.active_target is None:
+            raise RuntimeError("completed curriculum cannot resume a stage")
+        if self._state.stage_best_score is None:
+            raise RuntimeError("curriculum stage has no established gate")
+        if self._state.stagnation_count < self.stagnation_patience:
+            raise RuntimeError("curriculum stage has not stagnated")
+        self._state = dataclasses.replace(
+            self._state,
+            stagnation_count=0,
+        )
+        return self._state.stage_best_version_id
 
     def observe_certification(
         self,

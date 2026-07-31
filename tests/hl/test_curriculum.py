@@ -228,3 +228,17 @@ def test_curriculum_state_rebuilds_from_lifecycle_events(tmp_path):
     assert rebuilt.state.stage_best_score == 0.0
     assert rebuilt.state.stagnation_count == 4
     assert rebuilt.state.completed is False
+
+
+def test_resume_from_stagnation_keeps_best_parent_and_resets_patience():
+    manager = _manager()
+    manager.begin_stage_gate(version_id="v000000", score=0.0)
+    for index in range(1, 5):
+        manager.observe_gate(version_id=f"v{index:06d}", score=0.0)
+
+    parent = manager.resume_after_stagnation()
+    decision = manager.observe_gate(version_id="v000005", score=0.0)
+
+    assert parent == "v000000"
+    assert manager.state.stagnation_count == 1
+    assert decision.kind == "continue"

@@ -411,6 +411,56 @@ def test_completed_matches_emit_win_rate_inputs_and_role_elo(tmp_path):
     ) == 2
 
 
+def test_same_version_records_distinct_targets_without_match_id_collision(
+    tmp_path,
+):
+    from agentbench_frame.hl.events import read_events
+
+    controller = _controller(
+        tmp_path,
+        FakeProvider([]),
+        FakeEvaluator([]),
+    )
+    version = controller.initialize()
+
+    first = controller.record_matches(
+        version=version,
+        act_id=version.act_id,
+        phase="learning",
+        matches=(
+            {
+                "status": "complete",
+                "opponent": "rank15",
+                "seed": 101,
+                "result": "loss",
+            },
+        ),
+    )
+    second = controller.record_matches(
+        version=version,
+        act_id=version.act_id,
+        phase="learning",
+        matches=(
+            {
+                "status": "complete",
+                "opponent": "rank14",
+                "seed": 101,
+                "result": "loss",
+            },
+        ),
+    )
+
+    match_events = [
+        event
+        for event in read_events(tmp_path / "events.jsonl")
+        if event["event_type"] == "match_completed"
+    ]
+    assert first == 1
+    assert second == 1
+    assert len(match_events) == 2
+    assert len({event["match_id"] for event in match_events}) == 2
+
+
 def test_resume_restores_act_counter_and_parent_session(tmp_path):
     from agentbench_frame.hl.events import read_events
     from agentbench_frame.hl.lineage import LineageManager

@@ -152,6 +152,32 @@ class HLConfigTests(unittest.TestCase):
                     {**base, "curriculum": curriculum}
                 )
 
+    def test_weakest_failed_curriculum_requires_clean_imported_origin(self):
+        from agentbench_frame.hl.config import HLRunConfig
+
+        base = {
+            "game": "29_rollman",
+            "provider": {"kind": "codex"},
+            "curriculum": {"mode": "weakest_failed"},
+        }
+        with self.assertRaisesRegex(ValueError, "imported_version"):
+            HLRunConfig.from_mapping(base)
+        for reset_field in ("reset_session", "reset_experience"):
+            with self.subTest(reset_field=reset_field), self.assertRaisesRegex(
+                ValueError, reset_field
+            ):
+                HLRunConfig.from_mapping(
+                    {
+                        **base,
+                        "origin": {
+                            "mode": "imported_version",
+                            "source_run": "run-a",
+                            "source_version": "v000001",
+                            reset_field: False,
+                        },
+                    }
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

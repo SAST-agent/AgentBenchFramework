@@ -74,6 +74,9 @@ class HLController:
         self._coding_agent_acts = 0
         self._sessions: dict[str, str] = {}
         self._recorded_match_ids: set[str] = set()
+        self._recorded_match_keys: set[
+            tuple[str, str, str, int]
+        ] = set()
         self._started = False
 
     def initialize(self, *, evaluate: bool = False) -> Version:
@@ -289,6 +292,14 @@ class HLController:
             ):
                 continue
             self._recorded_match_ids.add(str(event["match_id"]))
+            self._recorded_match_keys.add(
+                (
+                    str(event["version_id"]),
+                    str(event.get("phase") or "learning"),
+                    str(event["opponent"]),
+                    int(event["seed"]),
+                )
+            )
             self.elo_ledger.update_game(
                 role=str(event.get("role") or "rollman"),
                 candidate=str(event["version_id"]),
@@ -361,10 +372,27 @@ class HLController:
         ]
         for index, match in enumerate(match_records):
             match_phase = str(match.get("phase") or phase)
+            match_key = (
+                version.version_id,
+                match_phase,
+                str(match.get("opponent")),
+                int(match["seed"]),
+            )
+            if match_key in self._recorded_match_keys:
+                continue
+            fallback_match_id = (
+                f"{version.version_id}-{match_phase}-{index:04d}"
+            )
+            if fallback_match_id in self._recorded_match_ids:
+                fallback_match_id = (
+                    f"{version.version_id}-{match_phase}-"
+                    f"{match.get('opponent', 'unknown')}-"
+                    f"{match.get('seed', index)}"
+                )
             match_id = str(
                 match.get(
                     "match_id",
-                    f"{version.version_id}-{match_phase}-{index:04d}",
+                    fallback_match_id,
                 )
             )
             if match_id in self._recorded_match_ids:
@@ -386,6 +414,7 @@ class HLController:
                 trace=match.get("trace"),
             )
             self._recorded_match_ids.add(match_id)
+            self._recorded_match_keys.add(match_key)
             elo_record = self.elo_ledger.update_game(
                 role="rollman",
                 candidate=version.version_id,
