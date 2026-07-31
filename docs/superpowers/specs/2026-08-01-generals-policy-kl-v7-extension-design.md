@@ -84,13 +84,16 @@ new run. Copying makes the run self-contained; provenance receipts record the
 source run, relative path, source digest, copied digest, semantic role, and
 reuse status. The completed source run is never opened for writing.
 
-The imported set is fixed rather than implementation-defined: both benchmark
-specifications, all 12 reference snapshots, all 12 exact-count records, the
+The imported set is fixed rather than implementation-defined: both source
+benchmark specifications, all 12 reference snapshots, all 12 exact-count records, the
 v0-v6 policy manifests and source trees, all 84 v0-v6 state-action probe
 records, the 288 rows in `measurement/per-state-kl.jsonl`, the old transition
 summary, `events.jsonl`, `quality.json`, and `summary.json`. The benchmark,
-state, count, and policy artifacts occupy their established paths in the new
-run. The new 336-row per-state file is generated from the 288 verified source
+The action-space specification, state, count, and policy artifacts occupy
+their established paths in the new run. A v2 reference-state specification is
+generated from the verified v1 coordinates and state IDs; both exact v1
+benchmark specifications are also preserved under `provenance/source-run/`.
+The new 336-row per-state file is generated from the 288 verified source
 facts followed by the 48 new facts. The exact old per-state file, source-run
 metadata, and old transition summary are preserved under
 `provenance/source-run/`, so they cannot overwrite the new run's event,
@@ -166,9 +169,11 @@ provenance/
   source-run-receipt.json
   imported-artifacts.jsonl
   source-run/
+    action-space-spec.json
     events.jsonl
     per-state-kl.jsonl
     quality.json
+    reference-state-spec.json
     summary.json
     transition-summary.json
 events.jsonl
