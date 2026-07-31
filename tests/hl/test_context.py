@@ -188,3 +188,20 @@ def test_prompt_history_table_shows_partial_credit_cols(tmp_path):
     assert "avg_score" in prompt
     assert "avg_turns" in prompt
 
+
+def test_prompt_has_data_schema_section(tmp_path):
+    """The per-act prompt must carry a Data schema section stating interprops
+    are int/object-coded (1=EscapeCapsule, 2=KeyMachine), that string
+    membership is always False, and the blind-interact-then-check-success
+    pattern. First-act prompt (no history) must still include it."""
+    cb = HLCodebase(root=tmp_path / "ws", store=tmp_path / "store")
+    (tmp_path / "ws").mkdir()
+    builder = ContextBuilder(codebase=cb, data_root=tmp_path, game="25_lostspace",
+                             agent_name="hl-v1", spec=_spec())
+    prompt = builder.build(version_before=None, act_id="r-act0001")["prompt"]
+    assert "Data schema" in prompt
+    assert "1=EscapeCapsule" in prompt
+    assert "2=KeyMachine" in prompt
+    assert "always False" in prompt or "always false" in prompt
+    assert "interact('KeyMachine')" in prompt
+

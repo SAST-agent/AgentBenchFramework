@@ -46,6 +46,20 @@ _GAME_RULES_BLURB = (
     "score. First to escape = rank 1."
 )
 
+_DATA_SCHEMA_BLURB = (
+    "`self.view.nodes[i].interprops` is a list of INTEGER CODES / objects "
+    "(1=EscapeCapsule, 2=KeyMachine); the agent client also appends the "
+    "string 'Box'. It is NOT a list of strings like 'KeyMachine', so "
+    "`if 'KeyMachine' in interprops` (or 'EscapeCapsule') is always False — "
+    "never gate an action on it. Safe pattern (already used by the seed): "
+    "call the action blind, then branch on the returned `['success']`, e.g. "
+    "`if self.interact('KeyMachine')['success']: return` — the server returns "
+    "success only when the action is valid. Win condition: interact with each "
+    "of the 4 corner KeyMachines (collect 4 keys), then interact with the "
+    "center EscapeCapsule. An agent that never calls interact('KeyMachine') "
+    "can never win."
+)
+
 
 class ContextBuilder:
     """Build the per-act coding-agent prompt from live match data."""
@@ -138,6 +152,7 @@ class ContextBuilder:
             "length-prefixed JSON, send the same).\n"
         )
         lines.append(f"## Game rules\n{_GAME_RULES_BLURB}\n")
+        lines.append(f"## Data schema\n{_DATA_SCHEMA_BLURB}\n")
 
         history = self._history_section()
         if history:
