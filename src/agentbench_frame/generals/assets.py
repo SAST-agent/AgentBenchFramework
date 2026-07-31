@@ -18,6 +18,7 @@ from .models import (
     HistoricalPolicyConfig,
     OpponentSpec,
     PilotConfig,
+    PolicyKLExtensionConfig,
     PolicyKLReferenceConfig,
     ProcessLimits,
     ReplaySkillAsset,
@@ -49,6 +50,12 @@ POLICY_KL_REFERENCE_SEATS = (0, 1)
 POLICY_KL_REFERENCE_DECISIONS = (2, 10)
 POLICY_KL_EPSILONS = ("0.001", "0.01", "0.05", "0.1")
 POLICY_KL_PRIMARY_EPSILON = "0.01"
+POLICY_KL_EXTENSION_ID = "generals-policy-kl-reference-v2"
+POLICY_KL_SOURCE_MEASUREMENT_ID = POLICY_KL_REFERENCE_ID
+POLICY_KL_SOURCE_RUN_ID = "20260730_1126_8d123b55"
+POLICY_KL_SOURCE_TREE_HASH = (
+    "6203161e1056628d46bb974ed2ffaaf1b2d6a67581e80b57f0d92afa2bb41225"
+)
 POLICY_KL_HISTORY = (
     (
         "v0",
@@ -84,6 +91,14 @@ POLICY_KL_HISTORY = (
         "v6",
         "20260729_1653_af8eda26",
         "974050ee1a3d4b4c4f96e61f5af39b4e52e2cfbc50f146f9e8b4ac96c4ac798b",
+    ),
+)
+POLICY_KL_EXTENSION_HISTORY = (
+    *POLICY_KL_HISTORY,
+    (
+        "v7",
+        "20260730_1739_680b1632",
+        "c1eb1e4eae5fb1afa393e15370d744743fe0af206cc05a329fa36bd62ca3c4c4",
     ),
 )
 PREVIOUSLY_FROZEN_GENERALS_SEEDS = frozenset({
@@ -491,6 +506,135 @@ def load_policy_kl_reference_config(
     if actual_history != POLICY_KL_HISTORY:
         raise AssetValidationError(
             "policy KL history must match approved run IDs and content hashes"
+        )
+    return config
+
+
+def load_policy_kl_extension_config(
+    path: Path,
+    pilot: PilotConfig,
+) -> PolicyKLExtensionConfig:
+    """Parse the exact v1-source reuse and v0-v7 history contract."""
+
+    try:
+        raw = tomllib.loads(path.read_text(encoding="utf-8"))
+        seeds_raw = raw["seeds"]
+        seats_raw = raw["seats"]
+        decisions_raw = raw["decision_numbers"]
+        history_raw = raw["history"]
+        if not isinstance(seeds_raw, list) or not all(
+            type(item) is int for item in seeds_raw
+        ):
+            raise TypeError("seeds must be an array of integers")
+        if not isinstance(seats_raw, list) or not all(
+            type(item) is int for item in seats_raw
+        ):
+            raise TypeError("seats must be an array of integers")
+        if not isinstance(decisions_raw, list) or not all(
+            type(item) is int for item in decisions_raw
+        ):
+            raise TypeError("decision_numbers must be an array of integers")
+        if not isinstance(history_raw, list):
+            raise TypeError("history must be an array of tables")
+        config = PolicyKLExtensionConfig(
+            measurement_id=str(raw["measurement_id"]),
+            source_measurement_id=str(raw["source_measurement_id"]),
+            source_run_id=str(raw["source_run_id"]),
+            source_tree_hash=str(raw["source_tree_hash"]),
+            opponent_id=str(raw["opponent_id"]),
+            seeds=tuple(seeds_raw),
+            seats=tuple(seats_raw),
+            decision_numbers=tuple(decisions_raw),
+            epsilons=_tuple_strings(raw["epsilons"], "epsilons"),
+            primary_epsilon=str(raw["primary_epsilon"]),
+            history=tuple(
+                HistoricalPolicyConfig(
+                    version=str(item["version"]),
+                    run_id=str(item["run_id"]),
+                    content_hash=str(item["content_hash"]),
+                )
+                for item in history_raw
+            ),
+        )
+    except (
+        OSError,
+        tomllib.TOMLDecodeError,
+        KeyError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        raise AssetValidationError(
+            f"invalid policy KL extension manifest: {exc}"
+        ) from exc
+
+    if config.measurement_id != POLICY_KL_EXTENSION_ID:
+        raise AssetValidationError(
+            f"measurement_id must be {POLICY_KL_EXTENSION_ID}"
+        )
+    if config.source_measurement_id != POLICY_KL_SOURCE_MEASUREMENT_ID:
+        raise AssetValidationError(
+            "policy KL source measurement must be the frozen v1 contract"
+        )
+    if config.source_run_id != POLICY_KL_SOURCE_RUN_ID:
+        raise AssetValidationError(
+            "policy KL source run must match the completed v1 measurement"
+        )
+    if config.source_tree_hash != POLICY_KL_SOURCE_TREE_HASH:
+        raise AssetValidationError(
+            "policy KL source tree hash must match the completed v1 run"
+        )
+    highest = pilot.opponents[0]
+    if highest.tier != "high" or config.opponent_id != highest.opponent_id:
+        raise AssetValidationError(
+            "policy KL opponent must be the frozen highest-tier opponent"
+        )
+    if config.seeds != POLICY_KL_REFERENCE_SEEDS:
+        raise AssetValidationError(
+            "policy KL extension seeds must match the frozen reference seeds"
+        )
+    if config.seats != POLICY_KL_REFERENCE_SEATS:
+        raise AssetValidationError(
+            "policy KL extension seats must be ordered [0, 1]"
+        )
+    if config.decision_numbers != POLICY_KL_REFERENCE_DECISIONS:
+        raise AssetValidationError(
+            "policy KL extension decision numbers must be ordered [2, 10]"
+        )
+    if config.epsilons != POLICY_KL_EPSILONS:
+        raise AssetValidationError(
+            "policy KL extension epsilons must match the frozen sensitivity set"
+        )
+    if config.primary_epsilon != POLICY_KL_PRIMARY_EPSILON:
+        raise AssetValidationError(
+            "policy KL extension primary epsilon must be 0.01"
+        )
+
+    versions = tuple(item.version for item in config.history)
+    expected_versions = tuple(
+        item[0] for item in POLICY_KL_EXTENSION_HISTORY
+    )
+    if versions != expected_versions:
+        raise AssetValidationError(
+            "policy KL extension versions must be ordered v0 through v7"
+        )
+    if any(
+        len(item.content_hash) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in item.content_hash
+        )
+        for item in config.history
+    ):
+        raise AssetValidationError(
+            "policy KL extension content hash must be a lowercase SHA-256 digest"
+        )
+    actual_history = tuple(
+        (item.version, item.run_id, item.content_hash)
+        for item in config.history
+    )
+    if actual_history != POLICY_KL_EXTENSION_HISTORY:
+        raise AssetValidationError(
+            "policy KL extension history must match approved runs and hashes"
         )
     return config
 

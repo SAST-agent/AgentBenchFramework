@@ -6,6 +6,7 @@ import pytest
 from agentbench_frame.generals.assets import (
     AssetValidationError,
     _stable_tree_hash,
+    load_policy_kl_extension_config,
     load_policy_kl_reference_config,
     load_pilot_config,
     load_round3_learning_config,
@@ -28,6 +29,9 @@ ROUND5_FIXTURE = (
 )
 POLICY_KL_REFERENCE_FIXTURE = (
     Path(__file__).parent / "fixtures" / "policy-kl-reference-v1.toml"
+)
+POLICY_KL_EXTENSION_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "policy-kl-reference-v2.toml"
 )
 
 
@@ -269,3 +273,91 @@ def test_policy_kl_reference_manifest_rejects_contract_changes(
 
     with pytest.raises(AssetValidationError, match=message):
         load_policy_kl_reference_config(manifest, pilot)
+
+
+def test_policy_kl_extension_manifest_freezes_v1_source_and_v7():
+    pilot = load_pilot_config(FIXTURE)
+
+    config = load_policy_kl_extension_config(
+        POLICY_KL_EXTENSION_FIXTURE,
+        pilot,
+    )
+
+    assert config.measurement_id == "generals-policy-kl-reference-v2"
+    assert config.source_measurement_id == "generals-policy-kl-reference-v1"
+    assert config.source_run_id == "20260730_1126_8d123b55"
+    assert config.source_tree_hash == (
+        "6203161e1056628d46bb974ed2ffaaf1b2d6a67581e80b57f0d92afa2bb41225"
+    )
+    assert config.opponent_id == "advanced-rank02-robinliu-v18"
+    assert config.seeds == (289101, 289202, 289303)
+    assert config.seats == (0, 1)
+    assert config.decision_numbers == (2, 10)
+    assert config.epsilons == ("0.001", "0.01", "0.05", "0.1")
+    assert config.primary_epsilon == "0.01"
+    assert tuple(item.version for item in config.history) == tuple(
+        f"v{index}" for index in range(8)
+    )
+    assert config.history[-1].content_hash == (
+        "c1eb1e4eae5fb1afa393e15370d744743fe0af206cc05a329fa36bd62ca3c4c4"
+    )
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "message"),
+    [
+        (
+            'source_run_id = "20260730_1126_8d123b55"',
+            'source_run_id = "wrong-run"',
+            "source run",
+        ),
+        (
+            'source_tree_hash = "6203161e1056628d46bb974ed2ffaaf1b2d6a67581e80b57f0d92afa2bb41225"',
+            'source_tree_hash = "not-a-sha256"',
+            "source tree hash",
+        ),
+        (
+            'run_id = "20260730_1739_680b1632"',
+            'run_id = "wrong-v7-run"',
+            "history",
+        ),
+        (
+            'content_hash = "c1eb1e4eae5fb1afa393e15370d744743fe0af206cc05a329fa36bd62ca3c4c4"',
+            'content_hash = "d1eb1e4eae5fb1afa393e15370d744743fe0af206cc05a329fa36bd62ca3c4c4"',
+            "history",
+        ),
+        (
+            "seeds = [289101, 289202, 289303]",
+            "seeds = [289102, 289202, 289303]",
+            "seed",
+        ),
+        (
+            'epsilons = ["0.001", "0.01", "0.05", "0.1"]',
+            'epsilons = ["0.001", "0.02", "0.05", "0.1"]',
+            "epsilon",
+        ),
+        (
+            'version = "v7"',
+            'version = "v8"',
+            "version",
+        ),
+    ],
+)
+def test_policy_kl_extension_manifest_rejects_contract_changes(
+    tmp_path,
+    old,
+    new,
+    message,
+):
+    pilot = load_pilot_config(FIXTURE)
+    manifest = tmp_path / "reference-v2.toml"
+    manifest.write_text(
+        POLICY_KL_EXTENSION_FIXTURE.read_text(encoding="utf-8").replace(
+            old,
+            new,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(AssetValidationError, match=message):
+        load_policy_kl_extension_config(manifest, pilot)

@@ -123,6 +123,21 @@ class PolicyKLReferenceConfig:
 
 
 @dataclass(frozen=True)
+class PolicyKLExtensionConfig:
+    measurement_id: str
+    source_measurement_id: str
+    source_run_id: str
+    source_tree_hash: str
+    opponent_id: str
+    seeds: tuple[int, ...]
+    seats: tuple[int, ...]
+    decision_numbers: tuple[int, ...]
+    epsilons: tuple[str, ...]
+    primary_epsilon: str
+    history: tuple[HistoricalPolicyConfig, ...]
+
+
+@dataclass(frozen=True)
 class ReplaySkillAsset:
     path: Path
     text: str
