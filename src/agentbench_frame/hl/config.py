@@ -100,6 +100,56 @@ class MeasurementConfig:
 
 
 @dataclasses.dataclass(frozen=True)
+class OriginConfig:
+    mode: str = "model_bootstrap"
+    source_run: Optional[str] = None
+    source_version: Optional[str] = None
+    reset_session: bool = True
+    reset_experience: bool = True
+
+    def __post_init__(self) -> None:
+        if self.mode not in {"model_bootstrap", "imported_version"}:
+            raise ValueError(
+                "origin.mode must be model_bootstrap or imported_version"
+            )
+        has_run = bool(self.source_run)
+        has_version = bool(self.source_version)
+        if self.mode == "imported_version" and not (has_run and has_version):
+            raise ValueError(
+                "imported_version origin requires source_run and source_version"
+            )
+        if self.mode == "model_bootstrap" and (has_run or has_version):
+            raise ValueError("model_bootstrap origin cannot define a source")
+
+
+@dataclasses.dataclass(frozen=True)
+class CurriculumConfig:
+    mode: str = "fixed"
+    target_order: str = "lowest_rank_first"
+    preserve_passed_opponents: bool = True
+    required_human_opponents: int = 16
+    stagnation_patience: int = 4
+
+    def __post_init__(self) -> None:
+        if self.mode not in {"fixed", "weakest_failed"}:
+            raise ValueError("curriculum.mode must be fixed or weakest_failed")
+        if self.target_order != "lowest_rank_first":
+            raise ValueError(
+                "curriculum.target_order must be lowest_rank_first"
+            )
+        if not 1 <= self.required_human_opponents <= 16:
+            raise ValueError(
+                "curriculum.required_human_opponents must be in [1, 16]"
+            )
+        if self.stagnation_patience < 1:
+            raise ValueError("curriculum.stagnation_patience must be >= 1")
+        if self.mode == "weakest_failed" and not self.preserve_passed_opponents:
+            raise ValueError(
+                "weakest_failed curriculum requires preserve_passed_opponents"
+            )
+
+
+@dataclasses.dataclass(frozen=True)
 class EvaluationConfig:
     learning_opponent: str = "rank01"
     fixed_gate_seeds: tuple[int, ...] = ()
@@ -121,6 +171,10 @@ class EvaluationConfig:
 class HLRunConfig:
     game: str
     provider: ProviderConfig
+    origin: OriginConfig = dataclasses.field(default_factory=OriginConfig)
+    curriculum: CurriculumConfig = dataclasses.field(
+        default_factory=CurriculumConfig
+    )
     iteration: IterationConfig = dataclasses.field(default_factory=IterationConfig)
     rollback: RollbackConfig = dataclasses.field(default_factory=RollbackConfig)
     experience: ExperienceConfig = dataclasses.field(default_factory=ExperienceConfig)
@@ -140,6 +194,8 @@ class HLRunConfig:
             **_strict_values(ProviderConfig, values["provider"], section="provider")
         )
         for name, section_cls in (
+            ("origin", OriginConfig),
+            ("curriculum", CurriculumConfig),
             ("iteration", IterationConfig),
             ("rollback", RollbackConfig),
             ("experience", ExperienceConfig),

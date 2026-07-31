@@ -84,6 +84,74 @@ class HLConfigTests(unittest.TestCase):
         self.assertEqual(serialized["provider"]["env_key"], "AGENTBENCH_API_KEY")
         self.assertNotIn("api_key", serialized["provider"])
 
+    def test_defaults_keep_model_bootstrap_and_fixed_opponent_mode(self):
+        from agentbench_frame.hl.config import HLRunConfig
+
+        config = HLRunConfig.from_mapping(
+            {
+                "game": "29_rollman",
+                "provider": {"kind": "codex"},
+            }
+        )
+
+        self.assertEqual(config.origin.mode, "model_bootstrap")
+        self.assertIsNone(config.origin.source_run)
+        self.assertIsNone(config.origin.source_version)
+        self.assertEqual(config.curriculum.mode, "fixed")
+
+    def test_imported_origin_requires_source_run_and_version(self):
+        from agentbench_frame.hl.config import HLRunConfig
+
+        base = {
+            "game": "29_rollman",
+            "provider": {"kind": "codex"},
+        }
+        for origin in (
+            {"mode": "imported_version"},
+            {
+                "mode": "imported_version",
+                "source_run": "run-a",
+            },
+            {
+                "mode": "imported_version",
+                "source_version": "v000001",
+            },
+        ):
+            with self.subTest(origin=origin), self.assertRaisesRegex(
+                ValueError, "source_run and source_version"
+            ):
+                HLRunConfig.from_mapping({**base, "origin": origin})
+
+    def test_weakest_failed_curriculum_requires_preservation_and_valid_bounds(self):
+        from agentbench_frame.hl.config import HLRunConfig
+
+        base = {
+            "game": "29_rollman",
+            "provider": {"kind": "codex"},
+        }
+        invalid_curricula = (
+            {
+                "mode": "weakest_failed",
+                "preserve_passed_opponents": False,
+            },
+            {
+                "mode": "weakest_failed",
+                "required_human_opponents": 17,
+            },
+            {
+                "mode": "weakest_failed",
+                "stagnation_patience": 0,
+            },
+        )
+
+        for curriculum in invalid_curricula:
+            with self.subTest(curriculum=curriculum), self.assertRaises(
+                ValueError
+            ):
+                HLRunConfig.from_mapping(
+                    {**base, "curriculum": curriculum}
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -70,6 +70,20 @@ class LocalHLConfig:
         run = HLRunConfig.from_mapping(value["run"])
         if run.game != "29_rollman":
             raise ValueError("this local harness currently supports 29_rollman")
+        if (
+            run.origin.mode == "imported_version"
+            and run.origin.source_run is not None
+        ):
+            source_run = Path(run.origin.source_run).expanduser()
+            if not source_run.is_absolute():
+                source_run = (source.parents[2] / source_run).resolve()
+            run = dataclasses.replace(
+                run,
+                origin=dataclasses.replace(
+                    run.origin,
+                    source_run=str(source_run),
+                ),
+            )
         return cls(
             schema_version="1.0",
             run=run,

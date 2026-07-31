@@ -20,6 +20,7 @@ from agentbench_frame.games.rollman.contract import (
 )
 from agentbench_frame.games.rollman.evaluator import load_human_pool
 from agentbench_frame.hl.context import ContextBundle
+from agentbench_frame.hl.config import HLRunConfig
 from agentbench_frame.hl.experience import ExperienceManager
 from agentbench_frame.hl.local_config import LocalHLConfig
 
@@ -139,6 +140,18 @@ def _frozen_run_config(config: LocalHLConfig) -> dict[str, Any]:
         },
     }
     return json.loads(json.dumps(value, ensure_ascii=False, sort_keys=True))
+
+
+def _normalize_frozen_run_config(value: dict[str, Any]) -> dict[str, Any]:
+    """Fill schema defaults when comparing runs frozen by an older harness."""
+
+    normalized = json.loads(
+        json.dumps(value, ensure_ascii=False, sort_keys=True)
+    )
+    normalized["run"] = HLRunConfig.from_mapping(normalized["run"]).to_dict()
+    return json.loads(
+        json.dumps(normalized, ensure_ascii=False, sort_keys=True)
+    )
 
 
 def _eligible_certification_version_id(
@@ -322,7 +335,9 @@ def _run_real(
     snapshot_path = run_dir / "run-config.json"
     if resume:
         persisted = json.loads(snapshot_path.read_text(encoding="utf-8"))
-        if persisted != config_snapshot:
+        if _normalize_frozen_run_config(persisted) != _normalize_frozen_run_config(
+            config_snapshot
+        ):
             raise ValueError("resume config differs from the frozen run config")
     else:
         snapshot_path.write_text(

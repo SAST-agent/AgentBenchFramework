@@ -116,13 +116,20 @@ def test_dotenv_credential_is_scoped_to_provider_environment(
 
 
 def test_frozen_run_config_is_json_native_and_round_trips():
-    from agentbench_frame.hl.cli import _frozen_run_config
+    from agentbench_frame.hl.cli import (
+        _frozen_run_config,
+        _normalize_frozen_run_config,
+    )
     from agentbench_frame.hl.local_config import LocalHLConfig
 
     snapshot = _frozen_run_config(LocalHLConfig.load(CONFIG))
 
     assert isinstance(snapshot["run"]["evaluation"]["fixed_gate_seeds"], list)
     assert json.loads(json.dumps(snapshot)) == snapshot
+    legacy_snapshot = json.loads(json.dumps(snapshot))
+    del legacy_snapshot["run"]["origin"]
+    del legacy_snapshot["run"]["curriculum"]
+    assert _normalize_frozen_run_config(legacy_snapshot) == snapshot
 
 
 def test_gate_saturated_selected_head_is_still_eligible_for_certification():
