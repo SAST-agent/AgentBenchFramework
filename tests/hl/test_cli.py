@@ -113,3 +113,13 @@ def test_dotenv_credential_is_scoped_to_provider_environment(
     assert environment is not None
     assert environment["AGENTBENCH_API_KEY"] == "test-runtime-value"
     assert "AGENTBENCH_API_KEY" not in __import__("os").environ
+
+
+def test_frozen_run_config_is_json_native_and_round_trips():
+    from agentbench_frame.hl.cli import _frozen_run_config
+    from agentbench_frame.hl.local_config import LocalHLConfig
+
+    snapshot = _frozen_run_config(LocalHLConfig.load(CONFIG))
+
+    assert isinstance(snapshot["run"]["evaluation"]["fixed_gate_seeds"], list)
+    assert json.loads(json.dumps(snapshot)) == snapshot

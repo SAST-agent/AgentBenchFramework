@@ -123,6 +123,24 @@ def _default_run_dir(config: LocalHLConfig) -> Path:
     return config.paths.runs_root / f"run-{timestamp}"
 
 
+def _frozen_run_config(config: LocalHLConfig) -> dict[str, Any]:
+    """Return the JSON-native run snapshot used for run and resume."""
+
+    value = {
+        "schema_version": "1.0",
+        "source_config": str(config.source_path),
+        "source_config_sha256": hashlib.sha256(
+            config.source_path.read_bytes()
+        ).hexdigest(),
+        "run": config.run.to_dict(),
+        "paths": {
+            field.name: str(getattr(config.paths, field.name))
+            for field in dataclasses.fields(config.paths)
+        },
+    }
+    return json.loads(json.dumps(value, ensure_ascii=False, sort_keys=True))
+
+
 def _cmd_validate(args: argparse.Namespace) -> int:
     _json(_validate(_load(args.config)))
     return 0
@@ -270,18 +288,7 @@ def _run_real(
             raise FileNotFoundError(run_dir)
     else:
         run_dir.mkdir(parents=True, exist_ok=False)
-    config_snapshot = {
-        "schema_version": "1.0",
-        "source_config": str(config.source_path),
-        "source_config_sha256": hashlib.sha256(
-            config.source_path.read_bytes()
-        ).hexdigest(),
-        "run": config.run.to_dict(),
-        "paths": {
-            field.name: str(getattr(config.paths, field.name))
-            for field in dataclasses.fields(config.paths)
-        },
-    }
+    config_snapshot = _frozen_run_config(config)
     snapshot_path = run_dir / "run-config.json"
     if resume:
         persisted = json.loads(snapshot_path.read_text(encoding="utf-8"))
