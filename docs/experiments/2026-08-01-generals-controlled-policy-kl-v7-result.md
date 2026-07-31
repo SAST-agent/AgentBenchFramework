@@ -4,12 +4,12 @@
 
 - Status: `complete`
 - Measurement ID: `generals-policy-kl-reference-v2`
-- Run ID: `20260731_1800_45b2e5d9`
+- Run ID: `20260731_1808_aedfbce7`
 - Source measurement: `generals-policy-kl-reference-v1`
 - Source run: `20260730_1126_8d123b55`
 - Reuse mode: `verified_v1_domain_probe_only_v7`
-- Framework commit recorded by the run: `1e9d74d`
-- Wall time: 8.11 seconds
+- Framework commit recorded by the run: `71e466a`
+- Wall time: 7.72 seconds
 - KL direction and unit: `new || old`, natural logarithm, nats
 - Primary smoothing: `epsilon = 0.01`
 
@@ -29,7 +29,9 @@ The source receipt SHA-256 is
 `0430a6a3a6d4f45f82ed944534d0481260575fbf4f97fca2f2f9fea248fdf9a3`.
 The summary also binds the complete ordered v0–v7 policy history. This run
 supersedes the pre-hardening extension run `20260731_1741_a4aa1f8c` as the
-figure source; neither that run nor the original v1 run was modified.
+figure source. The intermediate hardened run `20260731_1800_45b2e5d9` is also
+retained but is not the figure source; neither extension run nor the original
+v1 run was modified.
 
 ## Frozen measurement domain
 
@@ -134,7 +136,7 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m agentbench_frame.cli \
 ```bash
 MPLCONFIGDIR=/tmp/agentbench-matplotlib .venv/bin/python \
   scripts/plot_generals_controlled_policy_kl.py \
-  --run-dir agentbench_data/runs/28_generals/generals-policy-kl/20260731_1800_45b2e5d9 \
+  --run-dir agentbench_data/runs/28_generals/generals-policy-kl/20260731_1808_aedfbce7 \
   --output-prefix docs/experiments/figures/generals-controlled-policy-kl-three-panel
 ```
 
