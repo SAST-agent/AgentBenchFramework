@@ -107,6 +107,18 @@ class ExperienceManager:
             normalized[field] = tuple(items)
         return self.update(act_id, ExperienceUpdate(**normalized))
 
+    def rebuild(
+        self,
+        updates: tuple[tuple[str, str | Path], ...],
+    ) -> Path:
+        """Reconstruct active memory from validated staged updates."""
+
+        self._entries = {field: [] for _, field in self._SECTIONS}
+        self._write()
+        for act_id, path in updates:
+            self.apply_file(act_id, path)
+        return self.path
+
     def _write(self) -> None:
         lines = [
             "# HL Experience Skill",

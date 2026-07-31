@@ -18,16 +18,25 @@ Use this Skill to translate a frozen-backend replay into auditable decision evid
 
 3. If the command fails, mark the replay invalid and stop. Do not treat infrastructure failure as a loss, zero reward, or strategy defect.
 4. Check `Round coverage`. Any reported gap means the omitted rounds are unknown. Do not summarize actions, loops, threats, or causality across that interval.
-5. Locate score changes and named events at exact `(level, round)` coordinates.
-6. Inspect Rollman and Ghost paths for the same complete round before diagnosing collision or escape behavior.
-7. Compare the visible pre-decision state with the submitted direction and the resulting path. Do not invent an item target, route goal, tactic label, belief, or intent.
-8. Propose the smallest code-level policy change that generalizes to an explicit visible-state condition.
-9. State what replay evidence would falsify the hypothesis. Prefer one causal edit over a parameter sweep.
+5. Select at most four exact `(level, round)` locations supporting no more than two causal hypotheses.
+6. Read only bounded decision windows:
+
+   ```bash
+   python scripts/inspect_trace_window.py TRACE.jsonl \
+     --level LEVEL --round DECISION_ROUND --radius 1
+   ```
+
+   Repeat `--round` for additional locations. The script accepts at most 20 centers, limits radius to 0–2, omits the board, and caps output at 64 KiB. Do not open, print, grep, or parse the full trace with ad hoc commands.
+7. Inspect Rollman and Ghost paths in each returned outcome before diagnosing collision or escape behavior.
+8. Compare the visible pre-decision state with the submitted direction and the resulting path. Do not invent an item target, route goal, tactic label, belief, or intent.
+9. Propose the smallest code-level policy change that generalizes to an explicit visible-state condition.
+10. State what replay evidence would falsify the hypothesis. Prefer one causal edit over a parameter sweep.
 
 ## Frame semantics
 
 - A level initialization frame supplies the board and state before that level's first decision.
 - A normal round frame records the completed round. Its path and event fields are outcome evidence, not a fresh decision request.
+- In the trace, a player-0 `action` record with state round `r` is the decision for that visible state. Its ordinary outcome is the `watch` frame at round `r + 1` in the same level.
 - A terminal frame has non-null `StopReason`. It is bookkeeping after play and is never a decision point.
 - A replay with a terminal frame but missing ordinary rounds is not evidence about actions in those missing rounds.
 - `portal_available` in a completed round is the post-round value. A portal that becomes available in that frame can only be used by a later decision.
@@ -124,6 +133,7 @@ Before returning, verify:
 
 - Every event name came from the frozen table.
 - Every claimed action came from a recorded decision or submitted-action trace, not an outcome frame.
+- Every trace claim came from `inspect_trace_window.py`; no full trace was loaded into context.
 - No behavior was inferred across a round gap.
 - No terminal frame was treated as actionable.
 - Collision claims use complete same-round paths and event confirmation.

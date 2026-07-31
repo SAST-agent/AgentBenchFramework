@@ -63,7 +63,7 @@ flowchart LR
 
 Coding agent 的允许读取集合由候选 workspace、本 run 的 context、Experience Skill、指定 replay/trace 和 measurement 组成。Prompt 禁止访问其他 run、其他候选、Framework 源码、人类程序、对手构建目录和用户目录中的其他文件；Provider 从原始 JSONL 审计每条命令中的访问路径。越界 act 记录为 provider failure，保存 token 和审计证据，但不执行比赛评测、不生成有效性能点、不更新 Experience、不参与版本晋级。
 
-每局评测结束后，由 Harness 使用 Replay Skill 的冻结脚本生成紧凑 `summary.md`。Coding agent 必须从摘要中的完整性、分数和事件坐标开始，只对最多 2 个假设读取相关 trace 窗口；单条 trace 最多展开 20 个相关回合。每 act 的默认预算为 14 次工具调用、每条命令最多 6000 tokens 输出，禁止完整打印 replay、trace、棋盘或全量事件流。
+每局评测结束后，由 Harness 使用 Replay Skill 的冻结脚本生成紧凑 `summary.md`。Coding agent 必须从摘要中的完整性、分数和事件坐标开始，只对最多 2 个假设调用 `inspect_trace_window.py` 读取相关 trace 窗口；脚本将决策 round `r` 与同 level 的结果 round `r+1` 配对，省略棋盘，将半径限制为 0–2、中心回合限制为 20、输出限制为 64 KiB。每 act 的默认预算为 14 次工具调用，禁止通过通用文本命令或自行脚本完整读取 replay、trace、棋盘或全量事件流。
 
 Responses API 本身可按无状态接口理解：单次请求不自动等于可复现研究会话。Harness 将 Codex thread ID、精确 prompt、provider 配置指纹、原始 JSONL 和 token usage 写入 checkpoint，从而兼顾上下文复用与运行恢复。
 
@@ -227,6 +227,8 @@ cp .env.example .env
 人类池构建只接受 `opponent_profiles.json` 登记且 SHA-256 完全匹配的 16 份冻结归档，不提供任意源码构建入口。构建阶段禁网、限制环境变量，并设置整棵进程树的时间、内存、进程数、输出量和构建目录占用上限；候选与人类程序的比赛运行阶段采用只读白名单、私有临时写目录、禁网、禁止派生进程和内存上限。
 
 事件日志按事件类型校验必需字段、允许字段、类型、schema version 和 event ID 唯一性。代码版本对象以临时目录写入、fsync、原子重命名，并在读取和回滚前重新核对文件清单与内容哈希。`rollback_selected` 是持久 head 转移，因此中断恢复仍从选定历史 champion 继续。
+
+候选 Experience 采用两阶段提交：coding agent 的更新先写入 run 内的 pending 文件，只有目标评测及 KL/占用测量完整通过后才合并到活动 Skill。策略在参考状态上抛出异常时，Harness 记录 `measurement_failed`，写入原因明确的 `rollback_selected`，恢复父版本代码，并从已完成测量的历史更新重建 Experience。该候选保留为不可晋级的审计制品。
 
 每个满足 rank-1 门槛但尚未完成认证的入选版本都会接受认证，包括 gate 分数饱和时与 champion 同分的新版本。已完成但未达标的版本不重复认证；不完整认证允许重试。
 

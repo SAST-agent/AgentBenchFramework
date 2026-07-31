@@ -7,6 +7,7 @@ import dataclasses
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -25,6 +26,9 @@ from agentbench_frame.hl.config import HLRunConfig
 from agentbench_frame.hl.evaluator import CandidateEvaluation
 from agentbench_frame.hl.experience import ExperienceManager
 from agentbench_frame.hl.local_config import LocalHLConfig
+
+
+_SECRET_LIKE = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}")
 
 
 def _json(value: Any) -> None:
@@ -62,6 +66,148 @@ def _ensure_replay_summary(
         raise ValueError("replay summary exceeds 64 KiB")
     summary_path.write_text(completed.stdout, encoding="utf-8")
     return summary_path
+
+
+def _measure_candidate(
+    *,
+    measurement_runner: Any,
+    version_store: Any,
+    writer: Any,
+    candidate_version: Any,
+    parent_version: Any,
+    candidate_evaluation: CandidateEvaluation,
+    parent_evaluation: CandidateEvaluation,
+) -> bool:
+    """Measure one complete candidate, recording policy-probe failure safely."""
+
+    try:
+        metrics = measurement_runner.measure(
+            new_version=candidate_version,
+            old_version=parent_version,
+            version_store=version_store,
+            new_evaluation=candidate_evaluation,
+            old_evaluation=parent_evaluation,
+        )
+    except Exception as error:
+        message = " ".join(str(error).split()) or "measurement failed"
+        message = _SECRET_LIKE.sub("[REDACTED]", message)[:800]
+        writer.write(
+            "measurement_failed",
+            version_id=candidate_version.version_id,
+            parent_version_id=parent_version.version_id,
+            error_type=type(error).__name__,
+            error_message=message,
+        )
+        return False
+    writer.write(
+        "policy_kl_measured",
+        version_id=candidate_version.version_id,
+        parent_version_id=parent_version.version_id,
+        epsilon=metrics["epsilon"],
+        action_support=metrics["action_support"],
+        local_policy_kl_trace=metrics["local_policy_kl_trace"],
+        episode_local_policy_kl=metrics["episode_local_policy_kl"],
+        reference_manifest=metrics["reference_manifest"],
+    )
+    writer.write(
+        "occupancy_measured",
+        version_id=candidate_version.version_id,
+        parent_version_id=parent_version.version_id,
+        occupancy_shift=metrics["occupancy_shift"],
+    )
+    return True
+
+
+def _pending_measurement_candidate(
+    events: list[dict[str, Any]],
+) -> tuple[str, str] | None:
+    """Return the latest selected evaluated candidate left mid-transaction."""
+
+    selected_index = next(
+        (
+            index
+            for index in range(len(events) - 1, -1, -1)
+            if events[index].get("event_type") == "candidate_selected"
+            and events[index].get("iteration_id") != "iter-000000"
+        ),
+        None,
+    )
+    if selected_index is None:
+        return None
+    version_id = str(events[selected_index]["version_id"])
+    created = next(
+        (
+            event
+            for event in reversed(events[: selected_index + 1])
+            if event.get("event_type") == "version_created"
+            and str(event.get("version_id")) == version_id
+        ),
+        None,
+    )
+    if (
+        created is None
+        or created.get("evaluation_status") != "complete"
+        or created.get("parent_version_id") is None
+    ):
+        return None
+    later = events[selected_index + 1 :]
+    if any(
+        event.get("event_type") == "measurement_failed"
+        and str(event.get("version_id")) == version_id
+        for event in later
+    ):
+        return None
+    if any(
+        event.get("event_type") == "rollback_selected"
+        and str(event.get("from_version_id")) == version_id
+        for event in later
+    ):
+        return None
+    completed_types = {
+        str(event.get("event_type"))
+        for event in later
+        if str(event.get("version_id")) == version_id
+    }
+    if {"policy_kl_measured", "occupancy_measured"} <= completed_types:
+        return None
+    return version_id, str(created["parent_version_id"])
+
+
+def _validated_experience_updates(
+    events: list[dict[str, Any]],
+    run_root: str | Path,
+) -> tuple[tuple[str, Path], ...]:
+    """Select staged Experience updates whose policy measurements completed."""
+
+    event_types_by_version: dict[str, set[str]] = {}
+    for event in events:
+        version_id = event.get("version_id")
+        if version_id is None:
+            continue
+        event_types_by_version.setdefault(str(version_id), set()).add(
+            str(event.get("event_type"))
+        )
+    updates: list[tuple[str, Path]] = []
+    for event in events:
+        if event.get("event_type") != "experience_updated":
+            continue
+        version_id = str(event["version_id"])
+        types = event_types_by_version.get(version_id, set())
+        if "measurement_failed" in types or not {
+            "policy_kl_measured",
+            "occupancy_measured",
+        } <= types:
+            continue
+        act_id = str(event["act_id"])
+        pending = (
+            Path(run_root) / "experience" / "pending" / f"{act_id}.json"
+        )
+        if not pending.is_file():
+            raise FileNotFoundError(
+                f"validated experience update is missing: {pending}"
+            )
+        updates.append((act_id, pending))
+    return tuple(updates)
 
 
 def _load(path: str) -> LocalHLConfig:
@@ -747,13 +893,14 @@ def _run_real(
         experience_manager=experience,
     )
 
-    def measure_iteration(iteration_result: Any) -> None:
+    def measure_iteration(iteration_result: Any) -> set[str]:
         parent_evaluation = evaluations_by_version.get(
             iteration_result.parent_version_id
         )
         parent_version = version_store.get(
             iteration_result.parent_version_id
         )
+        failed: set[str] = set()
         for candidate in iteration_result.candidates:
             evaluations_by_version[
                 candidate.version.version_id
@@ -764,33 +911,17 @@ def _run_real(
                 or candidate.evaluation.status != "complete"
             ):
                 continue
-            metrics = measurement_runner.measure(
-                new_version=candidate.version,
-                old_version=parent_version,
+            if not _measure_candidate(
+                measurement_runner=measurement_runner,
                 version_store=version_store,
-                new_evaluation=candidate.evaluation,
-                old_evaluation=parent_evaluation,
-            )
-            writer.write(
-                "policy_kl_measured",
-                version_id=candidate.version.version_id,
-                parent_version_id=parent_version.version_id,
-                epsilon=metrics["epsilon"],
-                action_support=metrics["action_support"],
-                local_policy_kl_trace=metrics[
-                    "local_policy_kl_trace"
-                ],
-                episode_local_policy_kl=metrics[
-                    "episode_local_policy_kl"
-                ],
-                reference_manifest=metrics["reference_manifest"],
-            )
-            writer.write(
-                "occupancy_measured",
-                version_id=candidate.version.version_id,
-                parent_version_id=parent_version.version_id,
-                occupancy_shift=metrics["occupancy_shift"],
-            )
+                writer=writer,
+                candidate_version=candidate.version,
+                parent_version=parent_version,
+                candidate_evaluation=candidate.evaluation,
+                parent_evaluation=parent_evaluation,
+            ):
+                failed.add(candidate.version.version_id)
+        return failed
 
     if curriculum_mode:
         opponent_by_id = {
@@ -886,6 +1017,85 @@ def _run_real(
                         "run_dir": str(run_dir),
                         "certified": True,
                         "status": "all_human_opponents_defeated",
+                        **controller.summary(),
+                    }
+                )
+                return 0
+            pending_measurement = _pending_measurement_candidate(
+                historical
+            )
+            if pending_measurement is not None:
+                pending_version_id, pending_parent_id = (
+                    pending_measurement
+                )
+                pending_evaluation = evaluations_by_version.get(
+                    pending_version_id
+                )
+                pending_parent_evaluation = evaluations_by_version.get(
+                    pending_parent_id
+                )
+                if (
+                    pending_evaluation is None
+                    or pending_parent_evaluation is None
+                    or pending_evaluation.status != "complete"
+                    or pending_parent_evaluation.status != "complete"
+                ):
+                    raise ValueError(
+                        "pending measurement lacks complete evaluations"
+                    )
+                measured = _measure_candidate(
+                    measurement_runner=measurement_runner,
+                    version_store=version_store,
+                    writer=writer,
+                    candidate_version=version_store.get(
+                        pending_version_id
+                    ),
+                    parent_version=version_store.get(
+                        pending_parent_id
+                    ),
+                    candidate_evaluation=pending_evaluation,
+                    parent_evaluation=pending_parent_evaluation,
+                )
+                if not measured:
+                    rollback = controller.lineage.force_parent(
+                        pending_parent_id,
+                        reason="measurement_failed",
+                    )
+                    version_store.checkout(pending_parent_id)
+                    if rollback.rollback:
+                        writer.write(
+                            "rollback_selected",
+                            from_version_id=rollback.from_version_id,
+                            to_version_id=rollback.to_version_id,
+                            reason=rollback.reason,
+                        )
+                    repaired_history = read_events(events_path)
+                    accepted_updates = _validated_experience_updates(
+                        repaired_history,
+                        run_dir,
+                    )
+                    experience.rebuild(accepted_updates)
+                    writer.write(
+                        "experience_rebuilt",
+                        rejected_version_id=pending_version_id,
+                        accepted_updates=len(accepted_updates),
+                        experience_path=str(experience.path),
+                    )
+                    _json(
+                        {
+                            "run_dir": str(run_dir),
+                            "status": "measurement_failed",
+                            "version_id": pending_version_id,
+                            "next_parent_version_id": pending_parent_id,
+                            **controller.summary(),
+                        }
+                    )
+                    return 2
+                _json(
+                    {
+                        "run_dir": str(run_dir),
+                        "status": "measurement_recovered",
+                        "version_id": pending_version_id,
                         **controller.summary(),
                     }
                 )
@@ -1093,7 +1303,8 @@ def _run_real(
                     "provider credential is required for a model act"
                 )
             iteration_result = controller.run_act(
-                parent_version_id=next_parent
+                parent_version_id=next_parent,
+                defer_experience=True,
             )
             completed_here += 1
             stop_reason = _iteration_stop_reason(iteration_result)
@@ -1106,8 +1317,34 @@ def _run_real(
                     }
                 )
                 return 2
-            measure_iteration(iteration_result)
+            failed_measurements = measure_iteration(iteration_result)
             selected = iteration_result.selected
+            if selected.version.version_id in failed_measurements:
+                rollback = controller.lineage.force_parent(
+                    iteration_result.parent_version_id,
+                    reason="measurement_failed",
+                )
+                version_store.checkout(iteration_result.parent_version_id)
+                if rollback.rollback:
+                    writer.write(
+                        "rollback_selected",
+                        from_version_id=rollback.from_version_id,
+                        to_version_id=rollback.to_version_id,
+                        reason=rollback.reason,
+                    )
+                _json(
+                    {
+                        "run_dir": str(run_dir),
+                        "status": "measurement_failed",
+                        "version_id": selected.version.version_id,
+                        "next_parent_version_id": (
+                            iteration_result.parent_version_id
+                        ),
+                        **controller.summary(),
+                    }
+                )
+                return 2
+            controller.commit_experience(selected)
             assert selected.evaluation.score is not None
             gate_decision = curriculum_manager.observe_gate(
                 version_id=selected.version.version_id,

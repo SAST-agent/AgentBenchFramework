@@ -34,10 +34,12 @@ KNOWN_EVENT_TYPES = frozenset(
         "certification_completed",
         "policy_kl_measured",
         "occupancy_measured",
+        "measurement_failed",
         "elo_updated",
         "champion_promoted",
         "rollback_selected",
         "experience_updated",
+        "experience_rebuilt",
         "checkpoint_created",
         "run_completed",
     }
@@ -142,10 +144,23 @@ _EVENT_FIELDS = {
     "certification_completed": ({"version_id", "act_id", "status", "score", "passing_human_opponents", "required_human_opponents", "matches"}, set()),
     "policy_kl_measured": ({"version_id", "parent_version_id", "epsilon", "action_support", "local_policy_kl_trace", "episode_local_policy_kl", "reference_manifest"}, set()),
     "occupancy_measured": ({"version_id", "parent_version_id", "occupancy_shift"}, set()),
+    "measurement_failed": (
+        {
+            "version_id",
+            "parent_version_id",
+            "error_type",
+            "error_message",
+        },
+        set(),
+    ),
     "elo_updated": ({"match_id", "version_id", "act_id", "phase", "candidate", "opponent", "seed", "result", "rating_before", "rating", "opponent_rating", "role"}, set()),
     "champion_promoted": ({"version_id", "score"}, set()),
     "rollback_selected": ({"from_version_id", "to_version_id", "reason"}, set()),
     "experience_updated": ({"act_id", "version_id", "experience_path"}, set()),
+    "experience_rebuilt": (
+        {"rejected_version_id", "accepted_updates", "experience_path"},
+        set(),
+    ),
     "checkpoint_created": ({"act_id", "iteration_id", "path", "parent_version_id"}, {"thread_id"}),
     "run_completed": ({"reason", "version_id"}, {"passing_human_opponents"}),
 }
@@ -179,6 +194,7 @@ def _validate_record(record: Mapping[str, Any]) -> None:
         "reference_manifest", "source_run_id", "source_version_id",
         "source_content_hash", "active_target", "stage_origin_version_id",
         "stage_best_version_id", "completed_target", "next_target",
+        "error_type", "error_message", "rejected_version_id",
     ):
         if field in record and record[field] is not None and not isinstance(record[field], str):
             raise ValueError(f"{event_type}.{field} must be a string or null")
@@ -190,6 +206,7 @@ def _validate_record(record: Mapping[str, Any]) -> None:
         "reasoning_output_tokens", "total_tokens", "rollman_score",
         "ghosts_score",
         "active_target_rank", "stagnation_count",
+        "accepted_updates",
     ):
         value = record.get(field)
         if value is not None and (not isinstance(value, int) or isinstance(value, bool)):

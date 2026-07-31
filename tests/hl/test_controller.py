@@ -360,6 +360,49 @@ def test_controller_ingests_structured_experience_update_outside_version(tmp_pat
     assert ".agentbench/experience_update.json" not in result.selected.version.files
 
 
+def test_curriculum_can_defer_experience_until_candidate_validation(tmp_path):
+    from agentbench_frame.hl.events import read_events
+    from agentbench_frame.hl.experience import ExperienceManager
+
+    experience = ExperienceManager(tmp_path / "experience")
+    provider = FakeProvider(
+        ["VALUE = 1\n"],
+        experience_updates=[
+            {
+                "stable_knowledge": ["Only commit this after policy probes pass."],
+                "failed_hypotheses": [],
+                "replay_evidence": ["rank15 seed 101 level 2 round 7"],
+                "active_questions": [],
+            }
+        ],
+    )
+    controller = _controller(
+        tmp_path,
+        provider,
+        FakeEvaluator([0.0]),
+        experience=experience,
+    )
+    controller.initialize()
+
+    result = controller.run_act(defer_experience=True)
+
+    assert "Only commit this" not in experience.path.read_text(encoding="utf-8")
+    assert not [
+        event
+        for event in read_events(tmp_path / "events.jsonl")
+        if event["event_type"] == "experience_updated"
+    ]
+    controller.commit_experience(result.selected)
+    assert "Only commit this" in experience.path.read_text(encoding="utf-8")
+    assert len(
+        [
+            event
+            for event in read_events(tmp_path / "events.jsonl")
+            if event["event_type"] == "experience_updated"
+        ]
+    ) == 1
+
+
 def test_completed_matches_emit_win_rate_inputs_and_role_elo(tmp_path):
     from agentbench_frame.hl.evaluator import CandidateEvaluation
     from agentbench_frame.hl.events import read_events

@@ -163,3 +163,110 @@ def test_replay_summary_is_generated_once_and_reused(tmp_path):
     assert summary == replay.with_name("summary.md")
     assert reused == summary
     assert summary.read_text(encoding="utf-8") == "# summary for replay.jsonl\n"
+
+
+def test_measurement_failure_is_recorded_and_returns_false(tmp_path):
+    from types import SimpleNamespace
+
+    from agentbench_frame.hl.cli import _measure_candidate
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+    from agentbench_frame.hl.events import HLEventWriter, read_events
+
+    class FailingMeasurementRunner:
+        def measure(self, **kwargs):
+            raise TypeError("candidate policy failed on reference state 17")
+
+    writer = HLEventWriter(tmp_path / "events.jsonl", run_id="run-test")
+    completed = CandidateEvaluation(status="complete", score=0.0, matches=())
+
+    measured = _measure_candidate(
+        measurement_runner=FailingMeasurementRunner(),
+        version_store=object(),
+        writer=writer,
+        candidate_version=SimpleNamespace(version_id="v000001"),
+        parent_version=SimpleNamespace(version_id="v000000"),
+        candidate_evaluation=completed,
+        parent_evaluation=completed,
+    )
+
+    assert measured is False
+    event = read_events(tmp_path / "events.jsonl")[0]
+    assert event["event_type"] == "measurement_failed"
+    assert event["version_id"] == "v000001"
+    assert event["parent_version_id"] == "v000000"
+    assert event["error_type"] == "TypeError"
+    assert "reference state 17" in event["error_message"]
+
+
+def test_resume_detects_selected_candidate_with_unfinished_measurement():
+    from agentbench_frame.hl.cli import _pending_measurement_candidate
+
+    events = [
+        {
+            "event_type": "version_created",
+            "version_id": "v000001",
+            "parent_version_id": "v000000",
+            "evaluation_status": "complete",
+        },
+        {
+            "event_type": "candidate_selected",
+            "iteration_id": "iter-000001",
+            "version_id": "v000001",
+        },
+    ]
+
+    assert _pending_measurement_candidate(events) == ("v000001", "v000000")
+    assert (
+        _pending_measurement_candidate(
+            events
+            + [
+                {
+                    "event_type": "measurement_failed",
+                    "version_id": "v000001",
+                    "parent_version_id": "v000000",
+                }
+            ]
+        )
+        is None
+    )
+
+
+def test_experience_rebuild_uses_only_candidates_with_complete_measurement(
+    tmp_path,
+):
+    from agentbench_frame.hl.cli import _validated_experience_updates
+
+    pending = tmp_path / "experience" / "pending"
+    pending.mkdir(parents=True)
+    valid = pending / "act-valid.json"
+    invalid = pending / "act-invalid.json"
+    valid.write_text("{}\n", encoding="utf-8")
+    invalid.write_text("{}\n", encoding="utf-8")
+    events = [
+        {
+            "event_type": "experience_updated",
+            "act_id": "act-valid",
+            "version_id": "v1",
+        },
+        {
+            "event_type": "policy_kl_measured",
+            "version_id": "v1",
+        },
+        {
+            "event_type": "occupancy_measured",
+            "version_id": "v1",
+        },
+        {
+            "event_type": "experience_updated",
+            "act_id": "act-invalid",
+            "version_id": "v2",
+        },
+        {
+            "event_type": "measurement_failed",
+            "version_id": "v2",
+        },
+    ]
+
+    assert _validated_experience_updates(events, tmp_path) == (
+        ("act-valid", valid),
+    )

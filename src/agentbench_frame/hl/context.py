@@ -191,6 +191,11 @@ class IterationContext:
             sort_keys=True,
             separators=(",", ":"),
         )
+        trace_window_tool = (
+            self.bundle.files["replay_skill"].parent
+            / "scripts"
+            / "inspect_trace_window.py"
+        )
         curriculum = ""
         if active_target is not None:
             locked = json.dumps(
@@ -229,7 +234,8 @@ class IterationContext:
 Act 预算：
 - 最多 14 次工具调用；优先批量读取，禁止用许多小命令反复查看同一材料。
 - 必须先读取 evidence 中的 `summary`；不得打印完整 replay、完整 trace、完整棋盘或全量事件流。
-- 只允许对最多 2 个可证伪假设做定点探针，每个命令输出不超过 6000 tokens，每条 trace 最多展开 20 个相关回合。
+- 只允许对最多 2 个可证伪假设做定点探针；trace 必须用 `{trace_window_tool} TRACE --level L --round R --radius 1` 读取。
+- 禁止用 cat、sed、head、tail、rg 或自行脚本读取 trace。定点工具每次输出不超过 64 KiB，单条 trace 最多请求 20 个中心回合。
 - 完成一次证据诊断后立即实现最小机制改动并验证；禁止在同一 act 内形成参数搜索循环。
 
 执行约束：
@@ -240,7 +246,7 @@ Act 预算：
 5. 若一轮有多个候选，本候选必须与同轮其他候选机制上不同，不能只是换阈值。
 6. 压缩或整合被替代的策略，避免持续堆叠分支；保留清晰回滚边界。
 7. 不读取、搜索或推断人类对手源码。只能从合法比赛回放学习。
-8. 只在 candidate workspace 内完成 `python -m py_compile ai.py` 和候选侧 smoke test，不搜索 Framework 命令。不要直接修改 Experience Skill；将四个字符串数组 stable_knowledge、failed_hypotheses、replay_evidence、active_questions 写入 workspace/.agentbench/experience_update.json，由 Framework 在候选入选后合并。
+8. 只在 candidate workspace 内完成 `python -m py_compile ai.py` 和候选侧 smoke test，不搜索 Framework 命令。不要直接修改 Experience Skill；将四个字符串数组 stable_knowledge、failed_hypotheses、replay_evidence、active_questions 写入 workspace/.agentbench/experience_update.json，由 Framework 在候选测量完整通过后合并。
 """
 
 

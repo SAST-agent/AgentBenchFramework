@@ -262,3 +262,52 @@ def test_force_parent_rolls_back_immediately_and_survives_event_rebuild():
     ]
     rebuilt = LineageManager.from_events(events)
     assert rebuilt.lineage_head_version_id == "v0"
+
+
+def test_measurement_failure_rollback_reason_survives_event_rebuild():
+    from agentbench_frame.hl.lineage import LineageManager
+
+    lineage = LineageManager()
+    lineage.record_evaluation(
+        "v0",
+        parent_version_id=None,
+        status="complete",
+        score=0.0,
+    )
+    lineage.record_evaluation(
+        "v1",
+        parent_version_id="v0",
+        status="complete",
+        score=0.0,
+    )
+
+    decision = lineage.force_parent("v0", reason="measurement_failed")
+
+    assert decision.reason == "measurement_failed"
+    rebuilt = LineageManager.from_events(
+        [
+            {
+                "event_type": "version_created",
+                "version_id": "v0",
+                "parent_version_id": None,
+                "evaluation_status": "complete",
+                "benchmark_score": 0.0,
+            },
+            {"event_type": "candidate_selected", "version_id": "v0"},
+            {
+                "event_type": "version_created",
+                "version_id": "v1",
+                "parent_version_id": "v0",
+                "evaluation_status": "complete",
+                "benchmark_score": 0.0,
+            },
+            {"event_type": "candidate_selected", "version_id": "v1"},
+            {
+                "event_type": "rollback_selected",
+                "from_version_id": "v1",
+                "to_version_id": "v0",
+                "reason": "measurement_failed",
+            },
+        ]
+    )
+    assert rebuilt.lineage_head_version_id == "v0"

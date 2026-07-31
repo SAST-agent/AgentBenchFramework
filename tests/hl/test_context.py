@@ -132,6 +132,9 @@ def test_curriculum_prompt_names_target_and_locked_pool(tmp_path):
     assert "审计工具调用路径" in prompt
     assert "最多 14 次工具调用" in prompt
     assert "不得打印完整 replay" in prompt
+    assert "inspect_trace_window.py" in prompt
+    assert "禁止用 cat、sed、head、tail、rg 或自行脚本读取 trace" in prompt
+    assert "测量完整通过后合并" in prompt
     assert "summary" in prompt
 
 

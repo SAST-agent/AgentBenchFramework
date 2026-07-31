@@ -87,3 +87,41 @@ def test_experience_update_file_is_strict_and_survives_resume(tmp_path):
     update_path.write_text('{"unknown":[]}', encoding="utf-8")
     with pytest.raises(ValueError, match="unknown experience"):
         resumed.apply_file("act-0002", update_path)
+
+
+def test_experience_can_rebuild_from_only_validated_updates(tmp_path):
+    from agentbench_frame.hl.experience import ExperienceManager
+
+    manager = ExperienceManager(tmp_path / "experience")
+    first = tmp_path / "first.json"
+    second = tmp_path / "second.json"
+    first.write_text(
+        json.dumps(
+            {
+                "stable_knowledge": ["validated lesson"],
+                "failed_hypotheses": [],
+                "replay_evidence": [],
+                "active_questions": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    second.write_text(
+        json.dumps(
+            {
+                "stable_knowledge": ["invalid candidate lesson"],
+                "failed_hypotheses": [],
+                "replay_evidence": [],
+                "active_questions": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manager.apply_file("act-1", first)
+    manager.apply_file("act-2", second)
+
+    manager.rebuild((("act-1", first),))
+
+    skill = manager.path.read_text(encoding="utf-8")
+    assert "validated lesson" in skill
+    assert "invalid candidate lesson" not in skill

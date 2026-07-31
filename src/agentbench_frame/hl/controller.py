@@ -24,6 +24,7 @@ class CandidateResult:
     version: Version
     evaluation: CandidateEvaluation
     provider: ProviderInvocation
+    pending_experience_path: Optional[Path] = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -446,6 +447,7 @@ class HLController:
         self,
         *,
         parent_version_id: str | None = None,
+        defer_experience: bool = False,
     ) -> IterationResult:
         if not self._started:
             raise RuntimeError("initialize must be called before run_act")
@@ -546,6 +548,7 @@ class HLController:
                 version=version,
                 evaluation=evaluation,
                 provider=invocation,
+                pending_experience_path=pending_experience.get(act_id),
             )
             results.append(result)
             self._write_act_event(iteration_id, result)
@@ -573,18 +576,8 @@ class HLController:
             version_id=selected.version.version_id,
             act_id=selected.act_id,
         )
-        selected_experience = pending_experience.get(selected.act_id)
-        if self.experience_manager is not None and selected_experience is not None:
-            path = self.experience_manager.apply_file(
-                selected.act_id,
-                selected_experience,
-            )
-            self.events.write(
-                "experience_updated",
-                act_id=selected.act_id,
-                version_id=selected.version.version_id,
-                experience_path=str(path),
-            )
+        if not defer_experience:
+            self.commit_experience(selected)
         return IterationResult(
             iteration_id=iteration_id,
             parent_version_id=parent_id,
@@ -592,6 +585,21 @@ class HLController:
             selected=selected,
             rollback=rollback,
         )
+
+    def commit_experience(self, candidate: CandidateResult) -> Path | None:
+        """Commit a selected candidate's staged Experience update once."""
+
+        pending = candidate.pending_experience_path
+        if self.experience_manager is None or pending is None:
+            return None
+        path = self.experience_manager.apply_file(candidate.act_id, pending)
+        self.events.write(
+            "experience_updated",
+            act_id=candidate.act_id,
+            version_id=candidate.version.version_id,
+            experience_path=str(path),
+        )
+        return path
 
     def reached_iteration_limit(self) -> bool:
         return (

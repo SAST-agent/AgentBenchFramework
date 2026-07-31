@@ -142,6 +142,52 @@ class HLEventTests(unittest.TestCase):
                     invented=True,
                 )
 
+    def test_measurement_failure_is_a_strict_finalized_event(self):
+        from agentbench_frame.hl.events import HLEventWriter, read_events
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as directory:
+            path = f"{directory}/events.jsonl"
+            writer = HLEventWriter(path, run_id="run-curriculum")
+            writer.write(
+                "measurement_failed",
+                version_id="v000001",
+                parent_version_id="v000000",
+                error_type="TypeError",
+                error_message="candidate policy failed on a reference state",
+            )
+
+            event = read_events(path)[0]
+            self.assertEqual(event["event_type"], "measurement_failed")
+            self.assertEqual(event["version_id"], "v000001")
+            with self.assertRaisesRegex(ValueError, "unknown fields"):
+                writer.write(
+                    "measurement_failed",
+                    version_id="v000002",
+                    parent_version_id="v000000",
+                    error_type="TypeError",
+                    error_message="invalid policy",
+                    traceback="must not enter the fact log",
+                )
+
+    def test_experience_rebuild_records_the_rejected_candidate(self):
+        from agentbench_frame.hl.events import HLEventWriter, read_events
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as directory:
+            path = f"{directory}/events.jsonl"
+            writer = HLEventWriter(path, run_id="run-curriculum")
+            writer.write(
+                "experience_rebuilt",
+                rejected_version_id="v000001",
+                accepted_updates=0,
+                experience_path=f"{directory}/experience/SKILL.md",
+            )
+
+            event = read_events(path)[0]
+            self.assertEqual(event["event_type"], "experience_rebuilt")
+            self.assertEqual(event["accepted_updates"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
