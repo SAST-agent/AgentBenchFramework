@@ -162,6 +162,15 @@ def _eligible_certification_version_id(
     return version_id
 
 
+def _iteration_stop_reason(iteration_result: Any) -> str | None:
+    selected = iteration_result.selected
+    if selected.provider.status != "completed":
+        return f"provider_{selected.provider.status}"
+    if selected.evaluation.status != "complete":
+        return f"evaluation_{selected.evaluation.status}"
+    return None
+
+
 def _cmd_validate(args: argparse.Namespace) -> int:
     _json(_validate(_load(args.config)))
     return 0
@@ -651,6 +660,16 @@ def _run_real(
             break
         iteration_result = controller.run_act()
         completed_here += 1
+        stop_reason = _iteration_stop_reason(iteration_result)
+        if stop_reason is not None:
+            _json(
+                {
+                    "run_dir": str(run_dir),
+                    "status": stop_reason,
+                    **controller.summary(),
+                }
+            )
+            return 2
         parent_evaluation = evaluations_by_version.get(
             iteration_result.parent_version_id
         )

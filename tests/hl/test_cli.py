@@ -161,3 +161,24 @@ def test_resume_accepts_zero_new_model_acts(monkeypatch):
         )
         == 0
     )
+
+
+def test_unbounded_loop_stops_on_provider_or_evaluation_failure():
+    from types import SimpleNamespace
+    from agentbench_frame.hl.cli import _iteration_stop_reason
+
+    failed_provider = SimpleNamespace(
+        selected=SimpleNamespace(
+            provider=SimpleNamespace(status="failed"),
+            evaluation=SimpleNamespace(status="failed"),
+        )
+    )
+    incomplete_evaluation = SimpleNamespace(
+        selected=SimpleNamespace(
+            provider=SimpleNamespace(status="completed"),
+            evaluation=SimpleNamespace(status="incomplete"),
+        )
+    )
+
+    assert _iteration_stop_reason(failed_provider) == "provider_failed"
+    assert _iteration_stop_reason(incomplete_evaluation) == "evaluation_incomplete"

@@ -57,6 +57,8 @@ Bootstrap Codex act 读取三个带哈希的静态文件：
 
 Responses API 本身可按无状态接口理解：单次请求不自动等于可复现研究会话。Harness 将 Codex thread ID、精确 prompt、provider 配置指纹、原始 JSONL 和 token usage 写入 checkpoint，从而兼顾上下文复用与运行恢复。
 
+无上限运行遇到 provider failure/timeout 或固定评测 incomplete 时立即停止，不自动重复失败请求；同一 run 可在外部条件恢复后继续。
+
 本配置不使用 `codex exec --ephemeral`。`ephemeral` 表示不保留可恢复的本地会话状态，会破坏跨 act 的 resume。`disable_response_storage: true` 控制上游响应存储；本地科研产物仍按 run 目录保存。
 
 模型调用消耗 `.env` 中 `AGENTBENCH_API_KEY` 对应账户的 token，不消耗 Codex App 对话预算。Harness 直接读取该键并构造仅供 Codex 子进程使用的环境，不把键加载进全局进程环境；API key 不进入构建程序、候选程序、人类程序、prompt、事件或报告。
