@@ -99,13 +99,14 @@ def test_openai_client_converts_neutral_history():
 
 
 def test_anthropic_client_maps_response():
-    resp = _anthropic_resp("hi", tool_uses=[("write_agent_py", {"content": "print(1)"})],
+    resp = _anthropic_resp("hi", tool_uses=[("str_replace",
+                           {"old_string": "a", "new_string": "b"})],
                            usage=(8, 4))
     client = AnthropicClient(api_key="k", model="m", _client=_FakeAnthropic(resp))
     out = client.complete(system="S", messages=[{"role": "user", "content": "q"}],
                           tools=SHARED_TOOLS, max_tokens=100)
-    assert out.tool_calls[0].name == "write_agent_py"
-    assert out.tool_calls[0].arguments == {"content": "print(1)"}
+    assert out.tool_calls[0].name == "str_replace"
+    assert out.tool_calls[0].arguments == {"old_string": "a", "new_string": "b"}
     assert out.usage.prompt_tokens == 8
     assert out.usage.completion_tokens == 4
     assert out.usage.total_tokens == 12
@@ -135,7 +136,7 @@ def test_build_client_unknown_provider():
 
 def test_shared_tools_have_four_names():
     assert {t["name"] for t in SHARED_TOOLS} == {
-        "read_file", "list_replays", "read_replay", "write_agent_py"}
+        "read_file", "list_replays", "read_replay", "str_replace"}
 
 
 def test_openai_multi_call_roundtrip():

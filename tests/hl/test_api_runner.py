@@ -25,29 +25,57 @@ def _seed_agent(workspace: Path, body: str = "def step():\n    pass\n") -> Path:
     return p
 
 
-def test_applies_write_agent_py(tmp_path):
+def test_applies_str_replace(tmp_path):
     _seed_agent(tmp_path)
     client = ScriptedClient([
         LLMResponse(text="", tool_calls=[ToolCall("read_file", {"path": "agent.py"})],
                     usage=Usage(5, 1)),
-        LLMResponse(text="done", tool_calls=[ToolCall("write_agent_py",
-                    {"content": "VALUE = 1\n"})], usage=Usage(7, 2)),
+        LLMResponse(text="done", tool_calls=[ToolCall("str_replace",
+                    {"old_string": "def step():\n    pass\n",
+                     "new_string": "def step():\n    return 1\n"})],
+                    usage=Usage(7, 2)),
     ])
     r = ApiCodingRunner(client=client, system_prompt="S")
     res = r.run(workspace=tmp_path, context={"prompt": "improve it"})
     assert res.edit_type is None          # unclassified -> controller diff-classifies
     assert res.failure_reason is None
-    assert (tmp_path / "agent.py").read_text() == "VALUE = 1\n"
+    assert (tmp_path / "agent.py").read_text() == "def step():\n    return 1\n"
     assert res.prompt_tokens == 12 and res.completion_tokens == 3
     assert client.calls == 2
+
+
+def test_str_replace_not_unique_not_applied(tmp_path):
+    _seed_agent(tmp_path, "A = 1\nB = 1\n")  # "= 1\n" matches twice
+    client = ScriptedClient([
+        LLMResponse(text="", tool_calls=[ToolCall("str_replace",
+                    {"old_string": "= 1\n", "new_string": "= 2\n"})],
+                    usage=Usage(1, 1))])
+    res = ApiCodingRunner(client=client, system_prompt="S").run(
+        workspace=tmp_path, context={"prompt": "x"})
+    assert res.edit_type == "noop"
+    assert res.failure_reason and "not_unique" in res.failure_reason
+    assert (tmp_path / "agent.py").read_text() == "A = 1\nB = 1\n"  # unchanged
+
+
+def test_str_replace_not_found_not_applied(tmp_path):
+    _seed_agent(tmp_path, "ORIG = 1\n")
+    client = ScriptedClient([
+        LLMResponse(text="", tool_calls=[ToolCall("str_replace",
+                    {"old_string": "NOT_PRESENT", "new_string": "x"})],
+                    usage=Usage(1, 1))])
+    res = ApiCodingRunner(client=client, system_prompt="S").run(
+        workspace=tmp_path, context={"prompt": "x"})
+    assert res.edit_type == "noop"
+    assert res.failure_reason and "not_found" in res.failure_reason
+    assert (tmp_path / "agent.py").read_text() == "ORIG = 1\n"
 
 
 def test_invalid_python_not_applied(tmp_path):
     _seed_agent(tmp_path, "ORIGINAL = 1\n")
     client = ScriptedClient([
-        LLMResponse(text="", tool_calls=[ToolCall("write_agent_py",
-                    {"content": "def (\n"})], usage=Usage(1, 1)),
-    ])
+        LLMResponse(text="", tool_calls=[ToolCall("str_replace",
+                    {"old_string": "ORIGINAL = 1\n", "new_string": "def (\n"})],
+                    usage=Usage(1, 1))])
     res = ApiCodingRunner(client=client, system_prompt="S").run(
         workspace=tmp_path, context={"prompt": "x"})
     assert res.edit_type == "noop"
@@ -123,8 +151,9 @@ def test_timeout_passed_to_client(tmp_path):
     client = ScriptedClient([
         LLMResponse(text="", tool_calls=[ToolCall("read_file", {"path": "agent.py"})],
                     usage=Usage(5, 1)),
-        LLMResponse(text="done", tool_calls=[ToolCall("write_agent_py",
-                    {"content": "EDITED = 1\n"})], usage=Usage(7, 2)),
+        LLMResponse(text="done", tool_calls=[ToolCall("str_replace",
+                    {"old_string": "def step():\n    pass\n",
+                     "new_string": "EDITED = 1\n"})], usage=Usage(7, 2)),
     ])
     runner = ApiCodingRunner(client=client, system_prompt="S", timeout=42.0)
     res = runner.run(workspace=tmp_path, context={"prompt": "improve it"})
@@ -145,8 +174,10 @@ def test_transcript_records_successful_edit(tmp_path):
     client = ScriptedClient([
         LLMResponse(text="", tool_calls=[ToolCall("read_file", {"path": "agent.py"})],
                     usage=Usage(5, 1)),
-        LLMResponse(text="done", tool_calls=[ToolCall("write_agent_py",
-                    {"content": "VALUE = 1\n"})], usage=Usage(7, 2)),
+        LLMResponse(text="done", tool_calls=[ToolCall("str_replace",
+                    {"old_string": "def step():\n    pass\n",
+                     "new_string": "def step():\n    return 1\n"})],
+                    usage=Usage(7, 2)),
     ])
     res = ApiCodingRunner(client=client, system_prompt="S").run(
         workspace=tmp_path,
@@ -160,7 +191,7 @@ def test_transcript_records_successful_edit(tmp_path):
     assert turns[0]["tool_calls"][0]["name"] == "read_file"
     assert turns[0]["write_attempt"] is None
     wa = turns[1]["write_attempt"]
-    assert wa["called"] is True and wa["ast_ok"] is True and wa["content_len"] > 0
+    assert wa["called"] is True and wa["ast_ok"] is True and wa["old_len"] > 0
     assert terms and terms[0]["edit_applied"] is True and terms[0]["failure_reason"] is None
 
 
@@ -186,8 +217,9 @@ def test_transcript_records_syntax_failure(tmp_path):
     _seed_agent(tmp_path, "ORIG = 1\n")
     tdir = tmp_path / "t3"
     client = ScriptedClient([
-        LLMResponse(text="", tool_calls=[ToolCall("write_agent_py",
-                    {"content": "def (\n"})], usage=Usage(1, 1))])
+        LLMResponse(text="", tool_calls=[ToolCall("str_replace",
+                    {"old_string": "ORIG = 1\n", "new_string": "def (\n"})],
+                    usage=Usage(1, 1))])
     res = ApiCodingRunner(client=client, system_prompt="S").run(
         workspace=tmp_path, context={"prompt": "x", "transcript_dir": str(tdir)})
     recs = _read_transcript(res.transcript_path)
@@ -196,26 +228,28 @@ def test_transcript_records_syntax_failure(tmp_path):
     assert wa["reason"] and "syntax" in wa["reason"].lower()
 
 
-def test_empty_write_rejected(tmp_path):
-    """An empty write_agent_py content must never be applied (silent corruption)."""
+def test_empty_old_string_rejected(tmp_path):
+    """An empty old_string must never be applied (silent corruption)."""
     _seed_agent(tmp_path, "ORIG = 1\n")
     client = ScriptedClient([
-        LLMResponse(text="", tool_calls=[ToolCall("write_agent_py", {"content": ""})],
+        LLMResponse(text="", tool_calls=[ToolCall("str_replace",
+                    {"old_string": "", "new_string": "x"})],
                     usage=Usage(1, 1))])
     res = ApiCodingRunner(client=client, system_prompt="S").run(
         workspace=tmp_path, context={"prompt": "x"})
     assert res.edit_type == "noop"
-    assert res.failure_reason == "empty_write"
+    assert res.failure_reason == "empty_old_string"
     assert (tmp_path / "agent.py").read_text() == "ORIG = 1\n"  # unchanged
 
 
 def test_truncated_write_rejected(tmp_path):
-    """A length-capped generation (finish_reason=length) on a write turn means
-    the content arg was cut mid-stream -> never apply the partial file."""
+    """A length-capped generation (finish_reason=length) on an edit turn means
+    the old/new strings were cut mid-stream -> never apply the partial edit."""
     _seed_agent(tmp_path, "ORIG = 1\n")
     client = ScriptedClient([
         LLMResponse(text="", finish_reason="length",
-                    tool_calls=[ToolCall("write_agent_py", {"content": "partial = 1\n"})],
+                    tool_calls=[ToolCall("str_replace",
+                                {"old_string": "ORIG", "new_string": "partial"})],
                     usage=Usage(1, 4096))])
     res = ApiCodingRunner(client=client, system_prompt="S").run(
         workspace=tmp_path, context={"prompt": "x"})

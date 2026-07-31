@@ -325,8 +325,8 @@ class ApiCodingRunner:
 
     Hybrid depth: a bounded tool-use loop exposing read-only tools
     (``read_file`` / ``list_replays`` / ``read_replay``) plus the single edit
-    ``write_agent_py`` (full-file rewrite). The loop stops when the model calls
-    ``write_agent_py``, emits a final message with no tool call, or hits the
+    ``str_replace`` (unique-match diff into agent.py). The loop stops when the
+    model calls ``str_replace``, emits a final message with no tool call, or hits the
     step cap (``max_turns``). The edit is ``ast.parse``-validated before apply;
     a SyntaxError leaves the workspace untouched and yields an honest ``noop``
     plus a ``failure_reason``.
@@ -395,36 +395,37 @@ class ApiCodingRunner:
                                  "tool_calls": resp.tool_calls})
                 wrote = False
                 for tc in resp.tool_calls:
-                    if tc.name == "write_agent_py":
-                        content = tc.arguments.get("content", "")
+                    if tc.name == "str_replace":
+                        old = tc.arguments.get("old_string", "")
+                        new = tc.arguments.get("new_string", "")
                         # A length-capped generation (finish_reason="length")
-                        # cut the tool args mid-stream, so ``content`` is
-                        # incomplete — possibly empty. Never apply a
-                        # truncated/empty write: it silently corrupts
-                        # agent.py (empty file parses as valid Python). Fail
-                        # the act honestly; the workspace stays on the last
-                        # good version and the next act retries.
+                        # cut the tool args mid-stream, so old/new may be
+                        # incomplete. Never apply a truncated edit — it can
+                        # silently corrupt agent.py. Fail the act honestly;
+                        # the workspace stays on the last good version and
+                        # the next act retries.
                         if resp.finish_reason == "length":
                             rec["write_attempt"] = {
-                                "called": True, "content_len": len(content),
-                                "ast_ok": False,
-                                "reason": "write_truncated (max_tokens hit mid-write)",
+                                "called": True, "old_len": len(old),
+                                "new_len": len(new), "ast_ok": False,
+                                "reason": "write_truncated (max_tokens hit mid-edit)",
                             }
                             failure_reason = "write_truncated"
                             wrote = True
                             break
-                        if not content.strip():
+                        if not old:
                             rec["write_attempt"] = {
-                                "called": True, "content_len": len(content),
-                                "ast_ok": False, "reason": "empty_write",
+                                "called": True, "old_len": len(old),
+                                "new_len": len(new), "ast_ok": False,
+                                "reason": "empty_old_string",
                             }
-                            failure_reason = "empty_write"
+                            failure_reason = "empty_old_string"
                             wrote = True
                             break
-                        ok, reason = self._apply_edit(content, workspace)
+                        ok, reason = self._apply_str_replace(old, new, workspace)
                         rec["write_attempt"] = {
-                            "called": True, "content_len": len(content),
-                            "ast_ok": ok, "reason": reason,
+                            "called": True, "old_len": len(old),
+                            "new_len": len(new), "ast_ok": ok, "reason": reason,
                         }
                         if ok:
                             edit_applied = True
@@ -469,9 +470,9 @@ class ApiCodingRunner:
         """Write a per-act JSONL tool-call transcript beside the round root.
 
         One ``{kind: turn}`` record per tool-use turn (tool calls emitted,
-        any ``write_agent_py`` attempt, read-tool result previews) plus a
+        any ``str_replace`` attempt, read-tool result previews) plus a
         final ``{kind: terminal}`` record. Lets a run be diagnosed without a
-        live debugger: did the model call ``write_agent_py``? did it loop on
+        live debugger: did the model call ``str_replace``? did it loop on
         reads? did ``ast.parse`` reject the edit? ``transcript_dir`` in context
         overrides the default ``<workspace.parent>/transcripts``.
         Best-effort: any IO error -> None (never breaks the act loop).
@@ -508,13 +509,30 @@ class ApiCodingRunner:
 
     # ---- edit + tool dispatch ----
 
-    def _apply_edit(self, content: str, workspace: Path):
+    def _apply_str_replace(self, old_string: str, new_string: str,
+                           workspace: Path):
+        """Apply a surgical str_replace edit to agent.py (Claude-Code Edit
+        semantics). ``old_string`` must match exactly once; the result is
+        ast-validated before write. On any failure (not found / not unique /
+        syntax error / read error) the file is left untouched and a stable
+        reason string is returned. Never raises."""
         import ast
+        path = workspace / "agent.py"
         try:
-            ast.parse(content)
+            text = path.read_text(encoding="utf-8")
+        except OSError as e:
+            return False, f"read_error: {e}"
+        count = text.count(old_string)
+        if count == 0:
+            return False, "old_string_not_found"
+        if count > 1:
+            return False, f"old_string_not_unique ({count} matches)"
+        new_text = text.replace(old_string, new_string)
+        try:
+            ast.parse(new_text)
         except SyntaxError as e:
             return False, f"syntax_error: {e.msg} (line {e.lineno})"
-        (workspace / "agent.py").write_text(content, encoding="utf-8")
+        path.write_text(new_text, encoding="utf-8")
         return True, None
 
     def _dispatch(self, name: str, args: Dict[str, Any],
@@ -562,4 +580,5 @@ class ApiCodingRunner:
         goal = context.get("goal", "Improve the agent's win rate.")
         resources = context.get("resources_summary", "")
         return (f"{goal}\n\n{resources}\n\nInspect the workspace and replays, "
-                f"then call write_agent_py with the improved complete agent.py.")
+                f"then make a small surgical edit to agent.py via str_replace "
+                f"(unique old_string -> new_string). Do NOT rewrite the whole file.")

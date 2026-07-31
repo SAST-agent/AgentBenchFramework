@@ -68,12 +68,21 @@ SHARED_TOOLS: List[Dict[str, Any]] = [
                          "required": ["id"]},
     },
     {
-        "name": "write_agent_py",
-        "description": "Replace the entire agent.py with the given Python source. "
-                       "Must be complete, syntactically valid Python.",
+        "name": "str_replace",
+        "description": "Make a surgical edit to agent.py: replace exactly one "
+                       "UNIQUE occurrence of old_string with new_string. "
+                       "old_string must match the file exactly (indentation, "
+                       "newlines) and appear exactly once. The result is "
+                       "ast-validated before apply; a SyntaxError or a "
+                       "non-unique/missing old_string is rejected and nothing "
+                       "is written. Prefer many small str_replace calls over "
+                       "rewriting the whole file.",
         "input_schema": {"type": "object",
-                         "properties": {"content": {"type": "string"}},
-                         "required": ["content"]},
+                         "properties": {
+                             "old_string": {"type": "string"},
+                             "new_string": {"type": "string"},
+                         },
+                         "required": ["old_string", "new_string"]},
     },
 ]
 
