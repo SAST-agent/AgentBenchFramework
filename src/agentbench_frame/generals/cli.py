@@ -27,6 +27,7 @@ from .pipeline_v4 import GeneralsHLRound4Pipeline
 from .pipeline_v5 import GeneralsHLRound5Pipeline
 from .pipeline_v6 import GeneralsHLRound6Pipeline
 from .pipeline_v7 import GeneralsHLRound7Pipeline
+from .policy_kl_extension import GeneralsPolicyKLExtensionPipeline
 from .policy_kl_pipeline import GeneralsPolicyKLPipeline
 
 
@@ -86,6 +87,14 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
         (
             "recover-policy-kl",
             "Resume an incomplete exact controlled-reference measurement",
+        ),
+        (
+            "extend-policy-kl-v7",
+            "Reuse verified v1 policy KL inputs and probe only v7",
+        ),
+        (
+            "recover-policy-kl-v7",
+            "Resume an incomplete verified v7 policy KL extension",
         ),
     ):
         command = commands.add_parser(name, help=help_text)
@@ -221,6 +230,19 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
             )
         if name == "recover-policy-kl":
             command.add_argument("--failed-run", type=Path, required=True)
+        if name in {"extend-policy-kl-v7", "recover-policy-kl-v7"}:
+            command.add_argument(
+                "--reference-manifest",
+                type=Path,
+                required=True,
+            )
+            command.add_argument(
+                "--source-run",
+                type=Path,
+                required=True,
+            )
+        if name == "recover-policy-kl-v7":
+            command.add_argument("--failed-run", type=Path, required=True)
     return parser
 
 
@@ -251,6 +273,40 @@ def handle(args) -> int:
                 f"{layout.engine_hash[:12]}"
             )
             return 0
+        if args.generals_command in {
+            "extend-policy-kl-v7",
+            "recover-policy-kl-v7",
+        }:
+            pipeline = GeneralsPolicyKLExtensionPipeline.from_paths(
+                agentbench_root=args.agentbench_root,
+                manifest_path=args.manifest,
+                reference_manifest_path=args.reference_manifest,
+                source_run_dir=args.source_run,
+                data_dir=args.data_dir,
+            )
+            result = (
+                pipeline.run()
+                if args.generals_command == "extend-policy-kl-v7"
+                else pipeline.recover(args.failed_run)
+            )
+            print(
+                json.dumps(
+                    {
+                        "status": result.status,
+                        "run_dir": str(result.run_dir),
+                        "source_run_id": result.summary.get(
+                            "source_run_id"
+                        ),
+                        "controlled_reference_policy_kl": (
+                            result.summary.get(
+                                "controlled_reference_policy_kl"
+                            )
+                        ),
+                    },
+                    sort_keys=True,
+                )
+            )
+            return 0 if result.status == "complete" else 1
         if args.generals_command in {
             "measure-policy-kl",
             "recover-policy-kl",
