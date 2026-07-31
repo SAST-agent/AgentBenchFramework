@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import asdict
 import hashlib
 import json
@@ -9,7 +10,10 @@ from pathlib import Path
 from typing import Any
 
 from agentbench_frame.tracking.run import Run
-from agentbench_frame.tracking.quality import inspect_event_file
+from agentbench_frame.tracking.quality import (
+    KNOWN_EVENT_TYPES,
+    inspect_event_file,
+)
 
 from .assets import (
     load_pilot_config,
@@ -269,16 +273,118 @@ class GeneralsPolicyKLExtensionPipeline(GeneralsPolicyKLPipeline):
                 raise ValueError(
                     f"existing event payload changed: {event_id}"
                 )
+            emitted.pop(event_id)
             return
         run.write(event_type, event_id=event_id, **safe_payload)
-        emitted[event_id] = {
-            **safe_payload,
-            "schema_version": "1.0",
-            "event_id": event_id,
-            "event_type": event_type,
-            "event": event_type,
-            "run_id": run.run_id,
+
+    def _validate_unconsumed_existing_events(
+        self,
+        run: Run,
+        remaining: dict[str, dict[str, Any]],
+    ) -> None:
+        for event_id, record in remaining.items():
+            event_type = record.get("event_type", record.get("event"))
+            if event_type not in KNOWN_EVENT_TYPES:
+                # The final event-quality gate reports unknown types.
+                continue
+            if event_type not in {"pipeline_error", "pipeline_resumed"}:
+                raise ValueError(
+                    "unexpected pre-existing scientific event: "
+                    f"{event_id} ({event_type})"
+                )
+            if (
+                record.get("event") != event_type
+                or record.get("run_id") != run.run_id
+                or record.get("schema_version") != "1.0"
+            ):
+                raise ValueError(
+                    f"existing lifecycle event identity changed: {event_id}"
+                )
+            payload = {
+                name: value
+                for name, value in record.items()
+                if name not in EVENT_METADATA
+            }
+            if event_type == "pipeline_error":
+                if (
+                    set(payload) != {"stage", "error"}
+                    or payload.get("stage")
+                    not in {
+                        "policy_kl_v7_extension",
+                        "policy_kl_v7_extension_recovery",
+                    }
+                    or not isinstance(payload.get("error"), str)
+                    or not payload["error"]
+                ):
+                    raise ValueError(
+                        f"existing lifecycle event payload changed: {event_id}"
+                    )
+            elif (
+                set(payload) != {"recovery_status", "source_run_id"}
+                or not isinstance(payload.get("recovery_status"), str)
+                or payload.get("source_run_id")
+                != self.reference.source_run_id
+            ):
+                raise ValueError(
+                    f"existing lifecycle event payload changed: {event_id}"
+                )
+
+    @staticmethod
+    def _validate_event_projection(
+        run: Run,
+        *,
+        artifact_receipt_count: int,
+    ) -> None:
+        run.writer.flush()
+        records = list(
+            GeneralsPolicyKLExtensionPipeline._existing_events(
+                Path(run.run_dir)
+            ).values()
+        )
+        expected_counts = {
+            "policy_kl_source_verified": 1,
+            "policy_kl_artifact_reused": artifact_receipt_count,
+            "reference_state_selected": 12,
+            "action_space_count": 12,
+            "historical_policy_action": 96,
+            "controlled_reference_policy_kl": 336,
         }
+        counts = Counter(record.get("event_type") for record in records)
+        for event_type, expected in expected_counts.items():
+            if counts[event_type] != expected:
+                raise ValueError(
+                    f"{event_type} event count changed: "
+                    f"expected {expected}, got {counts[event_type]}"
+                )
+        coordinate_fields = {
+            "policy_kl_artifact_reused": ("destination_relative_path",),
+            "reference_state_selected": ("measurement_state_id",),
+            "action_space_count": ("measurement_state_id",),
+            "historical_policy_action": (
+                "version",
+                "measurement_state_id",
+            ),
+            "controlled_reference_policy_kl": (
+                "version_before",
+                "version_after",
+                "measurement_state_id",
+                "epsilon",
+            ),
+        }
+        for event_type, fields in coordinate_fields.items():
+            matching = [
+                record
+                for record in records
+                if record.get("event_type") == event_type
+            ]
+            coordinates = [
+                tuple(record.get(field) for field in fields)
+                for record in matching
+            ]
+            if any(any(value is None for value in item) for item in coordinates):
+                raise ValueError(f"{event_type} coordinate is incomplete")
+            if len(set(coordinates)) != len(coordinates):
+                raise ValueError(f"{event_type} coordinates are not unique")
 
     def _write_reference_spec(
         self,
@@ -716,6 +822,11 @@ class GeneralsPolicyKLExtensionPipeline(GeneralsPolicyKLPipeline):
             v7_actions,
             missing,
             emitted,
+        )
+        self._validate_unconsumed_existing_events(run, emitted)
+        self._validate_event_projection(
+            run,
+            artifact_receipt_count=len(receipts),
         )
         source_hash_after = canonical_tree_hash(self.source_run_dir)
         if source_hash_after != source.tree_hash:

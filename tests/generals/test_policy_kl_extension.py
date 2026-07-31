@@ -331,6 +331,27 @@ def test_recovery_cannot_finish_complete_with_an_unknown_event(tmp_path):
     assert recovered.summary["event_quality"]["unknown_event_types"] == 1
 
 
+def test_recovery_rejects_an_extra_known_scientific_event(tmp_path):
+    pipeline, _ = make_pipeline(tmp_path, probe_mode="raise")
+    failed = pipeline.run()
+    events = read_events(failed.run_dir)
+    extra = dict(
+        next(
+            item
+            for item in events
+            if item["event_type"] == "reference_state_selected"
+        )
+    )
+    extra["event_id"] = "evt_extra_known_scientific_event"
+    events.append(extra)
+    write_events(failed.run_dir, events)
+
+    recovered = pipeline.recover(failed.run_dir)
+
+    assert recovered.status == "failed"
+    assert "unexpected pre-existing scientific event" in recovered.summary["error"]
+
+
 def test_recovery_revalidates_two_raw_v7_outputs(tmp_path):
     pipeline, _ = make_pipeline(tmp_path, probe_mode="raise_after_one")
     failed = pipeline.run()
