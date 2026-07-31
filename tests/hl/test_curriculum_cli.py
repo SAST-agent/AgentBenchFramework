@@ -136,3 +136,30 @@ def test_resume_parent_uses_recorded_best_after_curriculum_resume():
         )
         == "v000002"
     )
+
+
+def test_replay_summary_is_generated_once_and_reused(tmp_path):
+    from agentbench_frame.hl.cli import _ensure_replay_summary
+
+    replay = tmp_path / "replay.jsonl"
+    replay.write_text("{}\n", encoding="utf-8")
+    script = tmp_path / "summarize.py"
+    script.write_text(
+        "import pathlib,sys\n"
+        "print('# summary for ' + pathlib.Path(sys.argv[1]).name)\n",
+        encoding="utf-8",
+    )
+
+    summary = _ensure_replay_summary(
+        replay=replay,
+        summarizer=script,
+    )
+    script.write_text("raise RuntimeError('must not rerun')\n", encoding="utf-8")
+    reused = _ensure_replay_summary(
+        replay=replay,
+        summarizer=script,
+    )
+
+    assert summary == replay.with_name("summary.md")
+    assert reused == summary
+    assert summary.read_text(encoding="utf-8") == "# summary for replay.jsonl\n"

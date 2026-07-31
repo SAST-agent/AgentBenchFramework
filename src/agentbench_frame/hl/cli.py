@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +29,39 @@ from agentbench_frame.hl.local_config import LocalHLConfig
 
 def _json(value: Any) -> None:
     print(json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2))
+
+
+def _ensure_replay_summary(
+    *,
+    replay: str | Path,
+    summarizer: str | Path,
+) -> Path:
+    replay_path = Path(replay).resolve()
+    summary_path = replay_path.with_name("summary.md")
+    if summary_path.is_file():
+        return summary_path
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(Path(summarizer).resolve()),
+            str(replay_path),
+            "--format",
+            "markdown",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise ValueError(
+            "failed to create replay summary: "
+            + (completed.stderr.strip() or "unknown summarizer failure")
+        )
+    if len(completed.stdout.encode("utf-8")) > 64 * 1024:
+        raise ValueError("replay summary exceeds 64 KiB")
+    summary_path.write_text(completed.stdout, encoding="utf-8")
+    return summary_path
 
 
 def _load(path: str) -> LocalHLConfig:
@@ -106,7 +140,7 @@ def _dry_run(
             "rules": asset_path("rules.md"),
             "decision_space": asset_path("decision_space.yaml"),
             "replay_skill": asset_path(
-                "replay-skill/rollman-replay/SKILL.md"
+                "replay-skill/rollman-replay"
             ),
         },
     )
@@ -548,7 +582,7 @@ def _run_real(
             "rules": asset_path("rules.md"),
             "decision_space": asset_path("decision_space.yaml"),
             "replay_skill": asset_path(
-                "replay-skill/rollman-replay/SKILL.md"
+                "replay-skill/rollman-replay"
             ),
         },
     )
@@ -641,16 +675,36 @@ def _run_real(
             )
         evaluation = evaluator.last_evaluation
         matches = list(evaluation.matches) if evaluation is not None else []
-        evidence = [
-            {
+        summarizer = (
+            bundle.files["replay_skill"].parent
+            / "scripts"
+            / "summarize_replay.py"
+        )
+        evidence = []
+        for match in matches:
+            replay = match.get("replay")
+            summary_path = (
+                None
+                if replay is None
+                else _ensure_replay_summary(
+                    replay=str(replay),
+                    summarizer=summarizer,
+                )
+            )
+            evidence.append(
+                {
                 "opponent": match.get("opponent"),
                 "seed": match.get("seed"),
                 "result": match.get("result"),
-                "replay": match.get("replay"),
+                "summary": (
+                    None
+                    if summary_path is None
+                    else str(summary_path)
+                ),
+                "replay": replay,
                 "trace": match.get("trace"),
-            }
-            for match in matches
-        ]
+                }
+            )
         return iteration_context.build_prompt(
             act_id=values["act_id"],
             branch_index=values["branch_index"],

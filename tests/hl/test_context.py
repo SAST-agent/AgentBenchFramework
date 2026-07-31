@@ -45,6 +45,32 @@ def test_context_references_static_files_and_current_workspace_instead_of_embedd
     assert "SOURCE-MARKER-DO-NOT-PASTE" not in prompt
 
 
+def test_context_bundle_copies_complete_skill_package(tmp_path):
+    from agentbench_frame.hl.context import ContextBundle
+
+    skill = tmp_path / "source-skill"
+    script = skill / "scripts" / "summarize.py"
+    script.parent.mkdir(parents=True)
+    (skill / "SKILL.md").write_text("# Replay skill", encoding="utf-8")
+    script.write_text("print('summary')\n", encoding="utf-8")
+
+    bundle = ContextBundle.create(
+        tmp_path / "bundle",
+        {"replay_skill": skill},
+    )
+
+    copied_skill = bundle.files["replay_skill"]
+    assert copied_skill.name == "SKILL.md"
+    assert (copied_skill.parent / "scripts" / "summarize.py").read_text(
+        encoding="utf-8"
+    ) == "print('summary')\n"
+    manifest = json.loads(bundle.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["files"]["replay_skill"]["resources"] == [
+        "SKILL.md",
+        "scripts/summarize.py",
+    ]
+
+
 def test_prompt_requires_replay_grounded_causal_change_and_blocks_grid_search(tmp_path):
     from agentbench_frame.hl.context import ContextBundle, IterationContext
 
@@ -104,6 +130,9 @@ def test_curriculum_prompt_names_target_and_locked_pool(tmp_path):
     assert "其他 run" in prompt
     assert "其他候选目录" in prompt
     assert "审计工具调用路径" in prompt
+    assert "最多 14 次工具调用" in prompt
+    assert "不得打印完整 replay" in prompt
+    assert "summary" in prompt
 
 
 def test_curriculum_prompt_rejects_evidence_from_another_opponent(tmp_path):

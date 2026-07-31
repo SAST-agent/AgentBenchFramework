@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import shutil
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 
@@ -30,9 +31,52 @@ class ContextBundle:
         files_root = target_root / "files"
         files_root.mkdir(parents=True, exist_ok=True)
         copied: dict[str, Path] = {}
-        manifest_files: dict[str, dict[str, str]] = {}
+        manifest_files: dict[str, dict[str, Any]] = {}
         for name, source_value in sorted(sources.items()):
             source = Path(source_value)
+            if not source.exists():
+                raise FileNotFoundError(source)
+            if source.is_dir():
+                destination_root = files_root / name
+                resources: list[str] = []
+                resource_hashes: dict[str, str] = {}
+                for source_file in sorted(source.rglob("*")):
+                    if (
+                        not source_file.is_file()
+                        or "__pycache__" in source_file.parts
+                        or source_file.suffix == ".pyc"
+                    ):
+                        continue
+                    relative = source_file.relative_to(source)
+                    destination_file = destination_root / relative
+                    destination_file.parent.mkdir(
+                        parents=True,
+                        exist_ok=True,
+                    )
+                    shutil.copy2(source_file, destination_file)
+                    resource = relative.as_posix()
+                    resources.append(resource)
+                    resource_hashes[resource] = _sha256(destination_file)
+                destination = destination_root / "SKILL.md"
+                if not destination.is_file():
+                    raise FileNotFoundError(
+                        f"skill package has no SKILL.md: {source}"
+                    )
+                package_hash = hashlib.sha256(
+                    json.dumps(
+                        resource_hashes,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest()
+                copied[name] = destination.resolve()
+                manifest_files[name] = {
+                    "path": str(destination.resolve()),
+                    "sha256": package_hash,
+                    "resources": resources,
+                }
+                continue
             if not source.is_file():
                 raise FileNotFoundError(source)
             destination = files_root / name / source.name
@@ -181,6 +225,12 @@ class IterationContext:
 - 禁止读取或搜索其他 run、其他候选目录、Framework 源码、人类程序、对手构建目录及用户目录中的其他文件。
 - 禁止列举 candidate workspace、指定 context 或指定回放目录的父目录，禁止使用 `..` 绕过边界。
 - Framework 会审计工具调用路径和原始记录；越界 act 会被标记失败，不评测、不晋级。
+
+Act 预算：
+- 最多 14 次工具调用；优先批量读取，禁止用许多小命令反复查看同一材料。
+- 必须先读取 evidence 中的 `summary`；不得打印完整 replay、完整 trace、完整棋盘或全量事件流。
+- 只允许对最多 2 个可证伪假设做定点探针，每个命令输出不超过 6000 tokens，每条 trace 最多展开 20 个相关回合。
+- 完成一次证据诊断后立即实现最小机制改动并验证；禁止在同一 act 内形成参数搜索循环。
 
 执行约束：
 1. 先阅读 context manifest 指向的规则、决策空间和 Replay Skill，再阅读 workspace 中的代码。

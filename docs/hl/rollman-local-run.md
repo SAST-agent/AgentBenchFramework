@@ -63,6 +63,8 @@ flowchart LR
 
 Coding agent 的允许读取集合由候选 workspace、本 run 的 context、Experience Skill、指定 replay/trace 和 measurement 组成。Prompt 禁止访问其他 run、其他候选、Framework 源码、人类程序、对手构建目录和用户目录中的其他文件；Provider 从原始 JSONL 审计每条命令中的访问路径。越界 act 记录为 provider failure，保存 token 和审计证据，但不执行比赛评测、不生成有效性能点、不更新 Experience、不参与版本晋级。
 
+每局评测结束后，由 Harness 使用 Replay Skill 的冻结脚本生成紧凑 `summary.md`。Coding agent 必须从摘要中的完整性、分数和事件坐标开始，只对最多 2 个假设读取相关 trace 窗口；单条 trace 最多展开 20 个相关回合。每 act 的默认预算为 14 次工具调用、每条命令最多 6000 tokens 输出，禁止完整打印 replay、trace、棋盘或全量事件流。
+
 Responses API 本身可按无状态接口理解：单次请求不自动等于可复现研究会话。Harness 将 Codex thread ID、精确 prompt、provider 配置指纹、原始 JSONL 和 token usage 写入 checkpoint，从而兼顾上下文复用与运行恢复。
 
 无上限运行遇到 provider failure/timeout 或固定评测 incomplete 时立即停止，不自动重复失败请求；同一 run 可在外部条件恢复后继续。
@@ -123,6 +125,9 @@ provider/<act_id>.jsonl
 versions/manifests/
 versions/objects/
 matches/<version>/<phase>/<opponent>/<seed>/
+  replay.jsonl
+  trace.jsonl
+  summary.md
 measurement/reference/
 measurement/probes/
 experience/SKILL.md
@@ -216,6 +221,8 @@ cp .env.example .env
 `validate`、`audit`、`run` 和 `resume` 均核对 `source_manifest.json` 中的 AgentBench、PacmanLogic、Logic core、PacmanSDK commit，以及冻结后端 `main.py` 和 core 文件哈希；任一不匹配即拒绝正式运行。
 
 本地裁判执行后端下发的回合约束：首次 AI 响应 20 秒、后续响应 1 秒、AI 输出最多 1024 字节。游戏规则内的 TLE、RE、OLE 和 IA 由裁判回传冻结 Logic，按 Logic 的错误分数产生有效胜负；错误加减分只出现在 `end_info`，基础局面分保留在 replay。Logic、管线或外部执行基础设施无法完成时评测为 incomplete，不产生 aggregate score。
+
+固定 seed 决定冻结环境的地图与环境随机流。若冻结人类程序自行从系统时间或操作系统熵初始化 RNG，其内部动作仍属于随机策略；Harness 不改写人类算法。此类对手的科研结果以原始 replay、对手制品哈希、seed 和重复对局协议复现，并通过增加重复对局数估计胜率，而不宣称逐字节轨迹确定性。
 
 人类池构建只接受 `opponent_profiles.json` 登记且 SHA-256 完全匹配的 16 份冻结归档，不提供任意源码构建入口。构建阶段禁网、限制环境变量，并设置整棵进程树的时间、内存、进程数、输出量和构建目录占用上限；候选与人类程序的比赛运行阶段采用只读白名单、私有临时写目录、禁网、禁止派生进程和内存上限。
 
