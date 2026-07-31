@@ -146,3 +146,85 @@ def test_match_table_preserves_each_game_and_invalid_status(tmp_path):
     assert [row["match_id"] for row in rows] == ["m1", "m2"]
     assert rows[1]["valid"] == "False"
     assert rows[1]["result"] == ""
+
+
+def test_curriculum_rows_capture_target_progress_and_stage_events():
+    from agentbench_frame.hl.report import derive_curriculum_rows
+
+    events = _events() + [
+        {
+            "event_type": "curriculum_started",
+            "version_id": "v0",
+            "active_target": "rank15",
+            "locked_opponents": [f"rank{rank:02d}" for rank in range(1, 15)],
+        },
+        {
+            "event_type": "curriculum_gate_completed",
+            "version_id": "v0",
+            "active_target": "rank15",
+            "score": 0.0,
+            "baseline": True,
+            "stagnation_count": 0,
+        },
+        {
+            "event_type": "curriculum_stage_promoted",
+            "version_id": "v1",
+            "completed_target": "rank15",
+            "next_target": "rank14",
+            "locked_opponents": [
+                f"rank{rank:02d}" for rank in range(1, 16)
+            ],
+            "passing_human_opponents": 15,
+        },
+        {
+            "event_type": "curriculum_target_selected",
+            "version_id": "v1",
+            "active_target": "rank14",
+            "locked_opponents": [
+                f"rank{rank:02d}" for rank in range(1, 16)
+            ],
+        },
+    ]
+
+    rows = derive_curriculum_rows(events)
+
+    assert rows[0]["active_target"] == "rank15"
+    assert rows[0]["locked_opponents"] == 14
+    assert rows[1]["event"] == "gate"
+    assert rows[1]["target_gate_score"] == 0.0
+    assert rows[2]["event"] == "stage_promoted"
+    assert rows[2]["passing_human_opponents"] == 15
+    assert rows[3]["active_target"] == "rank14"
+
+
+def test_report_writes_curriculum_csv_and_curve_fields(tmp_path):
+    from agentbench_frame.hl.report import write_hl_report
+
+    events = _events() + [
+        {
+            "event_type": "curriculum_gate_completed",
+            "version_id": "v1",
+            "active_target": "rank15",
+            "score": 0.5,
+            "baseline": False,
+            "stagnation_count": 0,
+        },
+        {
+            "event_type": "certification_completed",
+            "version_id": "v1",
+            "score": 0.9,
+            "passing_human_opponents": 15,
+        },
+    ]
+
+    outputs = write_hl_report(events, tmp_path)
+
+    assert outputs["curriculum_csv"].is_file()
+    with outputs["curves_csv"].open(
+        newline="", encoding="utf-8"
+    ) as handle:
+        rows = list(csv.DictReader(handle))
+    assert rows[1]["active_target"] == "rank15"
+    assert rows[1]["target_gate_score"] == "0.5"
+    assert rows[1]["passing_human_opponents"] == "15"
+    assert rows[1]["full_pool_win_rate"] == "0.9"
