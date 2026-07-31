@@ -4,12 +4,12 @@
 
 - Status: `complete`
 - Measurement ID: `generals-policy-kl-reference-v2`
-- Run ID: `20260731_1741_a4aa1f8c`
+- Run ID: `20260731_1800_45b2e5d9`
 - Source measurement: `generals-policy-kl-reference-v1`
 - Source run: `20260730_1126_8d123b55`
 - Reuse mode: `verified_v1_domain_probe_only_v7`
-- Framework commit recorded by the run: `00437d0`
-- Wall time: 8.28 seconds
+- Framework commit recorded by the run: `1e9d74d`
+- Wall time: 8.11 seconds
 - KL direction and unit: `new || old`, natural logarithm, nats
 - Primary smoothing: `epsilon = 0.01`
 
@@ -25,10 +25,16 @@ corresponding v1 summary objects. All 396 reused scientific events retain a
 non-null `source_event_id`; 162 copied artifacts have individual SHA-256
 receipts.
 
+The source receipt SHA-256 is
+`0430a6a3a6d4f45f82ed944534d0481260575fbf4f97fca2f2f9fea248fdf9a3`.
+The summary also binds the complete ordered v0–v7 policy history. This run
+supersedes the pre-hardening extension run `20260731_1741_a4aa1f8c` as the
+figure source; neither that run nor the original v1 run was modified.
+
 ## Frozen measurement domain
 
-The run reuses the same 12 strongest-human self-play states and exact
-canonical support set as v1:
+The run reuses the same 12 states collected against the strongest-human
+opponent and the same exact canonical support set as v1:
 
 - seeds: `289101`, `289202`, `289303`;
 - seats: `0`, `1`;
@@ -93,6 +99,9 @@ canonical macro at every measured state.
 - `action_space_count`: 12
 - `historical_policy_action`: 96 (84 reused, 12 new v7)
 - `controlled_reference_policy_kl`: 336 (288 reused, 48 new v6→v7)
+- Reused scientific events preserving their original measurement fields: 396
+- Immutable extension start receipt: present and validated
+- Source receipt digest bound in summary: verified
 - Per-state KL rows: 336 = 7 transitions × 12 states × 4 epsilons
 - Total events: 619
 - Malformed, invalid, unknown, or duplicate events: 0
@@ -125,7 +134,7 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python -m agentbench_frame.cli \
 ```bash
 MPLCONFIGDIR=/tmp/agentbench-matplotlib .venv/bin/python \
   scripts/plot_generals_controlled_policy_kl.py \
-  --run-dir agentbench_data/runs/28_generals/generals-policy-kl/20260731_1741_a4aa1f8c \
+  --run-dir agentbench_data/runs/28_generals/generals-policy-kl/20260731_1800_45b2e5d9 \
   --output-prefix docs/experiments/figures/generals-controlled-policy-kl-three-panel
 ```
 
