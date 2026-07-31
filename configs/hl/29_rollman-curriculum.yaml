@@ -47,6 +47,7 @@ run:
     certification_seeds: [201, 202, 203]
     required_human_opponents: 16
     required_win_rate: 0.5
+    full_pool_every_iteration: true
 paths:
   agentbench_root: "/Users/qingle/Code/SAST/AgentBench"
   official_logic_root: "/Users/qingle/Code/SAST/PacmanLogic"

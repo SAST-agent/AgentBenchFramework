@@ -114,7 +114,7 @@ def test_k_iteration_budget_includes_rejected_siblings_after_selected_branch_act
     assert rows[1]["cumulative_total_tokens"] == 170
 
 
-def test_report_writes_csv_and_six_panel_raster_and_vector_plots(tmp_path):
+def test_report_writes_csv_and_three_panel_raster_and_vector_plots(tmp_path):
     from agentbench_frame.hl.report import write_hl_report
 
     outputs = write_hl_report(_events(), tmp_path)
@@ -123,10 +123,84 @@ def test_report_writes_csv_and_six_panel_raster_and_vector_plots(tmp_path):
     assert outputs["curves_png"].is_file()
     assert outputs["curves_svg"].is_file()
     assert outputs["curves_png"].stat().st_size > 10_000
+    svg = outputs["curves_svg"].read_text(encoding="utf-8")
+    assert "Information Gain vs HL Iteration" in svg
+    assert "Elo vs HL Iteration" in svg
+    assert "Full-pool Win Rate vs HL Iteration" in svg
+    assert "Occupancy shift" not in svg
+    assert "Model budget" not in svg
     with outputs["curves_csv"].open(newline="", encoding="utf-8") as handle:
         rows = list(csv.DictReader(handle))
     assert rows[1]["mean_local_policy_kl"] == "0.2"
     assert rows[2]["benchmark_score"] == ""
+
+
+def test_curve_rows_use_final_evaluation_and_fixed_pool_elo():
+    from agentbench_frame.hl.report import derive_curve_rows
+
+    events = [
+        {
+            "event_type": "version_created",
+            "version_id": "v0",
+            "act_id": "initial",
+            "evaluation_status": "incomplete",
+            "benchmark_score": None,
+        },
+        {
+            "event_type": "candidate_selected",
+            "iteration_id": "iter-000000",
+            "version_id": "v0",
+            "act_id": "initial",
+        },
+        {
+            "event_type": "evaluation_completed",
+            "version_id": "v0",
+            "status": "complete",
+            "benchmark_score": 0.0,
+            "wins": 0,
+            "losses": 3,
+            "draws": 0,
+        },
+        {
+            "event_type": "certification_completed",
+            "version_id": "v0",
+            "status": "complete",
+            "score": 0.5,
+            "passing_human_opponents": 8,
+            "matches": [
+                {"status": "complete", "opponent": "rank01", "seed": 1,
+                 "result": "win"},
+                {"status": "complete", "opponent": "rank02", "seed": 1,
+                 "result": "loss"},
+            ],
+        },
+        {
+            "event_type": "elo_updated",
+            "version_id": "v0",
+            "phase": "learning",
+            "rating": 9999.0,
+        },
+    ]
+
+    rows = derive_curve_rows(events)
+
+    assert rows[0]["evaluation_status"] == "complete"
+    assert rows[0]["benchmark_score"] == 0.0
+    assert rows[0]["full_pool_win_rate"] == 0.5
+    assert rows[0]["rollman_elo"] != 9999.0
+
+
+def test_single_iteration_axis_uses_only_integer_iteration_ticks():
+    import matplotlib.pyplot as plt
+
+    from agentbench_frame.hl.report import _set_iteration_axis
+
+    figure, axis = plt.subplots()
+    _set_iteration_axis(axis, [0])
+
+    assert list(axis.get_xticks()) == [0]
+    assert axis.get_xlim() == (-0.5, 0.5)
+    plt.close(figure)
 
 
 def test_match_table_preserves_each_game_and_invalid_status(tmp_path):

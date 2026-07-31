@@ -157,6 +157,7 @@ class EvaluationConfig:
     certification_seeds: tuple[int, ...] = ()
     required_human_opponents: int = 15
     required_win_rate: float = 0.5
+    full_pool_every_iteration: bool = True
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "fixed_gate_seeds", tuple(self.fixed_gate_seeds))

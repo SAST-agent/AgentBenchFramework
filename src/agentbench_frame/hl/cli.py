@@ -1456,6 +1456,22 @@ def _run_real(
                 baseline=False,
                 improved=gate_decision.kind == "improved",
             )
+            certification = None
+            summary = None
+            if config.run.evaluation.full_pool_every_iteration:
+                certification, summary = certify_curriculum_version(
+                    selected.version
+                )
+                if certification.status != "complete" or summary is None:
+                    _json(
+                        {
+                            "run_dir": str(run_dir),
+                            "status": "incomplete_certification",
+                            "version_id": selected.version.version_id,
+                            **controller.summary(),
+                        }
+                    )
+                    return 2
             next_parent = gate_decision.parent_version_id
             if gate_decision.kind == "stagnated":
                 writer.write(
@@ -1491,19 +1507,21 @@ def _run_real(
                 < config.run.evaluation.required_win_rate
             ):
                 continue
-            certification, summary = certify_curriculum_version(
-                selected.version
-            )
-            if certification.status != "complete" or summary is None:
-                _json(
-                    {
-                        "run_dir": str(run_dir),
-                        "status": "incomplete_certification",
-                        "version_id": selected.version.version_id,
-                        **controller.summary(),
-                    }
+            if certification is None:
+                certification, summary = certify_curriculum_version(
+                    selected.version
                 )
-                return 2
+                if certification.status != "complete" or summary is None:
+                    _json(
+                        {
+                            "run_dir": str(run_dir),
+                            "status": "incomplete_certification",
+                            "version_id": selected.version.version_id,
+                            **controller.summary(),
+                        }
+                    )
+                    return 2
+            assert summary is not None
             completed_target = (
                 curriculum_manager.state.active_target
             )
