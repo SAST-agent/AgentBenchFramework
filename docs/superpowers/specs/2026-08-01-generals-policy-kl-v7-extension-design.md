@@ -153,7 +153,8 @@ The extension run keeps the established layout and adds a provenance area:
 benchmark/
   action-space-spec.json
   reference-state-spec.json
-reference-states/
+reference/
+  states/
 action-space/
   counts/
 policies/
