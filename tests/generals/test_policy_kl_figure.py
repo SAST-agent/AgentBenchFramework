@@ -45,6 +45,7 @@ def write_complete_run(tmp_path):
     summary = {
         "run_id": "measurement-1",
         "status": "complete",
+        "measurement_id": "generals-policy-kl-reference-v1",
         "controlled_reference_policy_kl": {
             "metric": "controlled_reference_policy_kl",
             "primary_epsilon": "0.01",
@@ -77,6 +78,39 @@ def write_complete_run(tmp_path):
     return run_dir
 
 
+def write_complete_v2_run(tmp_path):
+    run_dir = write_complete_run(tmp_path)
+    summary_path = run_dir / "summary.json"
+    summary = json.loads(summary_path.read_text())
+    summary["measurement_id"] = "generals-policy-kl-reference-v2"
+    summary["controlled_reference_policy_kl"]["transitions"].append({
+        "version_before": "v6",
+        "version_after": "v7",
+        "mean_kl_nats": 4.25,
+        "coverage": {"complete": 12, "total": 12},
+        "sensitivity": {
+            "0.001": {
+                "mean_kl_nats": 5.75,
+                "coverage": {"complete": 12, "total": 12},
+            },
+            "0.01": {
+                "mean_kl_nats": 4.25,
+                "coverage": {"complete": 12, "total": 12},
+            },
+            "0.05": {
+                "mean_kl_nats": 3.5,
+                "coverage": {"complete": 12, "total": 12},
+            },
+            "0.1": {
+                "mean_kl_nats": 3.0,
+                "coverage": {"complete": 12, "total": 12},
+            },
+        },
+    })
+    summary_path.write_text(json.dumps(summary))
+    return run_dir
+
+
 def test_loads_complete_figure_data(tmp_path):
     from agentbench_frame.generals.paper_figure import (
         load_policy_kl_figure_data,
@@ -97,6 +131,50 @@ def test_loads_complete_figure_data(tmp_path):
     assert len(data.support_states) == 12
     assert data.support_states[0].decision_number == 2
     assert data.support_states[-1].decision_number == 10
+
+
+def test_loads_complete_v2_figure_data(tmp_path):
+    from agentbench_frame.generals.paper_figure import (
+        load_policy_kl_figure_data,
+    )
+
+    data = load_policy_kl_figure_data(write_complete_v2_run(tmp_path))
+
+    assert data.transitions[-1] == "v6→v7"
+    assert data.primary_kl[-1] == 4.25
+    assert data.sensitivity["0.001"][-1] == 5.75
+    assert len(data.transitions) == 7
+    assert len(data.support_states) == 12
+
+
+def test_rejects_six_transition_v2_run(tmp_path):
+    from agentbench_frame.generals.paper_figure import (
+        load_policy_kl_figure_data,
+    )
+
+    run_dir = write_complete_run(tmp_path)
+    summary_path = run_dir / "summary.json"
+    summary = json.loads(summary_path.read_text())
+    summary["measurement_id"] = "generals-policy-kl-reference-v2"
+    summary_path.write_text(json.dumps(summary))
+
+    with pytest.raises(ValueError, match="transition order"):
+        load_policy_kl_figure_data(run_dir)
+
+
+def test_rejects_unknown_measurement_contract(tmp_path):
+    from agentbench_frame.generals.paper_figure import (
+        load_policy_kl_figure_data,
+    )
+
+    run_dir = write_complete_run(tmp_path)
+    summary_path = run_dir / "summary.json"
+    summary = json.loads(summary_path.read_text())
+    summary["measurement_id"] = "generals-policy-kl-reference-unknown"
+    summary_path.write_text(json.dumps(summary))
+
+    with pytest.raises(ValueError, match="measurement_id"):
+        load_policy_kl_figure_data(run_dir)
 
 
 def test_rejects_duplicate_support_state(tmp_path):
@@ -182,6 +260,21 @@ def test_renders_three_panel_svg_and_300_dpi_png(tmp_path):
     assert png.startswith(b"\x89PNG\r\n\x1a\n")
     assert width >= 6000
     assert height >= 1800
+
+
+def test_renders_v6_to_v7_in_the_v2_svg(tmp_path):
+    from agentbench_frame.generals.paper_figure import (
+        load_policy_kl_figure_data,
+        render_policy_kl_three_panel,
+    )
+
+    data = load_policy_kl_figure_data(write_complete_v2_run(tmp_path))
+    svg_path, _ = render_policy_kl_three_panel(
+        data,
+        tmp_path / "figure-v2" / "policy-kl",
+    )
+
+    assert "v6→v7" in svg_path.read_text()
 
 
 def test_figure_cli_writes_both_explicit_outputs(tmp_path):

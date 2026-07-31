@@ -11,14 +11,25 @@ import tempfile
 from typing import Any
 
 
-EXPECTED_VERSION_PAIRS = (
-    ("v0", "v1"),
-    ("v1", "v2"),
-    ("v2", "v3"),
-    ("v3", "v4"),
-    ("v4", "v5"),
-    ("v5", "v6"),
-)
+EXPECTED_VERSION_PAIRS_BY_MEASUREMENT = {
+    "generals-policy-kl-reference-v1": (
+        ("v0", "v1"),
+        ("v1", "v2"),
+        ("v2", "v3"),
+        ("v3", "v4"),
+        ("v4", "v5"),
+        ("v5", "v6"),
+    ),
+    "generals-policy-kl-reference-v2": (
+        ("v0", "v1"),
+        ("v1", "v2"),
+        ("v2", "v3"),
+        ("v3", "v4"),
+        ("v4", "v5"),
+        ("v5", "v6"),
+        ("v6", "v7"),
+    ),
+}
 EXPECTED_EPSILONS = ("0.001", "0.01", "0.05", "0.1")
 REFERENCE_STATE_COUNT = 12
 
@@ -174,6 +185,12 @@ def load_policy_kl_figure_data(run_dir: Path) -> PolicyKLFigureData:
     summary = _read_json(run_dir / "summary.json")
     if summary.get("status") != "complete":
         raise ValueError("figure source run status must be complete")
+    measurement_id = summary.get("measurement_id")
+    expected_pairs = EXPECTED_VERSION_PAIRS_BY_MEASUREMENT.get(
+        measurement_id
+    )
+    if expected_pairs is None:
+        raise ValueError("unsupported policy KL measurement_id")
     metric = summary.get("controlled_reference_policy_kl")
     if not isinstance(metric, dict):
         raise ValueError("controlled_reference_policy_kl metric is missing")
@@ -197,8 +214,10 @@ def load_policy_kl_figure_data(run_dir: Path) -> PolicyKLFigureData:
         for item in transitions
         if isinstance(item, dict)
     )
-    if actual_pairs != EXPECTED_VERSION_PAIRS:
-        raise ValueError("transition order must be v0→v1 through v5→v6")
+    if actual_pairs != expected_pairs:
+        raise ValueError(
+            f"transition order does not match {measurement_id}"
+        )
 
     primary_values = []
     sensitivity_values = {
@@ -206,7 +225,7 @@ def load_policy_kl_figure_data(run_dir: Path) -> PolicyKLFigureData:
     }
     for transition, (before, after) in zip(
         transitions,
-        EXPECTED_VERSION_PAIRS,
+        expected_pairs,
     ):
         if not isinstance(transition, dict):
             raise ValueError("each transition must be an object")
@@ -241,7 +260,7 @@ def load_policy_kl_figure_data(run_dir: Path) -> PolicyKLFigureData:
     return PolicyKLFigureData(
         run_id=run_id,
         transitions=tuple(
-            f"{before}→{after}" for before, after in EXPECTED_VERSION_PAIRS
+            f"{before}→{after}" for before, after in expected_pairs
         ),
         primary_epsilon="0.01",
         primary_kl=tuple(primary_values),
