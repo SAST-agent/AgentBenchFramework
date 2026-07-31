@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from agentbench_frame.tracking.run import Run
+from agentbench_frame.tracking.quality import inspect_event_file
 
 from .assets import (
     load_pilot_config,
@@ -30,6 +31,7 @@ from .policy_kl_pipeline import (
 from .policy_kl_reuse import (
     ArtifactReceipt,
     EVENT_METADATA,
+    QUALITY_DEFECT_FIELDS,
     VerifiedPolicyKLSource,
     canonical_tree_hash,
     materialize_policy_kl_source,
@@ -130,6 +132,57 @@ class GeneralsPolicyKLExtensionPipeline(GeneralsPolicyKLPipeline):
             self.reference,
         )
 
+    def _run_config(self) -> dict[str, Any]:
+        return {
+            "measurement_id": self.reference.measurement_id,
+            "source_measurement_id": self.reference.source_measurement_id,
+            "source_run_id": self.reference.source_run_id,
+            "reuse_mode": "verified_v1_domain_probe_only_v7",
+        }
+
+    def _start_receipt(self, run: Run) -> dict[str, Any]:
+        return {
+            "schema": "generals-policy-kl-extension-start-v1",
+            "run_id": run.run_id,
+            "game": run.meta.game,
+            "agent": run.meta.agent,
+            "run_type": run.meta.run_type,
+            "created": run.meta.created,
+            "git_commit": run.meta.git_commit,
+            "started_at": run.meta.started_at,
+            "config": self._run_config(),
+            "measurement_id": self.reference.measurement_id,
+            "source_measurement_id": self.reference.source_measurement_id,
+            "source_run_id": self.reference.source_run_id,
+            "source_tree_hash": self.reference.source_tree_hash,
+            "source_run_dir": str(self.source_run_dir),
+            "policy_history": [
+                asdict(item) for item in self.reference.history
+            ],
+        }
+
+    def _write_start_receipt(self, run: Run) -> None:
+        _write_exact(
+            Path(run.run_dir) / "provenance/extension-start-receipt.json",
+            _json_bytes(self._start_receipt(run)),
+        )
+
+    def _validate_recovery_identity(self, run: Run) -> None:
+        if (
+            Path(run.run_dir).name != run.run_id
+            or run.meta.game != "28_generals"
+            or run.meta.agent != "generals-policy-kl"
+            or run.meta.run_type != "measurement"
+            or run.config != self._run_config()
+        ):
+            raise ValueError("failed extension run identity changed")
+        receipt = _read_json(
+            Path(run.run_dir)
+            / "provenance/extension-start-receipt.json"
+        )
+        if receipt != self._start_receipt(run):
+            raise ValueError("failed extension start receipt changed")
+
     def _materialize_source(
         self,
         source: VerifiedPolicyKLSource,
@@ -148,24 +201,41 @@ class GeneralsPolicyKLExtensionPipeline(GeneralsPolicyKLPipeline):
         return policies[0]
 
     @staticmethod
-    def _existing_event_ids(run_dir: Path) -> set[str]:
+    def _existing_events(run_dir: Path) -> dict[str, dict[str, Any]]:
         path = run_dir / "events.jsonl"
         if not path.exists():
-            return set()
-        result = set()
-        for line in path.read_text(encoding="utf-8").splitlines():
+            return {}
+        result = {}
+        for line_number, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(),
+            start=1,
+        ):
             if not line.strip():
                 continue
-            record = json.loads(line)
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(
+                    f"malformed existing event at line {line_number}: {exc}"
+                ) from exc
+            if not isinstance(record, dict):
+                raise ValueError(
+                    f"existing event at line {line_number} must be an object"
+                )
             event_id = record.get("event_id")
-            if event_id:
-                result.add(str(event_id))
+            if not isinstance(event_id, str) or not event_id:
+                raise ValueError(
+                    f"existing event at line {line_number} is missing event_id"
+                )
+            if event_id in result:
+                raise ValueError(f"duplicate event_id in recovery: {event_id}")
+            result[event_id] = record
         return result
 
     @staticmethod
     def _emit_once(
         run: Run,
-        emitted: set[str],
+        emitted: dict[str, dict[str, Any]],
         event_type: str,
         *,
         kind: str,
@@ -173,12 +243,42 @@ class GeneralsPolicyKLExtensionPipeline(GeneralsPolicyKLPipeline):
         payload: dict[str, Any],
     ) -> None:
         event_id = extension_event_id(run.run_id, kind, key)
-        if event_id in emitted:
-            return
         safe_payload = dict(payload)
         safe_payload.pop("run_id", None)
+        if event_id in emitted:
+            existing = emitted[event_id]
+            identity = {
+                "event_id": event_id,
+                "event_type": event_type,
+                "event": event_type,
+                "run_id": run.run_id,
+            }
+            if any(
+                existing.get(name) != value
+                for name, value in identity.items()
+            ):
+                raise ValueError(
+                    f"existing event identity changed: {event_id}"
+                )
+            existing_payload = {
+                name: value
+                for name, value in existing.items()
+                if name not in EVENT_METADATA
+            }
+            if existing_payload != safe_payload:
+                raise ValueError(
+                    f"existing event payload changed: {event_id}"
+                )
+            return
         run.write(event_type, event_id=event_id, **safe_payload)
-        emitted.add(event_id)
+        emitted[event_id] = {
+            **safe_payload,
+            "schema_version": "1.0",
+            "event_id": event_id,
+            "event_type": event_type,
+            "event": event_type,
+            "run_id": run.run_id,
+        }
 
     def _write_reference_spec(
         self,
@@ -209,7 +309,7 @@ class GeneralsPolicyKLExtensionPipeline(GeneralsPolicyKLPipeline):
         run_dir: Path,
         source: VerifiedPolicyKLSource,
         receipts: tuple[ArtifactReceipt, ...],
-        emitted: set[str],
+        emitted: dict[str, dict[str, Any]],
     ) -> None:
         self._emit_once(
             run,
@@ -248,7 +348,7 @@ class GeneralsPolicyKLExtensionPipeline(GeneralsPolicyKLPipeline):
         run: Run,
         run_dir: Path,
         source: VerifiedPolicyKLSource,
-        emitted: set[str],
+        emitted: dict[str, dict[str, Any]],
     ) -> None:
         for record in source.reuse_events:
             event_type = str(record["event_type"])
@@ -264,12 +364,14 @@ class GeneralsPolicyKLExtensionPipeline(GeneralsPolicyKLPipeline):
                 payload["artifact_ref"] = str(
                     run_dir / "reference/states" / f"{state_id}.json"
                 )
-                payload["measurement_id"] = self.reference.measurement_id
             payload.update(
                 {
                     "source_event_id": record["event_id"],
                     "source_run_id": self.reference.source_run_id,
                     "reuse_status": "verified_reuse",
+                    "materialization_measurement_id": (
+                        self.reference.measurement_id
+                    ),
                 }
             )
             self._emit_once(
@@ -296,13 +398,61 @@ class GeneralsPolicyKLExtensionPipeline(GeneralsPolicyKLPipeline):
             for record in source.reference_records
         )
 
+    @staticmethod
+    def _validate_v7_observation(
+        record: dict[str, Any],
+        *,
+        policy: HistoricalPolicySource,
+        reference: ReferenceState,
+        action_space: Any,
+    ) -> tuple[tuple[int, ...], ...] | None:
+        identity = {
+            "version": "v7",
+            "run_id": policy.run_id,
+            "content_hash": policy.content_hash,
+            "measurement_state_id": reference.state_id,
+            "action_space_spec_id": action_space.spec_id,
+        }
+        if any(record.get(name) != value for name, value in identity.items()):
+            raise ValueError("saved v7 policy observation changed")
+        if record.get("status") != "complete":
+            if record.get("canonical_action") is not None:
+                raise ValueError("saved v7 policy observation changed")
+            return None
+        raw_actions = record.get("raw_actions")
+        saved_action = record.get("canonical_action")
+        if (
+            record.get("deterministic") is not True
+            or not isinstance(raw_actions, list)
+            or len(raw_actions) != 2
+            or not all(isinstance(item, list) for item in raw_actions)
+            or not isinstance(saved_action, list)
+            or not saved_action
+        ):
+            raise ValueError("saved v7 policy observation changed")
+        try:
+            first = action_space.canonicalize(
+                reference.snapshot,
+                raw_actions[0],
+            )
+            second = action_space.canonicalize(
+                reference.snapshot,
+                raw_actions[1],
+            )
+            saved = tuple(tuple(command) for command in saved_action)
+        except (TypeError, ValueError, KeyError, IndexError) as exc:
+            raise ValueError("saved v7 policy observation changed") from exc
+        if not first or first != second or first != saved:
+            raise ValueError("saved v7 policy observation changed")
+        return saved
+
     def _probe_v7(
         self,
         run: Run,
         run_dir: Path,
         action_space: Any,
         references: tuple[ReferenceState, ...],
-        emitted: set[str],
+        emitted: dict[str, dict[str, Any]],
     ) -> tuple[
         dict[tuple[str, str], tuple[tuple[int, ...], ...]],
         dict[tuple[str, str], str],
@@ -357,24 +507,13 @@ class GeneralsPolicyKLExtensionPipeline(GeneralsPolicyKLPipeline):
                     "action_space_spec_id": action_space.spec_id,
                 }
                 _write_exact(artifact, _json_bytes(record))
-            raw_action = record.get("canonical_action")
-            if (
-                record.get("version") != "v7"
-                or record.get("run_id") != policy.run_id
-                or record.get("content_hash") != policy.content_hash
-                or record.get("measurement_state_id") != reference.state_id
-                or record.get("action_space_spec_id") != action_space.spec_id
-            ):
-                raise ValueError("saved v7 policy observation changed")
-            if (
-                record.get("status") == "complete"
-                and record.get("deterministic") is True
-                and isinstance(raw_action, list)
-                and raw_action
-            ):
-                canonical_action = tuple(
-                    tuple(command) for command in raw_action
-                )
+            canonical_action = self._validate_v7_observation(
+                record,
+                policy=policy,
+                reference=reference,
+                action_space=action_space,
+            )
+            if canonical_action is not None:
                 actions[key] = canonical_action
             else:
                 missing[key] = str(
@@ -409,7 +548,7 @@ class GeneralsPolicyKLExtensionPipeline(GeneralsPolicyKLPipeline):
         references: tuple[ReferenceState, ...],
         v7_actions: dict[tuple[str, str], tuple[tuple[int, ...], ...]],
         missing: dict[tuple[str, str], str],
-        emitted: set[str],
+        emitted: dict[str, dict[str, Any]],
     ) -> tuple[dict[str, Any], bool]:
         actions = {**source.actions, **v7_actions}
         versions = tuple(item.version for item in self.reference.history)
@@ -452,6 +591,9 @@ class GeneralsPolicyKLExtensionPipeline(GeneralsPolicyKLPipeline):
                     "source_event_id": source_event["event_id"],
                     "source_run_id": self.reference.source_run_id,
                     "reuse_status": "verified_reuse",
+                    "materialization_measurement_id": (
+                        self.reference.measurement_id
+                    ),
                 }
                 event_kind = "reuse-kl"
                 event_key = str(source_event["event_id"])
@@ -484,8 +626,26 @@ class GeneralsPolicyKLExtensionPipeline(GeneralsPolicyKLPipeline):
         source_hash_before: str | None,
         source_hash_after: str | None,
         metric: dict[str, Any] | None,
+        source_receipt_sha256: str | None = None,
         error: str | None = None,
     ) -> PolicyKLMeasurementResult:
+        run.writer.flush()
+        prefinish_quality = inspect_event_file(
+            Path(run.run_dir) / "events.jsonl"
+        ).to_dict()
+        quality_defects = {
+            name: prefinish_quality.get(name, 0)
+            for name in QUALITY_DEFECT_FIELDS
+            if prefinish_quality.get(name, 0)
+        }
+        if status in {"complete", "incomplete_policy_measurement"} and (
+            quality_defects or prefinish_quality.get("warnings")
+        ):
+            status = "failed_event_quality"
+            error = (
+                "event quality prevents scientific finalization: "
+                f"{quality_defects or prefinish_quality.get('warnings')}"
+            )
         summary = run.finish(
             {
                 "status": status,
@@ -494,7 +654,11 @@ class GeneralsPolicyKLExtensionPipeline(GeneralsPolicyKLPipeline):
                 "source_run_id": self.reference.source_run_id,
                 "source_tree_hash_before": source_hash_before,
                 "source_tree_hash_after": source_hash_after,
+                "source_receipt_sha256": source_receipt_sha256,
                 "reuse_mode": "verified_v1_domain_probe_only_v7",
+                "policy_history": [
+                    asdict(item) for item in self.reference.history
+                ],
                 "controlled_reference_policy_kl": metric,
                 "error": error,
             }
@@ -513,7 +677,7 @@ class GeneralsPolicyKLExtensionPipeline(GeneralsPolicyKLPipeline):
         run: Run,
     ) -> PolicyKLMeasurementResult:
         run_dir = Path(run.run_dir)
-        emitted = self._existing_event_ids(run_dir)
+        emitted = self._existing_events(run_dir)
         source = self._verify_source()
         receipts = self._materialize_source(source, run_dir)
         self._write_reference_spec(run_dir, source)
@@ -562,13 +726,12 @@ class GeneralsPolicyKLExtensionPipeline(GeneralsPolicyKLPipeline):
             "source_run_id": self.reference.source_run_id,
             "source_tree_hash_before": source.tree_hash,
             "source_tree_hash_after": source_hash_after,
+            "source_run_dir": str(self.source_run_dir),
             "artifact_receipt_count": len(receipts),
             "verified": True,
         }
-        _write_exact(
-            run_dir / "provenance/source-run-receipt.json",
-            _json_bytes(receipt),
-        )
+        receipt_path = run_dir / "provenance/source-run-receipt.json"
+        _write_exact(receipt_path, _json_bytes(receipt))
         return self._finish_extension(
             run,
             status=(
@@ -577,6 +740,9 @@ class GeneralsPolicyKLExtensionPipeline(GeneralsPolicyKLPipeline):
             source_hash_before=source.tree_hash,
             source_hash_after=source_hash_after,
             metric=metric,
+            source_receipt_sha256=hashlib.sha256(
+                receipt_path.read_bytes()
+            ).hexdigest(),
         )
 
     def run(self) -> PolicyKLMeasurementResult:
@@ -585,13 +751,9 @@ class GeneralsPolicyKLExtensionPipeline(GeneralsPolicyKLPipeline):
             agent="generals-policy-kl",
             run_type="measurement",
             data_dir=str(self.data_dir),
-            config={
-                "measurement_id": self.reference.measurement_id,
-                "source_measurement_id": self.reference.source_measurement_id,
-                "source_run_id": self.reference.source_run_id,
-                "reuse_mode": "verified_v1_domain_probe_only_v7",
-            },
+            config=self._run_config(),
         )
+        self._write_start_receipt(run)
         try:
             return self._execute(run)
         except Exception as exc:
@@ -616,17 +778,26 @@ class GeneralsPolicyKLExtensionPipeline(GeneralsPolicyKLPipeline):
 
     def recover(self, failed_run: Path) -> PolicyKLMeasurementResult:
         run_dir = Path(failed_run).resolve()
-        summary = _read_json(run_dir / "summary.json")
-        if summary.get("status") == "complete":
-            raise ValueError("cannot recover a complete extension run")
-        if summary.get("measurement_id") != self.reference.measurement_id:
-            raise ValueError("failed extension measurement_id changed")
-        if summary.get("source_run_id") != self.reference.source_run_id:
-            raise ValueError("failed extension source run changed")
+        summary_path = run_dir / "summary.json"
+        summary = _read_json(summary_path) if summary_path.exists() else None
+        if summary is not None:
+            if summary.get("status") == "complete":
+                raise ValueError("cannot recover a complete extension run")
+            if summary.get("measurement_id") != self.reference.measurement_id:
+                raise ValueError("failed extension measurement_id changed")
+            if summary.get("source_run_id") != self.reference.source_run_id:
+                raise ValueError("failed extension source run changed")
         run = Run.resume(run_dir)
+        try:
+            self._validate_recovery_identity(run)
+        except Exception:
+            run.writer.close()
+            raise
         run.write(
             "pipeline_resumed",
-            recovery_status=summary.get("status"),
+            recovery_status=(
+                summary.get("status") if summary is not None else "interrupted"
+            ),
             source_run_id=self.reference.source_run_id,
         )
         try:

@@ -8,7 +8,7 @@ Data contract for CI visualization:
     └── events.jsonl     # step-level records (optional, for debugging)
 """
 
-import json, os, time, hashlib, subprocess, math
+import json, os, time, hashlib, subprocess, math, tomllib
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -86,14 +86,43 @@ class Run:
         )
 
         writer = JSONLWriter(os.path.join(run_path, "events.jsonl"))
-        return cls(run_id=run_id, run_dir=run_path, meta=meta, writer=writer, config=config or {})
+        run = cls(
+            run_id=run_id,
+            run_dir=run_path,
+            meta=meta,
+            writer=writer,
+            config=config or {},
+        )
+        # Persist immutable recovery identity before any workload begins. The
+        # finalized call overwrites this file only to add finish counters.
+        run._write_toml(os.path.join(run_path, "run.toml"))
+        return run
 
     @classmethod
     def resume(cls, run_dir: str | os.PathLike) -> "Run":
         """Reopen a finalized run for an explicit recovery continuation."""
         run_path = os.fspath(run_dir)
-        with open(os.path.join(run_path, "summary.json"), encoding="utf-8") as handle:
-            summary = json.load(handle)
+        summary_path = os.path.join(run_path, "summary.json")
+        if os.path.isfile(summary_path):
+            with open(summary_path, encoding="utf-8") as handle:
+                summary = json.load(handle)
+        else:
+            with open(os.path.join(run_path, "run.toml"), "rb") as handle:
+                document = tomllib.load(handle)
+            run_table = document.get("run")
+            if not isinstance(run_table, dict):
+                raise ValueError("unfinished run.toml is missing [run]")
+            summary = {
+                "run_id": run_table.get("run_id"),
+                "game": run_table.get("game"),
+                "agent": run_table.get("agent"),
+                "run_type": run_table.get("type", "eval"),
+                "created": run_table.get("created", ""),
+                "git_commit": run_table.get("git_commit", ""),
+                "started_at": run_table.get("started_at", time.time()),
+                "config": document.get("config") or {},
+                "budget": {},
+            }
         config = dict(summary.get("config") or {})
         meta = RunMeta(
             run_id=summary["run_id"],
