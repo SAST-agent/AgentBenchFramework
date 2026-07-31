@@ -438,6 +438,12 @@ def _run_real(
             )
 
     def prompt_factory(**values):
+        if values.get("bootstrap"):
+            return iteration_context.build_bootstrap_prompt(
+                act_id=values["act_id"],
+                workspace=workspace,
+                experience_path=experience.path,
+            )
         evaluation = evaluator.last_evaluation
         matches = list(evaluation.matches) if evaluation is not None else []
         evidence = [
@@ -486,7 +492,8 @@ def _run_real(
         head = controller.lineage.lineage_head_version_id
         evaluator.last_evaluation = evaluations_by_version.get(str(head))
     else:
-        origin = controller.initialize(evaluate=True)
+        origin_result = controller.bootstrap()
+        origin = origin_result.version
         assert evaluator.last_evaluation is not None
         evaluations_by_version[origin.version_id] = evaluator.last_evaluation
         measurement_runner.freeze_reference(evaluator.last_evaluation)
@@ -572,7 +579,7 @@ def _run_real(
 
     if not certified:
         certified = certify_eligible_champion()
-    completed_here = 0
+    completed_here = 0 if resume else 1
     while not certified and (acts is None or completed_here < acts):
         if controller.reached_iteration_limit():
             break

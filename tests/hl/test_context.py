@@ -65,6 +65,28 @@ def test_prompt_requires_replay_grounded_causal_change_and_blocks_grid_search(tm
     assert "压缩或整合" in prompt
 
 
+def test_bootstrap_prompt_creates_interpretable_origin_without_fake_replay(tmp_path):
+    from agentbench_frame.hl.context import ContextBundle, IterationContext
+
+    bundle = ContextBundle.create(tmp_path / "bundle", _static_files(tmp_path / "assets"))
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+
+    prompt = IterationContext(bundle).build_bootstrap_prompt(
+        act_id="act-000001-b00",
+        workspace=workspace,
+        experience_path=tmp_path / "experience" / "SKILL.md",
+    )
+
+    assert str(bundle.manifest_path) in prompt
+    assert str(workspace) in prompt
+    assert "初始算法" in prompt
+    assert "可解释" in prompt
+    assert "没有比赛回放" in prompt
+    assert "不要虚构回放证据" in prompt
+    assert "grid search" in prompt
+
+
 def test_checkpoint_records_hashes_and_recovery_inputs(tmp_path):
     from agentbench_frame.hl.context import ContextBundle, write_checkpoint
 

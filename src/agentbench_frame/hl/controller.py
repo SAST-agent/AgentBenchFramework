@@ -111,6 +111,102 @@ class HLController:
         self._started = True
         return version
 
+    def bootstrap(self) -> CandidateResult:
+        """Use one coding-agent act to create the only scientific origin."""
+
+        if self._started:
+            raise RuntimeError("controller already initialized")
+        self.events.write(
+            "run_started",
+            iteration_config=dataclasses.asdict(self.iteration),
+        )
+        iteration_id = "iter-000000"
+        act_id = "act-000001-b00"
+        parent_id = "bootstrap-scaffold"
+        prompt = self.prompt_factory(
+            act_id=act_id,
+            iteration_id=iteration_id,
+            branch_index=0,
+            branch_count=1,
+            parent_version_id=parent_id,
+            bootstrap=True,
+        )
+        scaffold_content_hash = self.version_store.current_content_hash()
+        raw_path = self.run_root / "provider" / f"{act_id}.jsonl"
+        invocation = self.provider.invoke(
+            prompt=prompt,
+            workspace=self.workspace,
+            raw_output_path=raw_path,
+            session_id=None,
+        )
+        self._write_checkpoint(
+            act_id=act_id,
+            iteration_id=iteration_id,
+            branch_index=0,
+            parent_version_id=parent_id,
+            prompt=prompt,
+            invocation=invocation,
+        )
+        self._coding_agent_acts = 1
+        if invocation.status != "completed":
+            self._write_provider_event(
+                act_id=act_id,
+                iteration_id=iteration_id,
+                branch_index=0,
+                invocation=invocation,
+            )
+            raise RuntimeError(
+                f"bootstrap provider did not complete: {invocation.status}"
+            )
+        if self.version_store.current_content_hash() == scaffold_content_hash:
+            self._write_provider_event(
+                act_id=act_id,
+                iteration_id=iteration_id,
+                branch_index=0,
+                invocation=invocation,
+            )
+            raise RuntimeError(
+                "bootstrap provider completed but did not change the candidate scaffold"
+            )
+
+        version = self.version_store.snapshot(
+            parent_version_id=None,
+            act_id=act_id,
+        )
+        evaluation = self.evaluator.evaluate(version)
+        self.lineage.record_evaluation(
+            version.version_id,
+            parent_version_id=None,
+            status=evaluation.status,
+            score=evaluation.score,
+        )
+        result = CandidateResult(
+            act_id=act_id,
+            branch_index=0,
+            version=version,
+            evaluation=evaluation,
+            provider=invocation,
+        )
+        thread_id = invocation.metadata.get("thread_id")
+        if thread_id:
+            self._sessions[version.version_id] = str(thread_id)
+        self._write_act_event(iteration_id, result)
+        self._write_version_event(version, evaluation, selected=True)
+        self.events.write(
+            "candidate_selected",
+            iteration_id=iteration_id,
+            version_id=version.version_id,
+            act_id=act_id,
+        )
+        if evaluation.status == "complete":
+            self.events.write(
+                "champion_promoted",
+                version_id=version.version_id,
+                score=evaluation.score,
+            )
+        self._started = True
+        return result
+
     def resume(self, historical_events: list[dict[str, Any]]) -> None:
         if self._started:
             raise RuntimeError("controller already initialized")
@@ -404,21 +500,36 @@ class HLController:
         iteration_id: str,
         result: CandidateResult,
     ) -> None:
-        usage = result.provider.usage
-        self.events.write(
-            "act_completed",
+        self._write_provider_event(
             act_id=result.act_id,
             iteration_id=iteration_id,
             branch_index=result.branch_index,
-            status=result.provider.status,
+            invocation=result.provider,
+        )
+
+    def _write_provider_event(
+        self,
+        *,
+        act_id: str,
+        iteration_id: str,
+        branch_index: int,
+        invocation: ProviderInvocation,
+    ) -> None:
+        usage = invocation.usage
+        self.events.write(
+            "act_completed",
+            act_id=act_id,
+            iteration_id=iteration_id,
+            branch_index=branch_index,
+            status=invocation.status,
             prompt_tokens=usage.prompt_tokens,
             cached_input_tokens=usage.cached_input_tokens,
             completion_tokens=usage.completion_tokens,
             reasoning_output_tokens=usage.reasoning_output_tokens,
             total_tokens=usage.total_tokens,
-            elapsed_time_s=result.provider.elapsed_time_s,
-            raw_output_ref=result.provider.raw_output_ref,
-            thread_id=result.provider.metadata.get("thread_id"),
+            elapsed_time_s=invocation.elapsed_time_s,
+            raw_output_ref=invocation.raw_output_ref,
+            thread_id=invocation.metadata.get("thread_id"),
         )
 
     def _write_checkpoint(

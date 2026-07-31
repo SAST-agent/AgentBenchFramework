@@ -74,6 +74,35 @@ class IterationContext:
     def __init__(self, bundle: ContextBundle) -> None:
         self.bundle = bundle
 
+    def build_bootstrap_prompt(
+        self,
+        *,
+        act_id: str,
+        workspace: str | Path,
+        experience_path: str | Path,
+    ) -> str:
+        return f"""# HL bootstrap {act_id} — 生成科研 origin
+
+目标：根据冻结游戏规则，从规则出发设计并实现一版可解释、可运行、可复现的初始算法。该版本将作为后续 HL 迭代的 origin。
+
+只读上下文：
+- context manifest: {self.bundle.manifest_path}
+- candidate workspace: {Path(workspace).resolve()}
+- Experience Skill: {Path(experience_path).resolve()}
+
+本阶段没有比赛回放。不要虚构回放证据，也不要假装从反馈中得出结论。
+
+执行约束：
+1. 完整阅读 context manifest 指向的规则、原子决策空间和 Replay Skill，再阅读 workspace 中的候选接口与脚手架代码。
+2. 基于可见 GameState 和合法原子动作，设计一套机制连贯的初始策略；允许路径规划、搜索、状态机、有限记忆及其他可解释代码。
+3. 初始算法必须显著优于占位策略，并在代码结构或注释中清楚表达决策依据。
+4. 禁止无依据的参数枚举、grid search、seed/固定坐标记忆和人工战术标签。
+5. 不读取、搜索或推断人类对手源码。
+6. 压缩重复规则，避免堆叠散乱 if/else；保持清晰的策略层次和回滚边界。
+7. 完成框架指定的静态检查和 smoke test。
+8. 不要直接修改 Experience Skill；本阶段只建立初始算法，后续再从合法比赛回放更新经验。
+"""
+
     def build_prompt(
         self,
         *,

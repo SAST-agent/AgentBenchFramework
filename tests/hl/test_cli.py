@@ -68,10 +68,11 @@ def test_hl_dry_run_needs_no_api_key_and_creates_no_provider_call(
 def test_real_run_fails_before_state_change_when_api_key_is_missing(
     tmp_path, monkeypatch
 ):
-    from agentbench_frame.hl.cli import main
+    from agentbench_frame.hl import cli
 
     monkeypatch.delenv("AGENTBENCH_API_KEY", raising=False)
-    code = main(
+    monkeypatch.setattr(cli, "_provider_environment", lambda _config: None)
+    code = cli.main(
         [
             "run",
             "--config",

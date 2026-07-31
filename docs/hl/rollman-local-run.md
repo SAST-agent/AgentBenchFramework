@@ -2,7 +2,7 @@
 
 ## 1. 目标
 
-Harness 驱动可解释 Rollman 程序从零开始迭代，学习对手固定为排名第一的 Ghost。候选达到学习门槛后，对 16 位人类 Ghost 执行冻结认证；至少 15 位对手上的固定 seed 得分率达到 50% 时满足停止条件。
+Harness 先让 coding agent 完整阅读冻结规则、原子决策空间和回放 Skill，自主设计并实现可解释的初始 Rollman 算法；该模型生成版本是唯一科研 origin。学习对手固定为排名第一的 Ghost。候选达到学习门槛后，对 16 位人类 Ghost 执行冻结认证；至少 15 位对手上的固定 seed 得分率达到 50% 时满足停止条件。
 
 默认参数：
 
@@ -19,7 +19,8 @@ Harness 驱动可解释 Rollman 程序从零开始迭代，学习对手固定为
 
 ```mermaid
 flowchart LR
-    A["不可变父版本"] --> B["Codex act<br/>k 个机制候选"]
+    Z["规则驱动的 Codex bootstrap<br/>可解释初始算法"] --> A["科研 origin"]
+    A --> B["Codex act<br/>k 个机制候选"]
     B --> C["静态检查与快照"]
     C --> D["对 rank-1 Ghost<br/>固定 seed 对局"]
     D --> E["回放 Skill<br/>证据与因果诊断"]
@@ -42,9 +43,11 @@ flowchart LR
 
 回滚只改变下一轮父版本。所有 act、候选、失败评测、代码对象和回放均保留。
 
+Bootstrap 阶段没有回放，不虚构反馈证据；模型必须修改候选脚手架并通过静态检查和 smoke test，否则 Harness 拒绝建立 origin。占位脚手架不产生版本、不参与评测、不进入曲线。反馈迭代从 origin 的真实对局回放开始。
+
 ## 3. Context 与 token
 
-首次 Codex act 读取三个带哈希的静态文件：
+Bootstrap Codex act 读取三个带哈希的静态文件：
 
 - `rules.md`
 - `decision_space.yaml`
@@ -183,7 +186,7 @@ cp .env.example .env
   --run-dir .agentbench/29_rollman/runs/RUN_ID
 ```
 
-`--acts N` 只用于 smoke test、调试和迭代轮数消融；正式目标运行省略该参数。
+`--acts N` 只用于 smoke test、调试和迭代轮数消融。新 run 的 `--acts 1` 只执行一次 bootstrap 模型调用并评测 origin；resume 的 `--acts 1` 执行一次基于回放的改进调用。正式目标运行省略该参数。
 
 ## 8. 冻结与裁判一致性
 

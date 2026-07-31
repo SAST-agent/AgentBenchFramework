@@ -104,6 +104,11 @@ class VersionStore:
                 continue
         return f"v{(max(numbers, default=-1) + 1):06d}"
 
+    def current_content_hash(self) -> str:
+        """Hash the current candidate tree without creating a version."""
+
+        return _hash_tree(_read_tree(self.workspace))
+
     def snapshot(
         self,
         *,

@@ -113,6 +113,55 @@ def test_k_candidates_are_siblings_and_gate_selects_best_complete_score(tmp_path
     assert "branch=0/3" in checkpoint.read_text(encoding="utf-8")
 
 
+def test_bootstrap_registers_only_provider_written_algorithm_as_origin(tmp_path):
+    from agentbench_frame.hl.events import read_events
+
+    provider = FakeProvider(["VALUE = 41\n", "VALUE = 42\n"])
+    controller = _controller(
+        tmp_path,
+        provider,
+        FakeEvaluator([0.35, 0.50]),
+    )
+
+    origin = controller.bootstrap()
+    next_iteration = controller.run_act()
+    events = read_events(tmp_path / "events.jsonl")
+
+    assert origin.version.parent_version_id is None
+    assert origin.version.edit_type == "initial"
+    assert origin.evaluation.score == 0.35
+    assert (controller.run_root / "versions" / "manifests" / "v000000.json").is_file()
+    assert len(
+        [event for event in events if event["event_type"] == "version_created"]
+    ) == 2
+    assert [
+        event["version_id"]
+        for event in events
+        if event["event_type"] == "candidate_selected"
+    ][0] == origin.version.version_id
+    assert provider.calls[0]["session_id"] is None
+    assert provider.calls[1]["session_id"] == "thread-1"
+    assert next_iteration.selected.act_id.startswith("act-000002")
+    assert controller.summary()["coding_agent_acts"] == 2
+
+
+def test_bootstrap_rejects_unchanged_scaffold_without_creating_origin(tmp_path):
+    import pytest
+
+    controller = _controller(
+        tmp_path,
+        FakeProvider(["VALUE = 0\n"]),
+        FakeEvaluator([]),
+    )
+
+    with pytest.raises(RuntimeError, match="did not change"):
+        controller.bootstrap()
+
+    assert not list(
+        (controller.run_root / "versions" / "manifests").glob("*.json")
+    )
+
+
 def test_each_invocation_gets_logical_version_and_incomplete_score_stays_missing(tmp_path):
     provider = FakeProvider(["VALUE = 0\n"])
     controller = _controller(tmp_path, provider, FakeEvaluator([None]))

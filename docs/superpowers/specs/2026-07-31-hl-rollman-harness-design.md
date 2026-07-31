@@ -6,7 +6,7 @@
 
 闭环包含：
 
-1. coding agent 从零构建并持续改进 Rollman 选手程序；
+1. coding agent 根据冻结规则自主构建可解释的初始算法，并持续改进 Rollman 选手程序；
 2. 每个 `coding_agent_act` 产生一个不可变逻辑版本；
 3. 每个版本使用冻结的学习对手、评测对手、地图 seed 和运行约束；
 4. coding agent 通过比赛回放、上一轮测量与持久经验 Skill 学习；
@@ -14,7 +14,7 @@
 6. 输出 benchmark score、胜率、Elo、局部策略 KL、occupancy shift 与预算曲线；
 7. 支持 `k` 个并行候选、上下文策略、回滚策略、经验 Skill、评测强度等参数消融。
 
-本地阶段不包含网站、服务器部署和正式长实验。模型 API key 只从运行时环境读取，不进入配置文件、日志、prompt、快照或 Git。
+本设计覆盖本地可恢复实验，不包含网站和服务器部署。正式目标运行不设置人为 act 上限，以冻结认证停止条件和账户侧费用上限约束运行。模型 API key 只从运行时环境读取，不进入配置文件、日志、prompt、快照或 Git。
 
 ## 2. 核心科研对象
 
@@ -144,9 +144,13 @@ coding agent 只能读取自己的程序、规则、决策空间、回放指南�
 
 `context_mode = "fresh"` 作为消融项。恢复失败、上下文超限或显式 checkpoint 时，框架从上述文件创建新 thread，不重复内嵌全部长文。
 
-### 4.2 Prompt 约束
+### 4.2 Bootstrap Prompt
 
-每个候选必须：
+首个 coding-agent act 完整阅读冻结规则、完整原子决策空间、回放 Skill 和候选接口，自主设计并实现机制连贯、可解释的初始算法。该版本是唯一科研 origin。Bootstrap 不提供比赛回放，不允许虚构反馈证据；模型必须实质修改候选脚手架并通过静态检查和 smoke test，否则不创建版本、不评测、不进入曲线。
+
+### 4.3 反馈迭代 Prompt
+
+origin 之后的每个候选必须：
 
 1. 先引用至少一个具体回放现象或测量异常；
 2. 写出可证伪的因果诊断；
@@ -358,4 +362,3 @@ run_completed
 - checkpoint 可在新会话中恢复；
 - run config、依赖版本、系统信息与 Git commit 写入 manifest；
 - 未经完整 frozen evaluation 的结果不标记为 SOTA。
-

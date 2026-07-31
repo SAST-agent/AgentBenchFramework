@@ -26,6 +26,22 @@ def test_snapshots_are_immutable_logical_versions(tmp_path):
     assert (tmp_path / "versions" / "manifests" / f"{v0.version_id}.json").exists()
 
 
+def test_current_content_hash_tracks_unsnapshotted_workspace_edits(tmp_path):
+    from agentbench_frame.hl.codebase import VersionStore
+
+    workspace = _workspace(tmp_path)
+    store = VersionStore(workspace, tmp_path / "versions")
+    before = store.current_content_hash()
+
+    (workspace / "agent.py").write_text(
+        "def act(state):\n    return 4\n",
+        encoding="utf-8",
+    )
+
+    assert store.current_content_hash() != before
+    assert not list((tmp_path / "versions" / "manifests").glob("*.json"))
+
+
 def test_snapshot_ignores_run_artifacts_but_keeps_candidate_source(tmp_path):
     from agentbench_frame.hl.codebase import VersionStore
 
