@@ -138,6 +138,36 @@ def test_resume_parent_uses_recorded_best_after_curriculum_resume():
     )
 
 
+def test_resume_parent_rolls_back_after_gate_reaches_rollback_patience():
+    from types import SimpleNamespace
+
+    from agentbench_frame.hl.cli import _curriculum_resume_parent
+
+    state = SimpleNamespace(
+        stage_origin_version_id="v000000",
+        stage_best_version_id="v000000",
+    )
+
+    parent = _curriculum_resume_parent(
+        [
+            {
+                "event_type": "candidate_selected",
+                "version_id": "v000004",
+            },
+            {
+                "event_type": "curriculum_gate_completed",
+                "version_id": "v000004",
+                "stagnation_count": 4,
+            },
+        ],
+        state=state,
+        lineage_head_version_id="v000004",
+        rollback_patience=3,
+    )
+
+    assert parent == "v000000"
+
+
 def test_replay_summary_is_generated_once_and_reused(tmp_path):
     from agentbench_frame.hl.cli import _ensure_replay_summary
 

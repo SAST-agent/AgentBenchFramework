@@ -38,6 +38,7 @@ def _manager():
         summary=_summary(failed=(14, 15)),
         required_human_opponents=16,
         stagnation_patience=4,
+        rollback_patience=3,
     )
 
 
@@ -109,7 +110,7 @@ def test_target_win_is_rejected_when_a_locked_opponent_regresses():
     assert manager.state.stage_origin_version_id == "v000000"
 
 
-def test_four_non_improving_gates_pause_at_stage_best():
+def test_non_improving_gates_roll_back_before_the_stop_threshold():
     manager = _manager()
     manager.begin_stage_gate(version_id="v000000", score=0.0)
 
@@ -121,9 +122,10 @@ def test_four_non_improving_gates_pause_at_stage_best():
     assert [decision.kind for decision in decisions] == [
         "continue",
         "continue",
-        "continue",
+        "rollback",
         "stagnated",
     ]
+    assert decisions[2].parent_version_id == "v000000"
     assert decisions[-1].parent_version_id == "v000000"
     assert manager.state.stagnation_count == 4
     assert manager.state.stage_best_version_id == "v000000"
@@ -219,6 +221,7 @@ def test_curriculum_state_rebuilds_from_lifecycle_events(tmp_path):
         read_events(path),
         required_human_opponents=16,
         stagnation_patience=4,
+        rollback_patience=3,
     )
 
     assert rebuilt.state.active_target == "rank15"

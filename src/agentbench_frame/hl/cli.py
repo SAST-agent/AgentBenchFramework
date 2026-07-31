@@ -496,6 +496,7 @@ def _curriculum_resume_parent(
     *,
     state: Any,
     lineage_head_version_id: str,
+    rollback_patience: int | None = None,
 ) -> str:
     """Choose the safe parent implied by the latest curriculum decision."""
 
@@ -505,6 +506,7 @@ def _curriculum_resume_parent(
         "curriculum_stagnated",
         "curriculum_resumed",
         "curriculum_stage_promoted",
+        "curriculum_gate_completed",
     }
     latest = next(
         (
@@ -521,6 +523,13 @@ def _curriculum_resume_parent(
             return str(state.stage_best_version_id)
         if latest.get("event_type") == "curriculum_resumed":
             return str(latest["stage_best_version_id"])
+        if (
+            latest.get("event_type") == "curriculum_gate_completed"
+            and rollback_patience is not None
+            and int(latest.get("stagnation_count", 0))
+            >= rollback_patience
+        ):
+            return str(state.stage_best_version_id)
     return lineage_head_version_id
 
 
@@ -1107,6 +1116,11 @@ def _run_real(
                 stagnation_patience=(
                     config.run.curriculum.stagnation_patience
                 ),
+                rollback_patience=(
+                    config.run.rollback.patience
+                    if config.run.rollback.enabled
+                    else None
+                ),
             )
             if certified:
                 _json(
@@ -1247,6 +1261,11 @@ def _run_real(
                 historical,
                 state=curriculum_manager.state,
                 lineage_head_version_id=head,
+                rollback_patience=(
+                    config.run.rollback.patience
+                    if config.run.rollback.enabled
+                    else None
+                ),
             )
             evaluator.last_evaluation = (
                 _curriculum_evaluation_from_events(
@@ -1310,6 +1329,11 @@ def _run_real(
                 ),
                 stagnation_patience=(
                     config.run.curriculum.stagnation_patience
+                ),
+                rollback_patience=(
+                    config.run.rollback.patience
+                    if config.run.rollback.enabled
+                    else None
                 ),
             )
             active_target = curriculum_manager.state.active_target

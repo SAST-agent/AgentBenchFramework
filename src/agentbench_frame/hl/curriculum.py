@@ -119,14 +119,18 @@ class CurriculumManager:
         *,
         required_human_opponents: int,
         stagnation_patience: int,
+        rollback_patience: int | None,
     ) -> None:
         if required_human_opponents < 1:
             raise ValueError("required_human_opponents must be positive")
         if stagnation_patience < 1:
             raise ValueError("stagnation_patience must be positive")
+        if rollback_patience is not None and rollback_patience < 1:
+            raise ValueError("rollback_patience must be positive")
         self._state = state
         self.required_human_opponents = required_human_opponents
         self.stagnation_patience = stagnation_patience
+        self.rollback_patience = rollback_patience
 
     @property
     def state(self) -> CurriculumState:
@@ -140,6 +144,7 @@ class CurriculumManager:
         summary: CertificationSummary,
         required_human_opponents: int,
         stagnation_patience: int,
+        rollback_patience: int | None,
     ) -> "CurriculumManager":
         completed = (
             summary.passing_opponents >= required_human_opponents
@@ -161,6 +166,7 @@ class CurriculumManager:
             state,
             required_human_opponents=required_human_opponents,
             stagnation_patience=stagnation_patience,
+            rollback_patience=rollback_patience,
         )
 
     @classmethod
@@ -170,6 +176,7 @@ class CurriculumManager:
         *,
         required_human_opponents: int,
         stagnation_patience: int,
+        rollback_patience: int | None,
     ) -> "CurriculumManager":
         manager: CurriculumManager | None = None
         for event in events:
@@ -196,6 +203,7 @@ class CurriculumManager:
                     state,
                     required_human_opponents=required_human_opponents,
                     stagnation_patience=stagnation_patience,
+                    rollback_patience=rollback_patience,
                 )
             elif manager is None:
                 continue
@@ -279,6 +287,14 @@ class CurriculumManager:
         if count >= self.stagnation_patience:
             return CurriculumDecision(
                 kind="stagnated",
+                parent_version_id=self._state.stage_best_version_id,
+            )
+        if (
+            self.rollback_patience is not None
+            and count >= self.rollback_patience
+        ):
+            return CurriculumDecision(
+                kind="rollback",
                 parent_version_id=self._state.stage_best_version_id,
             )
         return CurriculumDecision(
