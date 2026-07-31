@@ -92,6 +92,12 @@ class IterationContext:
 
 本阶段没有比赛回放。不要虚构回放证据，也不要假装从反馈中得出结论。
 
+科研隔离边界：
+- 只允许读取上述 context manifest 及其 files、candidate workspace 和 Experience Skill。
+- 禁止读取或搜索其他 run、其他候选目录、Framework 源码、人类程序、对手构建目录及用户目录中的其他文件。
+- 禁止列举 candidate workspace 或指定 context 目录的父目录，禁止使用 `..` 绕过边界。
+- Framework 会审计工具调用路径和原始记录；越界 act 会被标记失败，不评测、不晋级。
+
 执行约束：
 1. 完整阅读 context manifest 指向的规则、原子决策空间和 Replay Skill，再阅读 workspace 中的候选接口与脚手架代码。
 2. 基于可见 GameState 和合法原子动作，设计一套机制连贯的初始策略；允许路径规划、搜索、状态机、有限记忆及其他可解释代码。
@@ -170,6 +176,12 @@ class IterationContext:
 上一轮测量：{measurements}
 必须核查的回放证据：{evidence}
 
+科研隔离边界：
+- 只允许读取上述 context manifest 及其 files、candidate workspace、Experience Skill，以及“必须核查的回放证据”明确列出的 replay/trace。
+- 禁止读取或搜索其他 run、其他候选目录、Framework 源码、人类程序、对手构建目录及用户目录中的其他文件。
+- 禁止列举 candidate workspace、指定 context 或指定回放目录的父目录，禁止使用 `..` 绕过边界。
+- Framework 会审计工具调用路径和原始记录；越界 act 会被标记失败，不评测、不晋级。
+
 执行约束：
 1. 先阅读 context manifest 指向的规则、决策空间和 Replay Skill，再阅读 workspace 中的代码。
 2. 从给定回放中引用至少一个具体 level/round/事件，提出一个可证伪的因果诊断。
@@ -178,7 +190,7 @@ class IterationContext:
 5. 若一轮有多个候选，本候选必须与同轮其他候选机制上不同，不能只是换阈值。
 6. 压缩或整合被替代的策略，避免持续堆叠分支；保留清晰回滚边界。
 7. 不读取、搜索或推断人类对手源码。只能从合法比赛回放学习。
-8. 完成框架指定的静态检查和 smoke test。不要直接修改 Experience Skill；将四个字符串数组 stable_knowledge、failed_hypotheses、replay_evidence、active_questions 写入 workspace/.agentbench/experience_update.json，由 Framework 在候选入选后合并。
+8. 只在 candidate workspace 内完成 `python -m py_compile ai.py` 和候选侧 smoke test，不搜索 Framework 命令。不要直接修改 Experience Skill；将四个字符串数组 stable_knowledge、failed_hypotheses、replay_evidence、active_questions 写入 workspace/.agentbench/experience_update.json，由 Framework 在候选入选后合并。
 """
 
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -13,6 +14,10 @@ from typing import Mapping, Optional
 from agentbench_frame.hl.config import ProviderConfig
 from agentbench_frame.tracking.provider import ProviderInvocation
 from agentbench_frame.tracking.providers import parse_codex_jsonl
+
+
+_ABSOLUTE_PATH = re.compile(r"(?<![A-Za-z0-9_])(/[^\s'\"<>|;&]+)")
+_PARENT_TRAVERSAL = re.compile(r"(^|[\s'\"=])\.\.(?:/|\s|$)")
 
 
 def _toml_string(value: str) -> str:
@@ -171,6 +176,17 @@ class CodexSessionProvider:
         raw_path.parent.mkdir(parents=True, exist_ok=True)
         raw_path.write_text(completed.stdout or "", encoding="utf-8")
         result = parse_codex_jsonl(completed.stdout or "")
+        violations = self._access_policy_violations(
+            completed.stdout or "",
+            workspace=workspace,
+        )
+        result.metadata["access_policy_violations"] = violations
+        if violations:
+            result.status = "failed"
+            result.error = (
+                "provider access policy violation: coding agent read outside "
+                "the isolated candidate context"
+            )
         result.elapsed_time_s = time.monotonic() - started
         result.raw_output_ref = str(raw_path)
         result.metadata.update(
@@ -190,3 +206,52 @@ class CodexSessionProvider:
                 completed.stderr.strip() or f"provider exited {completed.returncode}"
             )
         return result
+
+    def _access_policy_violations(
+        self,
+        raw_output: str,
+        *,
+        workspace: str | Path,
+    ) -> list[str]:
+        allowed_roots = tuple(
+            path.resolve()
+            for path in (
+                Path(workspace),
+                self.run_root / "context",
+                self.run_root / "experience",
+                self.run_root / "matches",
+                self.run_root / "measurement",
+            )
+        )
+        home = Path(self.environ.get("HOME", str(Path.home()))).resolve()
+        commands: set[str] = set()
+        for line in raw_output.splitlines():
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            item = record.get("item")
+            if (
+                isinstance(item, Mapping)
+                and item.get("type") == "command_execution"
+                and isinstance(item.get("command"), str)
+            ):
+                commands.add(str(item["command"]))
+
+        violations: set[str] = set()
+        for command in commands:
+            if _PARENT_TRAVERSAL.search(command):
+                violations.add("<relative parent traversal>")
+            for raw_path in _ABSOLUTE_PATH.findall(command):
+                candidate = Path(raw_path.rstrip(",)]}")).resolve()
+                try:
+                    candidate.relative_to(home)
+                except ValueError:
+                    continue
+                if any(
+                    candidate == root or candidate.is_relative_to(root)
+                    for root in allowed_roots
+                ):
+                    continue
+                violations.add(str(candidate))
+        return sorted(violations)

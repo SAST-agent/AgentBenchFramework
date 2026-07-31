@@ -100,6 +100,10 @@ def test_curriculum_prompt_names_target_and_locked_pool(tmp_path):
     assert "固定回放坐标" in prompt
     assert "grid search" in prompt
     assert "只针对当前目标" in prompt
+    assert "科研隔离边界" in prompt
+    assert "其他 run" in prompt
+    assert "其他候选目录" in prompt
+    assert "审计工具调用路径" in prompt
 
 
 def test_curriculum_prompt_rejects_evidence_from_another_opponent(tmp_path):

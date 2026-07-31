@@ -61,6 +61,8 @@ flowchart LR
 
 后续 act 使用 `codex exec resume` 续接已记录 thread，只发送增量 prompt：父版本、回放路径、测量结果、Experience Skill 路径和本轮约束。规则正文、决策空间和 SDK 不在每轮 prompt 中重复嵌入。
 
+Coding agent 的允许读取集合由候选 workspace、本 run 的 context、Experience Skill、指定 replay/trace 和 measurement 组成。Prompt 禁止访问其他 run、其他候选、Framework 源码、人类程序、对手构建目录和用户目录中的其他文件；Provider 从原始 JSONL 审计每条命令中的访问路径。越界 act 记录为 provider failure，保存 token 和审计证据，但不执行比赛评测、不生成有效性能点、不更新 Experience、不参与版本晋级。
+
 Responses API 本身可按无状态接口理解：单次请求不自动等于可复现研究会话。Harness 将 Codex thread ID、精确 prompt、provider 配置指纹、原始 JSONL 和 token usage 写入 checkpoint，从而兼顾上下文复用与运行恢复。
 
 无上限运行遇到 provider failure/timeout 或固定评测 incomplete 时立即停止，不自动重复失败请求；同一 run 可在外部条件恢复后继续。

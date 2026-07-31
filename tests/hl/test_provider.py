@@ -117,3 +117,143 @@ def test_fake_codex_invocation_retains_jsonl_session_and_exact_usage(tmp_path):
     assert raw.read_text(encoding="utf-8").count("\n") == 3
     assert "sk-runtime-only" not in json.dumps(result.metadata)
 
+
+def test_provider_rejects_tool_reads_from_another_run(tmp_path):
+    from agentbench_frame.hl.provider import CodexSessionProvider
+
+    executable = tmp_path / "fake-codex"
+    other_run = (
+        tmp_path
+        / ".agentbench"
+        / "29_rollman"
+        / "runs"
+        / "old-run"
+        / "events.jsonl"
+    )
+    command = f"sed -n '1,20p' {other_run}"
+    records = [
+        {"type": "thread.started", "thread_id": "thread-tainted"},
+        {
+            "type": "item.completed",
+            "item": {
+                "type": "command_execution",
+                "command": command,
+                "status": "completed",
+                "exit_code": 0,
+            },
+        },
+        {
+            "type": "turn.completed",
+            "usage": {"input_tokens": 20, "output_tokens": 7},
+        },
+    ]
+    executable.write_text(
+        "#!/bin/sh\n"
+        f"printf '%s\\n' {json.dumps(json.dumps(records[0]))}\n"
+        f"printf '%s\\n' {json.dumps(json.dumps(records[1]))}\n"
+        f"printf '%s\\n' {json.dumps(json.dumps(records[2]))}\n",
+        encoding="utf-8",
+    )
+    executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+    run_root = (
+        tmp_path
+        / ".agentbench"
+        / "29_rollman"
+        / "runs"
+        / "active-run"
+    )
+    workspace = (
+        tmp_path / ".agentbench" / "29_rollman" / "candidate-curriculum"
+    )
+    workspace.mkdir(parents=True)
+    provider = CodexSessionProvider(
+        _provider_config(executable=str(executable)),
+        run_root=run_root,
+        environ={
+            "AGENTBENCH_API_KEY": "sk-runtime-only",
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": str(tmp_path),
+        },
+    )
+
+    result = provider.invoke(
+        prompt="make one isolated change",
+        workspace=workspace,
+        raw_output_path=run_root / "provider" / "act-1.jsonl",
+    )
+
+    assert result.status == "failed"
+    assert "access policy violation" in str(result.error)
+    assert result.metadata["access_policy_violations"] == [
+        str(other_run)
+    ]
+    assert result.usage.total_tokens == 27
+
+
+def test_provider_allows_declared_run_artifacts_and_candidate_workspace(tmp_path):
+    from agentbench_frame.hl.provider import CodexSessionProvider
+
+    executable = tmp_path / "fake-codex"
+    run_root = (
+        tmp_path
+        / ".agentbench"
+        / "29_rollman"
+        / "runs"
+        / "active-run"
+    )
+    workspace = (
+        tmp_path / ".agentbench" / "29_rollman" / "candidate-curriculum"
+    )
+    workspace.mkdir(parents=True)
+    allowed_paths = [
+        workspace / "ai.py",
+        run_root / "context" / "context-manifest.json",
+        run_root / "experience" / "SKILL.md",
+        run_root / "matches" / "v000000" / "learning" / "replay.jsonl",
+    ]
+    records = [
+        {"type": "thread.started", "thread_id": "thread-clean"},
+        *[
+            {
+                "type": "item.completed",
+                "item": {
+                    "type": "command_execution",
+                    "command": f"sed -n '1,20p' {path}",
+                    "status": "completed",
+                    "exit_code": 0,
+                },
+            }
+            for path in allowed_paths
+        ],
+        {
+            "type": "turn.completed",
+            "usage": {"input_tokens": 20, "output_tokens": 7},
+        },
+    ]
+    executable.write_text(
+        "#!/bin/sh\n"
+        + "".join(
+            f"printf '%s\\n' {json.dumps(json.dumps(record))}\n"
+            for record in records
+        ),
+        encoding="utf-8",
+    )
+    executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+    provider = CodexSessionProvider(
+        _provider_config(executable=str(executable)),
+        run_root=run_root,
+        environ={
+            "AGENTBENCH_API_KEY": "sk-runtime-only",
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": str(tmp_path),
+        },
+    )
+
+    result = provider.invoke(
+        prompt="make one isolated change",
+        workspace=workspace,
+        raw_output_path=run_root / "provider" / "act-1.jsonl",
+    )
+
+    assert result.status == "completed"
+    assert result.metadata["access_policy_violations"] == []
