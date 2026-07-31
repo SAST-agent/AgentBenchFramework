@@ -35,7 +35,7 @@ def test_rollman_curriculum_config_matches_approved_experiment():
     assert config.run.origin.source_version == "v000001"
     assert config.run.curriculum.mode == "weakest_failed"
     assert config.run.curriculum.required_human_opponents == 16
-    assert config.run.curriculum.stagnation_patience == 4
+    assert config.run.curriculum.stagnation_patience == 16
     assert config.run.iteration.candidates_per_act == 1
     assert config.run.iteration.max_acts is None
     assert config.run.evaluation.full_pool_every_iteration is True

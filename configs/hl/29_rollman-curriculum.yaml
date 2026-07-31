@@ -24,7 +24,7 @@ run:
     target_order: "lowest_rank_first"
     preserve_passed_opponents: true
     required_human_opponents: 16
-    stagnation_patience: 4
+    stagnation_patience: 16
   iteration:
     max_acts: null
     candidates_per_act: 1
