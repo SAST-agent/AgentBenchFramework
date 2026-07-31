@@ -1,0 +1,57 @@
+schema_version: "1.0"
+run:
+  game: "29_rollman"
+  provider:
+    kind: "codex"
+    model: "gpt-5.5"
+    review_model: "gpt-5.5"
+    reasoning_effort: "xhigh"
+    env_key: "AGENTBENCH_API_KEY"
+    base_url: "https://lab.cs.tsinghua.edu.cn/ai-platform/sub2api"
+    wire_api: "responses"
+    requires_openai_auth: true
+    disable_response_storage: true
+    network_access: "enabled"
+    context_mode: "resumable"
+  origin:
+    mode: "imported_version"
+    source_run: ".agentbench/29_rollman/runs/run-20260731-gpt55-sota"
+    source_version: "v000001"
+    reset_session: true
+    reset_experience: true
+  curriculum:
+    mode: "weakest_failed"
+    target_order: "lowest_rank_first"
+    preserve_passed_opponents: true
+    required_human_opponents: 16
+    stagnation_patience: 4
+  iteration:
+    max_acts: null
+    candidates_per_act: 1
+  rollback:
+    enabled: true
+    policy: "champion_on_sustained_degradation"
+    patience: 3
+    score_margin: 0.05
+  experience:
+    enabled: true
+    compress_every_acts: 5
+  measurement:
+    epsilon: 0.05
+    local_policy_kl: true
+    occupancy_shift: true
+  evaluation:
+    learning_opponent: "rank01"
+    fixed_gate_seeds: [101, 102, 103]
+    certification_opponents: "all"
+    certification_seeds: [201, 202, 203]
+    required_human_opponents: 16
+    required_win_rate: 0.5
+paths:
+  agentbench_root: "/Users/qingle/Code/SAST/AgentBench"
+  official_logic_root: "/Users/qingle/Code/SAST/PacmanLogic"
+  pacman_sdk_root: "/Users/qingle/Code/SAST/PacmanSDK-python"
+  human_manifest: "/Users/qingle/Code/SAST/AgentBench/top_algorithms/corpus/29_rollman_ghost_final/MANIFEST.tsv"
+  workspace: ".agentbench/29_rollman/candidate-curriculum"
+  runs_root: ".agentbench/29_rollman/runs"
+  opponent_build_root: ".agentbench/29_rollman/opponents"

@@ -2,13 +2,15 @@
 
 ## 1. 目标
 
-Harness 先让 coding agent 完整阅读冻结规则、原子决策空间和回放 Skill，自主设计并实现可解释的初始 Rollman 算法；该模型生成版本是唯一科研 origin。学习对手固定为排名第一的 Ghost。候选达到学习门槛后，对 16 位人类 Ghost 执行冻结认证；至少 15 位对手上的固定 seed 得分率达到 50% 时满足停止条件。
+科研 origin 由配置指定的冻结策略版本导入，并在新 run 中登记为 `v000000`。导入过程核对源对象清单与内容哈希；模型会话和 Experience Skill 从空状态开始，使课程实验从相同代码、相同上下文边界独立生长。
+
+对 origin 执行 16 位人类 Ghost 的固定 seed 认证，将所有已达标对手加入锁定集合，并从未达标集合中选择数字 rank 最大的对手作为学习靶标。每个候选只对当轮靶标执行学习门槛赛；通过门槛后再进行全池认证。候选必须同时保持全部锁定对手且击破当轮靶标，才可进入下一课程阶段。停止条件为 16 位人类对手全部达到固定 seed 得分率 50%。
 
 默认参数：
 
 - `max_acts: null`：不设置人为迭代上限；
 - `candidates_per_act: 1`：每轮产生一个候选；
-- 回滚开启：连续 3 个入选版本低于 champion 0.05 时，下一轮以 champion 为父版本；
+- 课程回滚开启：全池认证丢失任一锁定对手时回到该阶段 origin；连续 4 个候选未提高靶标门槛分时停在该阶段最佳版本，恢复运行后从该最佳版本继续；
 - Codex 上下文模式为 `resumable`；
 - 确定性策略测量 `epsilon: 0.05`；
 - 候选程序和人类程序在 default-deny 文件系统、无网络沙箱中执行，只读根目录和私有 scratch 显式声明；512 MiB 限额按完整后代进程树统计，进程组与脱离进程组的后代均清理；人类源码不进入 coding agent context。
@@ -19,35 +21,39 @@ Harness 先让 coding agent 完整阅读冻结规则、原子决策空间和回�
 
 ```mermaid
 flowchart LR
-    Z["规则驱动的 Codex bootstrap<br/>可解释初始算法"] --> A["科研 origin"]
-    A --> B["Codex act<br/>k 个机制候选"]
-    B --> C["静态检查与快照"]
-    C --> D["对 rank-1 Ghost<br/>固定 seed 对局"]
-    D --> E["回放 Skill<br/>证据与因果诊断"]
+    Z["导入冻结策略<br/>核对对象与内容哈希"] --> A["独立课程 origin"]
+    A --> CERT["16 人类固定 seed 认证"]
+    CERT --> SELECT["锁定已达标对手<br/>选择 rank 最大的未达标对手"]
+    SELECT --> B["Codex act<br/>k 个机制候选"]
+    B --> SNAP["静态检查与快照"]
+    SNAP --> E["对当轮靶标<br/>固定 seed 对局"]
     E --> F["score / win rate / Elo"]
     E --> G["固定参考状态上的策略 KL"]
-    D --> H["实际 rollout occupancy shift"]
+    E --> H["实际 rollout occupancy shift"]
+    E --> R["回放 Skill<br/>证据与因果诊断"]
     F --> I["候选选择与 champion 更新"]
     G --> I
     H --> I
-    I --> J{"持续退化？"}
-    J -- "是" --> A
-    J -- "否" --> K["入选版本"]
-    K --> B
-    K --> L{"rank-1 学习门槛"}
-    L -- "达到" --> M["16 人类认证"]
-    M --> N{"至少 15 人达标"}
-    N -- "是" --> O["完成"]
-    N -- "否" --> B
+    R --> I
+    I --> J{"靶标门槛通过？"}
+    J -- "否" --> Q{"连续 4 次无提升？"}
+    Q -- "否" --> B
+    Q -- "是" --> P["回到阶段最佳版本"]
+    P --> B
+    J -- "是" --> M["16 人类全池认证"]
+    M --> N{"锁定集合保持<br/>且靶标达标？"}
+    N -- "否" --> S["回到阶段 origin"]
+    S --> B
+    N -- "是" --> T{"16/16？"}
+    T -- "是" --> O["完成"]
+    T -- "否" --> SELECT
 ```
 
-回滚只改变下一轮父版本。所有 act、候选、失败评测、代码对象和回放均保留。
-
-Bootstrap 阶段没有回放，不虚构反馈证据；模型必须修改候选脚手架并通过静态检查和 smoke test，否则 Harness 拒绝建立 origin。占位脚手架不产生版本、不参与评测、不进入曲线。反馈迭代从 origin 的真实对局回放开始。
+回滚只改变下一轮父版本。所有 act、候选、失败评测、代码对象和回放均保留。策略改进允许可解释的条件分支、有限状态机、搜索、规划和特征组合；prompt 禁止无因果依据的参数枚举、grid search、seed 记忆和固定回放坐标记忆，并要求从回放提出可证伪的机制修改。
 
 ## 3. Context 与 token
 
-Bootstrap Codex act 读取三个带哈希的静态文件：
+课程首个 Codex act 读取三个带哈希的静态文件：
 
 - `rules.md`
 - `decision_space.yaml`
@@ -95,7 +101,7 @@ pi_epsilon(a|z) = (1-epsilon) I[a=f(z)] + epsilon/5
 
 ## 5. 回放证据
 
-回放 Skill 先验证 JSONL，再区分：
+回放 Skill 验证 JSONL，并区分：
 
 - 关卡初始化帧；
 - 普通结算帧；
@@ -121,6 +127,7 @@ experience/SKILL.md
 experience/history/
 report/curves.csv
 report/matches.csv
+report/curriculum.csv
 report/curves.png
 report/curves.svg
 ```
@@ -133,16 +140,23 @@ report/curves.svg
 - 按策略版本独立计算、角色固定且人类对手锚定的 Rollman Elo；认证赛逐局进入同一 Elo 事件流；
 - mean local policy KL；
 - occupancy shift；
+- 当轮课程靶标、靶标门槛得分率；
+- 全池得分率、已击破人类对手数；
+- 课程事件标记；
 - prompt、completion、total token 累计值。
 
-图表接口为六面板：
+图表接口为八面板：
 
 1. score / gain / best score；
 2. Rollman Elo；
-3. 冻结评测胜率；
-4. 策略信息增益；
-5. occupancy shift；
-6. token 预算。
+3. 当轮靶标与全池得分率；
+4. 已击破人类对手数；
+5. 入选评测胜率；
+6. 策略信息增益；
+7. occupancy shift（状态访问分布差异）；
+8. token 预算。
+
+`curriculum.csv` 是课程生命周期的稳定接口，包含事件序号、coding-agent act、版本、当轮靶标、靶标门槛得分率、锁定对手数、已击破对手数和事件类型。
 
 H2H-vs-origin 表示候选与初始版本直接对局的得分率。该指标可作为附加消融，不替代对冻结人类池的 benchmark score，也不是本配置的主停止条件。
 
@@ -162,6 +176,8 @@ cp .env.example .env
 .venv/bin/agentbench hl validate --config configs/hl/29_rollman.yaml
 .venv/bin/agentbench hl audit --config configs/hl/29_rollman.yaml
 .venv/bin/agentbench hl run --dry-run --config configs/hl/29_rollman.yaml
+.venv/bin/agentbench hl validate \
+  --config configs/hl/29_rollman-curriculum.yaml
 ```
 
 准备人类对手：
@@ -176,8 +192,11 @@ cp .env.example .env
 
 ```bash
 .venv/bin/agentbench hl run --config configs/hl/29_rollman.yaml
+.venv/bin/agentbench hl run \
+  --config configs/hl/29_rollman-curriculum.yaml \
+  --run-dir .agentbench/29_rollman/runs/RUN_ID
 .venv/bin/agentbench hl resume \
-  --config configs/hl/29_rollman.yaml \
+  --config configs/hl/29_rollman-curriculum.yaml \
   --run-dir .agentbench/29_rollman/runs/RUN_ID
 ```
 
@@ -188,7 +207,7 @@ cp .env.example .env
   --run-dir .agentbench/29_rollman/runs/RUN_ID
 ```
 
-`--acts N` 只用于 smoke test、调试和迭代轮数消融。新 run 的 `--acts 1` 只执行一次 bootstrap 模型调用并评测 origin；resume 的 `--acts 0` 只完成本地重评与认证，`--acts 1` 最多再执行一次基于回放的改进调用。正式目标运行省略该参数。
+`--acts N` 用于 smoke test、调试和迭代轮数消融。创建课程 run 时，`--acts 0` 只导入 origin、执行全池认证和当轮靶标基线，不调用模型；resume 的 `--acts 0` 只重建持久状态，不调用模型；`--acts 1` 最多执行一次基于靶标回放的模型改进调用。正式目标运行省略该参数。
 
 ## 8. 冻结与裁判一致性
 
