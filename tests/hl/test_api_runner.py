@@ -196,6 +196,34 @@ def test_transcript_records_syntax_failure(tmp_path):
     assert wa["reason"] and "syntax" in wa["reason"].lower()
 
 
+def test_empty_write_rejected(tmp_path):
+    """An empty write_agent_py content must never be applied (silent corruption)."""
+    _seed_agent(tmp_path, "ORIG = 1\n")
+    client = ScriptedClient([
+        LLMResponse(text="", tool_calls=[ToolCall("write_agent_py", {"content": ""})],
+                    usage=Usage(1, 1))])
+    res = ApiCodingRunner(client=client, system_prompt="S").run(
+        workspace=tmp_path, context={"prompt": "x"})
+    assert res.edit_type == "noop"
+    assert res.failure_reason == "empty_write"
+    assert (tmp_path / "agent.py").read_text() == "ORIG = 1\n"  # unchanged
+
+
+def test_truncated_write_rejected(tmp_path):
+    """A length-capped generation (finish_reason=length) on a write turn means
+    the content arg was cut mid-stream -> never apply the partial file."""
+    _seed_agent(tmp_path, "ORIG = 1\n")
+    client = ScriptedClient([
+        LLMResponse(text="", finish_reason="length",
+                    tool_calls=[ToolCall("write_agent_py", {"content": "partial = 1\n"})],
+                    usage=Usage(1, 4096))])
+    res = ApiCodingRunner(client=client, system_prompt="S").run(
+        workspace=tmp_path, context={"prompt": "x"})
+    assert res.edit_type == "noop"
+    assert res.failure_reason == "write_truncated"
+    assert (tmp_path / "agent.py").read_text() == "ORIG = 1\n"  # unchanged
+
+
 def test_zero_timeout_immediate_deadline(tmp_path):
     """Test that timeout=0.0 causes immediate deadline exit."""
     _seed_agent(tmp_path)

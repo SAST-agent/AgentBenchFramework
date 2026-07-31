@@ -340,7 +340,7 @@ class ApiCodingRunner:
     _READ_TOOLS = ("read_file", "list_replays", "read_replay")
 
     def __init__(self, *, client, system_prompt: str,
-                 max_turns: int = 6, max_tokens: int = 4096,
+                 max_turns: int = 6, max_tokens: int = 8192,
                  timeout: float = 300.0):
         self._client = client
         self._system = system_prompt
@@ -397,6 +397,30 @@ class ApiCodingRunner:
                 for tc in resp.tool_calls:
                     if tc.name == "write_agent_py":
                         content = tc.arguments.get("content", "")
+                        # A length-capped generation (finish_reason="length")
+                        # cut the tool args mid-stream, so ``content`` is
+                        # incomplete — possibly empty. Never apply a
+                        # truncated/empty write: it silently corrupts
+                        # agent.py (empty file parses as valid Python). Fail
+                        # the act honestly; the workspace stays on the last
+                        # good version and the next act retries.
+                        if resp.finish_reason == "length":
+                            rec["write_attempt"] = {
+                                "called": True, "content_len": len(content),
+                                "ast_ok": False,
+                                "reason": "write_truncated (max_tokens hit mid-write)",
+                            }
+                            failure_reason = "write_truncated"
+                            wrote = True
+                            break
+                        if not content.strip():
+                            rec["write_attempt"] = {
+                                "called": True, "content_len": len(content),
+                                "ast_ok": False, "reason": "empty_write",
+                            }
+                            failure_reason = "empty_write"
+                            wrote = True
+                            break
                         ok, reason = self._apply_edit(content, workspace)
                         rec["write_attempt"] = {
                             "called": True, "content_len": len(content),
