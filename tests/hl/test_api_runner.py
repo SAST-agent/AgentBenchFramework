@@ -133,6 +133,69 @@ def test_timeout_passed_to_client(tmp_path):
     assert client.last_timeout <= 42.0
 
 
+def _read_transcript(path):
+    import json
+    lines = [l for l in Path(path).read_text(encoding="utf-8").splitlines() if l.strip()]
+    return [json.loads(l) for l in lines]
+
+
+def test_transcript_records_successful_edit(tmp_path):
+    _seed_agent(tmp_path)
+    tdir = tmp_path / "transcripts"
+    client = ScriptedClient([
+        LLMResponse(text="", tool_calls=[ToolCall("read_file", {"path": "agent.py"})],
+                    usage=Usage(5, 1)),
+        LLMResponse(text="done", tool_calls=[ToolCall("write_agent_py",
+                    {"content": "VALUE = 1\n"})], usage=Usage(7, 2)),
+    ])
+    res = ApiCodingRunner(client=client, system_prompt="S").run(
+        workspace=tmp_path,
+        context={"prompt": "x", "act_id": "act-1", "transcript_dir": str(tdir)})
+    assert res.transcript_path is not None
+    assert Path(res.transcript_path) == tdir / "act-1.jsonl"
+    recs = _read_transcript(res.transcript_path)
+    turns = [r for r in recs if r.get("kind") == "turn"]
+    terms = [r for r in recs if r.get("kind") == "terminal"]
+    assert len(turns) == 2
+    assert turns[0]["tool_calls"][0]["name"] == "read_file"
+    assert turns[0]["write_attempt"] is None
+    wa = turns[1]["write_attempt"]
+    assert wa["called"] is True and wa["ast_ok"] is True and wa["content_len"] > 0
+    assert terms and terms[0]["edit_applied"] is True and terms[0]["failure_reason"] is None
+
+
+def test_transcript_records_step_cap(tmp_path):
+    _seed_agent(tmp_path)
+    tdir = tmp_path / "t2"
+    reader = LLMResponse(text="", tool_calls=[ToolCall("read_file", {"path": "agent.py"})],
+                         usage=Usage(1, 1))
+    client = ScriptedClient([reader] * 10)
+    res = ApiCodingRunner(client=client, system_prompt="S", max_turns=3).run(
+        workspace=tmp_path, context={"prompt": "x", "transcript_dir": str(tdir)})
+    recs = _read_transcript(res.transcript_path)
+    turns = [r for r in recs if r.get("kind") == "turn"]
+    terms = [r for r in recs if r.get("kind") == "terminal"]
+    assert len(turns) == 3
+    assert all(t["write_attempt"] is None for t in turns)
+    assert all(t["tool_calls"][0]["name"] == "read_file" for t in turns)
+    assert terms[0]["failure_reason"] == "step_cap_exceeded"
+    assert terms[0]["edit_applied"] is False
+
+
+def test_transcript_records_syntax_failure(tmp_path):
+    _seed_agent(tmp_path, "ORIG = 1\n")
+    tdir = tmp_path / "t3"
+    client = ScriptedClient([
+        LLMResponse(text="", tool_calls=[ToolCall("write_agent_py",
+                    {"content": "def (\n"})], usage=Usage(1, 1))])
+    res = ApiCodingRunner(client=client, system_prompt="S").run(
+        workspace=tmp_path, context={"prompt": "x", "transcript_dir": str(tdir)})
+    recs = _read_transcript(res.transcript_path)
+    wa = recs[0]["write_attempt"]
+    assert wa["called"] is True and wa["ast_ok"] is False
+    assert wa["reason"] and "syntax" in wa["reason"].lower()
+
+
 def test_zero_timeout_immediate_deadline(tmp_path):
     """Test that timeout=0.0 causes immediate deadline exit."""
     _seed_agent(tmp_path)

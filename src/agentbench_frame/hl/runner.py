@@ -356,6 +356,7 @@ class ApiCodingRunner:
         prompt_tok = completion_tok = total_tok = 0
         edit_applied = False
         failure_reason: Optional[str] = None
+        turn_records: List[Dict[str, Any]] = []
         started = _time.monotonic()
         try:
             for _ in range(self._max_turns):
@@ -371,8 +372,23 @@ class ApiCodingRunner:
                 completion_tok += u.completion_tokens or 0
                 total_tok += u.total_tokens or 0
 
+                rec: Dict[str, Any] = {
+                    "kind": "turn", "turn": len(turn_records) + 1,
+                    "finish_reason": resp.finish_reason,
+                    "usage": {"prompt": u.prompt_tokens,
+                              "completion": u.completion_tokens,
+                              "total": u.total_tokens},
+                    "tool_calls": [{"name": tc.name, "id": tc.id,
+                                    "args_preview": self._preview(tc.arguments)}
+                                   for tc in resp.tool_calls],
+                    "assistant_text_preview": (resp.text or "")[:300],
+                    "write_attempt": None,
+                    "tool_results": [],
+                }
+
                 if not resp.tool_calls:
                     messages.append({"role": "assistant", "content": resp.text})
+                    turn_records.append(rec)
                     break  # model chose to stop -> clean no-op unless it edited
 
                 messages.append({"role": "assistant", "content": resp.text,
@@ -380,8 +396,12 @@ class ApiCodingRunner:
                 wrote = False
                 for tc in resp.tool_calls:
                     if tc.name == "write_agent_py":
-                        ok, reason = self._apply_edit(
-                            tc.arguments.get("content", ""), workspace)
+                        content = tc.arguments.get("content", "")
+                        ok, reason = self._apply_edit(content, workspace)
+                        rec["write_attempt"] = {
+                            "called": True, "content_len": len(content),
+                            "ast_ok": ok, "reason": reason,
+                        }
                         if ok:
                             edit_applied = True
                         else:
@@ -391,6 +411,9 @@ class ApiCodingRunner:
                     result = self._dispatch(tc.name, tc.arguments, workspace, context)
                     messages.append({"role": "tool", "tool_name": tc.name,
                                      "tool_call_id": tc.id, "content": result})
+                    rec["tool_results"].append(
+                        {"name": tc.name, "preview": result[:300]})
+                turn_records.append(rec)
                 if wrote:
                     break
             else:
@@ -399,19 +422,65 @@ class ApiCodingRunner:
             failure_reason = f"api_error: {type(e).__name__}: {str(e)[:200]}"
 
         elapsed = _time.monotonic() - started
+        transcript_path = self._write_transcript(
+            turn_records, edit_applied, failure_reason, workspace, context)
         if edit_applied:
             return AgentRunResult(
                 edit_type=None,  # unclassified -> controller diff-classifies
                 prompt_tokens=prompt_tok or None,
                 completion_tokens=completion_tok or None,
                 total_tokens=total_tok or None,
-                time_s=elapsed)
+                time_s=elapsed, transcript_path=transcript_path)
         return AgentRunResult(
             edit_type="noop", failure_reason=failure_reason,
             prompt_tokens=prompt_tok or None,
             completion_tokens=completion_tok or None,
             total_tokens=total_tok or None,
-            time_s=elapsed)
+            time_s=elapsed, transcript_path=transcript_path)
+
+    def _write_transcript(self, turn_records: List[Dict[str, Any]],
+                          edit_applied: bool, failure_reason: Optional[str],
+                          workspace: Path, context: Dict[str, Any]
+                          ) -> Optional[str]:
+        """Write a per-act JSONL tool-call transcript beside the round root.
+
+        One ``{kind: turn}`` record per tool-use turn (tool calls emitted,
+        any ``write_agent_py`` attempt, read-tool result previews) plus a
+        final ``{kind: terminal}`` record. Lets a run be diagnosed without a
+        live debugger: did the model call ``write_agent_py``? did it loop on
+        reads? did ``ast.parse`` reject the edit? ``transcript_dir`` in context
+        overrides the default ``<workspace.parent>/transcripts``.
+        Best-effort: any IO error -> None (never breaks the act loop).
+        """
+        import json as _json
+        tdir = Path(context.get("transcript_dir")
+                    or (workspace.parent / "transcripts"))
+        try:
+            tdir.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            return None
+        act_id = context.get("act_id") or "last-run"
+        path = tdir / f"{act_id}.jsonl"
+        try:
+            with path.open("w", encoding="utf-8") as f:
+                for rec in turn_records:
+                    f.write(_json.dumps(rec) + "\n")
+                f.write(_json.dumps({
+                    "kind": "terminal", "edit_applied": edit_applied,
+                    "failure_reason": failure_reason,
+                    "turns": len(turn_records),
+                }) + "\n")
+        except OSError:
+            return None
+        return str(path)
+
+    @staticmethod
+    def _preview(args: Any) -> str:
+        import json as _json
+        try:
+            return _json.dumps(args)[:300]
+        except (TypeError, ValueError):
+            return str(args)[:300]
 
     # ---- edit + tool dispatch ----
 
