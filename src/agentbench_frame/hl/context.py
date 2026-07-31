@@ -447,5 +447,17 @@ class ContextBuilder:
                 f"ai_errors={d['ai_errors']}", f"rounds={d['n_rounds']}"]
         if d["last_action"]:
             bits.append(f"last={d['last_action']}")
+        # Loud callout: a game that ran long enough to collect keys but where
+        # seat 0 collected NONE and did not escape is almost certainly a broken
+        # win-condition path (the interprops-gating regression). Make it an
+        # explicit instruction, not a buried count.
+        if (d.get("keys", 0) == 0 and not d.get("escaped")
+                and d.get("n_rounds", 0) >= 20):
+            bits.append(
+                "ACTION: 0 keys + no escape = key collection is broken. Do "
+                "NOT gate interact('KeyMachine') on interprops membership "
+                "(int/object-coded, never the string 'KeyMachine'). Call "
+                "interact('KeyMachine') and branch on result['success']. See "
+                "the Data schema section.")
         return ("seat 0 last game: " + " ".join(bits)
                 + "  (replays are event-summarized; counts are lower bounds)")

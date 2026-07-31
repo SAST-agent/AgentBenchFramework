@@ -205,3 +205,43 @@ def test_prompt_has_data_schema_section(tmp_path):
     assert "always False" in prompt or "always false" in prompt
     assert "interact('KeyMachine')" in prompt
 
+
+def test_prompt_seat0_digest_loud_callout_on_zero_keys(tmp_path):
+    """When the last game ran long but seat 0 collected 0 keys and did not
+    escape, the digest must emit a loud ACTION callout naming the interprops
+    gating regression — not just a buried keys=0 count. This is the exact
+    failure mode of hl-curriculum-0731."""
+    cb = _codebase(tmp_path)
+    run_dir = tmp_path / "runs" / "25_lostspace" / "hl-v1" / "run-001"
+    art = run_dir / "artifacts"
+    art.mkdir(parents=True)
+    # 25 rounds; seat 0 (playerid 0) only moves — never getkey/keymachine.
+    seat0_turn = [{"type": "move", "playerid": 0, "pos": [0, 0, 1]}]
+    rounds = [[seat0_turn,
+               [{"type": "move", "playerid": 1, "pos": [6, 0, 1]}],
+               [{"type": "move", "playerid": 2, "pos": [6, 6, 1]}],
+               [{"type": "move", "playerid": 3, "pos": [0, 6, 1]}]]
+              for _ in range(25)]
+    replay = [[[0, 0, 1], [6, 0, 1], [6, 6, 1], [0, 6, 1]], *rounds,
+              {"0": 1, "1": 4, "2": 3, "3": 2}]
+    (art / "rank06-pair000-seat0.json").write_text(json.dumps(replay), encoding="utf-8")
+    (run_dir / "matches.jsonl").write_text(
+        json.dumps({"opponent": "rank06", "candidate_result": "loss",
+                    "candidate_rank": 4, "candidate_score": 1, "turns": 2500,
+                    "pair": 0, "candidate_seat": 0,
+                    "replay": "artifacts/rank06-pair000-seat0.json"}) + "\n",
+        encoding="utf-8")
+    builder = ContextBuilder(codebase=cb, data_root=tmp_path, game="25_lostspace",
+                             agent_name="hl-v1", spec=_spec())
+    prompt = builder.build(version_before=None, act_id="r-act0001")["prompt"]
+    assert "keys=0" in prompt
+    assert "ACTION" in prompt
+    assert "interprops" in prompt.lower()
+    # sanity: a game WITH a getkey must NOT trigger the callout
+    seat0_key = [{"type": "getkey", "playerid": 0}]
+    replay2 = json.loads(json.dumps(replay))
+    replay2[1][0] = seat0_key
+    (art / "rank06-pair000-seat0.json").write_text(json.dumps(replay2), encoding="utf-8")
+    prompt2 = builder.build(version_before=None, act_id="r-act0002")["prompt"]
+    assert "keys=" in prompt2 and "keys=0" not in prompt2
+
