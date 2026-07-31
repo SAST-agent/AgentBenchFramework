@@ -230,7 +230,18 @@ def _system_prompt() -> str:
         "(one unique old_string -> new_string change per act; never rewrite "
         "the whole file). Never touch manifest.toml. "
         "Never break the Saiblo stdio protocol (4-byte big-endian length "
-        "prefix + UTF-8 JSON). Leave the agent runnable."
+        "prefix + UTF-8 JSON). Leave the agent runnable. "
+        "DATA-SAFETY RULE: never gate an action you emit (interact/attack/"
+        "move/use_tool) on a membership or equality check against data whose "
+        "RUNTIME type you have not confirmed from the code that produces it. "
+        "In LostSpace `self.view.nodes[i].interprops` is a list of INTEGER "
+        "CODES / objects (1=EscapeCapsule, 2=KeyMachine; the client also "
+        "appends the string 'Box'), NOT a list of strings. So a guard like "
+        "`if 'KeyMachine' in interprops` is ALWAYS False and silently disables "
+        "key collection. Prefer the codebase's existing blind-call-then-check "
+        "pattern: call `self.interact('KeyMachine')` and branch on "
+        "`result['success']` (the server returns success only when the action "
+        "is actually valid)."
     )
 
 

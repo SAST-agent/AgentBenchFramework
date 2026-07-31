@@ -376,3 +376,17 @@ def test_default_seed_is_v1(monkeypatch, tmp_path):
     v1_agent = (Path(hl_cli.__file__).resolve().parent.parent
                 / "lostspace" / "candidates" / "v1" / "agent.py")
     assert ws_agent.read_bytes() == v1_agent.read_bytes()
+
+
+def test_system_prompt_states_interprops_schema_and_safe_pattern():
+    """The durable system prompt must warn that interprops are int/object-coded
+    (so 'X' in interprops is always False) and point to the blind-call-then-
+    check-success pattern. This is the regression that zeroed key collection
+    in hl-curriculum-0731."""
+    from agentbench_frame.hl.cli import _system_prompt
+
+    s = _system_prompt()
+    assert "interprops" in s.lower()
+    assert "always false" in s.lower()          # 'X' in interprops is always False
+    assert "success" in s.lower()               # branch on result['success']
+    assert "KeyMachine" in s
