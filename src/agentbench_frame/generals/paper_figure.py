@@ -68,7 +68,7 @@ def _coverage_value(
     record: dict[str, Any],
     *,
     label: str,
-) -> float | None:
+) -> float:
     coverage = record.get("coverage")
     if not isinstance(coverage, dict):
         raise ValueError(f"{label} coverage must be an object")
@@ -81,18 +81,19 @@ def _coverage_value(
         or not 0 <= complete <= total
     ):
         raise ValueError(f"{label} coverage is invalid")
-    value = record.get("mean_kl_nats")
-    if complete == total:
-        if not isinstance(value, (int, float)) or isinstance(value, bool):
-            raise ValueError(
-                f"{label} complete coverage requires a numeric aggregate"
-            )
-        return float(value)
-    if value is not None:
+    if complete != total:
         raise ValueError(
-            f"{label} incomplete coverage requires a null aggregate"
+            f"{label} must have full coverage in a complete figure run"
         )
-    return None
+    value = record.get("mean_kl_nats")
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise ValueError(
+            f"{label} complete coverage requires a numeric aggregate"
+        )
+    result = float(value)
+    if not math.isfinite(result) or result < 0:
+        raise ValueError(f"{label} KL must be finite nonnegative")
+    return result
 
 
 def _load_support_states(events_path: Path) -> tuple[SupportStatePoint, ...]:
@@ -138,22 +139,19 @@ def _load_support_states(events_path: Path) -> tuple[SupportStatePoint, ...]:
         if not isinstance(status, str) or not status:
             raise ValueError(f"missing count status for state {state_id}")
         raw_support = event.get("support_size")
-        if status == "complete":
-            if (
-                not isinstance(raw_support, str)
-                or not raw_support.isdecimal()
-                or int(raw_support) < 1
-            ):
-                raise ValueError(
-                    f"complete count requires positive support for {state_id}"
-                )
-            support_size = int(raw_support)
-        else:
-            if raw_support is not None:
-                raise ValueError(
-                    f"incomplete count requires null support for {state_id}"
-                )
-            support_size = None
+        if status != "complete":
+            raise ValueError(
+                f"complete figure run requires complete support for {state_id}"
+            )
+        if (
+            not isinstance(raw_support, str)
+            or not raw_support.isdecimal()
+            or int(raw_support) < 1
+        ):
+            raise ValueError(
+                f"complete count requires positive support for {state_id}"
+            )
+        support_size = int(raw_support)
         records[state_id] = SupportStatePoint(
             state_id=state_id,
             seed=seed,

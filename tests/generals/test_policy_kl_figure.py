@@ -238,6 +238,59 @@ def test_rejects_non_null_partial_transition_aggregate(tmp_path):
         load_policy_kl_figure_data(run_dir)
 
 
+def test_rejects_null_partial_transition_in_a_complete_run(tmp_path):
+    from agentbench_frame.generals.paper_figure import (
+        load_policy_kl_figure_data,
+    )
+
+    run_dir = write_complete_run(tmp_path)
+    summary_path = run_dir / "summary.json"
+    summary = json.loads(summary_path.read_text())
+    transition = summary["controlled_reference_policy_kl"]["transitions"][0]
+    transition["coverage"] = {"complete": 11, "total": 12}
+    transition["mean_kl_nats"] = None
+    summary_path.write_text(json.dumps(summary))
+
+    with pytest.raises(ValueError, match="full coverage"):
+        load_policy_kl_figure_data(run_dir)
+
+
+def test_rejects_incomplete_support_in_a_complete_run(tmp_path):
+    from agentbench_frame.generals.paper_figure import (
+        load_policy_kl_figure_data,
+    )
+
+    run_dir = write_complete_run(tmp_path)
+    events_path = run_dir / "events.jsonl"
+    events = [json.loads(line) for line in events_path.read_text().splitlines()]
+    events[0]["status"] = "wall_time_exceeded"
+    events[0]["support_size"] = None
+    events_path.write_text(
+        "".join(json.dumps(event) + "\n" for event in events)
+    )
+
+    with pytest.raises(ValueError, match="complete support"):
+        load_policy_kl_figure_data(run_dir)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -0.1])
+def test_rejects_non_finite_or_negative_kl(tmp_path, value):
+    from agentbench_frame.generals.paper_figure import (
+        load_policy_kl_figure_data,
+    )
+
+    run_dir = write_complete_run(tmp_path)
+    summary_path = run_dir / "summary.json"
+    summary = json.loads(summary_path.read_text())
+    transition = summary["controlled_reference_policy_kl"]["transitions"][0]
+    transition["mean_kl_nats"] = value
+    transition["sensitivity"]["0.01"]["mean_kl_nats"] = value
+    summary_path.write_text(json.dumps(summary))
+
+    with pytest.raises(ValueError, match="finite nonnegative"):
+        load_policy_kl_figure_data(run_dir)
+
+
 def test_renders_three_panel_svg_and_300_dpi_png(tmp_path):
     from agentbench_frame.generals.paper_figure import (
         load_policy_kl_figure_data,
