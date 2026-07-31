@@ -420,19 +420,32 @@ def _run_real(
             if event.get("event_type") != "version_created":
                 continue
             version_id = str(event["version_id"])
-            status = str(event["evaluation_status"])
-            completed = evaluation_events.get(version_id)
+            finalized = evaluation_events.get(version_id)
+            status = str(
+                finalized["status"]
+                if finalized is not None
+                else event["evaluation_status"]
+            )
             evaluations_by_version[version_id] = CandidateEvaluation(
                 status=status,
                 score=(
                     None
-                    if event.get("benchmark_score") is None
-                    else float(event["benchmark_score"])
+                    if (
+                        finalized.get("benchmark_score")
+                        if finalized is not None
+                        else event.get("benchmark_score")
+                    )
+                    is None
+                    else float(
+                        finalized["benchmark_score"]
+                        if finalized is not None
+                        else event["benchmark_score"]
+                    )
                 ),
                 error=None if status == "complete" else "historical incomplete evaluation",
                 matches=(
-                    tuple(completed.get("matches", ()))
-                    if completed is not None
+                    tuple(finalized.get("matches", ()))
+                    if finalized is not None
                     else ()
                 ),
             )
@@ -491,11 +504,39 @@ def _run_real(
         controller.resume(historical)
         head = controller.lineage.lineage_head_version_id
         evaluator.last_evaluation = evaluations_by_version.get(str(head))
+        if (
+            evaluator.last_evaluation is None
+            or evaluator.last_evaluation.status != "complete"
+        ):
+            evaluator.last_evaluation = controller.retry_head_evaluation()
+            evaluations_by_version[str(head)] = evaluator.last_evaluation
+        if evaluator.last_evaluation.status != "complete":
+            _json(
+                {
+                    "run_dir": str(run_dir),
+                    "status": "incomplete_evaluation",
+                    "version_id": str(head),
+                    "coding_agent_acts": controller.summary()["coding_agent_acts"],
+                }
+            )
+            return 2
+        if not measurement_runner.manifest_path.is_file():
+            measurement_runner.freeze_reference(evaluator.last_evaluation)
     else:
         origin_result = controller.bootstrap()
         origin = origin_result.version
         assert evaluator.last_evaluation is not None
         evaluations_by_version[origin.version_id] = evaluator.last_evaluation
+        if evaluator.last_evaluation.status != "complete":
+            _json(
+                {
+                    "run_dir": str(run_dir),
+                    "status": "incomplete_evaluation",
+                    "version_id": origin.version_id,
+                    "coding_agent_acts": controller.summary()["coding_agent_acts"],
+                }
+            )
+            return 2
         measurement_runner.freeze_reference(evaluator.last_evaluation)
     completed_certifications = {
         str(event["version_id"])

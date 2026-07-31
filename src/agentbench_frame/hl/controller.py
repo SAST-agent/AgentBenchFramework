@@ -95,7 +95,12 @@ class HLController:
             status=evaluation.status,
             score=evaluation.score,
         )
-        self._write_version_event(version, evaluation, selected=True)
+        self._write_version_event(
+            version,
+            evaluation,
+            selected=True,
+            record_evaluation=evaluate,
+        )
         self.events.write(
             "candidate_selected",
             iteration_id="iter-000000",
@@ -261,6 +266,30 @@ class HLController:
             lineage_head_version_id=self.lineage.lineage_head_version_id,
             champion_version_id=self.lineage.champion_version_id,
         )
+
+    def retry_head_evaluation(self) -> CandidateEvaluation:
+        """Retry local evaluation of an incomplete head without a provider call."""
+
+        if not self._started:
+            raise RuntimeError("controller must be initialized before evaluation retry")
+        head = self.lineage.lineage_head_version_id
+        if head is None:
+            raise ValueError("evaluation retry requires a lineage head")
+        version = self.version_store.get(head)
+        evaluation = self.evaluator.evaluate(version)
+        promoted = self.lineage.update_incomplete_evaluation(
+            version.version_id,
+            status=evaluation.status,
+            score=evaluation.score,
+        )
+        self._write_evaluation_event(version, evaluation)
+        if promoted:
+            self.events.write(
+                "champion_promoted",
+                version_id=version.version_id,
+                score=evaluation.score,
+            )
+        return evaluation
 
     def record_matches(
         self,
@@ -584,6 +613,7 @@ class HLController:
         evaluation: CandidateEvaluation,
         *,
         selected: bool,
+        record_evaluation: bool = True,
     ) -> None:
         self.events.write(
             "version_created",
@@ -596,26 +626,33 @@ class HLController:
             benchmark_score=evaluation.score,
             selected=selected,
         )
-        if evaluation.status == "complete":
-            match_records = [
-                dict(match)
-                for match in evaluation.matches
-                if match.get("status", "complete") == "complete"
-                and match.get("result") in {"win", "draw", "loss"}
-            ]
-            self.record_matches(
-                version=version,
-                act_id=version.act_id,
-                phase="learning",
-                matches=match_records,
-            )
-            self.events.write(
-                "evaluation_completed",
-                version_id=version.version_id,
-                status=evaluation.status,
-                benchmark_score=evaluation.score,
-                wins=sum(match["result"] == "win" for match in match_records),
-                draws=sum(match["result"] == "draw" for match in match_records),
-                losses=sum(match["result"] == "loss" for match in match_records),
-                matches=list(evaluation.matches),
-            )
+        if record_evaluation:
+            self._write_evaluation_event(version, evaluation)
+
+    def _write_evaluation_event(
+        self,
+        version: Version,
+        evaluation: CandidateEvaluation,
+    ) -> None:
+        match_records = [
+            dict(match)
+            for match in evaluation.matches
+            if match.get("status", "complete") == "complete"
+            and match.get("result") in {"win", "draw", "loss"}
+        ]
+        self.record_matches(
+            version=version,
+            act_id=version.act_id,
+            phase="learning",
+            matches=match_records,
+        )
+        self.events.write(
+            "evaluation_completed",
+            version_id=version.version_id,
+            status=evaluation.status,
+            benchmark_score=evaluation.score,
+            wins=sum(match["result"] == "win" for match in match_records),
+            draws=sum(match["result"] == "draw" for match in match_records),
+            losses=sum(match["result"] == "loss" for match in match_records),
+            matches=list(evaluation.matches),
+        )

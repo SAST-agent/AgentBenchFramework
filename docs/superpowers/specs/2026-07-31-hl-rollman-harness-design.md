@@ -112,6 +112,7 @@ flowchart TD
 - 方向决策 hook 与合法支持；
 - state ID；
 - score/win/draw/loss 判定；
+- 冻结 judger 的 TLE、RE、OLE、IA 回传与规则内错误计分；
 - Rollman 规则、决策空间、回放 Skill 和默认配置。
 
 ### 3.3 不透明人类对手

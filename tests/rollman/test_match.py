@@ -236,3 +236,53 @@ def test_from_scratch_candidate_runner_completes_frozen_game(tmp_path):
     assert result.status == "complete"
     assert result.rollman_decisions[0]["memory_id"] == "from-scratch-v0"
     assert len(result.rollman_decisions) > 1
+
+
+@pytest.mark.integration
+def test_frozen_backend_counts_game_rule_ghost_timeout_as_rollman_win(tmp_path):
+    agentbench_root = Path("/Users/qingle/Code/SAST/AgentBench")
+    logic_root = (
+        agentbench_root
+        / "backend_sources/corpus/29_rollman/logic/gamecode_logic/PacmanLogic"
+    )
+    if not logic_root.is_dir():
+        pytest.skip("frozen AgentBench backend is unavailable")
+    wrapper = (
+        Path(__file__).parents[2]
+        / "src/agentbench_frame/games/rollman/logic_runner.py"
+    )
+
+    result = run_match(
+        logic=ProcessSpec(
+            argv=(
+                sys.executable,
+                str(wrapper),
+                "--logic-root",
+                str(logic_root),
+                "--seed",
+                "101",
+            ),
+            cwd=logic_root,
+        ),
+        rollman=_python_fixture("fake_rollman.py"),
+        ghosts=_python_fixture("slow_ghosts.py"),
+        seed=101,
+        timeout_s=3,
+        replay_path=tmp_path / "timeout.jsonl",
+        trace_path=tmp_path / "timeout.trace.jsonl",
+        state_tracker=FrozenStateTracker(logic_root),
+    )
+
+    assert result.status == "complete"
+    assert result.result == "win"
+    assert result.end_state == ("OK", "TLE")
+    assert result.rollman_score > result.ghosts_score
+    assert any(
+        item.get("type") == "ai_fault"
+        and item.get("player") == 1
+        and item.get("error") == "TLE"
+        for item in (
+            json.loads(line)
+            for line in result.trace_path.read_text(encoding="utf-8").splitlines()
+        )
+    )

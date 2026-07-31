@@ -192,7 +192,7 @@ cp .env.example .env
 
 `validate`、`audit`、`run` 和 `resume` 均核对 `source_manifest.json` 中的 AgentBench、PacmanLogic、Logic core、PacmanSDK commit，以及冻结后端 `main.py` 和 core 文件哈希；任一不匹配即拒绝正式运行。
 
-本地裁判执行后端下发的回合约束：首次 AI 响应 20 秒、后续响应 1 秒、AI 输出最多 1024 字节。非 `OK` 终态、回放终局分数与 `end_info` 不一致、超时、超长输出或资源越界均不产生有效科研赛果。
+本地裁判执行后端下发的回合约束：首次 AI 响应 20 秒、后续响应 1 秒、AI 输出最多 1024 字节。游戏规则内的 TLE、RE、OLE 和 IA 由裁判回传冻结 Logic，按 Logic 的错误分数产生有效胜负；错误加减分只出现在 `end_info`，基础局面分保留在 replay。Logic、管线或外部执行基础设施无法完成时评测为 incomplete，不产生 aggregate score。
 
 人类池构建只接受 `opponent_profiles.json` 登记且 SHA-256 完全匹配的 16 份冻结归档，不提供任意源码构建入口。构建阶段禁网、限制环境变量，并设置整棵进程树的时间、内存、进程数、输出量和构建目录占用上限；候选与人类程序的比赛运行阶段采用只读白名单、私有临时写目录、禁网、禁止派生进程和内存上限。
 

@@ -80,6 +80,19 @@ class LineageManager:
                 )
             elif event_type == "candidate_selected":
                 manager.select_version(str(event["version_id"]))
+            elif event_type == "evaluation_completed":
+                version_id = str(event["version_id"])
+                existing = manager.versions.get(version_id)
+                if existing is not None and existing.status != "complete":
+                    manager.update_incomplete_evaluation(
+                        version_id,
+                        status=str(event["status"]),
+                        score=(
+                            None
+                            if event.get("benchmark_score") is None
+                            else float(event["benchmark_score"])
+                        ),
+                    )
             elif event_type == "rollback_selected":
                 decision = manager.select_next_parent()
                 if not decision.rollback:
@@ -127,6 +140,33 @@ class LineageManager:
         evaluation = VersionEvaluation(version_id, parent_version_id, status, score)
         self.versions[version_id] = evaluation
         self.latest_attempt_version_id = version_id
+
+    def update_incomplete_evaluation(
+        self,
+        version_id: str,
+        *,
+        status: str,
+        score: Optional[float],
+    ) -> bool:
+        """Finalize a new evaluation attempt for an existing incomplete version."""
+
+        if version_id not in self.versions:
+            raise KeyError(version_id)
+        existing = self.versions[version_id]
+        if existing.status == "complete":
+            raise ValueError("complete version evaluation cannot be retried")
+        if status == "complete":
+            if score is None or not 0.0 <= score <= 1.0:
+                raise ValueError("complete evaluation requires score in [0, 1]")
+        elif status not in {"incomplete", "failed", "timeout"} or score is not None:
+            raise ValueError("non-complete evaluation must have missing score")
+        self.versions[version_id] = VersionEvaluation(
+            version_id,
+            existing.parent_version_id,
+            status,
+            score,
+        )
+        return self.select_version(version_id)
 
     def select_version(self, version_id: str) -> bool:
         if version_id not in self.versions:

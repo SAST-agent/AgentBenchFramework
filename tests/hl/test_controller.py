@@ -162,6 +162,64 @@ def test_bootstrap_rejects_unchanged_scaffold_without_creating_origin(tmp_path):
     )
 
 
+def test_incomplete_bootstrap_persists_case_errors_and_can_retry_without_model(tmp_path):
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+    from agentbench_frame.hl.events import read_events
+
+    class RetryEvaluator:
+        def __init__(self):
+            self.calls = 0
+
+        def evaluate(self, version):
+            self.calls += 1
+            if self.calls == 1:
+                return CandidateEvaluation(
+                    status="incomplete",
+                    score=None,
+                    error="fixed case incomplete",
+                    matches=(
+                        {
+                            "phase": "learning",
+                            "status": "incomplete",
+                            "opponent": "rank01",
+                            "seed": 101,
+                            "error": "player 1 timed out",
+                        },
+                    ),
+                )
+            return CandidateEvaluation(
+                status="complete",
+                score=1.0,
+                matches=(
+                    {
+                        "phase": "learning",
+                        "status": "complete",
+                        "opponent": "rank01",
+                        "seed": 101,
+                        "result": "win",
+                    },
+                ),
+            )
+
+    provider = FakeProvider(["VALUE = 9\n"])
+    controller = _controller(tmp_path, provider, RetryEvaluator())
+
+    origin = controller.bootstrap()
+    retried = controller.retry_head_evaluation()
+    events = read_events(tmp_path / "events.jsonl")
+    evaluations = [
+        event for event in events if event["event_type"] == "evaluation_completed"
+    ]
+
+    assert origin.evaluation.status == "incomplete"
+    assert evaluations[0]["status"] == "incomplete"
+    assert evaluations[0]["matches"][0]["error"] == "player 1 timed out"
+    assert retried.status == "complete"
+    assert len(provider.calls) == 1
+    assert controller.lineage.champion_version_id == origin.version.version_id
+    assert [event["status"] for event in evaluations] == ["incomplete", "complete"]
+
+
 def test_each_invocation_gets_logical_version_and_incomplete_score_stays_missing(tmp_path):
     provider = FakeProvider(["VALUE = 0\n"])
     controller = _controller(tmp_path, provider, FakeEvaluator([None]))

@@ -306,6 +306,15 @@ def _parse_action(payload: bytes, *, player: int) -> tuple[dict[str, Any], Any]:
     return message, actions[0] if role == 0 else actions
 
 
+def _judger_ai_error(exc: ProtocolError) -> tuple[int, str]:
+    message = str(exc).lower()
+    if "timed out" in message:
+        return 1, "TLE"
+    if "unreasonable frame length" in message:
+        return 2, "OLE"
+    return 0, "RE"
+
+
 def _visible_state_from_watch(value: Mapping[str, Any]) -> dict[str, Any] | None:
     required = {
         "level",
@@ -428,11 +437,14 @@ def run_match(
                     raise MatchError("logic end_info must be an object")
                 if not isinstance(end_state, list) or len(end_state) != 2:
                     raise MatchError("logic end_state must contain two player states")
-                if end_state != ["OK", "OK"]:
-                    raise MatchError(f"game ended with non-OK player state: {end_state}")
+                allowed_end_states = {"OK", "RE", "TLE", "OLE", "IA"}
+                if any(str(value) not in allowed_end_states for value in end_state):
+                    raise MatchError(
+                        f"logic emitted unknown player end state: {end_state}"
+                    )
                 scores = (int(end_info["0"]), int(end_info["1"]))
                 replay = load_replay(replay_file)
-                if replay.final_score != scores:
+                if end_state == ["OK", "OK"] and replay.final_score != scores:
                     raise MatchError(
                         "logic end_info score disagrees with replay terminal score"
                     )
@@ -502,13 +514,40 @@ def run_match(
 
             listeners = [int(value) for value in message.get("listen", [])]
             responses: dict[int, bytes] = {}
+            ai_fault = False
             for player in listeners:
-                response = decode_ai_frame(
-                    players[player].stdout,
-                    timeout=announced_ai_timeout,
-                    label=f"player {player}",
-                    max_frame_size=announced_ai_max_length,
-                )
+                try:
+                    response = decode_ai_frame(
+                        players[player].stdout,
+                        timeout=announced_ai_timeout,
+                        label=f"player {player}",
+                        max_frame_size=announced_ai_max_length,
+                    )
+                except ProtocolError as exc:
+                    error_code, error_name = _judger_ai_error(exc)
+                    trace.append(
+                        {
+                            "type": "ai_fault",
+                            "state": state,
+                            "player": player,
+                            "error": error_name,
+                            "detail": str(exc),
+                        }
+                    )
+                    routed_error = json.dumps(
+                        {
+                            "player": -1,
+                            "content": json.dumps(
+                                {"error": error_code, "player": player},
+                                separators=(",", ":"),
+                            ),
+                        },
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                    write_logic_input(logic_process.stdin, routed_error)
+                    pending_actions.clear()
+                    ai_fault = True
+                    break
                 action_message, action = _parse_action(response, player=player)
                 responses[player] = response
                 pending_actions[player] = action
@@ -537,6 +576,8 @@ def run_match(
                     action_event["decision"] = decision
                 trace.append(action_event)
 
+            if ai_fault:
+                continue
             if 0 in pending_actions and 1 in pending_actions:
                 if state_tracker is not None:
                     state_tracker.step(pending_actions[0], pending_actions[1])
