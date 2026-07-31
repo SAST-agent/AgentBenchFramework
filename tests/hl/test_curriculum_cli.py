@@ -303,3 +303,48 @@ def test_experience_rebuild_uses_only_candidates_with_complete_measurement(
     assert _validated_experience_updates(events, tmp_path) == (
         ("act-valid", valid),
     )
+
+
+def test_resume_detects_failed_provider_candidate_that_needs_rollback():
+    from agentbench_frame.hl.cli import _pending_failed_candidate
+
+    events = [
+        {
+            "event_type": "act_completed",
+            "act_id": "act-2",
+            "status": "failed",
+        },
+        {
+            "event_type": "version_created",
+            "version_id": "v2",
+            "parent_version_id": "v0",
+            "act_id": "act-2",
+            "evaluation_status": "failed",
+        },
+        {
+            "event_type": "candidate_selected",
+            "iteration_id": "iter-2",
+            "version_id": "v2",
+            "act_id": "act-2",
+        },
+    ]
+
+    assert _pending_failed_candidate(events) == (
+        "v2",
+        "v0",
+        "provider_failed",
+    )
+    assert (
+        _pending_failed_candidate(
+            events
+            + [
+                {
+                    "event_type": "rollback_selected",
+                    "from_version_id": "v2",
+                    "to_version_id": "v0",
+                    "reason": "provider_failed",
+                }
+            ]
+        )
+        is None
+    )

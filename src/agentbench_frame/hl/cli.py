@@ -175,6 +175,65 @@ def _pending_measurement_candidate(
     return version_id, str(created["parent_version_id"])
 
 
+def _pending_failed_candidate(
+    events: list[dict[str, Any]],
+) -> tuple[str, str, str] | None:
+    """Return a selected failed candidate not yet restored to its parent."""
+
+    selected_index = next(
+        (
+            index
+            for index in range(len(events) - 1, -1, -1)
+            if events[index].get("event_type") == "candidate_selected"
+            and events[index].get("iteration_id") != "iter-000000"
+        ),
+        None,
+    )
+    if selected_index is None:
+        return None
+    selected = events[selected_index]
+    version_id = str(selected["version_id"])
+    later = events[selected_index + 1 :]
+    if any(
+        event.get("event_type") == "rollback_selected"
+        and str(event.get("from_version_id")) == version_id
+        for event in later
+    ):
+        return None
+    created = next(
+        (
+            event
+            for event in reversed(events[: selected_index + 1])
+            if event.get("event_type") == "version_created"
+            and str(event.get("version_id")) == version_id
+        ),
+        None,
+    )
+    if (
+        created is None
+        or created.get("evaluation_status") == "complete"
+        or created.get("parent_version_id") is None
+    ):
+        return None
+    act_id = str(created["act_id"])
+    act = next(
+        (
+            event
+            for event in reversed(events[: selected_index + 1])
+            if event.get("event_type") == "act_completed"
+            and str(event.get("act_id")) == act_id
+        ),
+        None,
+    )
+    provider_status = None if act is None else str(act.get("status"))
+    reason = (
+        f"provider_{provider_status}"
+        if provider_status not in {None, "completed"}
+        else f"evaluation_{created['evaluation_status']}"
+    )
+    return version_id, str(created["parent_version_id"]), reason
+
+
 def _validated_experience_updates(
     events: list[dict[str, Any]],
     run_root: str | Path,
@@ -925,6 +984,37 @@ def _run_real(
                 failed.add(candidate.version.version_id)
         return failed
 
+    def rollback_invalid_candidate(
+        *,
+        version_id: str,
+        parent_version_id: str,
+        reason: str,
+    ) -> None:
+        rollback = controller.lineage.force_parent(
+            parent_version_id,
+            reason=reason,
+        )
+        version_store.checkout(parent_version_id)
+        if rollback.rollback:
+            writer.write(
+                "rollback_selected",
+                from_version_id=rollback.from_version_id,
+                to_version_id=rollback.to_version_id,
+                reason=rollback.reason,
+            )
+        repaired_history = read_events(events_path)
+        accepted_updates = _validated_experience_updates(
+            repaired_history,
+            run_dir,
+        )
+        experience.rebuild(accepted_updates)
+        writer.write(
+            "experience_rebuilt",
+            rejected_version_id=version_id,
+            accepted_updates=len(accepted_updates),
+            experience_path=str(experience.path),
+        )
+
     if curriculum_mode:
         opponent_by_id = {
             opponent.opponent_id: opponent
@@ -1023,6 +1113,28 @@ def _run_real(
                     }
                 )
                 return 0
+            pending_failure = _pending_failed_candidate(historical)
+            if pending_failure is not None:
+                (
+                    failed_version_id,
+                    failed_parent_id,
+                    failure_reason,
+                ) = pending_failure
+                rollback_invalid_candidate(
+                    version_id=failed_version_id,
+                    parent_version_id=failed_parent_id,
+                    reason=failure_reason,
+                )
+                _json(
+                    {
+                        "run_dir": str(run_dir),
+                        "status": failure_reason,
+                        "version_id": failed_version_id,
+                        "next_parent_version_id": failed_parent_id,
+                        **controller.summary(),
+                    }
+                )
+                return 2
             pending_measurement = _pending_measurement_candidate(
                 historical
             )
@@ -1059,29 +1171,10 @@ def _run_real(
                     parent_evaluation=pending_parent_evaluation,
                 )
                 if not measured:
-                    rollback = controller.lineage.force_parent(
-                        pending_parent_id,
+                    rollback_invalid_candidate(
+                        version_id=pending_version_id,
+                        parent_version_id=pending_parent_id,
                         reason="measurement_failed",
-                    )
-                    version_store.checkout(pending_parent_id)
-                    if rollback.rollback:
-                        writer.write(
-                            "rollback_selected",
-                            from_version_id=rollback.from_version_id,
-                            to_version_id=rollback.to_version_id,
-                            reason=rollback.reason,
-                        )
-                    repaired_history = read_events(events_path)
-                    accepted_updates = _validated_experience_updates(
-                        repaired_history,
-                        run_dir,
-                    )
-                    experience.rebuild(accepted_updates)
-                    writer.write(
-                        "experience_rebuilt",
-                        rejected_version_id=pending_version_id,
-                        accepted_updates=len(accepted_updates),
-                        experience_path=str(experience.path),
                     )
                     _json(
                         {
@@ -1311,10 +1404,22 @@ def _run_real(
             completed_here += 1
             stop_reason = _iteration_stop_reason(iteration_result)
             if stop_reason is not None:
+                rollback_invalid_candidate(
+                    version_id=(
+                        iteration_result.selected.version.version_id
+                    ),
+                    parent_version_id=(
+                        iteration_result.parent_version_id
+                    ),
+                    reason=stop_reason,
+                )
                 _json(
                     {
                         "run_dir": str(run_dir),
                         "status": stop_reason,
+                        "next_parent_version_id": (
+                            iteration_result.parent_version_id
+                        ),
                         **controller.summary(),
                     }
                 )
@@ -1322,18 +1427,11 @@ def _run_real(
             failed_measurements = measure_iteration(iteration_result)
             selected = iteration_result.selected
             if selected.version.version_id in failed_measurements:
-                rollback = controller.lineage.force_parent(
-                    iteration_result.parent_version_id,
+                rollback_invalid_candidate(
+                    version_id=selected.version.version_id,
+                    parent_version_id=iteration_result.parent_version_id,
                     reason="measurement_failed",
                 )
-                version_store.checkout(iteration_result.parent_version_id)
-                if rollback.rollback:
-                    writer.write(
-                        "rollback_selected",
-                        from_version_id=rollback.from_version_id,
-                        to_version_id=rollback.to_version_id,
-                        reason=rollback.reason,
-                    )
                 _json(
                     {
                         "run_dir": str(run_dir),
