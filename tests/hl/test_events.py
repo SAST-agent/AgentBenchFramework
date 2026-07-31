@@ -113,6 +113,35 @@ class HLEventTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "duplicate event_id"):
                 read_events(path)
 
+    def test_curriculum_events_reject_unknown_fields(self):
+        from agentbench_frame.hl.events import HLEventWriter
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as directory:
+            writer = HLEventWriter(
+                f"{directory}/events.jsonl",
+                run_id="run-curriculum",
+            )
+            writer.write(
+                "curriculum_started",
+                version_id="v000000",
+                active_target="rank15",
+                active_target_rank=15,
+                locked_opponents=["rank01"],
+                required_human_opponents=16,
+                stage_origin_version_id="v000000",
+            )
+            with self.assertRaisesRegex(ValueError, "unknown fields"):
+                writer.write(
+                    "curriculum_stagnated",
+                    version_id="v000004",
+                    active_target="rank15",
+                    stage_best_version_id="v000000",
+                    stage_best_score=0.0,
+                    stagnation_count=4,
+                    invented=True,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -18,6 +18,12 @@ KNOWN_EVENT_TYPES = frozenset(
     {
         "run_started",
         "origin_imported",
+        "curriculum_started",
+        "curriculum_target_selected",
+        "curriculum_gate_completed",
+        "curriculum_stage_promoted",
+        "curriculum_candidate_rejected",
+        "curriculum_stagnated",
         "run_resumed",
         "act_completed",
         "version_created",
@@ -48,6 +54,72 @@ _EVENT_FIELDS = {
             "source_version_id",
             "source_content_hash",
             "version_id",
+        },
+        set(),
+    ),
+    "curriculum_started": (
+        {
+            "version_id",
+            "active_target",
+            "active_target_rank",
+            "locked_opponents",
+            "required_human_opponents",
+            "stage_origin_version_id",
+        },
+        set(),
+    ),
+    "curriculum_target_selected": (
+        {
+            "version_id",
+            "active_target",
+            "active_target_rank",
+            "locked_opponents",
+            "stage_origin_version_id",
+        },
+        set(),
+    ),
+    "curriculum_gate_completed": (
+        {
+            "version_id",
+            "active_target",
+            "status",
+            "score",
+            "matches",
+            "baseline",
+            "improved",
+            "stagnation_count",
+            "stage_best_version_id",
+            "stage_best_score",
+        },
+        set(),
+    ),
+    "curriculum_stage_promoted": (
+        {
+            "version_id",
+            "completed_target",
+            "next_target",
+            "locked_opponents",
+            "passing_human_opponents",
+        },
+        set(),
+    ),
+    "curriculum_candidate_rejected": (
+        {
+            "version_id",
+            "stage_origin_version_id",
+            "active_target",
+            "lost_locked_opponents",
+            "failed_active_target",
+        },
+        set(),
+    ),
+    "curriculum_stagnated": (
+        {
+            "version_id",
+            "active_target",
+            "stage_best_version_id",
+            "stage_best_score",
+            "stagnation_count",
         },
         set(),
     ),
@@ -95,7 +167,8 @@ def _validate_record(record: Mapping[str, Any]) -> None:
         "edit_type", "evaluation_status", "path", "experience_path",
         "raw_output_ref", "thread_id", "replay", "trace",
         "reference_manifest", "source_run_id", "source_version_id",
-        "source_content_hash",
+        "source_content_hash", "active_target", "stage_origin_version_id",
+        "stage_best_version_id", "completed_target", "next_target",
     ):
         if field in record and record[field] is not None and not isinstance(record[field], str):
             raise ValueError(f"{event_type}.{field} must be a string or null")
@@ -106,6 +179,7 @@ def _validate_record(record: Mapping[str, Any]) -> None:
         "cached_input_tokens", "completion_tokens",
         "reasoning_output_tokens", "total_tokens", "rollman_score",
         "ghosts_score",
+        "active_target_rank", "stagnation_count",
     ):
         value = record.get(field)
         if value is not None and (not isinstance(value, int) or isinstance(value, bool)):
@@ -113,18 +187,22 @@ def _validate_record(record: Mapping[str, Any]) -> None:
     for field in (
         "benchmark_score", "score", "epsilon", "occupancy_shift",
         "rating_before", "rating", "opponent_rating", "elapsed_time_s",
+        "stage_best_score",
     ):
         value = record.get(field)
         if value is not None and (
             not isinstance(value, (int, float)) or isinstance(value, bool)
         ):
             raise ValueError(f"{event_type}.{field} must be numeric or null")
-    for field in ("selected", "valid"):
+    for field in (
+        "selected", "valid", "baseline", "improved", "failed_active_target",
+    ):
         if field in record and not isinstance(record[field], bool):
             raise ValueError(f"{event_type}.{field} must be boolean")
     for field in (
         "matches", "action_support", "local_policy_kl_trace",
         "episode_local_policy_kl",
+        "locked_opponents", "lost_locked_opponents",
     ):
         if field in record and not isinstance(record[field], list):
             raise ValueError(f"{event_type}.{field} must be a list")
