@@ -50,7 +50,9 @@ class LLMResponse:
 SHARED_TOOLS: List[Dict[str, Any]] = [
     {
         "name": "read_file",
-        "description": "Read a UTF-8 text file from the agent workspace (relative path).",
+        "description": "Read a UTF-8 text file from the agent workspace (relative "
+                       "path). Returns the ENTIRE file content (up to 64k chars) "
+                       "— one read sees the whole file, no paging needed.",
         "input_schema": {"type": "object",
                          "properties": {"path": {"type": "string"}},
                          "required": ["path"]},

@@ -96,6 +96,31 @@ def test_step_cap_exceeded(tmp_path):
     assert client.calls == 3
 
 
+def test_read_file_returns_full_large_file(tmp_path):
+    """read_file must return the whole file, not truncate at 20k chars — the
+    LostSpace agent.py is ~30k chars; truncating left the model unable to see
+    the whole file, driving 8+ redundant reads and step-cap waste."""
+    big = "x = 1\n" * 5000  # 30k chars
+    _seed_agent(tmp_path, big)
+    captured = {}
+
+    class C:
+        def __init__(self): self.n = 0
+        def complete(self, *, system, messages, tools, max_tokens, timeout=None):
+            self.n += 1
+            for m in messages:
+                if m.get("role") == "tool" and m.get("tool_name") == "read_file":
+                    captured["result"] = m.get("content")
+            if self.n == 1:
+                return LLMResponse(text="", tool_calls=[ToolCall("read_file", {"path": "agent.py"})],
+                                   usage=Usage(1, 1))
+            return LLMResponse(text="ok", tool_calls=[], usage=Usage(1, 1))
+
+    ApiCodingRunner(client=C(), system_prompt="S").run(
+        workspace=tmp_path, context={"prompt": "x"})
+    assert len(captured.get("result", "")) > 20000  # not truncated at the old 20k cap
+
+
 def test_read_file_path_escape_blocked(tmp_path):
     _seed_agent(tmp_path)
     secret = tmp_path.parent / "secret.txt"

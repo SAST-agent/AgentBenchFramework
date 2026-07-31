@@ -557,7 +557,7 @@ class ApiCodingRunner:
         if not target.is_file():
             return f"error: not found: {rel}"
         text = target.read_text(encoding="utf-8", errors="replace")
-        return text[:20000]  # bound context
+        return text[:65536]  # whole file (LostSpace agent.py is ~30k chars)
 
     def _tool_list_replays(self, context: Dict[str, Any]) -> str:
         import json as _json
