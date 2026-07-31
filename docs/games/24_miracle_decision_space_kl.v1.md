@@ -65,6 +65,13 @@ exact `action_id -> probability` mappings:
 - total mass equals one with absolute tolerance `1e-9`;
 - no normalization, smoothing, or implicit zero filling.
 
+The `1e-9` envelope is the public distribution-validation boundary, not
+permission to treat non-unit mass as a probability distribution. Before KL
+arithmetic, each accepted total must still equal one within a fixed
+eight-ULP roundoff bound. Evidence outside that bound is preserved as
+`incomplete` with an `old_distribution_mass_not_strict` or
+`new_distribution_mass_not_strict` reason. It is never normalized.
+
 A submitted `local_policy_kl` is never accepted as input. The core recomputes
 the value from the captured distributions and trusted support identity.
 
@@ -75,6 +82,14 @@ checks the supplied identity, and recomputes local KL before aggregation.
 `DecisionKLRecord` is computation output only; passing a publicly constructed
 record, mapping, uploaded scalar, `local_kl`, `reported_local_kl`, or a
 decision-change value to the trajectory API is rejected.
+
+Expected domain unavailability is represented by a JSON-safe, enumerated
+reason and a null trace position. This includes non-finite ActionSupport,
+missing or extra distribution actions, invalid probability values, invalid
+mass, and a negative computed value beyond the documented floating-point
+roundoff bound. Support-identity mismatch, wrong evidence types, and
+non-continuous decision steps remain fail-closed API errors rather than
+trusted incomplete evidence.
 
 ## Frozen KL definition
 

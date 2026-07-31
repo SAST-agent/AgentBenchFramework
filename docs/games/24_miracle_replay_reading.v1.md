@@ -46,6 +46,8 @@ Every frame contains:
 
 - a strict continuous `decision_step` in `1..N`;
 - canonical `state_before` and `state_after` identities plus observations;
+- strict-integer before/after observation camps equal to the case's
+  `evaluated_agent_camp`;
 - the complete trusted ActionSupport regenerated from `state_before`;
 - one chosen canonical command belonging to that support;
 - acting policy and champion identity references;
@@ -71,6 +73,13 @@ complete legal-action count, chosen action, policy/champion identity, reward,
 outcome, and `rationale_status=not_recorded`. A final terminal line records the
 terminal outcome and flags. Agents can instead inspect the ordered ReplayPacket
 and DecisionFrame structures directly.
+
+Every dynamic text value is encoded as an RFC 3986 percent-encoded UTF-8 atom.
+The chosen command is first serialized as canonical JSON and then encoded by
+the same rule. Newlines, carriage returns, pipes, backslashes, equals signs,
+and other delimiters therefore cannot create extra lines or fields; decoding
+is deterministic and reversible. The renderer still records
+`rationale_status=not_recorded` and never invents rationale.
 
 ## Isolation and deferred work
 

@@ -181,8 +181,9 @@ def test_tiny_nonzero_new_probability_has_finite_trajectory_kl():
 
 @pytest.mark.parametrize("invalid", [True, False, "0.5", -0.1, math.nan, math.inf])
 def test_distribution_rejects_weak_or_nonstandard_numbers(invalid):
+    support = two_action_support()
     with pytest.raises((TypeError, ValueError)):
-        local({"a": invalid, "b": 1.0}, {"a": 0.5, "b": 0.5})
+        kl.validate_distribution({"a": invalid, "b": 1.0}, support)
 
 
 @pytest.mark.parametrize(
@@ -194,8 +195,9 @@ def test_distribution_rejects_weak_or_nonstandard_numbers(invalid):
     ],
 )
 def test_distribution_is_not_zero_filled_normalized_or_extended(distribution):
+    support = two_action_support()
     with pytest.raises(ValueError):
-        local(distribution, {"a": 0.5, "b": 0.5})
+        kl.validate_distribution(distribution, support)
 
 
 def test_probability_sum_uses_absolute_tolerance_1e_9():
@@ -330,7 +332,7 @@ def test_trajectory_rejects_support_identity_not_regenerated_from_state():
 
 
 @pytest.mark.parametrize("mutation", ["missing", "extra"])
-def test_trajectory_rejects_incomplete_or_extended_distributions(mutation):
+def test_trajectory_reports_incomplete_or_extended_distributions(mutation):
     state = empty_observation()
     support = kl.build_trusted_action_support(state)
     first, second = support.action_ids
@@ -339,10 +341,150 @@ def test_trajectory_rejects_incomplete_or_extended_distributions(mutation):
         old.pop(second)
     else:
         old["forged-action"] = 0.0
-    with pytest.raises(ValueError, match="action IDs"):
-        kl.compute_trajectory_kl(
-            [trajectory_evidence(state_before=state, old_distribution=old)]
-        )
+    summary = kl.compute_trajectory_kl(
+        [trajectory_evidence(state_before=state, old_distribution=old)]
+    )
+    assert summary.status == "incomplete"
+    assert summary.trajectory_kl is None
+    assert summary.threshold_passed is None
+    assert summary.reason == "old_distribution_action_ids_mismatch"
+
+
+def test_trajectory_reports_unavailable_action_support_as_structured_incomplete():
+    wind = [7, 3, 0, 1, 0, 0, 0, [-1, -1, -1]]
+    summary = kl.compute_trajectory_kl(
+        [
+            kl.DecisionKLEvidence(
+                decision_step=1,
+                state_before=empty_observation(artifact=wind),
+                support_identity={
+                    "schema_version": "unavailable",
+                    "support_id": "0" * 64,
+                    "action_ids": [],
+                },
+                old_distribution={},
+                new_distribution={},
+            )
+        ]
+    )
+    assert summary.status == "incomplete"
+    assert summary.trajectory_kl is None
+    assert summary.threshold_passed is None
+    assert summary.reason == "action_support_not_finitely_enumerable"
+    assert summary.trace == (None,)
+    json.dumps(summary.to_dict(), allow_nan=False)
+
+
+@pytest.mark.parametrize(
+    ("target", "mutation", "reason"),
+    [
+        ("old", "missing", "old_distribution_action_ids_mismatch"),
+        ("new", "extra", "new_distribution_action_ids_mismatch"),
+        ("old", "type", "old_distribution_probability_type"),
+        ("new", "nonfinite", "new_distribution_probability_non_finite"),
+        ("old", "negative", "old_distribution_probability_negative"),
+        ("new", "mass", "new_distribution_probability_sum_mismatch"),
+    ],
+)
+def test_trajectory_reports_distribution_domain_failures_as_incomplete(
+    target, mutation, reason
+):
+    state = empty_observation()
+    support = kl.build_trusted_action_support(state)
+    first, second = support.action_ids
+    distributions = {
+        "old": {first: 0.5, second: 0.5},
+        "new": {first: 0.5, second: 0.5},
+    }
+    selected = distributions[target]
+    if mutation == "missing":
+        selected.pop(second)
+    elif mutation == "extra":
+        selected["forged-action"] = 0.0
+    elif mutation == "type":
+        selected[first] = True
+    elif mutation == "nonfinite":
+        selected[first] = math.inf
+    elif mutation == "negative":
+        selected[first], selected[second] = -0.1, 1.1
+    else:
+        selected[first], selected[second] = 0.4, 0.4
+    summary = kl.compute_trajectory_kl(
+        [
+            trajectory_evidence(
+                state_before=state,
+                old_distribution=distributions["old"],
+                new_distribution=distributions["new"],
+            )
+        ]
+    )
+    assert summary.status == "incomplete"
+    assert summary.trajectory_kl is None
+    assert summary.threshold_passed is None
+    assert summary.reason == reason
+    assert summary.trace == (None,)
+    json.dumps(summary.to_dict(), allow_nan=False)
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ((0.50000000045, 0.50000000045), (0.49999999955, 0.49999999955)),
+        ((0.49999999955, 0.49999999955), (0.50000000045, 0.50000000045)),
+        ((0.50000000045, 0.50000000045), (0.50000000045, 0.50000000045)),
+    ],
+    ids=["positive-raw-kl", "negative-raw-kl", "zero-raw-kl"],
+)
+def test_tolerance_edge_nonunit_mass_is_structured_incomplete(old, new):
+    summary = local(
+        {"a": old[0], "b": old[1]},
+        {"a": new[0], "b": new[1]},
+    )
+    assert summary.status == "incomplete"
+    assert summary.trajectory_kl is None
+    assert summary.threshold_passed is None
+    assert summary.reason in {
+        "old_distribution_mass_not_strict",
+        "new_distribution_mass_not_strict",
+    }
+    assert summary.trace == (None,)
+
+
+def test_exact_unit_mass_zero_kl_remains_complete():
+    summary = local({"a": 0.5, "b": 0.5}, {"a": 0.5, "b": 0.5})
+    assert summary.status == "complete"
+    assert summary.trajectory_kl == 0.0
+    assert summary.threshold_passed is True
+
+
+def test_threshold_failure_has_priority_over_other_incomplete_decisions():
+    state = empty_observation()
+    support = kl.build_trusted_action_support(state)
+    first, second = support.action_ids
+    wind = [7, 3, 0, 1, 0, 0, 0, [-1, -1, -1]]
+    incomplete = kl.DecisionKLEvidence(
+        decision_step=1,
+        state_before=empty_observation(artifact=wind),
+        support_identity={
+            "schema_version": "unavailable",
+            "support_id": "0" * 64,
+            "action_ids": [],
+        },
+        old_distribution={},
+        new_distribution={},
+    )
+    failed = trajectory_evidence(
+        step=2,
+        state_before=state,
+        old_distribution={first: 1.0, second: 0.0},
+        new_distribution={first: 0.0, second: 1.0},
+    )
+    summary = kl.compute_trajectory_kl([incomplete, failed])
+    assert summary.status == "threshold_failed"
+    assert summary.trajectory_kl is None
+    assert summary.threshold_passed is False
+    assert summary.reason == "old_positive_new_zero"
+    assert summary.trace == (None, None)
 
 
 def test_empty_trajectory_is_incomplete_and_finite_trace_uses_arithmetic_mean():

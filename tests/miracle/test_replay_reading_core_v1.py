@@ -149,6 +149,17 @@ def rewrite_document(path, value):
     path.write_bytes(replay.canonical_replay_json_bytes(value))
 
 
+def rebind_and_approve(
+    monkeypatch, manifest_path, replay_path, manifest, replay_document
+):
+    rewrite_document(replay_path, replay_document)
+    manifest["replay_sha256"] = hashlib.sha256(replay_path.read_bytes()).hexdigest()
+    rewrite_document(manifest_path, manifest)
+    digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    approve(monkeypatch, digest)
+    return digest
+
+
 def test_context_is_issuer_only_and_object_new_forgery_cannot_open(tmp_path):
     with pytest.raises(TypeError):
         replay.ReplayReadingContext()
@@ -271,6 +282,50 @@ def test_action_support_rejects_weak_json_types_after_rebinding_digests(
         replay.preflight_replay_reading(manifest_path, approved_root=root)
 
 
+@pytest.mark.parametrize(
+    ("state_name", "camp"),
+    [
+        ("state_before", 1),
+        ("state_after", 1),
+        ("state_before", False),
+        ("state_before", 0.0),
+        ("state_before", "0"),
+        ("state_after", False),
+        ("state_after", 0.0),
+        ("state_after", "0"),
+    ],
+    ids=[
+        "before-other-camp",
+        "after-other-camp",
+        "before-bool",
+        "before-float",
+        "before-string",
+        "after-bool",
+        "after-float",
+        "after-string",
+    ],
+)
+def test_frame_perspective_camp_is_strictly_bound_after_digest_rebinding(
+    tmp_path, monkeypatch, state_name, camp
+):
+    root, manifest_path, replay_path, manifest, document, _ = artifact_fixture(
+        tmp_path
+    )
+    frame = document["decision_frames"][0]
+    changed = copy.deepcopy(frame[state_name]["observation"])
+    changed["camp"] = camp
+    frame[state_name] = state(changed)
+    if state_name == "state_before" and type(camp) is int:
+        _, supplied = canonical_support(changed)
+        frame["action_support"] = supplied
+        frame["chosen_action"] = supplied["actions"][0]
+    rebind_and_approve(
+        monkeypatch, manifest_path, replay_path, manifest, document
+    )
+    with pytest.raises(ValueError, match="camp"):
+        replay.preflight_replay_reading(manifest_path, approved_root=root)
+
+
 def test_frame_chain_and_terminal_consistency_are_strict(tmp_path, monkeypatch):
     for target in ("chain", "terminal"):
         root, manifest_path, replay_path, manifest, document, _ = artifact_fixture(tmp_path / target, frames=2)
@@ -340,6 +395,45 @@ def test_timeline_is_stable_ordered_complete_and_has_no_invented_rationale(tmp_p
     ):
         assert token in first
     assert "because" not in first.lower()
+
+
+def test_timeline_percent_encodes_all_dynamic_text_and_command_json(
+    tmp_path, monkeypatch
+):
+    root, manifest_path, replay_path, manifest, document, _ = artifact_fixture(
+        tmp_path
+    )
+    case_id = "case\nforged=1 | tail\\\r"
+    policy_version = "policy\r\n|\\=v"
+    champion_id = "champion\n|\\=id"
+    champion_version = "champion\r|\\=v"
+    for container in (manifest, document):
+        container["case_identity"]["case_id"] = case_id
+        container["acting_policy"]["version"] = policy_version
+        container["champion"]["logical_id"] = champion_id
+        container["champion"]["version"] = champion_version
+    frame = document["decision_frames"][0]
+    frame["case_identity_ref"] = case_id
+    frame["acting_identity_refs"]["acting_policy_version"] = policy_version
+    frame["acting_identity_refs"]["champion_logical_id"] = champion_id
+    frame["acting_identity_refs"]["champion_version"] = champion_version
+    document["terminal"]["termination_reason"] = "terminal\nforged=1 | tail\\\r"
+    rebind_and_approve(
+        monkeypatch, manifest_path, replay_path, manifest, document
+    )
+    context = replay.preflight_replay_reading(manifest_path, approved_root=root)
+    timeline = replay.render_replay_timeline(context)
+    assert len(timeline.splitlines()) == 3
+    assert timeline.count("\n") == 3
+    assert "\r" not in timeline
+    assert " | tail" not in timeline
+    for escaped in ("%0A", "%0D", "%7C", "%5C", "%3D"):
+        assert escaped in timeline
+    chosen = next(line for line in timeline.splitlines() if line.startswith("step=1"))
+    assert "chosen=" in chosen and ":%7B" in chosen
+    assert '{"operation_type"' not in timeline
+    assert "rationale_status=not_recorded" in timeline
+    assert "because" not in timeline.lower()
 
 
 @pytest.mark.parametrize("mutation", ["manifest", "approval", "replay"])

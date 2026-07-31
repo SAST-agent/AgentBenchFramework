@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Any
+from urllib.parse import quote
 
 from agentbench_frame.eval.measurement import canonical_state_id
 from agentbench_frame.games.miracle.research_protocol import (
@@ -206,6 +207,16 @@ def _validate_state(value: Any, label: str) -> dict[str, Any]:
     return copy.deepcopy(dict(value))
 
 
+def _validate_evaluated_camp(
+    observation: Mapping[str, Any], expected_camp: int, label: str
+) -> None:
+    camp = observation.get("camp")
+    if type(camp) is not int or camp not in (0, 1):
+        raise ValueError(f"{label} observation camp must be strict integer 0 or 1")
+    if camp != expected_camp:
+        raise ValueError(f"{label} observation camp does not match evaluated agent camp")
+
+
 @dataclass(frozen=True)
 class DecisionFrame:
     decision_step: int
@@ -299,6 +310,13 @@ def _validate_frame(value: Any, expected_step: int, *, case, seeds, policy, cham
         raise ValueError("decision_step must be strict integers 1..N")
     before = _validate_state(value["state_before"], "state_before")
     after = _validate_state(value["state_after"], "state_after")
+    expected_camp = case["evaluated_agent_camp"]
+    _validate_evaluated_camp(
+        before["observation"], expected_camp, "state_before"
+    )
+    _validate_evaluated_camp(
+        after["observation"], expected_camp, "state_after"
+    )
     support = build_action_support(enumerate_legal_commands(before["observation"]))
     actions = [{"action_id": item.action_id, "command": item.action} for item in support.actions]
     supplied = value["action_support"]
@@ -461,35 +479,50 @@ def render_replay_timeline(context: ReplayReadingContext) -> str:
     packet = open_replay_reading(context)
     case = packet.case_identity
     seeds = packet.seeds
+
+    def encoded_text(value: Any, label: str) -> str:
+        return quote(_strict_text(value, label), safe="-._~")
+
+    def encoded_command(value: Mapping[str, Any]) -> str:
+        canonical = canonical_replay_json_bytes(value).decode("utf-8")
+        return quote(canonical, safe="-._~")
+
     lines = [
         " | ".join((
-            f"case={case['case_id']}", f"role={packet.role}",
+            f"case={encoded_text(case['case_id'], 'case ID')}",
+            f"role={encoded_text(packet.role, 'role')}",
             f"logic_seed={seeds['logic_seed']}",
             f"evaluated_agent_seed={seeds['evaluated_agent_seed']}",
             f"opponent_seed={seeds['opponent_seed']}",
         ))
     ]
     for frame in packet.decision_frames:
-        command = json.dumps(
-            frame.chosen_action["command"], ensure_ascii=False, sort_keys=True,
-            separators=(",", ":"), allow_nan=False,
-        )
+        command = encoded_command(frame.chosen_action["command"])
         lines.append(" | ".join((
             f"step={frame.decision_step}",
-            f"state={frame.state_before['canonical_state_id']}",
+            f"state={encoded_text(frame.state_before['canonical_state_id'], 'state ID')}",
             f"legal_actions={len(frame.action_support['actions'])}",
-            f"chosen={frame.chosen_action['action_id']}:{command}",
-            f"policy={packet.acting_policy['version']}@{packet.acting_policy['source_sha256']}",
-            f"champion={packet.champion['logical_id']}@{packet.champion['version']}",
-            f"reward={frame.reward}", f"outcome={frame.outcome}",
-            f"rationale_status={frame.rationale_status}",
+            f"chosen={encoded_text(frame.chosen_action['action_id'], 'action ID')}:{command}",
+            "policy="
+            f"{encoded_text(packet.acting_policy['version'], 'policy version')}@"
+            f"{encoded_text(packet.acting_policy['source_sha256'], 'policy source')}",
+            "champion="
+            f"{encoded_text(packet.champion['logical_id'], 'champion logical ID')}@"
+            f"{encoded_text(packet.champion['version'], 'champion version')}",
+            f"reward={frame.reward}",
+            f"outcome={encoded_text(frame.outcome, 'frame outcome')}",
+            "rationale_status="
+            f"{encoded_text(frame.rationale_status, 'rationale status')}",
         )))
     terminal = packet.terminal
     lines.append(" | ".join((
-        "terminal", f"outcome={terminal['outcome']}", f"reward={terminal['reward']}",
+        "terminal",
+        f"outcome={encoded_text(terminal['outcome'], 'terminal outcome')}",
+        f"reward={terminal['reward']}",
         f"terminated={str(terminal['terminated']).lower()}",
         f"truncated={str(terminal['truncated']).lower()}",
-        f"termination_reason={terminal['termination_reason']}",
+        "termination_reason="
+        f"{encoded_text(terminal['termination_reason'], 'termination reason')}",
     )))
     return "\n".join(lines) + "\n"
 

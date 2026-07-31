@@ -15,6 +15,7 @@ from typing import Any
 
 from agentbench_frame.eval.measurement import ActionSupport
 from agentbench_frame.games.miracle.research_protocol import (
+    IncompleteActionSupportError,
     build_action_support,
     enumerate_legal_commands,
 )
@@ -26,6 +27,30 @@ ROLLOUT_SOURCE = "new_policy"
 SMOOTHING = "none"
 UNIT = "nats / decision"
 _IDENTITY_KEYS = {"schema_version", "support_id", "action_ids"}
+_DISTRIBUTION_SUM_TOLERANCE = 1e-9
+_STRICT_MASS_ROUNDOFF = 8 * math.ulp(1.0)
+_INCOMPLETE_REASONS = frozenset({
+    "action_support_not_finitely_enumerable",
+    "old_distribution_action_ids_mismatch",
+    "new_distribution_action_ids_mismatch",
+    "old_distribution_probability_type",
+    "new_distribution_probability_type",
+    "old_distribution_probability_non_finite",
+    "new_distribution_probability_non_finite",
+    "old_distribution_probability_negative",
+    "new_distribution_probability_negative",
+    "old_distribution_probability_sum_mismatch",
+    "new_distribution_probability_sum_mismatch",
+    "old_distribution_mass_not_strict",
+    "new_distribution_mass_not_strict",
+    "local_kl_negative_beyond_roundoff",
+})
+
+
+class _DistributionValidationError(ValueError):
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 def _passes_acceptance_threshold(value: float) -> bool:
@@ -110,6 +135,8 @@ class DecisionKLRecord:
                 raise ValueError("complete local KL cannot have a failure reason")
         elif self.local_kl is not None:
             raise ValueError("failed or incomplete local KL must not expose a scalar")
+        if self.status == "incomplete" and self.reason not in _INCOMPLETE_REASONS:
+            raise ValueError("incomplete local KL reason is invalid")
         if self.direction != DIRECTION or self.smoothing != SMOOTHING:
             raise ValueError("local KL contract identity is invalid")
         if self.log_base != "e":
@@ -172,6 +199,19 @@ class TrajectoryKLSummary:
         }
 
 
+@dataclass(frozen=True)
+class _IncompleteDecisionRecord:
+    decision_step: int
+    reason: str
+    status: str = "incomplete"
+    local_kl: None = None
+
+    def __post_init__(self) -> None:
+        _strict_step(self.decision_step)
+        if self.reason not in _INCOMPLETE_REASONS:
+            raise ValueError("incomplete decision reason is invalid")
+
+
 def build_trusted_action_support(observation: Mapping[str, Any]) -> ActionSupport:
     """Derive complete canonical support from a trusted visible observation."""
 
@@ -219,18 +259,56 @@ def validate_distribution(
     if not isinstance(distribution, Mapping):
         raise TypeError("distribution must be an action-ID mapping")
     if set(distribution) != set(support.action_ids):
-        raise ValueError("distribution action IDs must exactly match ActionSupport")
-    validated = {
-        action_id: _strict_nonnegative_number(
-            distribution[action_id], f"probability[{action_id!r}]"
+        raise _DistributionValidationError(
+            "action_ids_mismatch",
+            "distribution action IDs must exactly match ActionSupport",
         )
-        for action_id in support.action_ids
-    }
+    validated: dict[str, float] = {}
+    for action_id in support.action_ids:
+        value = distribution[action_id]
+        label = f"probability[{action_id!r}]"
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise _DistributionValidationError(
+                "probability_type",
+                f"{label} must be an int or float, not bool",
+            )
+        number = float(value)
+        if not math.isfinite(number):
+            raise _DistributionValidationError(
+                "probability_non_finite",
+                f"{label} must be finite",
+            )
+        if number < 0.0:
+            raise _DistributionValidationError(
+                "probability_negative",
+                f"{label} must be non-negative",
+            )
+        validated[action_id] = number
     if not math.isclose(
-        math.fsum(validated.values()), 1.0, rel_tol=0.0, abs_tol=1e-9
+        math.fsum(validated.values()),
+        1.0,
+        rel_tol=0.0,
+        abs_tol=_DISTRIBUTION_SUM_TOLERANCE,
     ):
-        raise ValueError("distribution probability sum must equal 1 within 1e-9")
+        raise _DistributionValidationError(
+            "probability_sum_mismatch",
+            "distribution probability sum must equal 1 within 1e-9",
+        )
     return validated
+
+
+def _incomplete_local_record(
+    step: int, support: ActionSupport, reason: str
+) -> DecisionKLRecord:
+    return DecisionKLRecord(
+        step,
+        support.schema_version,
+        support.support_id,
+        support.action_ids,
+        "incomplete",
+        None,
+        reason,
+    )
 
 
 def _compute_local_kl(
@@ -245,15 +323,22 @@ def _compute_local_kl(
 
     step = _strict_step(decision_step)
     _validate_support_identity(support_identity, support)
-    old = validate_distribution(old_distribution, support)
-    new = validate_distribution(new_distribution, support)
-    value = 0.0
+    try:
+        old = validate_distribution(old_distribution, support)
+    except _DistributionValidationError as exc:
+        return _incomplete_local_record(
+            step, support, f"old_distribution_{exc.code}"
+        )
+    try:
+        new = validate_distribution(new_distribution, support)
+    except _DistributionValidationError as exc:
+        return _incomplete_local_record(
+            step, support, f"new_distribution_{exc.code}"
+        )
     for action_id in support.action_ids:
         old_probability = old[action_id]
         new_probability = new[action_id]
-        if old_probability == 0.0:
-            continue
-        if new_probability == 0.0:
+        if old_probability > 0.0 and new_probability == 0.0:
             return DecisionKLRecord(
                 step,
                 support.schema_version,
@@ -263,11 +348,31 @@ def _compute_local_kl(
                 None,
                 "old_positive_new_zero",
             )
-        value += old_probability * (
-            math.log(old_probability) - math.log(new_probability)
+    old_mass = math.fsum(old.values())
+    new_mass = math.fsum(new.values())
+    if abs(old_mass - 1.0) > _STRICT_MASS_ROUNDOFF:
+        return _incomplete_local_record(
+            step, support, "old_distribution_mass_not_strict"
         )
-    if value < 0.0 and abs(value) <= 1e-15:
-        value = 0.0
+    if abs(new_mass - 1.0) > _STRICT_MASS_ROUNDOFF:
+        return _incomplete_local_record(
+            step, support, "new_distribution_mass_not_strict"
+        )
+    terms = [
+        old_probability
+        * (math.log(old_probability) - math.log(new[action_id]))
+        for action_id in support.action_ids
+        if (old_probability := old[action_id]) > 0.0
+    ]
+    value = math.fsum(terms)
+    negative_roundoff = 8 * math.ulp(1.0) * max(1, len(terms))
+    if value < 0.0:
+        if abs(value) <= negative_roundoff:
+            value = 0.0
+        else:
+            return _incomplete_local_record(
+                step, support, "local_kl_negative_beyond_roundoff"
+            )
     return DecisionKLRecord(
         step,
         support.schema_version,
@@ -311,13 +416,20 @@ def compute_trajectory_kl(
         raise TypeError("evidence must be a sequence")
     if not evidence:
         return _missing_summary("incomplete", (), "empty_trajectory", None)
-    records: list[DecisionKLRecord] = []
+    records: list[DecisionKLRecord | _IncompleteDecisionRecord] = []
     for expected_step, item in enumerate(evidence, start=1):
         if type(item) is not DecisionKLEvidence:
             raise TypeError("trajectory inputs must be trusted decision evidence")
         if item.decision_step != expected_step:
             raise ValueError("decision_step must be strict, unique, and continuous")
-        support = build_trusted_action_support(item.state_before)
+        try:
+            support = build_trusted_action_support(item.state_before)
+        except IncompleteActionSupportError:
+            records.append(_IncompleteDecisionRecord(
+                item.decision_step,
+                "action_support_not_finitely_enumerable",
+            ))
+            continue
         records.append(
             _compute_local_kl(
                 item.old_distribution,
