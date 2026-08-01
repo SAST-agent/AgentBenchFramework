@@ -1,22 +1,38 @@
-"""Emit a seed ReferenceStateSet (ν) for a first real HL run.
+"""Hand-authored ReferenceStateSet — **TEST FIXTURE ONLY, not a production ν.**
 
-The *proper* way to populate ν is to instrument the logic's
-``Player.get_legal_actions()`` during a frozen reference roll (see
-``reference.py``'s docstring) — that is a follow-up. This module ships a
-**hand-authored seed ν**: a few representative decision points whose
-``legal_actions`` dicts match the exact ``get_legal_actions()`` shape
-(``{'attack': [ids], 'move': [8 bools], 'detect': bool, 'interprops': [...]}}``)
-so the iteration loop is runnable and policy-KL is measurable out of the box.
+This module is preserved for the unit-test suite (``tests/hl/test_reference_seed.py``)
+and for ``ReferenceSample`` / ``ReferenceStateSet`` schema + round-trip tests.
+It is **no longer a production source of ν**.
+
+The production ν is produced by ``agentbench_frame.hl.reference_recorder`` from
+a real saved match trace (``trace.jsonl``) — see that module's docstring and
+the "Record a ν, then iterate" section of ``hl/README.md``.
+
+The samples here carry ``transcript=()`` (the empty default). That is fine for
+schema / round-trip / count unit tests, but the ``ReferenceProbe`` explicitly
+REJECTS empty-transcript samples by raising ``ReferenceSampleError`` ("re-record
+this ν") — a legacy single-frame ν cannot build the candidate's world model at
+the decision point (the probe would replay nothing and reach a state detached
+from the real game). Re-record ν from a real roll via the recorder; do not add
+transcripts to these seed samples — they stay single-frame by design (the
+fixture's purpose is structural schema coverage, not behavioral fidelity).
+
 The seed covers 8 diverse decision points (early move, attack, escape,
-KeyMachine interact, trap placement, Kit heal, multi-key routing,
-last-key transit) so a real strategy edit registers on at least one point
-instead of washing out to KL=0. KL is still coarse (synthetic, hand-authored)
-but real; the proper ν recorder is a follow-up.
+KeyMachine interact, trap placement, Kit heal, multi-key routing, last-key
+transit) so any structural change to ``legal_actions`` shape registers on at
+least one point. ``build_seed`` / ``main`` are kept working — the CLI still
+writes the JSON fixture — but the resulting file is a fixture, not a ν to
+iterate against.
 
-Usage::
+Usage (test fixture only)::
 
-    python -m agentbench_frame.hl.reference_seed --out nu-v1.json --spec-id hl-v1
-    python -m agentbench_frame.hl --reference nu-v1.json ...
+    python -m agentbench_frame.hl.reference_seed --out nu-seed-fixture.json --spec-id hl-seed-v1
+
+To produce a REAL ν for iteration::
+
+    python -m agentbench_frame.hl.reference_recorder \
+      --trace <trace.jsonl> --spec-id <id> --opponent <name> --out nu.json
+    python -m agentbench_frame.hl --reference nu.json ...
 """
 from __future__ import annotations
 

@@ -105,6 +105,46 @@ python src/agentbench_frame/lostspace/scripts/iterate_demo.py
 (It runs real matches, so it takes several minutes. Tune with the
 `LS_PAIRS` / `LS_SEATS` env vars.)
 
+## Record a ν, then iterate (HL loop)
+
+The HL iteration loop (`python -m agentbench_frame.hl`) needs a frozen
+`ReferenceStateSet` (ν) to measure policy-KL between versions. The ν is
+**recorded from a real reference match** — not hand-authored. Short version:
+
+1. **Run one reference match with `--save-traces`** (seat 0 = the v1 / sample
+   AI; opponents = the benchmark spec; fixed `mapconf2.map`). This writes a
+   per-frame `*.trace.jsonl` under the run's `artifacts/` directory.
+
+   ```bash
+   PYTHONPATH=src uv run python -m agentbench_frame.lostspace \
+     --logic "cd /d \"$BACKEND/gamecode_logic\" && python main.py" \
+     --candidate-name ref-v1 \
+     --candidate "python \"$LS/candidates/v1/agent.py\"" \
+     --opponent random="python \"$LS/baselines/random_agent.py\"" \
+     --pairs 1 --seats 0 --timeout 15 --save-traces
+   ```
+
+2. **Parse the trace into ν** with the recorder (pure parser, no logic change):
+
+   ```bash
+   PYTHONPATH=src uv run python -m agentbench_frame.hl.reference_recorder \
+     --trace <run_dir>/artifacts/<opp>-pair000-seat0.trace.jsonl \
+     --spec-id hl-v1 --opponent rank06 \
+     --out ./agentbench_data/reference/nu-v1.json
+   ```
+
+3. **Iterate** with the recorded ν:
+
+   ```bash
+   PYTHONPATH=src uv run python -m agentbench_frame.hl \
+     --reference ./agentbench_data/reference/nu-v1.json ...
+   ```
+
+See `hl/README.md` §3.1 for the full workflow and the demotion note: the
+legacy `reference_seed` module is now a **test fixture only** (its samples
+carry `transcript=()`, which the probe rejects with `ReferenceSampleError`).
+Re-record ν from a real roll — do not iterate against the seed.
+
 ## Notes
 
 - **Games are slow.** The official sample AI plays full ~100-round games with

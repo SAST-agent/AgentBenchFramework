@@ -78,32 +78,74 @@ A `claude` CLI must be installed and authenticated (`claude --version` works).
 
 ### 3.1 Produce the frozen ReferenceStateSet ν (once per spec)
 
-Assuming `PYTHONPATH=src` is already set in your shell (§2):
+The production ν is **recorded from a real reference match**, not
+hand-authored. The workflow is "record a ν, then iterate":
 
-```bash
-# bash
-uv run python -m agentbench_frame.hl.reference_seed \
-  --out ./agentbench_data/reference/nu-v1.json --spec-id hl-v1
-```
+1. **Run one reference match with `save_traces`** (seat 0 = the v1 / sample
+   AI; opponents = the benchmark spec; fixed `mapconf2.map`). This writes a
+   `trace.jsonl` per match under the run's `artifacts/` directory (see §4).
+   Use the lostspace CLI with `--save-traces` (alias: `--save-replays` also
+   writes replays; `--save-traces` writes the per-frame `*.trace.jsonl`).
 
-```powershell
-# PowerShell
-uv run python -m agentbench_frame.hl.reference_seed `
-  --out ./agentbench_data/reference/nu-v1.json --spec-id hl-v1
-```
+   ```bash
+   # bash — set BACKEND / LOGIC_PY per §3.2 first
+   PYTHONPATH=src uv run python -m agentbench_frame.lostspace \
+     --logic "cd /d \"$BACKEND\" && python main.py" \
+     --logic-python "$LOGIC_PY" \
+     --candidate-name ref-v1 \
+     --candidate "python \"$LS/candidates/v1/agent.py\"" \
+     --opponent random="python \"$LS/baselines/random_agent.py\"" \
+     --pairs 1 --seats 0 --timeout 15 --save-traces
+   # → agentbench_data/runs/25_lostspace/ref-v1/<run_id>/artifacts/*.trace.jsonl
+   ```
 
-(If you skipped §2, set it inline first: bash
-`PYTHONPATH=src uv run ...`; PowerShell `$env:PYTHONPATH="src"` then run.)
+2. **Parse the trace into ν** with the recorder (pure parser, no logic change):
 
-Writes 3 hand-authored decision points in the exact
-`get_legal_actions()` shape. This ν is frozen — re-use the same file across
-all versions you want comparable. Expand it later (see §6.3).
+   ```bash
+   # bash
+   PYTHONPATH=src uv run python -m agentbench_frame.hl.reference_recorder \
+     --trace ./agentbench_data/runs/25_lostspace/ref-v1/<run_id>/artifacts/<opp>-pair000-seat0.trace.jsonl \
+     --spec-id hl-v1 \
+     --opponent rank06 \
+     --out ./agentbench_data/reference/nu-v1.json
+   ```
 
-> **Honest note:** the seed ν is hand-authored. The *proper* ν comes from
-> instrumenting the logic's `Player.get_legal_actions()` during a frozen
-> reference roll — the wire frames alone don't carry `legal_actions` (it lives
-> in the logic, not the frame). That recorder is a follow-up. The seed makes
-> the loop runnable and KL measurable today; KL is coarse (3 points) but real.
+   ```powershell
+   # PowerShell
+   $env:PYTHONPATH="src"
+   uv run python -m agentbench_frame.hl.reference_recorder `
+     --trace ./agentbench_data/runs/25_lostspace/ref-v1/<run_id>/artifacts/<opp>-pair000-seat0.trace.jsonl `
+     --spec-id hl-v1 `
+     --opponent rank06 `
+     --out ./agentbench_data/reference/nu-v1.json
+   ```
+
+   The recorder emits one `ReferenceSample` per Alive on-turn `roundbegin`
+   decision point the candidate reached, each carrying the full judger→AI
+   transcript prefix (so the probe can faithfully replay the candidate's
+   world model at that point). This ν is frozen — re-use the same file
+   across all versions you want comparable.
+
+3. **Iterate** with the recorded ν — the `--reference` flag loads any
+   `ReferenceStateSet` JSON (no CLI change):
+
+   ```bash
+   PYTHONPATH=src uv run python -m agentbench_frame.hl \
+     --reference ./agentbench_data/reference/nu-v1.json ...
+   ```
+
+   See §3.2 for the full loop invocation.
+
+> **Legacy hand-authored seed — DEMOTED to a test fixture.**
+> `agentbench_frame.hl.reference_seed` still ships and its CLI still writes a
+> JSON file (`python -m agentbench_frame.hl.reference_seed --out nu.json`), but
+> its 8 samples carry `transcript=()` (empty). That is fine for schema /
+> round-trip unit tests, but the `ReferenceProbe` now REJECTS empty-transcript
+> samples with `ReferenceSampleError` ("re-record this ν") — a legacy
+> single-frame ν cannot build the candidate's world model. **Do not iterate
+> against the seed.** Re-record ν from a real roll via the recorder above.
+> The seed remains a structural unit-test fixture only (see
+> `tests/hl/test_reference_seed.py`).
 
 ### 3.2 Run the loop
 
@@ -371,39 +413,23 @@ act N+1 benefits from everything distilled through act N. Disable with
 
 ### 6.4 Your own ν
 
-Hand-author a JSON file in the seed format (the easiest path). Save this as
-`make_nu.py` (multi-line `python -c` is painful in PowerShell, so use a file):
+The **production** path is to record ν from a real reference match — see
+§3.1 ("Record a ν, then iterate"). The recorder (`reference_recorder`) parses
+a saved `trace.jsonl` into a `ReferenceStateSet` whose samples carry the full
+judger→AI transcript prefix; the probe replays that prefix to faithfully
+reconstruct the candidate's world model at each decision point.
 
-```python
-# make_nu.py
-from agentbench_frame.hl.reference import ReferenceSample, ReferenceStateSet
+Hand-authoring a ν JSON is **no longer supported as a production path**: a
+sample without a `transcript` is rejected by the probe with
+`ReferenceSampleError` ("re-record this ν"). The legacy
+`reference_seed` module is retained as a **test fixture only** (its samples
+carry `transcript=()` for schema / round-trip unit tests).
 
-nu = ReferenceStateSet(spec_id="hl-v1", samples=(
-    ReferenceSample(
-        observation={...},
-        legal_actions={"attack": [], "move": [True] * 8,
-                       "detect": True, "interprops": []},
-        inventory={"LandMine": 0, "Sticky": 0, "Transport": 0, "Kit": 0},
-        status=0, seat=0, opponent="rank06"),
-    # ... more decision points
-))
-nu.save("nu-v1.json")
-```
-
-Then run it (both shells, with `PYTHONPATH=src` set per §2):
-
-```bash
-# bash
-PYTHONPATH=src uv run python make_nu.py
-```
-```powershell
-# PowerShell
-$env:PYTHONPATH="src"; uv run python make_nu.py
-```
-
-`legal_actions` must match `Player.get_legal_actions()` exactly:
-`{'attack':[ids], 'move':[8 bools], 'detect':bool, 'interprops':[names]}`.
-Only `status == 0` (Alive) states are decision points.
+If you need a ν with specific decision points that the natural roll didn't
+reach, the supported route is to script the reference match so the candidate
+reaches them (opponent choice, seat, map), then record. Editing a recorded ν
+by hand to fix typos is fine; constructing one from scratch with empty
+transcripts is not (the probe will reject it).
 
 ### 6.4 Codebase shape
 
@@ -483,7 +509,13 @@ python -m agentbench_frame.hl
 Helpers:
 
 ```
-python -m agentbench_frame.hl.reference_seed --out nu.json --spec-id hl-v1
+# Record ν from a real match trace (PRODUCTION path — see §3.1):
+python -m agentbench_frame.hl.reference_recorder \
+  --trace <trace.jsonl> --spec-id <id> --opponent <name> --out nu.json
+
+# Write the hand-authored seed FIXTURE (test fixture ONLY — not a valid ν;
+# the probe rejects its empty-transcript samples with ReferenceSampleError):
+python -m agentbench_frame.hl.reference_seed --out nu-seed-fixture.json --spec-id hl-seed-v1
 ```
 
 ---
@@ -522,12 +554,13 @@ python -m agentbench_frame.hl.reference_seed --out nu.json --spec-id hl-v1
 1. **Figure/dashboard rendering** from `events.jsonl` — the data for learning
    curves (win_rate vs act), policy-KL traces, and token/time AUC is all
    captured, but no plotting module exists yet.
-2. **Proper ν recorder** — instrument the logic's `Player.get_legal_actions()`
-   during a frozen reference roll so ν is populated from real play, not by
-   hand.
-3. **Evaluation-scope budget** — the controller currently records only the
+2. **Evaluation-scope budget** — the controller currently records only the
    `learning` scope per act; an explicit evaluation-scope budget split is a
    straightforward extension.
+
+> The proper ν recorder (formerly listed here) is **built** — see §3.1 and
+> `agentbench_frame.hl.reference_recorder`. The hand-authored seed is demoted
+> to a test fixture.
 
 ---
 
