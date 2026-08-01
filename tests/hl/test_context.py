@@ -190,6 +190,38 @@ def test_prompt_triggers_opponent_distillation_after_three_stagnant_rollouts(tmp
     assert "KL 决策空间保持不变" in prompt
 
 
+def test_prompt_reuses_shared_opponent_distillation_without_rerunning_tool(tmp_path):
+    from agentbench_frame.hl.context import ContextBundle, IterationContext
+
+    files = _static_files(tmp_path / "assets")
+    scripts = files["replay_skill"].parent / "scripts"
+    scripts.mkdir()
+    (scripts / "inspect_trace_window.py").write_text("", encoding="utf-8")
+    (scripts / "distill_opponent_policy.py").write_text("", encoding="utf-8")
+    bundle = ContextBundle.create(tmp_path / "bundle", files)
+    shared = tmp_path / "shared-distillation.json"
+    shared.write_text("{}\n", encoding="utf-8")
+
+    prompt = IterationContext(bundle).build_prompt(
+        act_id="act-0004",
+        branch_index=0,
+        branch_count=4,
+        parent_version_id="v000003",
+        workspace=tmp_path / "candidate",
+        replay_evidence=[{"opponent": "rank15", "trace": "trace.jsonl"}],
+        previous_measurements={
+            "curriculum_stagnation_count": 3,
+            "opponent_distillation_path": str(shared),
+        },
+        experience_path=tmp_path / "experience.md",
+        active_target="rank15",
+    )
+
+    assert str(shared) in prompt
+    assert "共享 Ghost 蒸馏" in prompt
+    assert "不得重复运行蒸馏脚本" in prompt
+
+
 def test_curriculum_prompt_names_target_and_locked_pool(tmp_path):
     from agentbench_frame.hl.context import ContextBundle, IterationContext
 

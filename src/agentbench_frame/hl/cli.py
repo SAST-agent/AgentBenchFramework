@@ -68,6 +68,71 @@ def _ensure_replay_summary(
     return summary_path
 
 
+def _ensure_opponent_distillation(
+    *,
+    traces: list[str | Path],
+    distillation_tool: str | Path,
+    output_root: str | Path,
+) -> Path:
+    """Create one content-addressed, bounded Ghost distillation artifact."""
+
+    trace_paths = sorted({Path(value).resolve() for value in traces})
+    if not trace_paths:
+        raise ValueError("opponent distillation requires at least one trace")
+    digest = hashlib.sha256()
+    for path in trace_paths:
+        if not path.is_file():
+            raise FileNotFoundError(path)
+        digest.update(str(path).encode("utf-8"))
+        digest.update(hashlib.sha256(path.read_bytes()).digest())
+    destination_root = Path(output_root).resolve()
+    destination_root.mkdir(parents=True, exist_ok=True)
+    destination = destination_root / f"ghost-{digest.hexdigest()[:20]}.json"
+
+    def validate(raw: str) -> dict[str, Any]:
+        if len(raw.encode("utf-8")) > 64 * 1024:
+            raise ValueError("opponent distillation exceeds 64 KiB")
+        value = json.loads(raw)
+        if not isinstance(value, dict) or value.get("schema_version") != "1.0":
+            raise ValueError("invalid opponent distillation schema")
+        if int(value.get("trace_count") or 0) != len(trace_paths):
+            raise ValueError("opponent distillation trace count mismatch")
+        if int(value.get("ghost_decision_samples") or 0) < 1:
+            raise ValueError("opponent distillation has no Ghost decisions")
+        for key in ("coarse_backoff_patterns", "fine_patterns"):
+            if not isinstance(value.get(key), list):
+                raise ValueError(f"opponent distillation lacks {key}")
+        return value
+
+    if destination.is_file():
+        validate(destination.read_text(encoding="utf-8"))
+        return destination
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(Path(distillation_tool).resolve()),
+            *(str(path) for path in trace_paths),
+            "--max-patterns",
+            "40",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise ValueError(
+            "failed to distill opponent policy: "
+            + (completed.stderr.strip() or "unknown distillation failure")
+        )
+    value = validate(completed.stdout)
+    destination.write_text(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return destination
+
+
 def _trace_fault_summary(trace: str | Path | None) -> dict[str, str] | None:
     """Return the latest bounded Rollman fault for the next coding act."""
 
@@ -1170,8 +1235,10 @@ def _run_real(
             )
 
     curriculum_manager: CurriculumManager | None = None
+    shared_distillation_path: Path | None = None
 
     def prompt_factory(**values):
+        nonlocal shared_distillation_path
         if values.get("bootstrap"):
             return iteration_context.build_bootstrap_prompt(
                 act_id=values["act_id"],
@@ -1235,6 +1302,36 @@ def _run_real(
             else curriculum_manager.state.locked_opponents
         )
         phase = values.get("phase", "candidate")
+        stagnation_count = int(
+            previous_measurements["curriculum_stagnation_count"] or 0
+        )
+        if phase == "planner":
+            shared_distillation_path = None
+        if stagnation_count >= 3:
+            traces = [
+                str(item["trace"])
+                for item in evidence
+                if item.get("trace") is not None
+                and item.get("candidate_fault") is None
+            ]
+            if shared_distillation_path is None and traces:
+                shared_distillation_path = _ensure_opponent_distillation(
+                    traces=traces,
+                    distillation_tool=(
+                        bundle.files["replay_skill"].parent
+                        / "scripts"
+                        / "distill_opponent_policy.py"
+                    ),
+                    output_root=(
+                        run_dir
+                        / "distillation"
+                        / str(active_target or "unknown")
+                    ),
+                )
+            if shared_distillation_path is not None:
+                previous_measurements["opponent_distillation_path"] = str(
+                    shared_distillation_path
+                )
         if phase == "planner":
             return iteration_context.build_planner_prompt(
                 act_id=values["act_id"],

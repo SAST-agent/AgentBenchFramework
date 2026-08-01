@@ -1,5 +1,6 @@
 import json
 import dataclasses
+import subprocess
 from pathlib import Path
 
 
@@ -37,6 +38,51 @@ def test_trace_fault_summary_exposes_bounded_redacted_candidate_error(tmp_path):
         "detail": "player 0 emitted no frame",
         "stderr_tail": "Traceback: numpy failure [REDACTED]",
     }
+
+
+def test_opponent_distillation_is_cached_by_trace_content(tmp_path, monkeypatch):
+    from agentbench_frame.hl.cli import _ensure_opponent_distillation
+
+    trace_a = tmp_path / "a.trace.jsonl"
+    trace_b = tmp_path / "b.trace.jsonl"
+    trace_a.write_text('{"type":"a"}\n', encoding="utf-8")
+    trace_b.write_text('{"type":"b"}\n', encoding="utf-8")
+    tool = tmp_path / "distill.py"
+    tool.write_text("# fake\n", encoding="utf-8")
+    calls = []
+    output = {
+        "schema_version": "1.0",
+        "trace_count": 2,
+        "ghost_decision_samples": 12,
+        "coarse_backoff_patterns": [],
+        "fine_patterns": [],
+    }
+
+    def run(*args, **kwargs):
+        calls.append(args[0])
+        return subprocess.CompletedProcess(
+            args[0],
+            0,
+            json.dumps(output),
+            "",
+        )
+
+    monkeypatch.setattr("agentbench_frame.hl.cli.subprocess.run", run)
+
+    first = _ensure_opponent_distillation(
+        traces=[trace_a, trace_b],
+        distillation_tool=tool,
+        output_root=tmp_path / "distillation",
+    )
+    second = _ensure_opponent_distillation(
+        traces=[trace_a, trace_b],
+        distillation_tool=tool,
+        output_root=tmp_path / "distillation",
+    )
+
+    assert first == second
+    assert len(calls) == 1
+    assert json.loads(first.read_text(encoding="utf-8")) == output
 
 
 def test_main_curve_measurement_only_uses_linear_selected_successor():

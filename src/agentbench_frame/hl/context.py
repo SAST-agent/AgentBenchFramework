@@ -309,9 +309,21 @@ Act 预算：
         stagnation_count = int(
             previous_measurements.get("curriculum_stagnation_count") or 0
         )
+        shared_distillation = previous_measurements.get(
+            "opponent_distillation_path"
+        )
         distillation = ""
         if stagnation_count >= 3:
-            distillation = f"""
+            if shared_distillation:
+                distillation = f"""
+停滞干预（连续无提升 {stagnation_count} 轮）：
+- 读取共享 Ghost 蒸馏：`{Path(str(shared_distillation)).resolve()}`；不得重复运行蒸馏脚本。
+- 蒸馏只含相对几何和原子 Ghost 动作统计；用 fine table + coarse backoff 构造可解释预测器。
+- 我方角色是 Rollman，不能复制 Ghost 动作；应预测 Ghost 下一步路径后选择 Rollman 动作。
+- 不得把 seed、绝对坐标、对手身份或 replay ID 写入策略；Rollman 的 KL 决策空间保持不变。
+"""
+            else:
+                distillation = f"""
 停滞干预（连续无提升 {stagnation_count} 轮）：
 - 检验“可预测的 Ghost 行为能否支持 best response”，同时允许保留有回放证据支持的局部规则。
 - 对 evidence 中全部 trace 一次性运行 `{distillation_tool} TRACE1 TRACE2 TRACE3`。
@@ -401,6 +413,18 @@ Act 预算：
             sort_keys=True,
             separators=(",", ":"),
         )
+        stagnation_count = int(
+            previous_measurements.get("curriculum_stagnation_count") or 0
+        )
+        shared_distillation = previous_measurements.get(
+            "opponent_distillation_path"
+        )
+        distillation = ""
+        if stagnation_count >= 3 and shared_distillation:
+            distillation = f"""
+共享 Ghost 蒸馏：{Path(str(shared_distillation)).resolve()}
+先读取该坐标无关统计，再提出四个使用方式不同的 best-response 机制；不得重复运行蒸馏脚本。Rollman 只能预测 Ghost 行为后选择自身动作，不能复制 Ghost 动作。
+"""
         return f"""# Rollman HL hypothesis planner {act_id}
 
 proposal cycle: {iteration_id}
@@ -414,6 +438,7 @@ active target: {active_target or "none"}
 - candidate workspace: {Path(workspace).resolve()}
 - previous measurements: {measurements}
 - bounded replay evidence: {evidence}
+{distillation}
 
 先读取 game digest、research state、所有 evidence summary 和当前 workspace/ai.py。只有诊断依赖精确规则语义时，才按 manifest 定点读取权威规则对应章节；不要求每轮完整重读静态长文。不得读取人类对手源码、其他 run 或其他候选版本。
 
