@@ -69,12 +69,16 @@ def _mean(values: Any) -> float | None:
 
 
 def _fixed_pool_elo(matches: Any) -> float | None:
-    """Rate one version from a fresh 1500 against fixed 1500 anchors."""
+    """Order-invariant Elo estimate against fixed 1500 anchors.
+
+    Jeffreys smoothing keeps all-win/all-loss panels finite while preserving
+    comparability when reporting panels contain different numbers of games.
+    """
 
     if not isinstance(matches, list) or not matches:
         return None
     scores = {"win": 1.0, "draw": 0.5, "loss": 0.0}
-    rating = 1500.0
+    score = 0.0
     games = 0
     for match in matches:
         if not isinstance(match, Mapping):
@@ -84,10 +88,14 @@ def _fixed_pool_elo(matches: Any) -> float | None:
         result = match.get("result")
         if result not in scores:
             continue
-        expected = 1.0 / (1.0 + 10.0 ** ((1500.0 - rating) / 400.0))
-        rating += 32.0 * (scores[str(result)] - expected)
+        score += scores[str(result)]
         games += 1
-    return rating if games else None
+    if not games:
+        return None
+    probability = (score + 0.5) / (games + 1.0)
+    return 1500.0 + 400.0 * math.log10(
+        probability / (1.0 - probability)
+    )
 
 
 def _score_margin(matches: Any) -> float | None:
@@ -295,7 +303,9 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
                     if certification.get("matches")
                     else reported_elo.get(version_id)
                 ),
-                "mean_local_policy_kl": _mean(kl_trace),
+                "mean_local_policy_kl": (
+                    0.0 if iteration == 0 and not kl_trace else _mean(kl_trace)
+                ),
                 "_local_policy_kl_trace": kl_trace,
                 "occupancy_shift": occupancy.get(version_id),
                 "active_target": target_gate.get("active_target"),
@@ -304,7 +314,11 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
                     "passing_human_opponents"
                 ),
                 "full_pool_win_rate": certification.get("score"),
-                "mean_score_margin": panel.get("mean_score_margin"),
+                "mean_score_margin": (
+                    panel.get("mean_score_margin")
+                    if panel.get("mean_score_margin") is not None
+                    else _score_margin(certification.get("matches"))
+                ),
                 "curriculum_event": curriculum_events.get(version_id),
                 "cumulative_prompt_tokens": budget["prompt"],
                 "cumulative_completion_tokens": budget["completion"],
@@ -460,30 +474,6 @@ def _plot(
     def line(axis, field, label, **kwargs):
         axis.plot(x, [row.get(field) for row in rows], marker="o", label=label, **kwargs)
 
-    for iteration, row in zip(x, rows):
-        trace = row.get("_local_policy_kl_trace") or []
-        if trace:
-            axes[0].scatter(
-                [iteration] * len(trace), trace, color="#1565c0", alpha=0.18,
-                s=18,
-            )
-    branch_x = [int(row["iteration"]) for row in branches]
-    branch_kl = [row.get("mean_local_policy_kl") for row in branches]
-    valid_branch_kl = [
-        (iteration, value)
-        for iteration, value in zip(branch_x, branch_kl)
-        if value is not None
-    ]
-    if valid_branch_kl:
-        axes[0].scatter(
-            [item[0] for item in valid_branch_kl],
-            [item[1] for item in valid_branch_kl],
-            color="#90caf9",
-            edgecolor="#1565c0",
-            alpha=0.7,
-            s=38,
-            label="four rollout candidates",
-        )
     line(
         axes[0],
         "mean_local_policy_kl",

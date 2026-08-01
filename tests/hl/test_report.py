@@ -188,6 +188,75 @@ def test_curve_rows_use_final_evaluation_and_fixed_pool_elo():
     assert rows[0]["benchmark_score"] == 0.0
     assert rows[0]["full_pool_win_rate"] == 0.5
     assert rows[0]["rollman_elo"] != 9999.0
+    assert rows[0]["mean_local_policy_kl"] == 0.0
+
+
+def test_fixed_pool_elo_is_order_independent_and_comparable_across_panel_sizes():
+    from agentbench_frame.hl.report import _fixed_pool_elo
+
+    eighty_percent = [
+        {"status": "complete", "result": "win"}
+        for _ in range(8)
+    ] + [
+        {"status": "complete", "result": "loss"}
+        for _ in range(2)
+    ]
+    ninety_percent_large = [
+        {"status": "complete", "result": "win"}
+        for _ in range(72)
+    ] + [
+        {"status": "complete", "result": "loss"}
+        for _ in range(8)
+    ]
+
+    assert _fixed_pool_elo(eighty_percent) == _fixed_pool_elo(
+        list(reversed(eighty_percent))
+    )
+    assert _fixed_pool_elo(ninety_percent_large) > _fixed_pool_elo(
+        eighty_percent
+    )
+
+
+def test_origin_score_margin_comes_from_certification_when_no_reporting_panel():
+    from agentbench_frame.hl.report import derive_curve_rows
+
+    events = [
+        {
+            "event_type": "version_created",
+            "version_id": "v0",
+            "act_id": "bootstrap",
+            "evaluation_status": "complete",
+            "benchmark_score": 0.0,
+        },
+        {
+            "event_type": "candidate_selected",
+            "iteration_id": "iter-000000",
+            "version_id": "v0",
+            "act_id": "bootstrap",
+        },
+        {
+            "event_type": "certification_completed",
+            "version_id": "v0",
+            "status": "complete",
+            "score": 0.5,
+            "matches": [
+                {
+                    "status": "complete",
+                    "result": "win",
+                    "rollman_score": 20,
+                    "ghosts_score": 10,
+                },
+                {
+                    "status": "complete",
+                    "result": "loss",
+                    "rollman_score": -10,
+                    "ghosts_score": 10,
+                },
+            ],
+        },
+    ]
+
+    assert derive_curve_rows(events)[0]["mean_score_margin"] == -5.0
 
 
 def test_single_iteration_axis_uses_only_integer_iteration_ticks():
@@ -408,3 +477,4 @@ def test_k4_report_uses_proposal_cycle_as_integer_x_and_keeps_four_branches(
     assert outputs["branches_csv"].is_file()
     svg = outputs["curves_svg"].read_text(encoding="utf-8")
     assert "Score Margin vs HL Iteration" in svg
+    assert "four rollout candidates" not in svg
