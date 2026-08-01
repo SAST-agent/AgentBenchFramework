@@ -80,6 +80,7 @@ def _ensure_opponent_distillation(
     if not trace_paths:
         raise ValueError("opponent distillation requires at least one trace")
     digest = hashlib.sha256()
+    digest.update(b"agentbench-modal-distillation-v1\0")
     for path in trace_paths:
         if not path.is_file():
             raise FileNotFoundError(path)
@@ -89,9 +90,40 @@ def _ensure_opponent_distillation(
     destination_root.mkdir(parents=True, exist_ok=True)
     destination = destination_root / f"ghost-{digest.hexdigest()[:20]}.json"
 
+    def compact(value: dict[str, Any]) -> dict[str, Any]:
+        compacted = {
+            key: value[key]
+            for key in (
+                "schema_version",
+                "trace_count",
+                "ghost_decision_samples",
+                "frozen_samples_omitted",
+                "action_counts",
+                "chase_step_rate",
+                "same_action_as_previous_rate",
+                "feature_contract",
+            )
+            if key in value
+        }
+        compacted["representation"] = "modal_patterns_v1"
+        for table in ("coarse_backoff_patterns", "fine_patterns"):
+            compacted[table] = [
+                {
+                    key: pattern[key]
+                    for key in (
+                        "context",
+                        "count",
+                        "modal_action",
+                        "modal_confidence",
+                    )
+                }
+                for pattern in value.get(table, [])
+            ]
+        return compacted
+
     def validate(raw: str) -> dict[str, Any]:
-        if len(raw.encode("utf-8")) > 64 * 1024:
-            raise ValueError("opponent distillation exceeds 64 KiB")
+        if len(raw.encode("utf-8")) > 24 * 1024:
+            raise ValueError("opponent distillation exceeds 24 KiB")
         value = json.loads(raw)
         if not isinstance(value, dict) or value.get("schema_version") != "1.0":
             raise ValueError("invalid opponent distillation schema")
@@ -102,6 +134,14 @@ def _ensure_opponent_distillation(
         for key in ("coarse_backoff_patterns", "fine_patterns"):
             if not isinstance(value.get(key), list):
                 raise ValueError(f"opponent distillation lacks {key}")
+        if value.get("representation") != "modal_patterns_v1":
+            raise ValueError("opponent distillation is not compact modal form")
+        if any(
+            "action_counts" in pattern
+            for key in ("coarse_backoff_patterns", "fine_patterns")
+            for pattern in value[key]
+        ):
+            raise ValueError("opponent distillation contains verbose patterns")
         return value
 
     if destination.is_file():
@@ -125,11 +165,16 @@ def _ensure_opponent_distillation(
             "failed to distill opponent policy: "
             + (completed.stderr.strip() or "unknown distillation failure")
         )
-    value = validate(completed.stdout)
-    destination.write_text(
-        json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    raw_value = json.loads(completed.stdout)
+    value = compact(raw_value)
+    encoded = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ) + "\n"
+    validate(encoded)
+    destination.write_text(encoded, encoding="utf-8")
     return destination
 
 

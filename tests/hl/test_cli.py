@@ -82,7 +82,13 @@ def test_opponent_distillation_is_cached_by_trace_content(tmp_path, monkeypatch)
 
     assert first == second
     assert len(calls) == 1
-    assert json.loads(first.read_text(encoding="utf-8")) == output
+    distilled = json.loads(first.read_text(encoding="utf-8"))
+    assert distilled["representation"] == "modal_patterns_v1"
+    assert distilled["trace_count"] == 2
+    assert distilled["ghost_decision_samples"] == 12
+    assert distilled["coarse_backoff_patterns"] == []
+    assert distilled["fine_patterns"] == []
+    assert first.stat().st_size < 24 * 1024
 
 
 def test_main_curve_measurement_only_uses_linear_selected_successor():
