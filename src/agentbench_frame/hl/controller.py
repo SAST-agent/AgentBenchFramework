@@ -781,6 +781,7 @@ class HLController:
         parent_version_id: str | None = None,
         defer_experience: bool = False,
         parent_evaluation: CandidateEvaluation | None = None,
+        planner_recovery: ProviderInvocation | None = None,
     ) -> ProposalCycleResult:
         """Run one planner, four sibling candidates, and one reducer."""
 
@@ -799,51 +800,66 @@ class HLController:
             raise ValueError("proposal cycle requires a parent")
         self.version_store.checkout(parent_id)
         iteration_id = f"iter-{self._iteration_count + 1:06d}"
-        self.events.write(
-            "proposal_cycle_started",
-            iteration_id=iteration_id,
-            parent_version_id=parent_id,
-            candidate_count=4,
-        )
 
         control_root = self.workspace / ".agentbench"
         control_root.mkdir(parents=True, exist_ok=True)
         planner_output = control_root / "branch_briefs.json"
-        if planner_output.exists():
-            planner_output.unlink()
-        planner_act_id = f"act-{self._coding_agent_acts + 1:06d}-planner"
-        planner_prompt = self.prompt_factory(
-            phase="planner",
-            act_id=planner_act_id,
-            iteration_id=iteration_id,
-            branch_index=None,
-            branch_count=4,
-            parent_version_id=parent_id,
-            branch_brief=None,
-            reducer_input=None,
-        )
-        planner_raw = self.run_root / "provider" / f"{planner_act_id}.jsonl"
-        planner = self.provider.invoke(
-            prompt=planner_prompt,
-            workspace=self.workspace,
-            raw_output_path=planner_raw,
-            session_id=None,
-        )
-        self._coding_agent_acts += 1
-        self._write_checkpoint(
-            act_id=planner_act_id,
-            iteration_id=iteration_id,
-            branch_index=None,
-            parent_version_id=parent_id,
-            prompt=planner_prompt,
-            invocation=planner,
-        )
-        self._write_provider_event(
-            act_id=planner_act_id,
-            iteration_id=iteration_id,
-            branch_index=None,
-            invocation=planner,
-        )
+        if planner_recovery is None:
+            self.events.write(
+                "proposal_cycle_started",
+                iteration_id=iteration_id,
+                parent_version_id=parent_id,
+                candidate_count=4,
+            )
+            if planner_output.exists():
+                planner_output.unlink()
+            planner_act_id = f"act-{self._coding_agent_acts + 1:06d}-planner"
+            planner_prompt = self.prompt_factory(
+                phase="planner",
+                act_id=planner_act_id,
+                iteration_id=iteration_id,
+                branch_index=None,
+                branch_count=4,
+                parent_version_id=parent_id,
+                branch_brief=None,
+                reducer_input=None,
+            )
+            planner_raw = self.run_root / "provider" / f"{planner_act_id}.jsonl"
+            planner = self.provider.invoke(
+                prompt=planner_prompt,
+                workspace=self.workspace,
+                raw_output_path=planner_raw,
+                session_id=None,
+            )
+            self._coding_agent_acts += 1
+            self._write_checkpoint(
+                act_id=planner_act_id,
+                iteration_id=iteration_id,
+                branch_index=None,
+                parent_version_id=parent_id,
+                prompt=planner_prompt,
+                invocation=planner,
+            )
+            self._write_provider_event(
+                act_id=planner_act_id,
+                iteration_id=iteration_id,
+                branch_index=None,
+                invocation=planner,
+            )
+        else:
+            planner = planner_recovery
+            planner_act_id = str(planner.metadata.get("act_id") or "")
+            recovered_iteration = str(
+                planner.metadata.get("iteration_id") or ""
+            )
+            if planner.status != "completed":
+                raise ValueError("recovered planner must be completed")
+            if not planner_act_id:
+                raise ValueError("recovered planner requires metadata.act_id")
+            if recovered_iteration != iteration_id:
+                raise ValueError(
+                    "recovered planner iteration does not match pending cycle"
+                )
         if planner.status != "completed" or not planner_output.is_file():
             raise RuntimeError("planner did not produce branch_briefs.json")
         proposal_root = self.run_root / "proposals" / iteration_id
@@ -855,7 +871,11 @@ class HLController:
             "planner_completed",
             act_id=planner_act_id,
             iteration_id=iteration_id,
-            status=planner.status,
+            status=(
+                "recovered"
+                if planner_recovery is not None
+                else planner.status
+            ),
             branch_briefs=str(persisted_briefs),
         )
 

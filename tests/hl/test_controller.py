@@ -659,6 +659,108 @@ def test_k4_proposal_cycle_uses_one_parent_and_reducer_sees_all_feedback(tmp_pat
     assert research.recent_comparisons[0]["selected_branch"] == 1
 
 
+def test_k4_cycle_reuses_valid_persisted_planner_without_second_api_call(tmp_path):
+    import json
+
+    from agentbench_frame.hl.codebase import VersionStore
+    from agentbench_frame.hl.config import IterationConfig, RollbackConfig
+    from agentbench_frame.hl.controller import HLController
+    from agentbench_frame.hl.events import HLEventWriter
+    from agentbench_frame.hl.lineage import LineageManager
+    from agentbench_frame.tracking.provider import ProviderInvocation
+
+    class RecoveryProvider:
+        def __init__(self):
+            self.calls = []
+
+        def invoke(self, *, prompt, workspace, raw_output_path, session_id=None):
+            self.calls.append(prompt)
+            assert "phase=planner" not in prompt
+            control = Path(workspace, ".agentbench")
+            control.mkdir(parents=True, exist_ok=True)
+            if "phase=candidate" in prompt:
+                Path(workspace, "agent.py").write_text(
+                    f"VALUE = {len(self.calls)}\n", encoding="utf-8"
+                )
+            else:
+                (control / "research_state_update.json").write_text(
+                    json.dumps(
+                        {
+                            "stable_knowledge": ["recovered planner was valid"],
+                            "failed_hypotheses": [],
+                            "open_questions": [],
+                            "recent_comparisons": [
+                                {"branches": [0, 1, 2, 3]}
+                            ],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            Path(raw_output_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(raw_output_path).write_text("{}\n", encoding="utf-8")
+            return ProviderInvocation(status="completed")
+
+    workspace = _workspace(tmp_path)
+    control = workspace / ".agentbench"
+    control.mkdir()
+    (control / "branch_briefs.json").write_text(
+        json.dumps(
+            [
+                {
+                    "branch_index": index,
+                    "diagnosis": f"diagnosis-{index}",
+                    "mechanism": mechanism,
+                    "expected_change": f"expected-{index}",
+                    "falsifier": f"falsifier-{index}",
+                }
+                for index, mechanism in enumerate(
+                    ("adapter", "capture filter", "portal controller", "respawn memory")
+                )
+            ]
+        ),
+        encoding="utf-8",
+    )
+    provider = RecoveryProvider()
+    controller = HLController(
+        workspace=workspace,
+        run_root=tmp_path,
+        provider=provider,
+        evaluator=FakeEvaluator([0.5, 0.1, 0.2, 0.3, 0.4]),
+        version_store=VersionStore(workspace, tmp_path / "versions"),
+        lineage=LineageManager(),
+        events=HLEventWriter(tmp_path / "events.jsonl", run_id="run-recovery"),
+        iteration=IterationConfig(
+            candidates_per_cycle=4,
+            planner_enabled=True,
+            reducer_enabled=True,
+            finalist_count=2,
+        ),
+        rollback=RollbackConfig(),
+        prompt_factory=lambda **values: f"phase={values['phase']}",
+    )
+    origin = controller.initialize(evaluate=True)
+    controller._coding_agent_acts = 1
+    recovered = ProviderInvocation(
+        status="completed",
+        raw_output_ref=str(tmp_path / "provider" / "act-000001-planner.jsonl"),
+        metadata={
+            "act_id": "act-000001-planner",
+            "iteration_id": "iter-000001",
+            "recovered_from_persisted_output": True,
+        },
+    )
+
+    result = controller.run_proposal_cycle(
+        parent_version_id=origin.version_id,
+        planner_recovery=recovered,
+    )
+
+    assert result.planner is recovered
+    assert len(result.candidates) == 4
+    assert len(provider.calls) == 5
+    assert all("phase=planner" not in prompt for prompt in provider.calls)
+
+
 def test_k4_cycle_keeps_current_parent_when_every_candidate_regresses(tmp_path):
     from agentbench_frame.hl.codebase import VersionStore
     from agentbench_frame.hl.config import IterationConfig, RollbackConfig

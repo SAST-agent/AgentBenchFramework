@@ -207,6 +207,33 @@ class CodexSessionProvider:
             )
         return result
 
+    def recover_completed_output(
+        self,
+        *,
+        raw_output_path: str | Path,
+        workspace: str | Path,
+    ) -> ProviderInvocation:
+        """Revalidate a persisted successful Codex stream without another API call."""
+
+        raw_path = Path(raw_output_path)
+        raw_output = raw_path.read_text(encoding="utf-8")
+        result = parse_codex_jsonl(raw_output)
+        violations = self._access_policy_violations(
+            raw_output,
+            workspace=workspace,
+        )
+        result.metadata["access_policy_violations"] = violations
+        result.metadata["provider_fingerprint"] = self.fingerprint
+        result.metadata["recovered_from_persisted_output"] = True
+        result.raw_output_ref = str(raw_path)
+        if violations:
+            result.status = "failed"
+            result.error = (
+                "provider access policy violation: coding agent read outside "
+                "the isolated candidate context"
+            )
+        return result
+
     def _access_policy_violations(
         self,
         raw_output: str,

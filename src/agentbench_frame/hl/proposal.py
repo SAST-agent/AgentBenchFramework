@@ -42,9 +42,12 @@ def load_branch_briefs(
     expected_count: int,
 ) -> tuple[BranchBrief, ...]:
     value = json.loads(Path(path).read_text(encoding="utf-8"))
-    if not isinstance(value, Mapping) or set(value) != {"branches"}:
-        raise ValueError("planner output must contain only branches")
-    raw_branches = value["branches"]
+    if isinstance(value, list):
+        raw_branches = value
+    elif isinstance(value, Mapping) and set(value) == {"branches"}:
+        raw_branches = value["branches"]
+    else:
+        raise ValueError("planner output must be a branch array")
     if not isinstance(raw_branches, list) or len(raw_branches) != expected_count:
         raise ValueError(f"planner must produce exactly {expected_count} branches")
     briefs: list[BranchBrief] = []

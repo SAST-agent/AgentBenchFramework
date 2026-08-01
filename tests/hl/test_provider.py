@@ -259,3 +259,58 @@ def test_provider_allows_declared_run_artifacts_and_candidate_workspace(tmp_path
 
     assert result.status == "completed"
     assert result.metadata["access_policy_violations"] == []
+
+
+def test_provider_recovers_completed_persisted_output_without_new_process(tmp_path):
+    from agentbench_frame.hl.provider import CodexSessionProvider
+
+    run_root = tmp_path / ".agentbench" / "runs" / "active-run"
+    workspace = tmp_path / ".agentbench" / "candidate"
+    workspace.mkdir(parents=True)
+    raw = run_root / "provider" / "act-000001-planner.jsonl"
+    raw.parent.mkdir(parents=True)
+    raw.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {"type": "thread.started", "thread_id": "thread-recovered"}
+                ),
+                json.dumps(
+                    {
+                        "type": "item.completed",
+                        "item": {
+                            "type": "command_execution",
+                            "command": f"sed -n '1,20p' {run_root / 'research_state.json'}",
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "turn.completed",
+                        "usage": {"input_tokens": 20, "output_tokens": 7},
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    provider = CodexSessionProvider(
+        _provider_config(),
+        run_root=run_root,
+        environ={
+            "AGENTBENCH_API_KEY": "sk-runtime-only",
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": str(tmp_path),
+        },
+    )
+
+    recovered = provider.recover_completed_output(
+        raw_output_path=raw,
+        workspace=workspace,
+    )
+
+    assert recovered.status == "completed"
+    assert recovered.metadata["thread_id"] == "thread-recovered"
+    assert recovered.metadata["recovered_from_persisted_output"] is True
+    assert recovered.usage.total_tokens == 27

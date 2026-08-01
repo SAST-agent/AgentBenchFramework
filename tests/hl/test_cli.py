@@ -207,6 +207,69 @@ def test_unbounded_loop_stops_on_provider_or_evaluation_failure():
     assert _iteration_stop_reason(incomplete_evaluation) == "evaluation_incomplete"
 
 
+def test_pending_planner_is_recovered_from_valid_persisted_stream(tmp_path):
+    from agentbench_frame.hl.cli import _pending_planner_recovery
+    from agentbench_frame.tracking.provider import ProviderInvocation
+
+    workspace = tmp_path / "candidate"
+    (workspace / ".agentbench").mkdir(parents=True)
+    (workspace / ".agentbench" / "branch_briefs.json").write_text(
+        json.dumps(
+            [
+                {
+                    "branch_index": index,
+                    "diagnosis": f"diagnosis-{index}",
+                    "mechanism": mechanism,
+                    "expected_change": f"expected-{index}",
+                    "falsifier": f"falsifier-{index}",
+                }
+                for index, mechanism in enumerate(
+                    ("adapter", "capture filter", "portal controller", "respawn memory")
+                )
+            ]
+        ),
+        encoding="utf-8",
+    )
+    raw = tmp_path / "run" / "provider" / "act-000001-planner.jsonl"
+    raw.parent.mkdir(parents=True)
+    raw.write_text('{"type":"turn.completed"}\n', encoding="utf-8")
+
+    class Provider:
+        def __init__(self):
+            self.calls = []
+
+        def recover_completed_output(self, *, raw_output_path, workspace):
+            self.calls.append((Path(raw_output_path), Path(workspace)))
+            return ProviderInvocation(status="completed")
+
+    provider = Provider()
+    historical = [
+        {
+            "event_type": "proposal_cycle_started",
+            "iteration_id": "iter-000001",
+            "parent_version_id": "v000000",
+        },
+        {
+            "event_type": "act_completed",
+            "iteration_id": "iter-000001",
+            "act_id": "act-000001-planner",
+            "status": "failed",
+            "raw_output_ref": str(raw),
+        },
+    ]
+
+    recovered = _pending_planner_recovery(
+        historical,
+        provider=provider,
+        workspace=workspace,
+    )
+
+    assert recovered is not None
+    assert recovered.metadata["act_id"] == "act-000001-planner"
+    assert recovered.metadata["iteration_id"] == "iter-000001"
+    assert provider.calls == [(raw, workspace)]
+
+
 def test_imported_run_accepts_zero_acts_without_provider_credential(
     tmp_path, monkeypatch
 ):

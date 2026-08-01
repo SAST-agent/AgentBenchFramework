@@ -446,6 +446,73 @@ def _iteration_stop_reason(iteration_result: Any) -> str | None:
     return None
 
 
+def _pending_planner_recovery(
+    historical: list[dict[str, Any]],
+    *,
+    provider: Any,
+    workspace: str | Path,
+) -> Any | None:
+    """Recover a validated planner artifact from an interrupted proposal cycle."""
+
+    from agentbench_frame.hl.proposal import load_branch_briefs
+
+    completed_cycles = {
+        str(event.get("iteration_id"))
+        for event in historical
+        if event.get("event_type") == "proposal_cycle_completed"
+    }
+    pending = next(
+        (
+            event
+            for event in reversed(historical)
+            if event.get("event_type") == "proposal_cycle_started"
+            and str(event.get("iteration_id")) not in completed_cycles
+        ),
+        None,
+    )
+    if pending is None:
+        return None
+    iteration_id = str(pending["iteration_id"])
+    if any(
+        event.get("event_type") == "planner_completed"
+        and str(event.get("iteration_id")) == iteration_id
+        for event in historical
+    ):
+        return None
+    failed = next(
+        (
+            event
+            for event in reversed(historical)
+            if event.get("event_type") == "act_completed"
+            and str(event.get("iteration_id")) == iteration_id
+            and str(event.get("act_id", "")).endswith("-planner")
+            and event.get("status") == "failed"
+        ),
+        None,
+    )
+    if failed is None or not hasattr(provider, "recover_completed_output"):
+        return None
+    raw_ref = failed.get("raw_output_ref")
+    raw_path = None if raw_ref is None else Path(str(raw_ref))
+    briefs_path = Path(workspace) / ".agentbench" / "branch_briefs.json"
+    if raw_path is None or not raw_path.is_file() or not briefs_path.is_file():
+        return None
+    load_branch_briefs(briefs_path, expected_count=4)
+    recovered = provider.recover_completed_output(
+        raw_output_path=raw_path,
+        workspace=workspace,
+    )
+    if recovered.status != "completed":
+        return None
+    recovered.metadata.update(
+        {
+            "act_id": str(failed["act_id"]),
+            "iteration_id": iteration_id,
+        }
+    )
+    return recovered
+
+
 def _curriculum_evaluation_from_events(
     events: list[dict[str, Any]],
     *,
@@ -835,6 +902,15 @@ def _run_real(
     )
     events_path = run_dir / "events.jsonl"
     historical = read_events(events_path)
+    pending_planner_recovery = (
+        _pending_planner_recovery(
+            historical,
+            provider=provider,
+            workspace=workspace,
+        )
+        if resume and provider is not None
+        else None
+    )
     failed_bootstrap_event = next(
         (
             event
@@ -1644,6 +1720,7 @@ def _run_real(
                     parent_evaluation=evaluations_by_version.get(
                         next_parent
                     ),
+                    planner_recovery=pending_planner_recovery,
                 )
                 if config.run.iteration.planner_enabled
                 else controller.run_act(
@@ -1651,6 +1728,7 @@ def _run_real(
                     defer_experience=True,
                 )
             )
+            pending_planner_recovery = None
             completed_here += 1
             stop_reason = _iteration_stop_reason(iteration_result)
             if stop_reason is not None:
