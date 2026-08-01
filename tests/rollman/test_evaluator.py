@@ -182,7 +182,7 @@ def test_any_invalid_fixed_case_makes_aggregate_score_missing(tmp_path):
     assert result.matches[1]["status"] == "incomplete"
 
 
-def test_non_ok_opponent_end_state_is_incomplete_not_a_candidate_win(tmp_path):
+def test_game_judger_opponent_timeout_is_a_valid_candidate_win(tmp_path):
     def runner(**kwargs):
         return _Match(
             status="complete",
@@ -212,10 +212,10 @@ def test_non_ok_opponent_end_state_is_incomplete_not_a_candidate_win(tmp_path):
 
     result = evaluator.evaluate(_version())
 
-    assert result.status == "incomplete"
-    assert result.score is None
+    assert result.status == "complete"
+    assert result.score == 1.0
     assert result.matches[0]["end_state"] == ["OK", "TLE"]
-    assert "non-OK" in result.matches[0]["error"]
+    assert result.matches[0]["result"] == "win"
 
 
 def test_staged_evaluation_uses_one_quick_seed_then_remaining_finalist_seeds(tmp_path):

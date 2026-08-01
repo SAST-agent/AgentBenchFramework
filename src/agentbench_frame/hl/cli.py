@@ -1275,7 +1275,15 @@ def _run_real(
             and event.get("reason") == "all_human_opponents_defeated"
             for event in historical
         )
-        if resume and bootstrap_recovery is None:
+        curriculum_has_started = any(
+            event.get("event_type") == "curriculum_started"
+            for event in historical
+        )
+        if (
+            resume
+            and bootstrap_recovery is None
+            and curriculum_has_started
+        ):
             controller.resume(historical)
             curriculum_manager = CurriculumManager.from_events(
                 historical,
@@ -1466,6 +1474,19 @@ def _run_real(
         else:
             if bootstrap_recovery is not None:
                 origin = controller.recover_bootstrap(**bootstrap_recovery)
+            elif resume:
+                controller.resume(historical)
+                origin_id = controller.lineage.lineage_head_version_id
+                if origin_id is None:
+                    raise ValueError("pre-curriculum resume has no origin")
+                origin = version_store.get(origin_id)
+                if (
+                    controller.lineage.versions[origin_id].status
+                    != "complete"
+                ):
+                    evaluator.last_evaluation = (
+                        controller.retry_head_evaluation()
+                    )
             elif config.run.origin.mode == "imported_version":
                 assert config.run.origin.source_run is not None
                 assert config.run.origin.source_version is not None

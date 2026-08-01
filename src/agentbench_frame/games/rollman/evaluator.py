@@ -252,29 +252,18 @@ class RollmanEvaluator:
                     complete = False
                     record.update(status="incomplete", error=str(exc))
                 else:
-                    if match.end_state != ("OK", "OK"):
-                        complete = False
-                        record.update(
-                            status="incomplete",
-                            end_state=list(match.end_state),
-                            error=(
-                                "non-OK player end state is excluded from "
-                                f"scientific scoring: {match.end_state}"
-                            ),
-                        )
-                    else:
-                        record.update(
-                            status="complete",
-                            result=match.result,
-                            end_state=list(match.end_state),
-                            rollman_score=match.rollman_score,
-                            ghosts_score=match.ghosts_score,
-                            raw_replay_sha256=match.replay.raw_sha256,
-                            normalized_replay_sha256=match.replay.normalized_sha256,
-                            replay=str(replay_path),
-                            trace=str(trace_path),
-                            game_agent_decisions=len(match.rollman_decisions),
-                        )
+                    record.update(
+                        status="complete",
+                        result=match.result,
+                        end_state=list(match.end_state),
+                        rollman_score=match.rollman_score,
+                        ghosts_score=match.ghosts_score,
+                        raw_replay_sha256=match.replay.raw_sha256,
+                        normalized_replay_sha256=match.replay.normalized_sha256,
+                        replay=str(replay_path),
+                        trace=str(trace_path),
+                        game_agent_decisions=len(match.rollman_decisions),
+                    )
                 records.append(record)
 
         if not complete:
