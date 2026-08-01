@@ -96,6 +96,60 @@ def test_no_change_proposal_records_zero_kl_and_zero_occupancy_shift():
     assert rows[1]["occupancy_shift"] == 0.0
 
 
+def test_reused_version_keeps_reporting_panel_bound_to_each_iteration():
+    from agentbench_frame.hl.report import derive_curve_rows
+
+    events = [
+        {
+            "event_type": "version_created",
+            "version_id": "v0",
+            "act_id": "origin",
+            "evaluation_status": "complete",
+            "benchmark_score": 0.5,
+        },
+        {
+            "event_type": "candidate_selected",
+            "iteration_id": "iter-000000",
+            "version_id": "v0",
+            "act_id": "origin",
+        },
+        {
+            "event_type": "reporting_panel_completed",
+            "iteration_id": "iter-000000",
+            "version_id": "v0",
+            "score": 0.5,
+            "mean_score_margin": 10.0,
+            "matches": [
+                {"status": "complete", "result": "win"},
+                {"status": "complete", "result": "loss"},
+            ],
+        },
+        {
+            "event_type": "proposal_cycle_completed",
+            "iteration_id": "iter-000001",
+            "parent_version_id": "v0",
+            "selected_version_id": "v0",
+            "candidate_version_ids": ["v1", "v2", "v3", "v4"],
+        },
+        {
+            "event_type": "reporting_panel_completed",
+            "iteration_id": "iter-000001",
+            "version_id": "v0",
+            "score": 0.75,
+            "mean_score_margin": 20.0,
+            "matches": [
+                {"status": "complete", "result": "win"},
+                {"status": "complete", "result": "win"},
+            ],
+        },
+    ]
+
+    rows = derive_curve_rows(events)
+
+    assert [row["full_pool_win_rate"] for row in rows] == [0.5, 0.75]
+    assert [row["mean_score_margin"] for row in rows] == [10.0, 20.0]
+
+
 def test_k_iteration_budget_includes_rejected_siblings_after_selected_branch_act():
     from agentbench_frame.hl.report import derive_curve_rows
 

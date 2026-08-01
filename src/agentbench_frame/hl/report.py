@@ -158,6 +158,7 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
     target_gates: dict[str, dict[str, Any]] = {}
     certifications: dict[str, dict[str, Any]] = {}
     reporting: dict[str, dict[str, Any]] = {}
+    reporting_by_iteration: dict[str, dict[str, Any]] = {}
     curriculum_events: dict[str, str] = {}
     prompt_tokens = completion_tokens = total_tokens = act_count = 0
 
@@ -230,6 +231,9 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
             certifications[str(event["version_id"])] = event
         elif event_type == "reporting_panel_completed":
             reporting[str(event["version_id"])] = event
+            iteration_id = event.get("iteration_id")
+            if iteration_id is not None:
+                reporting_by_iteration[str(iteration_id)] = event
         elif isinstance(event_type, str) and event_type.startswith("curriculum_"):
             version_id = event.get("version_id")
             if version_id is not None:
@@ -279,7 +283,10 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
             best = score if best is None else max(best, score)
         target_gate = target_gates.get(version_id, {})
         certification = certifications.get(version_id, {})
-        panel = reporting.get(version_id, {})
+        panel = reporting_by_iteration.get(
+            str(selection.get("iteration_id")),
+            reporting.get(version_id, {}),
+        )
         kl_trace = policy_kl.get(version_id, [])
         win_rate = _win_rate(evaluation)
         no_change = bool(
