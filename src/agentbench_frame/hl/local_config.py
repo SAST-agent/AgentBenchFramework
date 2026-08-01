@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -38,7 +39,13 @@ class LocalPaths:
             raise ValueError(f"missing paths fields: {missing}")
         values = {}
         for name in allowed:
-            path = Path(str(raw[name])).expanduser()
+            raw_path = str(raw[name])
+            expanded = os.path.expandvars(raw_path)
+            if "$" in expanded:
+                raise ValueError(
+                    f"unresolved environment variable in paths.{name}: {raw_path}"
+                )
+            path = Path(expanded).expanduser()
             if not path.is_absolute():
                 path = (config_dir / path).resolve()
             values[name] = path

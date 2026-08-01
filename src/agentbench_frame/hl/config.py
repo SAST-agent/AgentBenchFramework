@@ -54,12 +54,69 @@ class ProviderConfig:
 class IterationConfig:
     max_acts: Optional[int] = None
     candidates_per_act: int = 1
+    candidates_per_cycle: Optional[int] = None
+    planner_enabled: bool = False
+    reducer_enabled: bool = False
+    quick_screen_seeds: int = 1
+    finalist_count: int = 1
+    finalist_seeds: int = 1
 
     def __post_init__(self) -> None:
+        resolved_candidates = (
+            self.candidates_per_act
+            if self.candidates_per_cycle is None
+            else self.candidates_per_cycle
+        )
+        if (
+            self.candidates_per_cycle is not None
+            and self.candidates_per_act != 1
+            and self.candidates_per_act != self.candidates_per_cycle
+        ):
+            raise ValueError(
+                "iteration candidates_per_act and candidates_per_cycle disagree"
+            )
+        object.__setattr__(self, "candidates_per_act", resolved_candidates)
+        object.__setattr__(self, "candidates_per_cycle", resolved_candidates)
         if self.max_acts is not None and self.max_acts < 1:
             raise ValueError("iteration.max_acts must be null or >= 1")
-        if self.candidates_per_act < 1:
-            raise ValueError("iteration.candidates_per_act must be >= 1")
+        if resolved_candidates < 1:
+            raise ValueError("iteration.candidates_per_cycle must be >= 1")
+        if self.quick_screen_seeds < 1:
+            raise ValueError("iteration.quick_screen_seeds must be >= 1")
+        if not 1 <= self.finalist_count <= resolved_candidates:
+            raise ValueError(
+                "iteration.finalist_count must be within candidate count"
+            )
+        if self.finalist_seeds < 1:
+            raise ValueError("iteration.finalist_seeds must be >= 1")
+
+
+@dataclasses.dataclass(frozen=True)
+class SelectionConfig:
+    mode: str = "linear_lexicographic"
+    exploration_debt_cycles: int = 3
+    source_size_penalty: bool = False
+
+    def __post_init__(self) -> None:
+        if self.mode != "linear_lexicographic":
+            raise ValueError("selection.mode must be linear_lexicographic")
+        if self.exploration_debt_cycles < 1:
+            raise ValueError("selection.exploration_debt_cycles must be >= 1")
+        if self.source_size_penalty:
+            raise ValueError("selection.source_size_penalty must be false")
+
+
+@dataclasses.dataclass(frozen=True)
+class ContextConfig:
+    use_game_digest: bool = False
+    research_state_max_bytes: int = 16384
+    reduction_token_threshold: int = 250000
+
+    def __post_init__(self) -> None:
+        if self.research_state_max_bytes < 1024:
+            raise ValueError("context.research_state_max_bytes must be >= 1024")
+        if self.reduction_token_threshold < 1:
+            raise ValueError("context.reduction_token_threshold must be >= 1")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -158,6 +215,8 @@ class EvaluationConfig:
     required_human_opponents: int = 15
     required_win_rate: float = 0.5
     full_pool_every_iteration: bool = True
+    reporting_panel_every_cycle: bool = False
+    reporting_seeds_per_opponent: int = 1
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "fixed_gate_seeds", tuple(self.fixed_gate_seeds))
@@ -166,6 +225,10 @@ class EvaluationConfig:
             raise ValueError("evaluation.required_human_opponents must be >= 1")
         if not 0.0 <= self.required_win_rate <= 1.0:
             raise ValueError("evaluation.required_win_rate must be in [0, 1]")
+        if self.reporting_seeds_per_opponent < 1:
+            raise ValueError(
+                "evaluation.reporting_seeds_per_opponent must be >= 1"
+            )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -177,6 +240,8 @@ class HLRunConfig:
         default_factory=CurriculumConfig
     )
     iteration: IterationConfig = dataclasses.field(default_factory=IterationConfig)
+    selection: SelectionConfig = dataclasses.field(default_factory=SelectionConfig)
+    context: ContextConfig = dataclasses.field(default_factory=ContextConfig)
     rollback: RollbackConfig = dataclasses.field(default_factory=RollbackConfig)
     experience: ExperienceConfig = dataclasses.field(default_factory=ExperienceConfig)
     measurement: MeasurementConfig = dataclasses.field(default_factory=MeasurementConfig)
@@ -185,11 +250,10 @@ class HLRunConfig:
     def __post_init__(self) -> None:
         if not self.game:
             raise ValueError("game is required")
-        if self.curriculum.mode == "weakest_failed":
-            if self.origin.mode != "imported_version":
-                raise ValueError(
-                    "weakest_failed curriculum requires imported_version origin"
-                )
+        if (
+            self.curriculum.mode == "weakest_failed"
+            and self.origin.mode == "imported_version"
+        ):
             if not self.origin.reset_session:
                 raise ValueError(
                     "weakest_failed curriculum requires origin.reset_session"
@@ -211,6 +275,8 @@ class HLRunConfig:
             ("origin", OriginConfig),
             ("curriculum", CurriculumConfig),
             ("iteration", IterationConfig),
+            ("selection", SelectionConfig),
+            ("context", ContextConfig),
             ("rollback", RollbackConfig),
             ("experience", ExperienceConfig),
             ("measurement", MeasurementConfig),

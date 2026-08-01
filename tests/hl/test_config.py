@@ -152,7 +152,7 @@ class HLConfigTests(unittest.TestCase):
                     {**base, "curriculum": curriculum}
                 )
 
-    def test_weakest_failed_curriculum_requires_clean_imported_origin(self):
+    def test_weakest_failed_curriculum_accepts_bootstrap_or_clean_import(self):
         from agentbench_frame.hl.config import HLRunConfig
 
         base = {
@@ -160,8 +160,8 @@ class HLConfigTests(unittest.TestCase):
             "provider": {"kind": "codex"},
             "curriculum": {"mode": "weakest_failed"},
         }
-        with self.assertRaisesRegex(ValueError, "imported_version"):
-            HLRunConfig.from_mapping(base)
+        bootstrap = HLRunConfig.from_mapping(base)
+        self.assertEqual(bootstrap.origin.mode, "model_bootstrap")
         for reset_field in ("reset_session", "reset_experience"):
             with self.subTest(reset_field=reset_field), self.assertRaisesRegex(
                 ValueError, reset_field
@@ -177,6 +177,62 @@ class HLConfigTests(unittest.TestCase):
                         },
                     }
                 )
+
+    def test_k4_config_parses_linear_proposal_cycle(self):
+        from agentbench_frame.hl.config import HLRunConfig
+
+        config = HLRunConfig.from_mapping(
+            {
+                "game": "29_rollman",
+                "provider": {
+                    "kind": "codex",
+                    "model": "gpt-5.5",
+                    "context_mode": "fresh",
+                },
+                "iteration": {
+                    "candidates_per_cycle": 4,
+                    "planner_enabled": True,
+                    "reducer_enabled": True,
+                    "quick_screen_seeds": 1,
+                    "finalist_count": 2,
+                    "finalist_seeds": 3,
+                },
+                "selection": {
+                    "mode": "linear_lexicographic",
+                    "exploration_debt_cycles": 3,
+                    "source_size_penalty": False,
+                },
+                "context": {
+                    "use_game_digest": True,
+                    "research_state_max_bytes": 16384,
+                    "reduction_token_threshold": 250000,
+                },
+                "evaluation": {
+                    "reporting_panel_every_cycle": True,
+                    "reporting_seeds_per_opponent": 1,
+                },
+            }
+        )
+
+        self.assertEqual(config.iteration.candidates_per_cycle, 4)
+        self.assertEqual(config.iteration.candidates_per_act, 4)
+        self.assertEqual(config.iteration.finalist_count, 2)
+        self.assertEqual(config.selection.mode, "linear_lexicographic")
+        self.assertFalse(config.selection.source_size_penalty)
+        self.assertEqual(config.context.research_state_max_bytes, 16384)
+        self.assertTrue(config.evaluation.reporting_panel_every_cycle)
+
+    def test_linear_k4_rejects_more_finalists_than_candidates(self):
+        from agentbench_frame.hl.config import IterationConfig
+
+        with self.assertRaisesRegex(ValueError, "finalist_count"):
+            IterationConfig(candidates_per_cycle=4, finalist_count=5)
+
+    def test_source_size_penalty_is_forbidden_for_linear_search(self):
+        from agentbench_frame.hl.config import SelectionConfig
+
+        with self.assertRaisesRegex(ValueError, "source_size_penalty"):
+            SelectionConfig(source_size_penalty=True)
 
 
 if __name__ == "__main__":

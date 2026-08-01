@@ -52,3 +52,26 @@ paths:
     assert config.run.curriculum.mode == "weakest_failed"
     assert config.run.curriculum.required_human_opponents == 16
     assert config.run.curriculum.stagnation_patience == 4
+
+
+def test_machine_local_paths_expand_environment_variables(tmp_path, monkeypatch):
+    from agentbench_frame.hl.local_config import LocalPaths
+
+    external = tmp_path / "external"
+    monkeypatch.setenv("AGENTBENCH_SAST_ROOT", str(external))
+
+    paths = LocalPaths.from_mapping(
+        {
+            "agentbench_root": "${AGENTBENCH_SAST_ROOT}/AgentBench",
+            "official_logic_root": "${AGENTBENCH_SAST_ROOT}/PacmanLogic",
+            "pacman_sdk_root": "${AGENTBENCH_SAST_ROOT}/PacmanSDK-python",
+            "human_manifest": "${AGENTBENCH_SAST_ROOT}/AgentBench/MANIFEST.tsv",
+            "workspace": ".agentbench/candidate",
+            "runs_root": ".agentbench/runs",
+            "opponent_build_root": ".agentbench/opponents",
+        },
+        config_dir=tmp_path / "project",
+    )
+
+    assert paths.agentbench_root == external / "AgentBench"
+    assert paths.official_logic_root == external / "PacmanLogic"
