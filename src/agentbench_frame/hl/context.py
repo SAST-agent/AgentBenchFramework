@@ -5,9 +5,12 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import re
 import shutil
 from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
+
+import yaml
 
 
 def _sha256(path: Path) -> str:
@@ -112,6 +115,80 @@ class ContextBundle:
         )
 
 
+def compile_game_digest(
+    bundle: ContextBundle,
+    destination: str | Path,
+) -> Path:
+    """Compile a deterministic index without inventing tactical semantics."""
+
+    decision_value = yaml.safe_load(
+        bundle.files["decision_space"].read_text(encoding="utf-8")
+    )
+    if not isinstance(decision_value, Mapping):
+        raise ValueError("decision space must be a mapping")
+    roles = decision_value.get("roles")
+    if not isinstance(roles, Mapping):
+        raise ValueError("decision space must define roles")
+    rollman = roles.get("rollman")
+    ghosts = roles.get("ghosts")
+    if not isinstance(rollman, Mapping) or not isinstance(ghosts, Mapping):
+        raise ValueError("decision space must define rollman and ghosts")
+    actions = rollman.get("actions")
+    if not isinstance(actions, list) or not all(
+        isinstance(item, Mapping) and isinstance(item.get("id"), int)
+        for item in actions
+    ):
+        raise ValueError("rollman actions must be structured mappings")
+    normalized_actions = [dict(item) for item in actions]
+    if [item["id"] for item in normalized_actions] != [0, 1, 2, 3, 4]:
+        raise ValueError("Rollman primitive action support must be exactly 0..4")
+
+    rules_text = bundle.files["rules"].read_text(encoding="utf-8")
+    headings = [
+        match.group(1).strip()
+        for line in rules_text.splitlines()
+        if (match := re.match(r"^#{1,6}\s+(.+?)\s*$", line))
+    ]
+    skill_text = bundle.files["replay_skill"].read_text(encoding="utf-8")
+    skill_metadata: Mapping[str, Any] = {}
+    if skill_text.startswith("---\n"):
+        _, front_matter, _ = skill_text.split("---", 2)
+        parsed_metadata = yaml.safe_load(front_matter)
+        if isinstance(parsed_metadata, Mapping):
+            skill_metadata = parsed_metadata
+
+    value = {
+        "schema_version": "1.0",
+        "context_bundle_hash": bundle.bundle_hash,
+        "context_manifest": str(bundle.manifest_path),
+        "roles": {
+            "rollman": {
+                "role_id": int(rollman["role_id"]),
+                "output_shape": str(rollman["output_shape"]),
+                "actions": normalized_actions,
+            },
+            "ghosts": {
+                "role_id": int(ghosts["role_id"]),
+                "output_shape": str(ghosts["output_shape"]),
+                "component_support": list(ghosts["component_support"]),
+            },
+        },
+        "rule_sections": headings,
+        "replay_skill": {
+            "name": str(skill_metadata.get("name") or ""),
+            "description": str(skill_metadata.get("description") or ""),
+            "path": str(bundle.files["replay_skill"]),
+        },
+    }
+    path = Path(destination)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 class IterationContext:
     """Build small act prompts that point at versioned files and artifacts."""
 
@@ -148,7 +225,7 @@ class IterationContext:
 3. 初始算法必须显著优于占位策略，并在代码结构或注释中清楚表达决策依据。
 4. 禁止无依据的参数枚举、grid search、seed/固定坐标记忆和人工战术标签。
 5. 不读取、搜索或推断人类对手源码。
-6. 压缩重复规则，避免堆叠散乱 if/else；保持清晰的策略层次和回滚边界。
+6. 允许策略代码增长和增加新的情形分支；不以源代码长度或 if/else 数量作为惩罚。
 7. 完成框架指定的静态检查和 smoke test。
 8. 不要直接修改 Experience Skill；本阶段只建立初始算法，后续再从合法比赛回放更新经验。
 """
@@ -208,7 +285,7 @@ class IterationContext:
         if stagnation_count >= 3:
             distillation = f"""
 停滞干预（连续无提升 {stagnation_count} 轮）：
-- 禁止继续堆叠局部逃逸/阈值例外；必须检验“可预测的 Ghost 行为能否支持 best response”。
+- 检验“可预测的 Ghost 行为能否支持 best response”，同时允许保留有回放证据支持的局部规则。
 - 对 evidence 中全部 trace 一次性运行 `{distillation_tool} TRACE1 TRACE2 TRACE3`。
 - 蒸馏输出只含相对几何和原子 Ghost 动作统计；用 fine table + coarse backoff 构造可解释预测器。
 - 我方角色是 Rollman，不能复制 Ghost 动作；应预测 Ghost 下一步路径后选择 Rollman 动作。
@@ -263,7 +340,7 @@ Act 预算：
 3. 实现一个机制连贯、可泛化的改进；允许搜索、路径规划、状态机、记忆和其他可解释代码。
 4. 禁止无依据的参数枚举或 grid search。只在回放证据直接指向决策边界时修改数值。
 5. 若一轮有多个候选，本候选必须与同轮其他候选机制上不同，不能只是换阈值。
-6. 压缩或整合被替代的策略，避免持续堆叠分支；保留清晰回滚边界。
+6. 允许策略代码增长和堆叠有证据支持的情形分支；不以代码长度或 if/else 数量作为惩罚。
 7. 不读取、搜索或推断人类对手源码。只能从合法比赛回放学习。
 8. 只在 candidate workspace 内完成 `python -m py_compile ai.py` 和候选侧 smoke test，不搜索 Framework 命令。不要直接修改 Experience Skill；将四个字符串数组 stable_knowledge、failed_hypotheses、replay_evidence、active_questions 写入 workspace/.agentbench/experience_update.json，由 Framework 在候选测量完整通过后合并。
 """

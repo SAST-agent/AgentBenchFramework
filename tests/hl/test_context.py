@@ -17,6 +17,38 @@ def _static_files(root: Path) -> dict[str, Path]:
     return values
 
 
+def _digest_files(root: Path) -> dict[str, Path]:
+    values = _static_files(root)
+    values["rules"].write_text(
+        "# Rollman rules\n\n## Collision\n\nPaths collide.\n",
+        encoding="utf-8",
+    )
+    values["decision_space"].write_text(
+        """
+roles:
+  rollman:
+    role_id: 0
+    output_shape: one integer
+    actions:
+      - {id: 0, name: STAY}
+      - {id: 1, name: UP}
+      - {id: 2, name: LEFT}
+      - {id: 3, name: DOWN}
+      - {id: 4, name: RIGHT}
+  ghosts:
+    role_id: 1
+    output_shape: ordered triple
+    component_support: [0, 1, 2, 3, 4]
+""".lstrip(),
+        encoding="utf-8",
+    )
+    values["replay_skill"].write_text(
+        "---\nname: rollman-replay\ndescription: Diagnose Rollman JSONL.\n---\n\n# Skill\n",
+        encoding="utf-8",
+    )
+    return values
+
+
 def test_context_references_static_files_and_current_workspace_instead_of_embedding_them(tmp_path):
     from agentbench_frame.hl.context import ContextBundle, IterationContext
 
@@ -71,6 +103,31 @@ def test_context_bundle_copies_complete_skill_package(tmp_path):
     ]
 
 
+def test_game_digest_is_deterministic_and_contains_primitive_actions(tmp_path):
+    from agentbench_frame.hl.context import ContextBundle, compile_game_digest
+
+    bundle = ContextBundle.create(
+        tmp_path / "bundle",
+        _digest_files(tmp_path / "assets"),
+    )
+
+    first = compile_game_digest(bundle, tmp_path / "first.json")
+    second = compile_game_digest(bundle, tmp_path / "second.json")
+
+    assert first.read_bytes() == second.read_bytes()
+    value = json.loads(first.read_text(encoding="utf-8"))
+    assert value["context_bundle_hash"] == bundle.bundle_hash
+    assert [item["id"] for item in value["roles"]["rollman"]["actions"]] == [
+        0,
+        1,
+        2,
+        3,
+        4,
+    ]
+    assert value["rule_sections"] == ["Rollman rules", "Collision"]
+    assert value["replay_skill"]["name"] == "rollman-replay"
+
+
 def test_prompt_requires_replay_grounded_causal_change_and_blocks_grid_search(tmp_path):
     from agentbench_frame.hl.context import ContextBundle, IterationContext
 
@@ -90,7 +147,8 @@ def test_prompt_requires_replay_grounded_causal_change_and_blocks_grid_search(tm
     assert "禁止无依据的参数枚举或 grid search" in prompt
     assert "机制上不同" in prompt
     assert "候选 2/3" in prompt
-    assert "压缩或整合" in prompt
+    assert "允许策略代码增长" in prompt
+    assert "压缩或整合被替代的策略" not in prompt
 
 
 def test_prompt_triggers_opponent_distillation_after_three_stagnant_rollouts(tmp_path):
