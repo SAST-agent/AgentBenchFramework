@@ -14,8 +14,6 @@ run:
     network_access: "enabled"
     context_mode: "fresh"
     timeout_seconds: 600
-    transport_retry_attempts: 3
-    transport_retry_backoff_seconds: 2.0
   origin:
     mode: "model_bootstrap"
     reset_session: true

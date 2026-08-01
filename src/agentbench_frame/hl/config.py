@@ -39,7 +39,7 @@ class ProviderConfig:
     context_mode: str = "resumable"
     executable: str = "codex"
     timeout_seconds: int = 600
-    transport_retry_attempts: int = 2
+    transport_retry_attempts: int = 3
     transport_retry_backoff_seconds: float = 2.0
 
     def __post_init__(self) -> None:
