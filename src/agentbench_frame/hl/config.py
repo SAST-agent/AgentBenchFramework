@@ -217,6 +217,7 @@ class EvaluationConfig:
     full_pool_every_iteration: bool = True
     reporting_panel_every_cycle: bool = False
     reporting_seeds_per_opponent: int = 1
+    max_parallel_matches: int = 1
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "fixed_gate_seeds", tuple(self.fixed_gate_seeds))
@@ -229,6 +230,8 @@ class EvaluationConfig:
             raise ValueError(
                 "evaluation.reporting_seeds_per_opponent must be >= 1"
             )
+        if self.max_parallel_matches < 1:
+            raise ValueError("evaluation.max_parallel_matches must be >= 1")
 
 
 @dataclasses.dataclass(frozen=True)

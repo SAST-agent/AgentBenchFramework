@@ -259,6 +259,45 @@ def test_staged_evaluation_uses_one_quick_seed_then_remaining_finalist_seeds(tmp
     assert calls[0][0] == 101
 
 
+def test_fixed_cases_can_run_in_parallel_but_preserve_seed_order(tmp_path):
+    import threading
+
+    barrier = threading.Barrier(4)
+
+    def runner(**kwargs):
+        barrier.wait(timeout=2)
+        return _Match(
+            status="complete",
+            seed=kwargs["seed"],
+            rollman_score=kwargs["seed"],
+            ghosts_score=0,
+            result="win",
+        )
+
+    opponent = Opponent(
+        opponent_id="rank15",
+        rank=15,
+        archive=Path("rank15.zip"),
+        process=ProcessSpec(("ghost",)),
+    )
+    evaluator = RollmanEvaluator(
+        logic=ProcessSpec(("logic",)),
+        candidate_factory=lambda version: ProcessSpec(("candidate",)),
+        learning_opponent=opponent,
+        human_pool=(opponent,),
+        fixed_gate_seeds=(4, 1, 3, 2),
+        certification_seeds=(8,),
+        artifact_root=tmp_path,
+        match_runner=runner,
+        max_parallel_matches=4,
+    )
+
+    result = evaluator.evaluate(_version())
+
+    assert result.status == "complete"
+    assert [match["seed"] for match in result.matches] == [4, 1, 3, 2]
+
+
 def test_reporting_panel_uses_every_valid_opponent_on_requested_seed(tmp_path):
     opponents = tuple(
         Opponent(

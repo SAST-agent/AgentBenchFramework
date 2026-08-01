@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import dataclasses
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
@@ -77,6 +78,7 @@ class RollmanEvaluator:
         timeout_s: float = 2.0,
         match_runner: MatchRunner = run_match,
         state_tracker_factory: TrackerFactory | None = None,
+        max_parallel_matches: int = 1,
     ) -> None:
         self.logic = logic
         self.candidate_factory = candidate_factory
@@ -90,6 +92,7 @@ class RollmanEvaluator:
         self.timeout_s = float(timeout_s)
         self.match_runner = match_runner
         self.state_tracker_factory = state_tracker_factory
+        self.max_parallel_matches = int(max_parallel_matches)
         self.last_evaluation: CandidateEvaluation | None = None
         if learning_opponent.process is None:
             raise ValueError("learning opponent has not been prepared")
@@ -99,6 +102,8 @@ class RollmanEvaluator:
             raise ValueError("certification_seeds cannot be empty")
         if self.timeout_s <= 0:
             raise ValueError("timeout_s must be positive")
+        if self.max_parallel_matches < 1:
+            raise ValueError("max_parallel_matches must be positive")
 
     def evaluate(self, version: Version) -> CandidateEvaluation:
         self.last_evaluation = self._evaluate_cases(
@@ -212,59 +217,75 @@ class RollmanEvaluator:
         phase: str,
     ) -> CandidateEvaluation:
         candidate = self.candidate_factory(version)
-        records: list[dict[str, Any]] = []
-        complete = True
-        for opponent in opponents:
+        cases = [
+            (opponent, seed)
+            for opponent in opponents
+            for seed in seeds
+        ]
+
+        def run_case(opponent: Opponent, seed: int) -> dict[str, Any]:
             assert opponent.process is not None
-            for seed in seeds:
-                case_root = (
-                    self.artifact_root
-                    / version.version_id
-                    / phase
-                    / opponent.opponent_id
-                    / f"seed-{seed}"
+            case_root = (
+                self.artifact_root
+                / version.version_id
+                / phase
+                / opponent.opponent_id
+                / f"seed-{seed}"
+            )
+            replay_path = case_root / "replay.jsonl"
+            trace_path = case_root / "trace.jsonl"
+            record: dict[str, Any] = {
+                "phase": phase,
+                "version_id": version.version_id,
+                "opponent": opponent.opponent_id,
+                "opponent_rank": opponent.rank,
+                "seed": seed,
+            }
+            try:
+                match = self.match_runner(
+                    logic=self.logic,
+                    rollman=candidate,
+                    ghosts=opponent.process,
+                    seed=seed,
+                    timeout_s=self.timeout_s,
+                    replay_path=replay_path,
+                    trace_path=trace_path,
+                    state_tracker=(
+                        self.state_tracker_factory()
+                        if self.state_tracker_factory is not None
+                        else None
+                    ),
                 )
-                replay_path = case_root / "replay.jsonl"
-                trace_path = case_root / "trace.jsonl"
-                record: dict[str, Any] = {
-                    "phase": phase,
-                    "version_id": version.version_id,
-                    "opponent": opponent.opponent_id,
-                    "opponent_rank": opponent.rank,
-                    "seed": seed,
-                }
-                try:
-                    match = self.match_runner(
-                        logic=self.logic,
-                        rollman=candidate,
-                        ghosts=opponent.process,
-                        seed=seed,
-                        timeout_s=self.timeout_s,
-                        replay_path=replay_path,
-                        trace_path=trace_path,
-                        state_tracker=(
-                            self.state_tracker_factory()
-                            if self.state_tracker_factory is not None
-                            else None
-                        ),
-                    )
-                except MatchError as exc:
-                    complete = False
-                    record.update(status="incomplete", error=str(exc))
-                else:
-                    record.update(
-                        status="complete",
-                        result=match.result,
-                        end_state=list(match.end_state),
-                        rollman_score=match.rollman_score,
-                        ghosts_score=match.ghosts_score,
-                        raw_replay_sha256=match.replay.raw_sha256,
-                        normalized_replay_sha256=match.replay.normalized_sha256,
-                        replay=str(replay_path),
-                        trace=str(trace_path),
-                        game_agent_decisions=len(match.rollman_decisions),
-                    )
-                records.append(record)
+            except MatchError as exc:
+                record.update(status="incomplete", error=str(exc))
+            else:
+                record.update(
+                    status="complete",
+                    result=match.result,
+                    end_state=list(match.end_state),
+                    rollman_score=match.rollman_score,
+                    ghosts_score=match.ghosts_score,
+                    raw_replay_sha256=match.replay.raw_sha256,
+                    normalized_replay_sha256=match.replay.normalized_sha256,
+                    replay=str(replay_path),
+                    trace=str(trace_path),
+                    game_agent_decisions=len(match.rollman_decisions),
+                )
+            return record
+
+        if self.max_parallel_matches == 1 or len(cases) <= 1:
+            records = [run_case(opponent, seed) for opponent, seed in cases]
+        else:
+            with ThreadPoolExecutor(
+                max_workers=min(self.max_parallel_matches, len(cases))
+            ) as executor:
+                futures = [
+                    executor.submit(run_case, opponent, seed)
+                    for opponent, seed in cases
+                ]
+                records = [future.result() for future in futures]
+
+        complete = all(record.get("status") == "complete" for record in records)
 
         if not complete:
             return CandidateEvaluation(

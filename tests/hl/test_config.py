@@ -210,6 +210,7 @@ class HLConfigTests(unittest.TestCase):
                 "evaluation": {
                     "reporting_panel_every_cycle": True,
                     "reporting_seeds_per_opponent": 1,
+                    "max_parallel_matches": 4,
                 },
             }
         )
@@ -221,6 +222,7 @@ class HLConfigTests(unittest.TestCase):
         self.assertFalse(config.selection.source_size_penalty)
         self.assertEqual(config.context.research_state_max_bytes, 16384)
         self.assertTrue(config.evaluation.reporting_panel_every_cycle)
+        self.assertEqual(config.evaluation.max_parallel_matches, 4)
 
     def test_linear_k4_rejects_more_finalists_than_candidates(self):
         from agentbench_frame.hl.config import IterationConfig

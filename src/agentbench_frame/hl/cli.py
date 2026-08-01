@@ -796,6 +796,9 @@ def _run_real(
         artifact_root=run_dir / "matches",
         match_runner=run_match,
         state_tracker_factory=lambda: FrozenStateTracker(logic_root),
+        max_parallel_matches=(
+            config.run.evaluation.max_parallel_matches
+        ),
     )
     bundle = ContextBundle.create(
         run_dir / "context",
