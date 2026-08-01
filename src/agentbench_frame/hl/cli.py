@@ -1158,6 +1158,7 @@ def _run_real(
             run_root=run_dir,
             environ=provider_environment,
             timeout_s=config.run.provider.timeout_seconds,
+            idle_timeout_s=config.run.provider.idle_timeout_seconds,
         )
     )
     events_path = run_dir / "events.jsonl"

@@ -39,6 +39,7 @@ class ProviderConfig:
     context_mode: str = "resumable"
     executable: str = "codex"
     timeout_seconds: int = 600
+    idle_timeout_seconds: int = 360
     transport_retry_attempts: int = 3
     transport_retry_backoff_seconds: float = 2.0
 
@@ -53,6 +54,12 @@ class ProviderConfig:
             raise ValueError("provider.wire_api must be responses or chat")
         if self.timeout_seconds < 1:
             raise ValueError("provider.timeout_seconds must be >= 1")
+        if self.idle_timeout_seconds < 1:
+            raise ValueError("provider.idle_timeout_seconds must be >= 1")
+        if self.idle_timeout_seconds > self.timeout_seconds:
+            raise ValueError(
+                "provider.idle_timeout_seconds cannot exceed timeout_seconds"
+            )
         if self.transport_retry_attempts < 0:
             raise ValueError("provider.transport_retry_attempts must be >= 0")
         if self.transport_retry_backoff_seconds < 0:

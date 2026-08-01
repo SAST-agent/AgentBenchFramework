@@ -97,6 +97,7 @@ def test_fake_codex_invocation_retains_jsonl_session_and_exact_usage(tmp_path):
             "PATH": os.environ.get("PATH", ""),
             "HOME": str(tmp_path),
         },
+        idle_timeout_s=1,
     )
     workspace = tmp_path / "candidate"
     workspace.mkdir()
@@ -156,6 +157,45 @@ def test_provider_timeout_persists_partial_jsonl(tmp_path, monkeypatch):
     assert result.raw_output_ref == str(raw)
     assert raw.read_text(encoding="utf-8") == partial
     assert result.metadata["thread_id"] == "thread-partial"
+
+
+def test_provider_idle_timeout_persists_stream_and_identifies_deadline(tmp_path):
+    from agentbench_frame.hl.provider import CodexSessionProvider
+
+    executable = tmp_path / "idle-codex"
+    executable.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys, time\n"
+        "print('{\"type\":\"thread.started\",\"thread_id\":\"thread-idle\"}', flush=True)\n"
+        "time.sleep(5)\n",
+        encoding="utf-8",
+    )
+    executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    raw = tmp_path / "run" / "provider" / "act-idle.jsonl"
+    provider = CodexSessionProvider(
+        _provider_config(executable=str(executable)),
+        run_root=tmp_path / "run",
+        environ={
+            "AGENTBENCH_API_KEY": "sk-runtime-only",
+            "PATH": os.environ.get("PATH", ""),
+        },
+        timeout_s=3,
+        idle_timeout_s=1.0,
+    )
+
+    result = provider.invoke(
+        prompt="bounded idle task",
+        workspace=workspace,
+        raw_output_path=raw,
+    )
+
+    assert result.status == "timeout"
+    assert result.metadata["timeout_kind"] == "idle"
+    assert result.metadata["thread_id"] == "thread-idle"
+    assert "thread-idle" in raw.read_text(encoding="utf-8")
+    assert result.elapsed_time_s < 2.0
 
 
 def test_provider_retries_zero_usage_transport_failure_and_preserves_attempt(

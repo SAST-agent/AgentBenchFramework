@@ -34,6 +34,14 @@ class HLConfigTests(unittest.TestCase):
             {"iteration": {"candidates_per_act": 0}},
             {"iteration": {"max_acts": 0}},
             {"provider": {"kind": "codex", "env_key": "KEY", "context_mode": "hidden"}},
+            {"provider": {"kind": "codex", "idle_timeout_seconds": 0}},
+            {
+                "provider": {
+                    "kind": "codex",
+                    "timeout_seconds": 10,
+                    "idle_timeout_seconds": 11,
+                }
+            },
             {"rollback": {"patience": 0}},
             {"rollback": {"score_margin": -0.01}},
             {"measurement": {"epsilon": 1.01}},

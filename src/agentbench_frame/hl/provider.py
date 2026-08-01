@@ -36,6 +36,7 @@ class CodexSessionProvider:
         run_root: str | Path,
         environ: Optional[Mapping[str, str]] = None,
         timeout_s: Optional[float] = None,
+        idle_timeout_s: Optional[float] = None,
     ) -> None:
         self.config = config
         self.run_root = Path(run_root)
@@ -44,6 +45,7 @@ class CodexSessionProvider:
         self.config_path = self.codex_home / "config.toml"
         self.environ = dict(os.environ if environ is None else environ)
         self.timeout_s = timeout_s
+        self.idle_timeout_s = idle_timeout_s
         self._write_config()
 
     def _write_config(self) -> None:
@@ -194,14 +196,10 @@ class CodexSessionProvider:
         command = self.build_command(prompt, workspace, session_id=session_id)
         started = time.monotonic()
         try:
-            completed = subprocess.run(
-                command,
-                cwd=str(workspace),
-                env=self.build_environment(),
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_s,
-                check=False,
+            completed = self._run_command(
+                command=command,
+                workspace=workspace,
+                raw_output_path=raw_output_path,
             )
         except subprocess.TimeoutExpired as exc:
             partial = exc.stdout or ""
@@ -213,13 +211,21 @@ class CodexSessionProvider:
             result = parse_codex_jsonl(partial)
             result.status = "timeout"
             result.elapsed_time_s = time.monotonic() - started
-            result.error = f"provider timed out after {self.timeout_s}s"
+            timeout_kind = getattr(exc, "timeout_kind", "hard")
+            if timeout_kind == "idle":
+                result.error = (
+                    "provider produced no stream progress for "
+                    f"{self.idle_timeout_s}s"
+                )
+            else:
+                result.error = f"provider timed out after {self.timeout_s}s"
             result.raw_output_ref = str(raw_path)
             result.metadata.update(
                 {
                     "command": command,
                     "provider_fingerprint": self.fingerprint,
                     "partial_output_persisted": True,
+                    "timeout_kind": timeout_kind,
                 }
             )
             return result
@@ -257,6 +263,96 @@ class CodexSessionProvider:
                 completed.stderr.strip() or f"provider exited {completed.returncode}"
             )
         return result
+
+    def _run_command(
+        self,
+        *,
+        command: list[str],
+        workspace: str | Path,
+        raw_output_path: str | Path,
+    ) -> subprocess.CompletedProcess[str]:
+        if self.idle_timeout_s is None:
+            return subprocess.run(
+                command,
+                cwd=str(workspace),
+                env=self.build_environment(),
+                capture_output=True,
+                text=True,
+                timeout=self.timeout_s,
+                check=False,
+            )
+
+        process = subprocess.Popen(
+            command,
+            cwd=str(workspace),
+            env=self.build_environment(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        raw_path = Path(raw_output_path)
+        raw_path.parent.mkdir(parents=True, exist_ok=True)
+        started = time.monotonic()
+        last_progress = started
+        observed_sizes = (0, 0)
+        partial_stdout = ""
+        partial_stderr = ""
+
+        def decoded(value: str | bytes | None) -> str:
+            if value is None:
+                return ""
+            if isinstance(value, bytes):
+                return value.decode("utf-8", errors="replace")
+            return value
+
+        while True:
+            now = time.monotonic()
+            hard_remaining = (
+                float("inf")
+                if self.timeout_s is None
+                else self.timeout_s - (now - started)
+            )
+            idle_remaining = self.idle_timeout_s - (now - last_progress)
+            if hard_remaining <= 0 or idle_remaining <= 0:
+                timeout_kind = "hard" if hard_remaining <= 0 else "idle"
+                process.kill()
+                stdout, stderr = process.communicate()
+                partial_stdout = decoded(stdout) or partial_stdout
+                partial_stderr = decoded(stderr) or partial_stderr
+                raw_path.write_text(partial_stdout, encoding="utf-8")
+                error = subprocess.TimeoutExpired(
+                    cmd=command,
+                    timeout=(
+                        self.timeout_s
+                        if timeout_kind == "hard"
+                        else self.idle_timeout_s
+                    ),
+                    output=partial_stdout,
+                    stderr=partial_stderr,
+                )
+                error.timeout_kind = timeout_kind
+                raise error
+            try:
+                stdout, stderr = process.communicate(
+                    timeout=max(0.01, min(0.1, hard_remaining, idle_remaining))
+                )
+            except subprocess.TimeoutExpired as exc:
+                stdout = decoded(exc.stdout)
+                stderr = decoded(exc.stderr)
+                sizes = (len(stdout), len(stderr))
+                if sizes != observed_sizes:
+                    observed_sizes = sizes
+                    last_progress = time.monotonic()
+                    partial_stdout = stdout
+                    partial_stderr = stderr
+                    raw_path.write_text(partial_stdout, encoding="utf-8")
+                continue
+            return subprocess.CompletedProcess(
+                command,
+                process.returncode,
+                decoded(stdout),
+                decoded(stderr),
+            )
 
     @staticmethod
     def _is_retryable_transport_failure(
