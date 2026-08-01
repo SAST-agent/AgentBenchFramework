@@ -221,6 +221,8 @@ class CodexSessionProvider:
                 self.run_root / "experience",
                 self.run_root / "matches",
                 self.run_root / "measurement",
+                self.run_root / "proposals",
+                self.run_root / "research_state.json",
             )
         )
         home = Path(self.environ.get("HOME", str(Path.home()))).resolve()

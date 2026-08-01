@@ -210,6 +210,8 @@ def test_provider_allows_declared_run_artifacts_and_candidate_workspace(tmp_path
         run_root / "context" / "context-manifest.json",
         run_root / "experience" / "SKILL.md",
         run_root / "matches" / "v000000" / "learning" / "replay.jsonl",
+        run_root / "research_state.json",
+        run_root / "proposals" / "iter-000001" / "reducer_input.json",
     ]
     records = [
         {"type": "thread.started", "thread_id": "thread-clean"},
