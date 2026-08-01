@@ -251,6 +251,14 @@ def _pending_proposal_finalization(
 def _measurement_candidates(iteration_result: Any) -> tuple[Any, ...]:
     """Measure the single linear successor used by the main iteration curves."""
 
+    selected_id = iteration_result.selected.version.version_id
+    search_parent_id = getattr(
+        iteration_result,
+        "search_parent_version_id",
+        selected_id,
+    )
+    if search_parent_id != selected_id:
+        return ()
     return (iteration_result.selected,)
 
 

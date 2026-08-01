@@ -415,7 +415,13 @@ active target: {active_target or "none"}
 - previous measurements: {measurements}
 - bounded replay evidence: {evidence}
 
-先读取 game digest、research state 和所有 evidence summary。只有诊断依赖精确规则语义时，才按 manifest 定点读取权威规则对应章节；不要求每轮完整重读静态长文。不得读取人类对手源码、其他 run 或其他候选版本。
+先读取 game digest、research state、所有 evidence summary 和当前 workspace/ai.py。只有诊断依赖精确规则语义时，才按 manifest 定点读取权威规则对应章节；不要求每轮完整重读静态长文。不得读取人类对手源码、其他 run 或其他候选版本。
+
+Planner 压缩边界：
+- 只能读取 evidence 的 summary；不得打开 replay 或 trace，不得对它们运行脚本或自行解析。
+- 不得打印完整 replay、完整 trace、完整 observation、完整棋盘或全量事件流。
+- diagnosis 中的 level/round/事件必须来自 summary；精确窗口由后续候选 act 使用受限工具核查。
+- 对照 research state 与当前 ai.py，四个 mechanism 必须是尚未实现、未被既有失败证据否定的实质新机制。
 
 最多 10 次工具调用；四个 summary 应批量读取。写出并校验 branch_briefs.json 后立即结束，不运行 git status/diff，不继续扩展诊断。
 

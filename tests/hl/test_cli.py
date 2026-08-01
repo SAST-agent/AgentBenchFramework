@@ -44,10 +44,36 @@ def test_main_curve_measurement_only_uses_linear_selected_successor():
 
     from agentbench_frame.hl.cli import _measurement_candidates
 
-    siblings = tuple(SimpleNamespace(name=f"branch-{index}") for index in range(4))
-    iteration = SimpleNamespace(candidates=siblings, selected=siblings[2])
+    siblings = tuple(
+        SimpleNamespace(
+            name=f"branch-{index}",
+            version=SimpleNamespace(version_id=f"v{index}"),
+        )
+        for index in range(4)
+    )
+    iteration = SimpleNamespace(
+        candidates=siblings,
+        selected=siblings[2],
+        search_parent_version_id="v2",
+    )
 
     assert _measurement_candidates(iteration) == (siblings[2],)
+
+
+def test_main_curve_measurement_skips_rejected_sibling_when_parent_is_retained():
+    from types import SimpleNamespace
+
+    from agentbench_frame.hl.cli import _measurement_candidates
+
+    selected_sibling = SimpleNamespace(
+        version=SimpleNamespace(version_id="v2")
+    )
+    iteration = SimpleNamespace(
+        selected=selected_sibling,
+        search_parent_version_id="v1",
+    )
+
+    assert _measurement_candidates(iteration) == ()
 
 
 def test_hl_validate_reports_open_ended_k1_rollback_defaults(capsys):

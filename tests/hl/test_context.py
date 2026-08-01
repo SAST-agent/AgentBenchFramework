@@ -326,6 +326,8 @@ def test_k4_role_prompts_use_digest_research_state_and_exact_branch_brief(tmp_pa
     assert str(research) in planner
     assert "branch_briefs.json" in planner
     assert "恰好 4" in planner
+    assert "不得打开 replay 或 trace" in planner
+    assert "完整 replay" in planner
     assert "time-expanded escape search" in candidate
     assert "候选 3/4" in candidate
     assert "完整重读" in candidate

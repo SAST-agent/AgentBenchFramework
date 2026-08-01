@@ -52,6 +52,50 @@ def test_curve_rows_keep_performance_information_and_budget_separate():
     assert rows[2]["cumulative_total_tokens"] == 230
 
 
+def test_no_change_proposal_records_zero_kl_and_zero_occupancy_shift():
+    from agentbench_frame.hl.report import derive_curve_rows
+
+    events = [
+        {
+            "event_type": "version_created",
+            "version_id": "v0",
+            "act_id": "origin",
+            "evaluation_status": "complete",
+            "benchmark_score": 0.25,
+        },
+        {
+            "event_type": "candidate_selected",
+            "iteration_id": "iter-000000",
+            "version_id": "v0",
+            "act_id": "origin",
+        },
+        {
+            "event_type": "policy_kl_measured",
+            "version_id": "v0",
+            "local_policy_kl_trace": [1.25],
+        },
+        {
+            "event_type": "occupancy_measured",
+            "version_id": "v0",
+            "occupancy_shift": 9.0,
+        },
+        {
+            "event_type": "proposal_cycle_completed",
+            "iteration_id": "iter-000001",
+            "parent_version_id": "v0",
+            "selected_version_id": "v0",
+            "candidate_version_ids": ["v1", "v2", "v3", "v4"],
+        },
+    ]
+
+    rows = derive_curve_rows(events)
+
+    assert [row["iteration"] for row in rows] == [0, 1]
+    assert rows[1]["version_id"] == "v0"
+    assert rows[1]["mean_local_policy_kl"] == 0.0
+    assert rows[1]["occupancy_shift"] == 0.0
+
+
 def test_k_iteration_budget_includes_rejected_siblings_after_selected_branch_act():
     from agentbench_frame.hl.report import derive_curve_rows
 

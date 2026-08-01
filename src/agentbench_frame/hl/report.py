@@ -282,6 +282,10 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
         panel = reporting.get(version_id, {})
         kl_trace = policy_kl.get(version_id, [])
         win_rate = _win_rate(evaluation)
+        no_change = bool(
+            selection.get("_proposal")
+            and str(selection.get("parent_version_id")) == version_id
+        )
         rows.append(
             {
                 "iteration": iteration,
@@ -309,10 +313,14 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
                     else reported_elo.get(version_id)
                 ),
                 "mean_local_policy_kl": (
-                    0.0 if iteration == 0 and not kl_trace else _mean(kl_trace)
+                    0.0
+                    if no_change or (iteration == 0 and not kl_trace)
+                    else _mean(kl_trace)
                 ),
                 "_local_policy_kl_trace": kl_trace,
-                "occupancy_shift": occupancy.get(version_id),
+                "occupancy_shift": (
+                    0.0 if no_change else occupancy.get(version_id)
+                ),
                 "active_target": target_gate.get("active_target"),
                 "target_gate_score": target_gate.get("score"),
                 "passing_human_opponents": certification.get(
