@@ -158,6 +158,89 @@ def test_provider_timeout_persists_partial_jsonl(tmp_path, monkeypatch):
     assert result.metadata["thread_id"] == "thread-partial"
 
 
+def test_provider_retries_zero_usage_transport_failure_and_preserves_attempt(
+    tmp_path, monkeypatch
+):
+    from agentbench_frame.hl.provider import CodexSessionProvider
+
+    failed = (
+        '{"type":"thread.started","thread_id":"thread-disconnected"}\n'
+        '{"type":"error","message":"stream disconnected before completion: error sending request"}\n'
+        '{"type":"turn.failed","error":{"message":"stream disconnected before completion"}}\n'
+    )
+    completed = (
+        '{"type":"thread.started","thread_id":"thread-retried"}\n'
+        '{"type":"turn.completed","usage":{"input_tokens":20,"output_tokens":7}}\n'
+    )
+    calls = []
+
+    def run(*args, **kwargs):
+        calls.append(args[0])
+        if len(calls) == 1:
+            return subprocess.CompletedProcess(args[0], 1, failed, "")
+        return subprocess.CompletedProcess(args[0], 0, completed, "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr("agentbench_frame.hl.provider.time.sleep", lambda _: None)
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    raw = tmp_path / "run" / "provider" / "act-retry.jsonl"
+    provider = CodexSessionProvider(
+        _provider_config(
+            transport_retry_attempts=2,
+            transport_retry_backoff_seconds=1.0,
+        ),
+        run_root=tmp_path / "run",
+        environ={"AGENTBENCH_API_KEY": "sk-runtime-only"},
+    )
+
+    result = provider.invoke(
+        prompt="retry transport only",
+        workspace=workspace,
+        raw_output_path=raw,
+    )
+
+    assert len(calls) == 2
+    assert result.status == "completed"
+    assert result.metadata["transport_retry_count"] == 1
+    attempt = raw.with_name("act-retry.attempt-1.jsonl")
+    assert attempt.read_text(encoding="utf-8") == failed
+    assert raw.read_text(encoding="utf-8") == completed
+
+
+def test_provider_does_not_retry_failed_act_after_token_usage(tmp_path, monkeypatch):
+    from agentbench_frame.hl.provider import CodexSessionProvider
+
+    output = (
+        '{"type":"thread.started","thread_id":"thread-billed"}\n'
+        '{"type":"turn.completed","usage":{"input_tokens":20,"output_tokens":7}}\n'
+    )
+    calls = []
+
+    def run(*args, **kwargs):
+        calls.append(args[0])
+        return subprocess.CompletedProcess(args[0], 1, output, "provider exited")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    provider = CodexSessionProvider(
+        _provider_config(transport_retry_attempts=2),
+        run_root=tmp_path / "run",
+        environ={"AGENTBENCH_API_KEY": "sk-runtime-only"},
+    )
+
+    result = provider.invoke(
+        prompt="do not duplicate billed work",
+        workspace=workspace,
+        raw_output_path=tmp_path / "run" / "provider" / "act-billed.jsonl",
+    )
+
+    assert len(calls) == 1
+    assert result.status == "failed"
+    assert result.usage.total_tokens == 27
+
+
 def test_provider_rejects_tool_reads_from_another_run(tmp_path):
     from agentbench_frame.hl.provider import CodexSessionProvider
 

@@ -39,6 +39,8 @@ class ProviderConfig:
     context_mode: str = "resumable"
     executable: str = "codex"
     timeout_seconds: int = 600
+    transport_retry_attempts: int = 2
+    transport_retry_backoff_seconds: float = 2.0
 
     def __post_init__(self) -> None:
         if self.kind != "codex":
@@ -51,6 +53,12 @@ class ProviderConfig:
             raise ValueError("provider.wire_api must be responses or chat")
         if self.timeout_seconds < 1:
             raise ValueError("provider.timeout_seconds must be >= 1")
+        if self.transport_retry_attempts < 0:
+            raise ValueError("provider.transport_retry_attempts must be >= 0")
+        if self.transport_retry_backoff_seconds < 0:
+            raise ValueError(
+                "provider.transport_retry_backoff_seconds must be >= 0"
+            )
 
 
 @dataclasses.dataclass(frozen=True)

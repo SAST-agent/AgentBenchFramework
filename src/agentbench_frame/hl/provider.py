@@ -153,6 +153,44 @@ class CodexSessionProvider:
         raw_output_path: str | Path,
         session_id: Optional[str] = None,
     ) -> ProviderInvocation:
+        raw_path = Path(raw_output_path)
+        retry_outputs: list[str] = []
+        max_attempts = self.config.transport_retry_attempts + 1
+        for attempt_index in range(max_attempts):
+            result = self._invoke_once(
+                prompt=prompt,
+                workspace=workspace,
+                raw_output_path=raw_path,
+                session_id=session_id,
+            )
+            should_retry = (
+                attempt_index + 1 < max_attempts
+                and self._is_retryable_transport_failure(result, raw_path)
+            )
+            if not should_retry:
+                result.metadata["transport_retry_count"] = len(retry_outputs)
+                result.metadata["transport_retry_outputs"] = retry_outputs
+                return result
+
+            attempt_path = raw_path.with_name(
+                f"{raw_path.stem}.attempt-{attempt_index + 1}{raw_path.suffix}"
+            )
+            attempt_path.parent.mkdir(parents=True, exist_ok=True)
+            raw_path.replace(attempt_path)
+            retry_outputs.append(str(attempt_path))
+            backoff = self.config.transport_retry_backoff_seconds * (2**attempt_index)
+            if backoff:
+                time.sleep(backoff)
+        raise AssertionError("provider retry loop must return")
+
+    def _invoke_once(
+        self,
+        *,
+        prompt: str,
+        workspace: str | Path,
+        raw_output_path: str | Path,
+        session_id: Optional[str] = None,
+    ) -> ProviderInvocation:
         command = self.build_command(prompt, workspace, session_id=session_id)
         started = time.monotonic()
         try:
@@ -219,6 +257,44 @@ class CodexSessionProvider:
                 completed.stderr.strip() or f"provider exited {completed.returncode}"
             )
         return result
+
+    @staticmethod
+    def _is_retryable_transport_failure(
+        result: ProviderInvocation,
+        raw_output_path: str | Path,
+    ) -> bool:
+        """Retry only failures that cannot have performed or billed useful work."""
+
+        if result.status != "failed":
+            return False
+        if result.usage.total_tokens is not None or result.tool_call_count:
+            return False
+        raw_path = Path(raw_output_path)
+        raw_output = (
+            raw_path.read_text(encoding="utf-8", errors="replace")
+            if raw_path.is_file()
+            else ""
+        )
+        diagnostic = " ".join(
+            (
+                str(result.error or ""),
+                str(result.metadata.get("stderr") or ""),
+                raw_output,
+            )
+        ).lower()
+        transport_markers = (
+            "stream disconnected",
+            "error sending request",
+            "connection reset",
+            "connection closed",
+            "could not resolve host",
+            "dns error",
+            "temporarily unavailable",
+            "http status 502",
+            "http status 503",
+            "http status 504",
+        )
+        return any(marker in diagnostic for marker in transport_markers)
 
     def recover_completed_output(
         self,
