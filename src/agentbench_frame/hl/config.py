@@ -38,6 +38,7 @@ class ProviderConfig:
     network_access: str = "enabled"
     context_mode: str = "resumable"
     executable: str = "codex"
+    timeout_seconds: int = 600
 
     def __post_init__(self) -> None:
         if self.kind != "codex":
@@ -48,6 +49,8 @@ class ProviderConfig:
             raise ValueError("provider.context_mode must be resumable or fresh")
         if self.wire_api not in {"responses", "chat"}:
             raise ValueError("provider.wire_api must be responses or chat")
+        if self.timeout_seconds < 1:
+            raise ValueError("provider.timeout_seconds must be >= 1")
 
 
 @dataclasses.dataclass(frozen=True)

@@ -13,6 +13,7 @@ run:
     disable_response_storage: true
     network_access: "enabled"
     context_mode: "fresh"
+    timeout_seconds: 600
   origin:
     mode: "model_bootstrap"
     reset_session: true

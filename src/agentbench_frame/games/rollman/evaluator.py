@@ -259,8 +259,9 @@ class RollmanEvaluator:
             except MatchError as exc:
                 record.update(status="incomplete", error=str(exc))
             else:
+                candidate_state = str(match.end_state[0])
                 record.update(
-                    status="complete",
+                    status=("complete" if candidate_state == "OK" else "incomplete"),
                     result=match.result,
                     end_state=list(match.end_state),
                     rollman_score=match.rollman_score,
@@ -271,6 +272,8 @@ class RollmanEvaluator:
                     trace=str(trace_path),
                     game_agent_decisions=len(match.rollman_decisions),
                 )
+                if candidate_state != "OK":
+                    record["error"] = f"candidate ended with {candidate_state}"
             return record
 
         if self.max_parallel_matches == 1 or len(cases) <= 1:

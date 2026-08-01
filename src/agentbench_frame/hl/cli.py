@@ -68,6 +68,40 @@ def _ensure_replay_summary(
     return summary_path
 
 
+def _trace_fault_summary(trace: str | Path | None) -> dict[str, str] | None:
+    """Return the latest bounded Rollman fault for the next coding act."""
+
+    if trace is None:
+        return None
+    path = Path(trace)
+    if not path.is_file():
+        return None
+    latest: dict[str, Any] | None = None
+    for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if (
+            isinstance(record, dict)
+            and record.get("type") == "ai_fault"
+            and record.get("player") == 0
+        ):
+            latest = record
+    if latest is None:
+        return None
+    result: dict[str, str] = {}
+    for key in ("error", "detail", "stderr_tail"):
+        value = latest.get(key)
+        if value is None:
+            continue
+        text = _SECRET_LIKE.sub("[REDACTED]", str(value))
+        if len(text.encode("utf-8")) > 4096:
+            text = text[-4096:]
+        result[key] = text
+    return result or None
+
+
 def _measure_candidate(
     *,
     measurement_runner: Any,
@@ -977,6 +1011,7 @@ def _run_real(
             config.run.provider,
             run_root=run_dir,
             environ=provider_environment,
+            timeout_s=config.run.provider.timeout_seconds,
         )
     )
     events_path = run_dir / "events.jsonl"
@@ -1100,6 +1135,7 @@ def _run_real(
                 ),
                 "replay": replay,
                 "trace": match.get("trace"),
+                "candidate_fault": _trace_fault_summary(match.get("trace")),
                 }
             )
         previous_measurements = {
@@ -1634,6 +1670,19 @@ def _run_real(
                         "provider credential is required for model bootstrap"
                     )
                 origin = controller.bootstrap().version
+            if (
+                evaluator.last_evaluation is None
+                or evaluator.last_evaluation.status != "complete"
+            ):
+                _json(
+                    {
+                        "run_dir": str(run_dir),
+                        "status": "incomplete_origin_evaluation",
+                        "version_id": origin.version_id,
+                        **controller.summary(),
+                    }
+                )
+                return 2
             certification, origin_summary = certify_curriculum_version(
                 origin
             )

@@ -1,6 +1,7 @@
 import json
 import os
 import stat
+import subprocess
 from pathlib import Path
 
 
@@ -116,6 +117,45 @@ def test_fake_codex_invocation_retains_jsonl_session_and_exact_usage(tmp_path):
     assert result.tool_call_count == 1
     assert raw.read_text(encoding="utf-8").count("\n") == 3
     assert "sk-runtime-only" not in json.dumps(result.metadata)
+
+
+def test_provider_timeout_persists_partial_jsonl(tmp_path, monkeypatch):
+    from agentbench_frame.hl.provider import CodexSessionProvider
+
+    partial = (
+        '{"type":"thread.started","thread_id":"thread-partial"}\n'
+        '{"type":"item.completed","item":{"type":"file_change"}}\n'
+    )
+
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(
+            cmd=args[0],
+            timeout=3,
+            output=partial,
+            stderr="hard phase deadline",
+        )
+
+    monkeypatch.setattr(subprocess, "run", timeout)
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    raw = tmp_path / "run" / "provider" / "act-timeout.jsonl"
+    provider = CodexSessionProvider(
+        _provider_config(),
+        run_root=tmp_path / "run",
+        environ={"AGENTBENCH_API_KEY": "sk-runtime-only"},
+        timeout_s=3,
+    )
+
+    result = provider.invoke(
+        prompt="bounded task",
+        workspace=workspace,
+        raw_output_path=raw,
+    )
+
+    assert result.status == "timeout"
+    assert result.raw_output_ref == str(raw)
+    assert raw.read_text(encoding="utf-8") == partial
+    assert result.metadata["thread_id"] == "thread-partial"
 
 
 def test_provider_rejects_tool_reads_from_another_run(tmp_path):

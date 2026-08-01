@@ -32,6 +32,12 @@ policy_interface:
     - portal_available
     - portal_coord
   canonical_normalization: "game_state.gamestate_to_statedict()"
+  normalized_value_types:
+    board: "numpy.ndarray"
+    pacman_skill_status: "numpy.ndarray"
+    pacman_coord: "numpy.ndarray"
+    ghosts_coord: "list[numpy.ndarray]"
+    portal_coord: "numpy.ndarray"
   normalized_state_mapping:
     pacman_coord: "pacman_pos"
     ghosts_coord: "ghosts_pos"

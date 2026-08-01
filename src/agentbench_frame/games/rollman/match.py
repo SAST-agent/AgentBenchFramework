@@ -273,6 +273,22 @@ def _stop(process: subprocess.Popen[bytes]) -> None:
         shutil.rmtree(scratch, ignore_errors=True)
 
 
+def _stderr_tail(process: Any, *, max_bytes: int = 8192) -> str | None:
+    """Read bounded diagnostics only after a player process has exited."""
+
+    if max_bytes < 1 or process.poll() is None or process.stderr is None:
+        return None
+    try:
+        payload = process.stderr.read()
+    except (OSError, ValueError):
+        return None
+    if not payload:
+        return None
+    if isinstance(payload, str):
+        payload = payload.encode("utf-8", errors="replace")
+    return bytes(payload)[-max_bytes:].decode("utf-8", errors="replace")
+
+
 def _write_raw(stream: Any, content: str) -> None:
     stream.write(content.encode("utf-8"))
     stream.flush()
@@ -528,15 +544,17 @@ def run_match(
                     )
                 except ProtocolError as exc:
                     error_code, error_name = _judger_ai_error(exc)
-                    trace.append(
-                        {
-                            "type": "ai_fault",
-                            "state": state,
-                            "player": player,
-                            "error": error_name,
-                            "detail": str(exc),
-                        }
-                    )
+                    fault = {
+                        "type": "ai_fault",
+                        "state": state,
+                        "player": player,
+                        "error": error_name,
+                        "detail": str(exc),
+                    }
+                    stderr_tail = _stderr_tail(players[player])
+                    if stderr_tail is not None:
+                        fault["stderr_tail"] = stderr_tail
+                    trace.append(fault)
                     routed_error = json.dumps(
                         {
                             "player": -1,

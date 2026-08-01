@@ -165,13 +165,26 @@ class CodexSessionProvider:
                 timeout=self.timeout_s,
                 check=False,
             )
-        except subprocess.TimeoutExpired:
-            return ProviderInvocation(
-                status="timeout",
-                elapsed_time_s=time.monotonic() - started,
-                error=f"provider timed out after {self.timeout_s}s",
-                metadata={"command": command, "provider_fingerprint": self.fingerprint},
+        except subprocess.TimeoutExpired as exc:
+            partial = exc.stdout or ""
+            if isinstance(partial, bytes):
+                partial = partial.decode("utf-8", errors="replace")
+            raw_path = Path(raw_output_path)
+            raw_path.parent.mkdir(parents=True, exist_ok=True)
+            raw_path.write_text(partial, encoding="utf-8")
+            result = parse_codex_jsonl(partial)
+            result.status = "timeout"
+            result.elapsed_time_s = time.monotonic() - started
+            result.error = f"provider timed out after {self.timeout_s}s"
+            result.raw_output_ref = str(raw_path)
+            result.metadata.update(
+                {
+                    "command": command,
+                    "provider_fingerprint": self.fingerprint,
+                    "partial_output_persisted": True,
+                }
             )
+            return result
         raw_path = Path(raw_output_path)
         raw_path.parent.mkdir(parents=True, exist_ok=True)
         raw_path.write_text(completed.stdout or "", encoding="utf-8")

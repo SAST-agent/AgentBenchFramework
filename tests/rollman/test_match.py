@@ -26,6 +26,23 @@ def test_process_cleanup_does_not_mask_broken_pipe_error():
 
     _stop(ExitedProcess())
 
+
+def test_exited_player_stderr_is_bounded_for_fault_diagnostics():
+    import io
+
+    from agentbench_frame.games.rollman.match import _stderr_tail
+
+    class ExitedProcess:
+        stderr = io.BytesIO(b"prefix\nTraceback: numpy truth-value failure\n")
+
+        @staticmethod
+        def poll():
+            return 1
+
+    assert _stderr_tail(ExitedProcess(), max_bytes=32) == (
+        "back: numpy truth-value failure\n"
+    )
+
 import pytest
 
 from agentbench_frame.games.rollman.match import ProcessSpec, run_match

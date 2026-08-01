@@ -12,6 +12,33 @@ def _last_json(capsys):
     return json.loads(capsys.readouterr().out)
 
 
+def test_trace_fault_summary_exposes_bounded_redacted_candidate_error(tmp_path):
+    from agentbench_frame.hl.cli import _trace_fault_summary
+
+    trace = tmp_path / "trace.jsonl"
+    trace.write_text(
+        json.dumps({"type": "watch", "content": {"round": 0}})
+        + "\n"
+        + json.dumps(
+            {
+                "type": "ai_fault",
+                "player": 0,
+                "error": "RE",
+                "detail": "player 0 emitted no frame",
+                "stderr_tail": "Traceback: numpy failure sk-secretvalue123",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert _trace_fault_summary(trace) == {
+        "error": "RE",
+        "detail": "player 0 emitted no frame",
+        "stderr_tail": "Traceback: numpy failure [REDACTED]",
+    }
+
+
 def test_hl_validate_reports_open_ended_k1_rollback_defaults(capsys):
     from agentbench_frame.hl.cli import main
 

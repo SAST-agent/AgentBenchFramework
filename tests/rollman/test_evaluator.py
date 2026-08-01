@@ -182,6 +182,42 @@ def test_any_invalid_fixed_case_makes_aggregate_score_missing(tmp_path):
     assert result.matches[1]["status"] == "incomplete"
 
 
+def test_candidate_runtime_error_is_not_scored_as_a_valid_loss(tmp_path):
+    def runner(**kwargs):
+        return _Match(
+            status="complete",
+            seed=kwargs["seed"],
+            rollman_score=-1000,
+            ghosts_score=1000,
+            result="loss",
+            end_state=("RE", "OK"),
+        )
+
+    evaluator = RollmanEvaluator(
+        logic=ProcessSpec(("logic",)),
+        candidate_factory=lambda version: ProcessSpec(("candidate",)),
+        learning_opponent=Opponent(
+            opponent_id="rank16",
+            rank=16,
+            archive=Path("rank16.zip"),
+            process=ProcessSpec(("ghost",)),
+        ),
+        human_pool=(),
+        fixed_gate_seeds=(101,),
+        certification_seeds=(201,),
+        artifact_root=tmp_path,
+        match_runner=runner,
+    )
+
+    result = evaluator.evaluate(_version())
+
+    assert result.status == "incomplete"
+    assert result.score is None
+    assert result.matches[0]["status"] == "incomplete"
+    assert result.matches[0]["error"] == "candidate ended with RE"
+    assert result.matches[0]["end_state"] == ["RE", "OK"]
+
+
 def test_game_judger_opponent_timeout_is_a_valid_candidate_win(tmp_path):
     def runner(**kwargs):
         return _Match(

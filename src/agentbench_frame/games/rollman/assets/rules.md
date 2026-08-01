@@ -189,6 +189,13 @@ Rollman 被吃后重生到空地中“到三个幽灵的最小曼哈顿距离”
 `score = [pacman_score, ghosts_score]`。策略不得假设对象本身直接提供
 `pacman_coord`、`ghosts_coord` 或 `score` 属性。
 
+冻结 SDK 使用 NumPy：`board`、`pacman_coord`、`portal_coord` 和
+`pacman_skill_status` 是 `numpy.ndarray`，`ghosts_coord` 是由三个
+`numpy.ndarray` 构成的列表。代码不得对数组直接使用 `if array`、
+`array or fallback` 或其他隐式布尔判断；应使用 `is None`、`.size`、
+显式长度判断或先调用 `.tolist()`。候选 smoke test 必须使用这些真实类型，
+仅用 Python list 的伪对象不足以验证 SDK 兼容性。
+
 规范字典包含：
 
 - `level`

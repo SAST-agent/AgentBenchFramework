@@ -227,7 +227,7 @@ class IterationContext:
 
 目标：根据冻结游戏规则，从规则出发设计并实现一版可解释、可运行、可复现的初始算法。该版本将作为后续 HL 迭代的 origin。
 
-实时策略输入是冻结 SDK 的 `core.gamedata.GameState` 对象。必须读取规则第 9 节，优先调用 `game_state.gamestate_to_statedict()`；不要把对象属性误写成回放字段。smoke test 必须覆盖具有 `pacman_pos`、`ghosts_pos`、`pacman_score`、`ghosts_score` 的对象输入，并确认首个合法状态不返回 STAY fallback。
+实时策略输入是冻结 SDK 的 `core.gamedata.GameState` 对象。必须读取规则第 9 节，优先调用 `game_state.gamestate_to_statedict()`；不要把对象属性误写成回放字段。规范化结果中的 board、坐标和技能状态是 NumPy 数组，禁止 `array or []`、`if array` 等隐式布尔判断。smoke test 必须使用真实 `numpy.ndarray` 覆盖 `pacman_pos`、`ghosts_pos`、`pacman_score`、`ghosts_score`，并确认首个合法状态不返回 STAY fallback。
 
 只读上下文：
 - context manifest: {self.bundle.manifest_path}
@@ -235,6 +235,10 @@ class IterationContext:
 - Experience Skill: {Path(experience_path).resolve()}
 
 本阶段没有比赛回放。不要虚构回放证据，也不要假装从反馈中得出结论。
+
+Act 预算：
+- 最多 10 次工具调用；优先批量读取规则与接口，禁止反复查看同一文件。
+- 写完策略后只运行一次编译和一次使用真实 NumPy 数组的对象 smoke test；两者成功后立即结束。
 
 科研隔离边界：
 - 只允许读取上述 context manifest 及其 files、candidate workspace 和 Experience Skill。
@@ -251,6 +255,7 @@ class IterationContext:
 6. 允许策略代码增长和增加新的情形分支；不以源代码长度或 if/else 数量作为惩罚。
 7. 完成框架指定的静态检查和 smoke test。
 8. 不要直接修改 Experience Skill；本阶段只建立初始算法，后续再从合法比赛回放更新经验。
+9. 第一次编译与真实类型 smoke 成功后立即结束；禁止重复执行测试、git status/diff、额外润色或第二轮重构，真实比赛会负责验证。
 """
 
     def build_prompt(
@@ -333,7 +338,7 @@ class IterationContext:
 
 目标：在冻结评测协议下提升游戏 agent，保持程序可解释、可运行、可复现。
 
-实时策略输入是冻结 SDK 的 `core.gamedata.GameState` 对象；规范化入口是 `game_state.gamestate_to_statedict()`。对象属性使用 `pacman_pos`、`ghosts_pos`、`pacman_score`、`ghosts_score`，而回放/规范字典使用 `pacman_coord`、`ghosts_coord`、`score`。不得混淆两层字段。
+实时策略输入是冻结 SDK 的 `core.gamedata.GameState` 对象；规范化入口是 `game_state.gamestate_to_statedict()`。对象属性使用 `pacman_pos`、`ghosts_pos`、`pacman_score`、`ghosts_score`，而回放/规范字典使用 `pacman_coord`、`ghosts_coord`、`score`。不得混淆两层字段。规范字典中的 board、坐标和技能状态是 NumPy 数组，禁止对数组使用隐式布尔判断（例如 `array or []` 或 `if array`）。
 
 只读上下文：
 - context manifest: {self.bundle.manifest_path}
