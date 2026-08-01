@@ -366,6 +366,7 @@ def test_k4_role_prompts_use_digest_research_state_and_exact_branch_brief(tmp_pa
     assert str(reducer_input) in reducer
     assert "research_state_update.json" in reducer
     assert "不得修改" in reducer
+    assert "不得先声明或访问 run 根目录" in reducer
 
 
 def test_bootstrap_prompt_creates_interpretable_origin_without_fake_replay(tmp_path):

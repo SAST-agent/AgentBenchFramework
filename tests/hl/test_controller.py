@@ -671,6 +671,108 @@ def test_k4_proposal_cycle_uses_one_parent_and_reducer_sees_all_feedback(tmp_pat
     assert research.recent_comparisons[0]["selected_branch"] == 1
 
 
+def test_failed_reducer_output_cannot_mutate_research_state(tmp_path):
+    import json
+
+    from agentbench_frame.hl.codebase import VersionStore
+    from agentbench_frame.hl.config import IterationConfig, RollbackConfig
+    from agentbench_frame.hl.controller import HLController
+    from agentbench_frame.hl.events import HLEventWriter, read_events
+    from agentbench_frame.hl.lineage import LineageManager
+    from agentbench_frame.hl.research_state import ResearchState
+    from agentbench_frame.tracking.provider import ProviderInvocation, ProviderUsage
+
+    class Provider:
+        def invoke(self, *, prompt, workspace, raw_output_path, session_id=None):
+            control = Path(workspace, ".agentbench")
+            control.mkdir(parents=True, exist_ok=True)
+            status = "completed"
+            if "phase=planner" in prompt:
+                (control / "branch_briefs.json").write_text(
+                    json.dumps(
+                        {
+                            "branches": [
+                                {
+                                    "branch_index": index,
+                                    "diagnosis": f"diagnosis-{index}",
+                                    "mechanism": ("planner", "predictor", "shield", "portal")[index],
+                                    "expected_change": f"expected-{index}",
+                                    "falsifier": f"falsifier-{index}",
+                                }
+                                for index in range(4)
+                            ]
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            elif "phase=candidate" in prompt:
+                Path(workspace, "agent.py").write_text(
+                    f"VALUE = {len(list((control).iterdir()))}\n",
+                    encoding="utf-8",
+                )
+            elif "phase=reducer" in prompt:
+                (control / "research_state_update.json").write_text(
+                    json.dumps(
+                        {
+                            "stable_knowledge": ["tainted update"],
+                            "failed_hypotheses": [],
+                            "open_questions": [],
+                            "recent_comparisons": [],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                status = "failed"
+            Path(raw_output_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(raw_output_path).write_text("{}\n", encoding="utf-8")
+            return ProviderInvocation(
+                status=status,
+                usage=ProviderUsage(prompt_tokens=1, completion_tokens=1),
+                raw_output_ref=str(raw_output_path),
+                metadata={"thread_id": "thread"},
+            )
+
+    workspace = _workspace(tmp_path)
+    research_path = tmp_path / "research_state.json"
+    ResearchState.empty(max_bytes=4096).advance(
+        official_champion_version_id="v000000",
+        active_target="rank15",
+    ).write(research_path)
+    controller = HLController(
+        workspace=workspace,
+        run_root=tmp_path,
+        provider=Provider(),
+        evaluator=FakeEvaluator([0.8, 0.1, 0.7, 0.4, 0.2]),
+        version_store=VersionStore(workspace, tmp_path / "versions"),
+        lineage=LineageManager(),
+        events=HLEventWriter(tmp_path / "events.jsonl", run_id="run-failed-reducer"),
+        iteration=IterationConfig(
+            candidates_per_cycle=4,
+            planner_enabled=True,
+            reducer_enabled=True,
+            finalist_count=2,
+        ),
+        rollback=RollbackConfig(),
+        prompt_factory=lambda **values: f"phase={values['phase']}",
+        research_state_path=research_path,
+        research_state_max_bytes=4096,
+    )
+    origin = controller.initialize(evaluate=True)
+
+    controller.run_proposal_cycle(parent_version_id=origin.version_id)
+
+    research = ResearchState.load_or_create(research_path, max_bytes=4096)
+    assert research.proposal_cycle == 0
+    assert "tainted update" not in research.stable_knowledge
+    reducer = [
+        event
+        for event in read_events(tmp_path / "events.jsonl")
+        if event["event_type"] == "reducer_completed"
+    ][0]
+    assert reducer["status"] == "failed"
+    assert reducer["output_path"] is None
+
+
 def test_k4_cycle_reuses_valid_persisted_planner_without_second_api_call(tmp_path):
     import json
 

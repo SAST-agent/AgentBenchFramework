@@ -965,7 +965,7 @@ class HLController:
             invocation=reducer,
         )
         persisted_reducer_output: str | None = None
-        if reducer_output.is_file():
+        if reducer.status == "completed" and reducer_output.is_file():
             target = proposal_root / "research_state_update.json"
             shutil.copy2(reducer_output, target)
             persisted_reducer_output = str(target)
