@@ -37,6 +37,7 @@ class IterationResult:
     candidates: tuple[CandidateResult, ...]
     selected: CandidateResult
     rollback: Optional[ParentDecision]
+    finalists: tuple[CandidateResult, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -491,6 +492,12 @@ class HLController:
         branch_count = self.iteration.candidates_per_act
         if branch_briefs is not None and len(branch_briefs) != branch_count:
             raise ValueError("branch briefs must match candidate count")
+        staged_evaluation = (
+            self.iteration.planner_enabled
+            and hasattr(self.evaluator, "quick_screen")
+            and hasattr(self.evaluator, "evaluate_finalist")
+            and hasattr(self.evaluator, "combine_stages")
+        )
 
         for branch_index in range(branch_count):
             self.version_store.checkout(parent_id)
@@ -550,7 +557,11 @@ class HLController:
                 edit_type="candidate",
             )
             evaluation = (
-                self.evaluator.evaluate(version)
+                (
+                    self.evaluator.quick_screen(version)
+                    if staged_evaluation
+                    else self.evaluator.evaluate(version)
+                )
                 if invocation.status == "completed"
                 else CandidateEvaluation(
                     status=invocation.status
@@ -581,9 +592,6 @@ class HLController:
             self._write_act_event(iteration_id, result)
             self._write_version_event(version, evaluation, selected=False)
 
-        completed = [
-            result for result in results if result.evaluation.status == "complete"
-        ]
         def selection_key(result: CandidateResult) -> tuple[float, ...]:
             try:
                 diagnostics = CandidateDiagnostics.from_matches(
@@ -604,7 +612,54 @@ class HLController:
                 )
             return diagnostics.key()
 
+        finalists: tuple[CandidateResult, ...] = ()
+        if staged_evaluation:
+            quick_completed = sorted(
+                (
+                    result
+                    for result in results
+                    if result.evaluation.status == "complete"
+                ),
+                key=selection_key,
+                reverse=True,
+            )
+            finalist_ids = {
+                result.version.version_id
+                for result in quick_completed[: self.iteration.finalist_count]
+            }
+            updated_results: list[CandidateResult] = []
+            for result in results:
+                if result.version.version_id not in finalist_ids:
+                    updated_results.append(result)
+                    continue
+                finalist_evaluation = self.evaluator.evaluate_finalist(
+                    result.version
+                )
+                combined = self.evaluator.combine_stages(
+                    result.evaluation,
+                    finalist_evaluation,
+                )
+                updated = dataclasses.replace(result, evaluation=combined)
+                updated_results.append(updated)
+                self._write_evaluation_event(result.version, combined)
+            results = updated_results
+            finalists = tuple(
+                result
+                for result in results
+                if result.version.version_id in finalist_ids
+            )
+
+        completed = [
+            result for result in results if result.evaluation.status == "complete"
+        ]
+
         selected = max(completed, key=selection_key) if completed else results[0]
+        if not finalists:
+            finalists = tuple(
+                sorted(completed, key=selection_key, reverse=True)[
+                    : self.iteration.finalist_count
+                ]
+            ) or (selected,)
         promoted = (
             self.lineage.select_version(selected.version.version_id)
             if promote_champion
@@ -631,6 +686,7 @@ class HLController:
             candidates=tuple(results),
             selected=selected,
             rollback=rollback,
+            finalists=finalists,
         )
 
     def run_proposal_cycle(
@@ -721,19 +777,7 @@ class HLController:
             branch_briefs=briefs,
             promote_champion=False,
         )
-        completed = sorted(
-            (
-                candidate
-                for candidate in iteration.candidates
-                if candidate.evaluation.status == "complete"
-                and candidate.evaluation.score is not None
-            ),
-            key=lambda candidate: (
-                -float(candidate.evaluation.score),
-                candidate.branch_index,
-            ),
-        )
-        finalists = tuple(completed[: self.iteration.finalist_count])
+        finalists = iteration.finalists
         if iteration.selected not in finalists:
             finalists = (iteration.selected, *finalists)[: self.iteration.finalist_count]
         self.events.write(

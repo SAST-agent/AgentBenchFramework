@@ -109,6 +109,80 @@ class RollmanEvaluator:
         )
         return self.last_evaluation
 
+    def quick_screen(self, version: Version) -> CandidateEvaluation:
+        """Give every sibling one common, real feedback trajectory."""
+
+        return self._evaluate_cases(
+            version,
+            opponents=(self.learning_opponent,),
+            seeds=self.fixed_gate_seeds[:1],
+            phase="quick_screen",
+        )
+
+    def evaluate_finalist(self, version: Version) -> CandidateEvaluation:
+        """Evaluate a quick-screen finalist on the remaining target seeds."""
+
+        seeds = self.fixed_gate_seeds[1:]
+        if not seeds:
+            return CandidateEvaluation(
+                status="complete",
+                score=0.0,
+                matches=(),
+            )
+        return self._evaluate_cases(
+            version,
+            opponents=(self.learning_opponent,),
+            seeds=seeds,
+            phase="finalist",
+        )
+
+    @staticmethod
+    def combine_stages(
+        quick: CandidateEvaluation,
+        finalist: CandidateEvaluation,
+    ) -> CandidateEvaluation:
+        matches = (*quick.matches, *finalist.matches)
+        if quick.status != "complete" or finalist.status != "complete":
+            return CandidateEvaluation(
+                status="incomplete",
+                score=None,
+                error="one or more staged evaluation cases are incomplete",
+                matches=matches,
+            )
+        results = [match.get("result") for match in matches]
+        if any(result not in {"win", "draw", "loss"} for result in results):
+            return CandidateEvaluation(
+                status="incomplete",
+                score=None,
+                error="staged evaluation contains an invalid result",
+                matches=matches,
+            )
+        if not results:
+            return CandidateEvaluation(status="complete", score=0.0, matches=())
+        score = (
+            sum(result == "win" for result in results)
+            + 0.5 * sum(result == "draw" for result in results)
+        ) / len(results)
+        return CandidateEvaluation(status="complete", score=score, matches=matches)
+
+    def evaluate_reporting_panel(
+        self,
+        version: Version,
+        *,
+        seeds: Iterable[int],
+    ) -> CandidateEvaluation:
+        if any(opponent.process is None for opponent in self.human_pool):
+            raise ValueError("every reporting opponent must be prepared")
+        normalized_seeds = tuple(int(seed) for seed in seeds)
+        if not normalized_seeds:
+            raise ValueError("reporting panel seeds cannot be empty")
+        return self._evaluate_cases(
+            version,
+            opponents=self.human_pool,
+            seeds=normalized_seeds,
+            phase="reporting",
+        )
+
     def set_learning_opponent(self, opponent: Opponent) -> None:
         """Switch the fixed-seed gate target without rebuilding the runtime."""
 
@@ -178,17 +252,29 @@ class RollmanEvaluator:
                     complete = False
                     record.update(status="incomplete", error=str(exc))
                 else:
-                    record.update(
-                        status="complete",
-                        result=match.result,
-                        rollman_score=match.rollman_score,
-                        ghosts_score=match.ghosts_score,
-                        raw_replay_sha256=match.replay.raw_sha256,
-                        normalized_replay_sha256=match.replay.normalized_sha256,
-                        replay=str(replay_path),
-                        trace=str(trace_path),
-                        game_agent_decisions=len(match.rollman_decisions),
-                    )
+                    if match.end_state != ("OK", "OK"):
+                        complete = False
+                        record.update(
+                            status="incomplete",
+                            end_state=list(match.end_state),
+                            error=(
+                                "non-OK player end state is excluded from "
+                                f"scientific scoring: {match.end_state}"
+                            ),
+                        )
+                    else:
+                        record.update(
+                            status="complete",
+                            result=match.result,
+                            end_state=list(match.end_state),
+                            rollman_score=match.rollman_score,
+                            ghosts_score=match.ghosts_score,
+                            raw_replay_sha256=match.replay.raw_sha256,
+                            normalized_replay_sha256=match.replay.normalized_sha256,
+                            replay=str(replay_path),
+                            trace=str(trace_path),
+                            game_agent_decisions=len(match.rollman_decisions),
+                        )
                 records.append(record)
 
         if not complete:

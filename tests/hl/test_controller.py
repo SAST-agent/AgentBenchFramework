@@ -153,6 +153,99 @@ def test_equal_win_rates_select_better_score_margin_instead_of_first_branch(tmp_
     assert result.selected.branch_index == 1
 
 
+def test_staged_k4_evaluation_gives_all_quick_feedback_and_only_two_finalists(tmp_path):
+    from agentbench_frame.hl.codebase import VersionStore
+    from agentbench_frame.hl.config import IterationConfig, RollbackConfig
+    from agentbench_frame.hl.controller import HLController
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+    from agentbench_frame.hl.events import HLEventWriter
+    from agentbench_frame.hl.lineage import LineageManager
+
+    class StagedEvaluator:
+        def __init__(self):
+            self.quick_calls = []
+            self.finalist_calls = []
+
+        def quick_screen(self, version):
+            self.quick_calls.append(version.version_id)
+            branch = int(version.version_id[1:]) - 1
+            margins = (-500, -100, -200, -300)
+            return CandidateEvaluation(
+                status="complete",
+                score=0.0,
+                matches=(
+                    {
+                        "phase": "quick_screen",
+                        "status": "complete",
+                        "result": "loss",
+                        "opponent": "rank15",
+                        "seed": 101,
+                        "rollman_score": 0,
+                        "ghosts_score": -margins[branch],
+                    },
+                ),
+            )
+
+        def evaluate_finalist(self, version):
+            self.finalist_calls.append(version.version_id)
+            win = version.version_id == "v000002"
+            return CandidateEvaluation(
+                status="complete",
+                score=1.0 if win else 0.0,
+                matches=(
+                    {
+                        "phase": "finalist",
+                        "status": "complete",
+                        "result": "win" if win else "loss",
+                        "opponent": "rank15",
+                        "seed": 102,
+                        "rollman_score": 100 if win else 0,
+                        "ghosts_score": 0 if win else 100,
+                    },
+                ),
+            )
+
+        @staticmethod
+        def combine_stages(quick, finalist):
+            matches = (*quick.matches, *finalist.matches)
+            points = sum(
+                1.0 if match["result"] == "win" else 0.5 if match["result"] == "draw" else 0.0
+                for match in matches
+            ) / len(matches)
+            return CandidateEvaluation(status="complete", score=points, matches=matches)
+
+    workspace = _workspace(tmp_path)
+    evaluator = StagedEvaluator()
+    controller = HLController(
+        workspace=workspace,
+        run_root=tmp_path,
+        provider=FakeProvider(
+            ["VALUE = 1\n", "VALUE = 2\n", "VALUE = 3\n", "VALUE = 4\n"]
+        ),
+        evaluator=evaluator,
+        version_store=VersionStore(workspace, tmp_path / "versions"),
+        lineage=LineageManager(),
+        events=HLEventWriter(tmp_path / "events.jsonl", run_id="run-staged"),
+        iteration=IterationConfig(
+            candidates_per_cycle=4,
+            planner_enabled=True,
+            reducer_enabled=True,
+            finalist_count=2,
+        ),
+        rollback=RollbackConfig(),
+        prompt_factory=lambda **values: f"branch={values['branch_index']}",
+    )
+    controller.initialize()
+
+    result = controller.run_act(promote_champion=False)
+
+    assert len(evaluator.quick_calls) == 4
+    assert set(evaluator.finalist_calls) == {"v000002", "v000003"}
+    assert len(result.finalists) == 2
+    assert result.selected.version.version_id == "v000002"
+    assert len(result.selected.evaluation.matches) == 2
+
+
 def test_bootstrap_registers_only_provider_written_algorithm_as_origin(tmp_path):
     from agentbench_frame.hl.events import read_events
 

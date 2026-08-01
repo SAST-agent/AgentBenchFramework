@@ -35,6 +35,7 @@ class _Match:
     rollman_score: int
     ghosts_score: int
     result: str
+    end_state: tuple[str, str] = ("OK", "OK")
     replay: _Replay = _Replay()
     rollman_decisions: tuple = ()
     trace_path: Path = Path("trace.jsonl")
@@ -179,6 +180,123 @@ def test_any_invalid_fixed_case_makes_aggregate_score_missing(tmp_path):
     assert result.score is None
     assert result.matches[0]["result"] == "win"
     assert result.matches[1]["status"] == "incomplete"
+
+
+def test_non_ok_opponent_end_state_is_incomplete_not_a_candidate_win(tmp_path):
+    def runner(**kwargs):
+        return _Match(
+            status="complete",
+            seed=kwargs["seed"],
+            rollman_score=1000,
+            ghosts_score=-1000,
+            result="win",
+            end_state=("OK", "TLE"),
+        )
+
+    opponent = Opponent(
+        opponent_id="rank15",
+        rank=15,
+        archive=Path("rank15.zip"),
+        process=ProcessSpec(("ghost",)),
+    )
+    evaluator = RollmanEvaluator(
+        logic=ProcessSpec(("logic",)),
+        candidate_factory=lambda version: ProcessSpec(("candidate",)),
+        learning_opponent=opponent,
+        human_pool=(opponent,),
+        fixed_gate_seeds=(1,),
+        certification_seeds=(2,),
+        artifact_root=tmp_path,
+        match_runner=runner,
+    )
+
+    result = evaluator.evaluate(_version())
+
+    assert result.status == "incomplete"
+    assert result.score is None
+    assert result.matches[0]["end_state"] == ["OK", "TLE"]
+    assert "non-OK" in result.matches[0]["error"]
+
+
+def test_staged_evaluation_uses_one_quick_seed_then_remaining_finalist_seeds(tmp_path):
+    calls = []
+
+    def runner(**kwargs):
+        calls.append((kwargs["seed"], str(kwargs["replay_path"])))
+        return _Match(
+            status="complete",
+            seed=kwargs["seed"],
+            rollman_score=1,
+            ghosts_score=0,
+            result="win",
+        )
+
+    opponent = Opponent(
+        opponent_id="rank15",
+        rank=15,
+        archive=Path("rank15.zip"),
+        process=ProcessSpec(("ghost",)),
+    )
+    evaluator = RollmanEvaluator(
+        logic=ProcessSpec(("logic",)),
+        candidate_factory=lambda version: ProcessSpec(("candidate",)),
+        learning_opponent=opponent,
+        human_pool=(opponent,),
+        fixed_gate_seeds=(101, 102, 103, 104),
+        certification_seeds=(201,),
+        artifact_root=tmp_path,
+        match_runner=runner,
+    )
+
+    quick = evaluator.quick_screen(_version())
+    finalist = evaluator.evaluate_finalist(_version())
+    combined = evaluator.combine_stages(quick, finalist)
+
+    assert [match["seed"] for match in quick.matches] == [101]
+    assert [match["seed"] for match in finalist.matches] == [102, 103, 104]
+    assert [match["seed"] for match in combined.matches] == [101, 102, 103, 104]
+    assert combined.score == 1.0
+    assert calls[0][0] == 101
+
+
+def test_reporting_panel_uses_every_valid_opponent_on_requested_seed(tmp_path):
+    opponents = tuple(
+        Opponent(
+            opponent_id=f"rank{rank:02d}",
+            rank=rank,
+            archive=Path(f"rank{rank:02d}.zip"),
+            process=ProcessSpec((f"ghost-{rank}",)),
+        )
+        for rank in (14, 15)
+    )
+
+    def runner(**kwargs):
+        return _Match(
+            status="complete",
+            seed=kwargs["seed"],
+            rollman_score=1,
+            ghosts_score=0,
+            result="win",
+        )
+
+    evaluator = RollmanEvaluator(
+        logic=ProcessSpec(("logic",)),
+        candidate_factory=lambda version: ProcessSpec(("candidate",)),
+        learning_opponent=opponents[0],
+        human_pool=opponents,
+        fixed_gate_seeds=(101,),
+        certification_seeds=(201,),
+        artifact_root=tmp_path,
+        match_runner=runner,
+    )
+
+    result = evaluator.evaluate_reporting_panel(_version(), seeds=(301,))
+
+    assert result.status == "complete"
+    assert {(match["opponent"], match["seed"]) for match in result.matches} == {
+        ("rank14", 301),
+        ("rank15", 301),
+    }
 
 
 def test_certification_runs_every_human_on_same_seed_set(tmp_path):
