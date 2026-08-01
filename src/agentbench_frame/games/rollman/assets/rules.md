@@ -165,7 +165,31 @@ Rollman 被吃后重生到空地中“到三个幽灵的最小曼哈顿距离”
 
 ## 9. AI 可见状态
 
-每关初始化状态包含：
+策略入口是 `ai_func(game_state)`；冻结 Python SDK 传入 `GameState`
+（即 `core.gamedata.GameState`）对象，而不是回放 JSON 字典。对象直接属性为：
+
+- `space_info`
+- `level`
+- `round`
+- `board_size`
+- `board`
+- `pacman_skill_status`
+- `pacman_pos`
+- `ghosts_pos`
+- `pacman_score`
+- `ghosts_score`
+- `beannumber`
+- `portal_available`
+- `portal_coord`
+
+策略可调用对象的 `gamestate_to_statedict()` 方法（即
+`game_state.gamestate_to_statedict()`）得到规范字典。该字典将
+`pacman_pos` 映射为 `pacman_coord`、将 `ghosts_pos` 映射为
+`ghosts_coord`，并将 `pacman_score` 与 `ghosts_score` 合并为
+`score = [pacman_score, ghosts_score]`。策略不得假设对象本身直接提供
+`pacman_coord`、`ghosts_coord` 或 `score` 属性。
+
+规范字典包含：
 
 - `level`
 - `round`

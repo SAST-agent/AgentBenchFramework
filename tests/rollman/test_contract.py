@@ -81,3 +81,22 @@ def test_rule_asset_names_all_frozen_replay_fields_and_source_precedence():
     assert "[8, 8, 8, 8, 2]" in rules
     assert "10 轮" not in rules
 
+
+def test_rule_and_decision_assets_distinguish_sdk_object_from_replay_fields():
+    from agentbench_frame.games.rollman.contract import asset_path
+
+    rules = asset_path("rules.md").read_text(encoding="utf-8")
+    decision = yaml.safe_load(
+        asset_path("decision_space.yaml").read_text(encoding="utf-8")
+    )
+
+    assert "`GameState`" in rules
+    assert "`pacman_pos`" in rules
+    assert "`ghosts_pos`" in rules
+    assert "`pacman_score`" in rules
+    assert "`ghosts_score`" in rules
+    assert "`gamestate_to_statedict()`" in rules
+    interface = decision["policy_interface"]
+    assert interface["input_type"] == "core.gamedata.GameState"
+    assert interface["normalized_state_mapping"]["pacman_coord"] == "pacman_pos"
+    assert interface["normalized_state_mapping"]["ghosts_coord"] == "ghosts_pos"

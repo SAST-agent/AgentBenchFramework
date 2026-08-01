@@ -126,6 +126,19 @@ def compile_game_digest(
     )
     if not isinstance(decision_value, Mapping):
         raise ValueError("decision space must be a mapping")
+    policy_interface = decision_value.get("policy_interface")
+    if not isinstance(policy_interface, Mapping):
+        raise ValueError("decision space must define policy_interface")
+    if policy_interface.get("input_type") != "core.gamedata.GameState":
+        raise ValueError("Rollman policy input must be core.gamedata.GameState")
+    object_fields = policy_interface.get("object_fields")
+    if not isinstance(object_fields, list) or not all(
+        isinstance(field, str) and field for field in object_fields
+    ):
+        raise ValueError("policy_interface.object_fields must be strings")
+    normalized_mapping = policy_interface.get("normalized_state_mapping")
+    if not isinstance(normalized_mapping, Mapping):
+        raise ValueError("policy_interface must define normalized_state_mapping")
     roles = decision_value.get("roles")
     if not isinstance(roles, Mapping):
         raise ValueError("decision space must define roles")
@@ -161,6 +174,14 @@ def compile_game_digest(
         "schema_version": "1.0",
         "context_bundle_hash": bundle.bundle_hash,
         "context_manifest": str(bundle.manifest_path),
+        "policy_interface": {
+            "input_type": str(policy_interface["input_type"]),
+            "object_fields": list(object_fields),
+            "canonical_normalization": str(
+                policy_interface.get("canonical_normalization") or ""
+            ),
+            "normalized_state_mapping": dict(normalized_mapping),
+        },
         "roles": {
             "rollman": {
                 "role_id": int(rollman["role_id"]),
@@ -205,6 +226,8 @@ class IterationContext:
         return f"""# HL bootstrap {act_id} — 生成科研 origin
 
 目标：根据冻结游戏规则，从规则出发设计并实现一版可解释、可运行、可复现的初始算法。该版本将作为后续 HL 迭代的 origin。
+
+实时策略输入是冻结 SDK 的 `core.gamedata.GameState` 对象。必须读取规则第 9 节，优先调用 `game_state.gamestate_to_statedict()`；不要把对象属性误写成回放字段。smoke test 必须覆盖具有 `pacman_pos`、`ghosts_pos`、`pacman_score`、`ghosts_score` 的对象输入，并确认首个合法状态不返回 STAY fallback。
 
 只读上下文：
 - context manifest: {self.bundle.manifest_path}
@@ -310,6 +333,8 @@ class IterationContext:
 
 目标：在冻结评测协议下提升游戏 agent，保持程序可解释、可运行、可复现。
 
+实时策略输入是冻结 SDK 的 `core.gamedata.GameState` 对象；规范化入口是 `game_state.gamestate_to_statedict()`。对象属性使用 `pacman_pos`、`ghosts_pos`、`pacman_score`、`ghosts_score`，而回放/规范字典使用 `pacman_coord`、`ghosts_coord`、`score`。不得混淆两层字段。
+
 只读上下文：
 - context manifest: {self.bundle.manifest_path}
 - candidate workspace: {Path(workspace).resolve()}
@@ -328,7 +353,7 @@ class IterationContext:
 - Framework 会审计工具调用路径和原始记录；越界 act 会被标记失败，不评测、不晋级。
 
 Act 预算：
-- 最多 14 次工具调用；优先批量读取，禁止用许多小命令反复查看同一材料。
+- 最多 10 次工具调用；优先批量读取，禁止用许多小命令反复查看同一材料。
 - 必须先读取 evidence 中的 `summary`；不得打印完整 replay、完整 trace、完整棋盘或全量事件流。
 - 只允许对最多 2 个可证伪假设做定点探针；trace 必须用 `{trace_window_tool} TRACE --level L --round R --radius 1` 读取。
 - 除停滞干预指定的 `{distillation_tool}` 外，禁止用 cat、sed、head、tail、rg 或自行脚本读取 trace。两个工具单次输出均不超过 64 KiB，单条定点 trace 最多请求 20 个中心回合。
@@ -343,6 +368,7 @@ Act 预算：
 6. 允许策略代码增长和堆叠有证据支持的情形分支；不以代码长度或 if/else 数量作为惩罚。
 7. 不读取、搜索或推断人类对手源码。只能从合法比赛回放学习。
 8. 只在 candidate workspace 内完成 `python -m py_compile ai.py` 和候选侧 smoke test，不搜索 Framework 命令。不要直接修改 Experience Skill；将四个字符串数组 stable_knowledge、failed_hypotheses、replay_evidence、active_questions 写入 workspace/.agentbench/experience_update.json，由 Framework 在候选测量完整通过后合并。
+9. 第一次编译、对象输入 smoke 和 experience JSON 成功后立即结束；禁止再运行 git status/diff、重复读取、额外边缘润色或第二轮重构，真实比赛会负责验证。
 """
 
     def build_planner_prompt(
@@ -385,6 +411,8 @@ active target: {active_target or "none"}
 - bounded replay evidence: {evidence}
 
 先读取 game digest、research state 和所有 evidence summary。只有诊断依赖精确规则语义时，才按 manifest 定点读取权威规则对应章节；不要求每轮完整重读静态长文。不得读取人类对手源码、其他 run 或其他候选版本。
+
+最多 10 次工具调用；四个 summary 应批量读取。写出并校验 branch_briefs.json 后立即结束，不运行 git status/diff，不继续扩展诊断。
 
 基于同一份证据，提出恰好 4 个机制上不同、可证伪的 Rollman 改进方向。禁止把同一机制的阈值、权重或参数变化伪装成四种方案；禁止 grid search。允许 if/else、路径规划、搜索、状态机、有限记忆和策略代码增长。
 
@@ -469,6 +497,7 @@ selected search parent: {selected_version_id}
 比较四个机制的实际比赛反馈。Framework 记录的分数、回放和测量高于模型推断；不得把没有证据的解释写成稳定知识。策略膨胀和局部 if/else 不构成失败理由。不得修改候选代码、版本指针、对手课程或认证结论。
 
 将严格 JSON 对象写入 workspace/.agentbench/research_state_update.json，必须且只能包含四个数组字段：stable_knowledge、failed_hypotheses、open_questions、recent_comparisons。前三项只能包含非空字符串；recent_comparisons 每项为简短对象。不得修改 proposal_cycle、search_parent、official_champion、active_target、locked_opponents 或 exploration_debt，这些字段由 Framework 根据事实维护。
+最多 6 次工具调用；读取 reducer input 与 research state、写出并校验 JSON 后立即结束，不运行 git status/diff 或额外分析。
 """
 
 

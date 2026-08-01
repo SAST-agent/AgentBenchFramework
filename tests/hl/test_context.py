@@ -25,6 +25,12 @@ def _digest_files(root: Path) -> dict[str, Path]:
     )
     values["decision_space"].write_text(
         """
+policy_interface:
+  input_type: core.gamedata.GameState
+  object_fields: [level, round, board, pacman_pos, ghosts_pos]
+  normalized_state_mapping:
+    pacman_coord: pacman_pos
+    ghosts_coord: ghosts_pos
 roles:
   rollman:
     role_id: 0
@@ -126,6 +132,11 @@ def test_game_digest_is_deterministic_and_contains_primitive_actions(tmp_path):
     ]
     assert value["rule_sections"] == ["Rollman rules", "Collision"]
     assert value["replay_skill"]["name"] == "rollman-replay"
+    assert value["policy_interface"]["input_type"] == "core.gamedata.GameState"
+    assert value["policy_interface"]["normalized_state_mapping"] == {
+        "ghosts_coord": "ghosts_pos",
+        "pacman_coord": "pacman_pos",
+    }
 
 
 def test_prompt_requires_replay_grounded_causal_change_and_blocks_grid_search(tmp_path):
@@ -211,12 +222,14 @@ def test_curriculum_prompt_names_target_and_locked_pool(tmp_path):
     assert "if/else" in prompt
     assert "固定回放坐标" in prompt
     assert "grid search" in prompt
+    assert "gamestate_to_statedict" in prompt
+    assert "pacman_pos" in prompt
     assert "只针对当前目标" in prompt
     assert "科研隔离边界" in prompt
     assert "其他 run" in prompt
     assert "其他候选目录" in prompt
     assert "审计工具调用路径" in prompt
-    assert "最多 14 次工具调用" in prompt
+    assert "最多 10 次工具调用" in prompt
     assert "不得打印完整 replay" in prompt
     assert "inspect_trace_window.py" in prompt
     assert "禁止用 cat、sed、head、tail、rg 或自行脚本读取 trace" in prompt
@@ -341,6 +354,9 @@ def test_bootstrap_prompt_creates_interpretable_origin_without_fake_replay(tmp_p
     assert "没有比赛回放" in prompt
     assert "不要虚构回放证据" in prompt
     assert "grid search" in prompt
+    assert "gamestate_to_statedict" in prompt
+    assert "pacman_pos" in prompt
+    assert "不返回 STAY fallback" in prompt
 
 
 def test_checkpoint_records_hashes_and_recovery_inputs(tmp_path):

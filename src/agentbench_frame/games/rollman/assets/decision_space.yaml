@@ -15,6 +15,27 @@ context:
     - portal_available
     - portal_coord
   private_memory: "Candidate-owned memory that can affect submitted_direction."
+policy_interface:
+  input_type: "core.gamedata.GameState"
+  object_fields:
+    - space_info
+    - level
+    - round
+    - board_size
+    - board
+    - pacman_skill_status
+    - pacman_pos
+    - ghosts_pos
+    - pacman_score
+    - ghosts_score
+    - beannumber
+    - portal_available
+    - portal_coord
+  canonical_normalization: "game_state.gamestate_to_statedict()"
+  normalized_state_mapping:
+    pacman_coord: "pacman_pos"
+    ghosts_coord: "ghosts_pos"
+    score: ["pacman_score", "ghosts_score"]
 roles:
   rollman:
     role_id: 0
