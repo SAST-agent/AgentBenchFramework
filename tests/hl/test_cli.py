@@ -39,6 +39,17 @@ def test_trace_fault_summary_exposes_bounded_redacted_candidate_error(tmp_path):
     }
 
 
+def test_main_curve_measurement_only_uses_linear_selected_successor():
+    from types import SimpleNamespace
+
+    from agentbench_frame.hl.cli import _measurement_candidates
+
+    siblings = tuple(SimpleNamespace(name=f"branch-{index}") for index in range(4))
+    iteration = SimpleNamespace(candidates=siblings, selected=siblings[2])
+
+    assert _measurement_candidates(iteration) == (siblings[2],)
+
+
 def test_hl_validate_reports_open_ended_k1_rollback_defaults(capsys):
     from agentbench_frame.hl.cli import main
 

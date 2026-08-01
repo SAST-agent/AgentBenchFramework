@@ -294,6 +294,87 @@ def test_resume_detects_selected_candidate_with_unfinished_measurement():
     )
 
 
+def test_resume_detects_search_parent_after_other_sibling_measurement_failed():
+    from agentbench_frame.hl.cli import _pending_measurement_candidate
+
+    events = [
+        {
+            "event_type": "version_created",
+            "version_id": "v000001",
+            "parent_version_id": "v000000",
+            "evaluation_status": "complete",
+        },
+        {
+            "event_type": "measurement_failed",
+            "version_id": "v000001",
+            "parent_version_id": "v000000",
+        },
+        {
+            "event_type": "version_created",
+            "version_id": "v000002",
+            "parent_version_id": "v000000",
+            "evaluation_status": "complete",
+        },
+        {
+            "event_type": "search_parent_selected",
+            "iteration_id": "iter-000001",
+            "version_id": "v000002",
+        },
+        {
+            "event_type": "proposal_cycle_completed",
+            "iteration_id": "iter-000001",
+            "parent_version_id": "v000000",
+            "selected_version_id": "v000002",
+        },
+    ]
+
+    assert _pending_measurement_candidate(events) == ("v000002", "v000000")
+
+
+def test_resume_detects_measured_proposal_cycle_needing_gate_finalization():
+    from agentbench_frame.hl.cli import _pending_proposal_finalization
+
+    events = [
+        {
+            "event_type": "version_created",
+            "version_id": "v000002",
+            "parent_version_id": "v000000",
+            "evaluation_status": "complete",
+        },
+        {
+            "event_type": "search_parent_selected",
+            "iteration_id": "iter-000001",
+            "version_id": "v000002",
+        },
+        {
+            "event_type": "proposal_cycle_completed",
+            "iteration_id": "iter-000001",
+            "parent_version_id": "v000000",
+            "selected_version_id": "v000002",
+        },
+        {"event_type": "policy_kl_measured", "version_id": "v000002"},
+        {"event_type": "occupancy_measured", "version_id": "v000002"},
+    ]
+
+    assert _pending_proposal_finalization(events) == (
+        "iter-000001",
+        "v000002",
+        "v000000",
+    )
+    assert (
+        _pending_proposal_finalization(
+            events
+            + [
+                {
+                    "event_type": "curriculum_gate_completed",
+                    "version_id": "v000002",
+                }
+            ]
+        )
+        is None
+    )
+
+
 def test_experience_rebuild_uses_only_candidates_with_complete_measurement(
     tmp_path,
 ):

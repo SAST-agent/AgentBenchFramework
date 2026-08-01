@@ -58,13 +58,16 @@ def probe_states(
     from core.gamedata import GameState
 
     policy = _load_policy(candidate)
+    environment = PacmanEnv()
+    if not states:
+        return []
+    environment.ai_reset(dict(states[0]))
+    space_info = environment.game_state().space_info
     decisions = []
     for index, state in enumerate(states):
-        environment = PacmanEnv()
-        environment.ai_reset(dict(state))
         score = state["score"]
         game_state = GameState(
-            space_info=environment.game_state().space_info,
+            space_info=space_info,
             level=int(state["level"]),
             round=int(state["round"]),
             board_size=int(state["board_size"]),
@@ -100,7 +103,7 @@ def run_probe_episode(
     sdk_root: str | Path,
     states: Sequence[Mapping[str, Any]],
     artifact_path: str | Path,
-    timeout_s: float = 30.0,
+    timeout_s: float | None = None,
 ) -> tuple[dict[str, Any], ...]:
     output = Path(artifact_path).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -114,6 +117,11 @@ def run_probe_episode(
         for name in ("PATH", "LANG", "LC_ALL", "LC_CTYPE", "TMPDIR")
         if name in os.environ
     }
+    resolved_timeout = (
+        max(30.0, 0.25 * len(states))
+        if timeout_s is None
+        else float(timeout_s)
+    )
     completed = subprocess.run(
         (
             sys.executable,
@@ -130,7 +138,7 @@ def run_probe_episode(
         env=environment,
         capture_output=True,
         text=True,
-        timeout=timeout_s,
+        timeout=resolved_timeout,
     )
     if completed.returncode != 0:
         raise RuntimeError(

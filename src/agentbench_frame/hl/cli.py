@@ -163,7 +163,8 @@ def _pending_measurement_candidate(
         (
             index
             for index in range(len(events) - 1, -1, -1)
-            if events[index].get("event_type") == "candidate_selected"
+            if events[index].get("event_type")
+            in {"candidate_selected", "search_parent_selected"}
             and events[index].get("iteration_id") != "iter-000000"
         ),
         None,
@@ -207,6 +208,50 @@ def _pending_measurement_candidate(
     if {"policy_kl_measured", "occupancy_measured"} <= completed_types:
         return None
     return version_id, str(created["parent_version_id"])
+
+
+def _pending_proposal_finalization(
+    events: list[dict[str, Any]],
+) -> tuple[str, str, str] | None:
+    """Find a measured proposal cycle interrupted before its curriculum gate."""
+
+    cycle_index = next(
+        (
+            index
+            for index in range(len(events) - 1, -1, -1)
+            if events[index].get("event_type") == "proposal_cycle_completed"
+        ),
+        None,
+    )
+    if cycle_index is None:
+        return None
+    cycle = events[cycle_index]
+    iteration_id = str(cycle.get("iteration_id") or "")
+    version_id = str(cycle.get("selected_version_id") or "")
+    parent_id = str(cycle.get("parent_version_id") or "")
+    if not iteration_id or not version_id or not parent_id:
+        return None
+    later = events[cycle_index + 1 :]
+    if any(
+        event.get("event_type") == "curriculum_gate_completed"
+        and str(event.get("version_id")) == version_id
+        for event in later
+    ):
+        return None
+    measured = {
+        str(event.get("event_type"))
+        for event in later
+        if str(event.get("version_id")) == version_id
+    }
+    if not {"policy_kl_measured", "occupancy_measured"} <= measured:
+        return None
+    return iteration_id, version_id, parent_id
+
+
+def _measurement_candidates(iteration_result: Any) -> tuple[Any, ...]:
+    """Measure the single linear successor used by the main iteration curves."""
+
+    return (iteration_result.selected,)
 
 
 def _pending_failed_candidate(
@@ -1269,7 +1314,7 @@ def _run_real(
             iteration_result.parent_version_id
         )
         failed: set[str] = set()
-        for candidate in iteration_result.candidates:
+        for candidate in _measurement_candidates(iteration_result):
             evaluations_by_version[
                 candidate.version.version_id
             ] = candidate.evaluation
@@ -1552,11 +1597,147 @@ def _run_real(
                         }
                     )
                     return 2
+                historical = read_events(events_path)
+            pending_finalization = _pending_proposal_finalization(
+                historical
+            )
+            if pending_finalization is not None:
+                (
+                    pending_iteration_id,
+                    pending_version_id,
+                    pending_parent_id,
+                ) = pending_finalization
+                pending_evaluation = evaluations_by_version.get(
+                    pending_version_id
+                )
+                if (
+                    pending_evaluation is None
+                    or pending_evaluation.status != "complete"
+                    or pending_evaluation.score is None
+                ):
+                    raise ValueError(
+                        "pending proposal finalization lacks a complete evaluation"
+                    )
+                selected_version = version_store.get(pending_version_id)
+                version_store.checkout(pending_version_id)
+                active_target = curriculum_manager.state.active_target
+                if active_target is None:
+                    raise ValueError(
+                        "pending proposal finalization has no active target"
+                    )
+                evaluator.set_learning_opponent(opponent_by_id[active_target])
+
+                reporting_done = any(
+                    event.get("event_type") == "reporting_panel_completed"
+                    and str(event.get("iteration_id")) == pending_iteration_id
+                    and str(event.get("version_id")) == pending_version_id
+                    for event in historical
+                )
+                if (
+                    config.run.evaluation.reporting_panel_every_cycle
+                    and not reporting_done
+                ):
+                    reporting = evaluator.evaluate_reporting_panel(
+                        selected_version,
+                        seeds=tuple(
+                            900_001 + offset
+                            for offset in range(
+                                config.run.evaluation.reporting_seeds_per_opponent
+                            )
+                        ),
+                    )
+                    controller.record_matches(
+                        version=selected_version,
+                        act_id=selected_version.act_id,
+                        phase="reporting",
+                        matches=reporting.matches,
+                    )
+                    reporting_margins = [
+                        float(match["rollman_score"])
+                        - float(match["ghosts_score"])
+                        for match in reporting.matches
+                        if match.get("status") == "complete"
+                        and isinstance(match.get("rollman_score"), (int, float))
+                        and isinstance(match.get("ghosts_score"), (int, float))
+                    ]
+                    writer.write(
+                        "reporting_panel_completed",
+                        iteration_id=pending_iteration_id,
+                        proposal_cycle=int(
+                            pending_iteration_id.rsplit("-", 1)[-1]
+                        ),
+                        version_id=pending_version_id,
+                        status=reporting.status,
+                        score=reporting.score,
+                        mean_score_margin=(
+                            sum(reporting_margins) / len(reporting_margins)
+                            if reporting_margins
+                            else None
+                        ),
+                        matches=list(reporting.matches),
+                    )
+                    if reporting.status != "complete":
+                        _json(
+                            {
+                                "run_dir": str(run_dir),
+                                "status": "incomplete_reporting_panel",
+                                "version_id": pending_version_id,
+                                **controller.summary(),
+                            }
+                        )
+                        return 2
+
+                act_id = selected_version.act_id
+                pending_experience = (
+                    run_dir / "experience" / "pending" / f"{act_id}.json"
+                )
+                experience_done = any(
+                    event.get("event_type") == "experience_updated"
+                    and str(event.get("act_id")) == act_id
+                    for event in historical
+                )
+                if pending_experience.is_file() and not experience_done:
+                    experience_path = experience.apply_file(
+                        act_id,
+                        pending_experience,
+                    )
+                    writer.write(
+                        "experience_updated",
+                        act_id=act_id,
+                        version_id=pending_version_id,
+                        experience_path=str(experience_path),
+                    )
+
+                evaluator.last_evaluation = pending_evaluation
+                gate_decision = curriculum_manager.observe_gate(
+                    version_id=pending_version_id,
+                    score=pending_evaluation.score,
+                )
+                write_curriculum_gate(
+                    version=selected_version,
+                    evaluation=pending_evaluation,
+                    baseline=False,
+                    improved=gate_decision.kind == "improved",
+                )
+                state = ResearchState.load_or_create(
+                    research_state_path,
+                    max_bytes=config.run.context.research_state_max_bytes,
+                )
+                state.advance(
+                    search_parent_version_id=pending_version_id,
+                    exploration_debt=(
+                        0
+                        if pending_version_id != pending_parent_id
+                        else state.exploration_debt
+                    ),
+                ).write(research_state_path)
+                sync_research_state()
                 _json(
                     {
                         "run_dir": str(run_dir),
-                        "status": "measurement_recovered",
+                        "status": "proposal_cycle_recovered",
                         "version_id": pending_version_id,
+                        "active_target": active_target,
                         **controller.summary(),
                     }
                 )

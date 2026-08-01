@@ -84,3 +84,31 @@ def test_probe_reconstructs_official_space_info(tmp_path):
     )
 
     assert decisions[0]["action"] == 4
+
+
+def test_probe_timeout_scales_with_exact_state_count(tmp_path, monkeypatch):
+    import subprocess
+
+    captured = {}
+
+    class Completed:
+        returncode = 0
+        stderr = ""
+        stdout = ""
+
+    def fake_run(*args, **kwargs):
+        captured["timeout"] = kwargs["timeout"]
+        output_index = args[0].index("--output") + 1
+        Path(args[0][output_index]).write_text("[]\n", encoding="utf-8")
+        return Completed()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    run_probe_episode(
+        workspace=tmp_path,
+        sdk_root=tmp_path,
+        states=[{"round": index} for index in range(400)],
+        artifact_path=tmp_path / "probe.json",
+    )
+
+    assert captured["timeout"] == 100.0
