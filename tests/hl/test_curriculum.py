@@ -169,6 +169,24 @@ def test_strict_gate_improvement_resets_stagnation_and_stage_best():
     assert manager.state.stage_best_score == pytest.approx(1 / 3)
 
 
+def test_equal_score_lexicographic_improvement_advances_stage_best():
+    manager = _manager()
+    manager.begin_stage_gate(version_id="v000000", score=0.25)
+    manager.observe_gate(version_id="v000001", score=0.25)
+
+    decision = manager.observe_gate(
+        version_id="v000002",
+        score=0.25,
+        tie_break_improved=True,
+    )
+
+    assert decision.kind == "improved"
+    assert decision.parent_version_id == "v000002"
+    assert manager.state.stage_best_version_id == "v000002"
+    assert manager.state.stage_best_score == pytest.approx(0.25)
+    assert manager.state.stagnation_count == 0
+
+
 def test_all_sixteen_passed_completes_curriculum():
     manager = _manager()
     manager.begin_stage_gate(version_id="v000000", score=0.0)

@@ -1891,6 +1891,9 @@ def _run_real(
                 gate_decision = curriculum_manager.observe_gate(
                     version_id=pending_version_id,
                     score=pending_evaluation.score,
+                    tie_break_improved=(
+                        pending_version_id != pending_parent_id
+                    ),
                 )
                 write_curriculum_gate(
                     version=selected_version,
@@ -2315,6 +2318,10 @@ def _run_real(
             gate_decision = curriculum_manager.observe_gate(
                 version_id=selected.version.version_id,
                 score=selected.evaluation.score,
+                tie_break_improved=(
+                    selected.version.version_id
+                    != iteration_result.parent_version_id
+                ),
             )
             write_curriculum_gate(
                 version=selected.version,

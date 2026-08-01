@@ -289,13 +289,14 @@ class CurriculumManager:
         *,
         version_id: str,
         score: float,
+        tie_break_improved: bool = False,
     ) -> CurriculumDecision:
         if self._state.completed or self._state.active_target is None:
             raise RuntimeError("completed curriculum cannot observe a gate")
         if not 0.0 <= score <= 1.0:
             raise ValueError("gate score must be in [0, 1]")
         best = self._state.stage_best_score
-        if best is None or score > best:
+        if best is None or score > best or (score == best and tie_break_improved):
             self._state = dataclasses.replace(
                 self._state,
                 stage_best_version_id=version_id,
