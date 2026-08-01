@@ -11,6 +11,30 @@ def test_champion_and_latest_attempt_are_distinct():
     assert lineage.versions["v2"].score == 0.65
 
 
+def test_search_parent_can_advance_without_promoting_official_champion():
+    from agentbench_frame.hl.lineage import LineageManager
+
+    lineage = LineageManager()
+    lineage.record_evaluation(
+        "v0",
+        parent_version_id=None,
+        status="complete",
+        score=0.8,
+    )
+    lineage.register_candidate(
+        "v1",
+        parent_version_id="v0",
+        status="complete",
+        score=0.0,
+    )
+
+    promoted = lineage.select_search_parent("v1")
+
+    assert promoted is False
+    assert lineage.lineage_head_version_id == "v1"
+    assert lineage.champion_version_id == "v0"
+
+
 def test_sustained_degradation_rolls_next_parent_back_without_deleting_attempts():
     from agentbench_frame.hl.lineage import LineageManager
 

@@ -113,6 +113,46 @@ def test_k_candidates_are_siblings_and_gate_selects_best_complete_score(tmp_path
     assert "branch=0/3" in checkpoint.read_text(encoding="utf-8")
 
 
+def test_equal_win_rates_select_better_score_margin_instead_of_first_branch(tmp_path):
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+
+    class MarginEvaluator:
+        def __init__(self):
+            self.margins = iter((-500, -100, -200, -300))
+
+        def evaluate(self, version):
+            margin = next(self.margins)
+            return CandidateEvaluation(
+                status="complete",
+                score=0.0,
+                matches=(
+                    {
+                        "status": "complete",
+                        "result": "loss",
+                        "opponent": "rank15",
+                        "seed": 101,
+                        "rollman_score": 0,
+                        "ghosts_score": -margin,
+                        "game_agent_decisions": 100,
+                    },
+                ),
+            )
+
+    controller = _controller(
+        tmp_path,
+        FakeProvider(
+            ["VALUE = 1\n", "VALUE = 2\n", "VALUE = 3\n", "VALUE = 4\n"]
+        ),
+        MarginEvaluator(),
+        k=4,
+    )
+    controller.initialize()
+
+    result = controller.run_act(promote_champion=False)
+
+    assert result.selected.branch_index == 1
+
+
 def test_bootstrap_registers_only_provider_written_algorithm_as_origin(tmp_path):
     from agentbench_frame.hl.events import read_events
 
@@ -427,7 +467,7 @@ def test_k4_proposal_cycle_uses_one_parent_and_reducer_sees_all_feedback(tmp_pat
         workspace=workspace,
         run_root=tmp_path,
         provider=provider,
-        evaluator=FakeEvaluator([0.1, 0.7, 0.4, 0.2]),
+        evaluator=FakeEvaluator([0.8, 0.1, 0.7, 0.4, 0.2]),
         version_store=VersionStore(workspace, tmp_path / "versions"),
         lineage=LineageManager(),
         events=HLEventWriter(tmp_path / "events.jsonl", run_id="run-k4"),
@@ -443,7 +483,7 @@ def test_k4_proposal_cycle_uses_one_parent_and_reducer_sees_all_feedback(tmp_pat
             f"brief={values.get('branch_brief')} input={values.get('reducer_input')}"
         ),
     )
-    origin = controller.initialize()
+    origin = controller.initialize(evaluate=True)
 
     result = controller.run_proposal_cycle(parent_version_id=origin.version_id)
 
@@ -454,6 +494,7 @@ def test_k4_proposal_cycle_uses_one_parent_and_reducer_sees_all_feedback(tmp_pat
     assert len(result.finalists) == 2
     assert result.selected in result.finalists
     assert controller.lineage.lineage_head_version_id == result.selected.version.version_id
+    assert controller.lineage.champion_version_id == origin.version_id
     reducer_payload = json.loads(result.reducer_input_path.read_text(encoding="utf-8"))
     assert {row["branch_index"] for row in reducer_payload["candidates"]} == {
         0,

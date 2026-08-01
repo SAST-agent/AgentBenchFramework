@@ -80,6 +80,8 @@ class LineageManager:
                 )
             elif event_type == "candidate_selected":
                 manager.select_version(str(event["version_id"]))
+            elif event_type == "search_parent_selected":
+                manager.select_search_parent(str(event["version_id"]))
             elif event_type == "evaluation_completed":
                 version_id = str(event["version_id"])
                 existing = manager.versions.get(version_id)
@@ -195,6 +197,31 @@ class LineageManager:
                 self._degradation_streak = 0
                 self._rollback_pending = False
         return promoted
+
+    def select_search_parent(self, version_id: str) -> bool:
+        """Advance the exploratory parent without changing the champion."""
+
+        if version_id not in self.versions:
+            raise KeyError(version_id)
+        self.lineage_head_version_id = version_id
+        self._degradation_streak = 0
+        self._rollback_pending = False
+        return False
+
+    def promote_champion(self, version_id: str) -> bool:
+        """Promote only after the caller has completed frozen certification."""
+
+        if version_id not in self.versions:
+            raise KeyError(version_id)
+        evaluation = self.versions[version_id]
+        if evaluation.status != "complete" or evaluation.score is None:
+            raise ValueError("champion promotion requires complete evaluation")
+        if self._champion_score is not None and evaluation.score < self._champion_score:
+            return False
+        changed = self.champion_version_id != version_id
+        self.champion_version_id = version_id
+        self._champion_score = evaluation.score
+        return changed
 
     def begin_stage(self, version_id: str, *, score: float) -> None:
         """Reset score comparison when the learning opponent changes."""

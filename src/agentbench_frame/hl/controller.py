@@ -16,6 +16,7 @@ from agentbench_frame.hl.events import HLEventWriter
 from agentbench_frame.hl.experience import ExperienceManager
 from agentbench_frame.hl.lineage import LineageManager, ParentDecision
 from agentbench_frame.hl.proposal import BranchBrief, load_branch_briefs
+from agentbench_frame.hl.selection import CandidateDiagnostics
 from agentbench_frame.tracking.provider import ProviderInvocation
 
 
@@ -333,7 +334,8 @@ class HLController:
         selected_iterations = {
             str(event.get("iteration_id"))
             for event in historical_events
-            if event.get("event_type") == "candidate_selected"
+            if event.get("event_type")
+            in {"candidate_selected", "search_parent_selected"}
             and event.get("iteration_id") != "iter-000000"
         }
         self._iteration_count = len(selected_iterations)
@@ -464,6 +466,7 @@ class HLController:
         parent_version_id: str | None = None,
         defer_experience: bool = False,
         branch_briefs: tuple[BranchBrief, ...] | None = None,
+        promote_champion: bool = True,
     ) -> IterationResult:
         if not self._started:
             raise RuntimeError("initialize must be called before run_act")
@@ -581,12 +584,32 @@ class HLController:
         completed = [
             result for result in results if result.evaluation.status == "complete"
         ]
-        selected = (
-            max(completed, key=lambda result: result.evaluation.score)
-            if completed
-            else results[0]
+        def selection_key(result: CandidateResult) -> tuple[float, ...]:
+            try:
+                diagnostics = CandidateDiagnostics.from_matches(
+                    version_id=result.version.version_id,
+                    branch_index=result.branch_index,
+                    matches=result.evaluation.matches,
+                )
+            except ValueError:
+                return (
+                    float(result.evaluation.score or 0.0),
+                    float("-inf"),
+                    float("-inf"),
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    float(-result.branch_index),
+                )
+            return diagnostics.key()
+
+        selected = max(completed, key=selection_key) if completed else results[0]
+        promoted = (
+            self.lineage.select_version(selected.version.version_id)
+            if promote_champion
+            else self.lineage.select_search_parent(selected.version.version_id)
         )
-        promoted = self.lineage.select_version(selected.version.version_id)
         self.version_store.checkout(selected.version.version_id)
         if promoted:
             self.events.write(
@@ -595,7 +618,7 @@ class HLController:
                 score=selected.evaluation.score,
             )
         self.events.write(
-            "candidate_selected",
+            "candidate_selected" if promote_champion else "search_parent_selected",
             iteration_id=iteration_id,
             version_id=selected.version.version_id,
             act_id=selected.act_id,
@@ -696,6 +719,7 @@ class HLController:
             parent_version_id=parent_id,
             defer_experience=True,
             branch_briefs=briefs,
+            promote_champion=False,
         )
         completed = sorted(
             (
