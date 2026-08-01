@@ -27,10 +27,23 @@ CURVE_FIELDS = (
     "target_gate_score",
     "passing_human_opponents",
     "full_pool_win_rate",
+    "mean_score_margin",
     "curriculum_event",
     "cumulative_prompt_tokens",
     "cumulative_completion_tokens",
     "cumulative_total_tokens",
+)
+
+BRANCH_FIELDS = (
+    "iteration",
+    "iteration_id",
+    "branch_index",
+    "version_id",
+    "selected",
+    "evaluation_status",
+    "target_win_rate",
+    "mean_score_margin",
+    "mean_local_policy_kl",
 )
 
 CURRICULUM_FIELDS = (
@@ -77,6 +90,50 @@ def _fixed_pool_elo(matches: Any) -> float | None:
     return rating if games else None
 
 
+def _score_margin(matches: Any) -> float | None:
+    if not isinstance(matches, list):
+        return None
+    margins = [
+        float(match["rollman_score"]) - float(match["ghosts_score"])
+        for match in matches
+        if isinstance(match, Mapping)
+        and match.get("status", "complete") == "complete"
+        and isinstance(match.get("rollman_score"), (int, float))
+        and isinstance(match.get("ghosts_score"), (int, float))
+    ]
+    return sum(margins) / len(margins) if margins else None
+
+
+def _win_rate(evaluation: Mapping[str, Any]) -> float | None:
+    wins = evaluation.get("wins")
+    losses = evaluation.get("losses")
+    draws = evaluation.get("draws")
+    if not all(isinstance(value, int) for value in (wins, losses, draws)):
+        matches = evaluation.get("matches")
+        if isinstance(matches, list):
+            valid_results = [
+                match.get("result")
+                for match in matches
+                if isinstance(match, Mapping)
+                and match.get("status", "complete") == "complete"
+                and match.get("result") in {"win", "draw", "loss"}
+            ]
+            wins = sum(result == "win" for result in valid_results)
+            draws = sum(result == "draw" for result in valid_results)
+            losses = sum(result == "loss" for result in valid_results)
+    if all(isinstance(value, int) for value in (wins, losses, draws)):
+        games = wins + losses + draws
+        if games:
+            return (wins + 0.5 * draws) / games
+    return None
+
+
+def _cycle_number(value: Any, fallback: int) -> int:
+    text = str(value or "")
+    suffix = text.rsplit("-", 1)[-1]
+    return int(suffix) if suffix.isdigit() else fallback
+
+
 def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
     records = [dict(event) for event in events]
     versions: dict[str, dict[str, Any]] = {}
@@ -87,6 +144,7 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
     reported_elo: dict[str, float | None] = {}
     target_gates: dict[str, dict[str, Any]] = {}
     certifications: dict[str, dict[str, Any]] = {}
+    reporting: dict[str, dict[str, Any]] = {}
     curriculum_events: dict[str, str] = {}
     prompt_tokens = completion_tokens = total_tokens = act_count = 0
 
@@ -103,6 +161,23 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
             selected.append(
                 {
                     **event,
+                    "_budget": {
+                        "coding_agent_act": act_count,
+                        "prompt": prompt_tokens,
+                        "completion": completion_tokens,
+                        "total": total_tokens,
+                    },
+                }
+            )
+        elif event_type == "proposal_cycle_completed":
+            selected.append(
+                {
+                    **event,
+                    "version_id": event["selected_version_id"],
+                    "act_id": versions.get(
+                        str(event["selected_version_id"]), {}
+                    ).get("act_id", ""),
+                    "_proposal": True,
                     "_budget": {
                         "coding_agent_act": act_count,
                         "prompt": prompt_tokens,
@@ -140,6 +215,8 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
             curriculum_events[version_id] = "gate"
         elif event_type == "certification_completed":
             certifications[str(event["version_id"])] = event
+        elif event_type == "reporting_panel_completed":
+            reporting[str(event["version_id"])] = event
         elif isinstance(event_type, str) and event_type.startswith("curriculum_"):
             version_id = event.get("version_id")
             if version_id is not None:
@@ -157,9 +234,25 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
             raw_score = float(value)
             break
 
+    proposal_iteration_ids = {
+        str(item.get("iteration_id"))
+        for item in selected
+        if item.get("_proposal")
+    }
+    selected = [
+        item
+        for item in selected
+        if item.get("_proposal")
+        or str(item.get("iteration_id")) not in proposal_iteration_ids
+    ]
+    selected.sort(
+        key=lambda item: _cycle_number(item.get("iteration_id"), 0)
+    )
+
     rows: list[dict[str, Any]] = []
     best = None
-    for iteration, selection in enumerate(selected):
+    for ordinal, selection in enumerate(selected):
+        iteration = _cycle_number(selection.get("iteration_id"), ordinal)
         version_id = str(selection.get("version_id"))
         version = versions.get(version_id, {})
         act_id = str(selection.get("act_id", version.get("act_id", "")))
@@ -173,28 +266,9 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
             best = score if best is None else max(best, score)
         target_gate = target_gates.get(version_id, {})
         certification = certifications.get(version_id, {})
+        panel = reporting.get(version_id, {})
         kl_trace = policy_kl.get(version_id, [])
-        wins = evaluation.get("wins")
-        losses = evaluation.get("losses")
-        draws = evaluation.get("draws")
-        if not all(isinstance(value, int) for value in (wins, losses, draws)):
-            matches = evaluation.get("matches")
-            if isinstance(matches, list):
-                valid_results = [
-                    match.get("result")
-                    for match in matches
-                    if isinstance(match, Mapping)
-                    and match.get("status", "complete") == "complete"
-                    and match.get("result") in {"win", "draw", "loss"}
-                ]
-                wins = sum(result == "win" for result in valid_results)
-                draws = sum(result == "draw" for result in valid_results)
-                losses = sum(result == "loss" for result in valid_results)
-        win_rate = None
-        if all(isinstance(value, int) for value in (wins, losses, draws)):
-            games = wins + losses + draws
-            if games:
-                win_rate = (wins + 0.5 * draws) / games
+        win_rate = _win_rate(evaluation)
         rows.append(
             {
                 "iteration": iteration,
@@ -215,7 +289,9 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
                 "best_score_so_far": best,
                 "win_rate": win_rate,
                 "rollman_elo": (
-                    _fixed_pool_elo(certification.get("matches"))
+                    _fixed_pool_elo(panel.get("matches"))
+                    if panel.get("matches")
+                    else _fixed_pool_elo(certification.get("matches"))
                     if certification.get("matches")
                     else reported_elo.get(version_id)
                 ),
@@ -228,12 +304,67 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
                     "passing_human_opponents"
                 ),
                 "full_pool_win_rate": certification.get("score"),
+                "mean_score_margin": panel.get("mean_score_margin"),
                 "curriculum_event": curriculum_events.get(version_id),
                 "cumulative_prompt_tokens": budget["prompt"],
                 "cumulative_completion_tokens": budget["completion"],
                 "cumulative_total_tokens": budget["total"],
             }
         )
+        if panel.get("score") is not None:
+            rows[-1]["full_pool_win_rate"] = float(panel["score"])
+    return rows
+
+
+def derive_branch_rows(
+    events: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    records = [dict(event) for event in events]
+    versions = {
+        str(event["version_id"]): event
+        for event in records
+        if event.get("event_type") == "version_created"
+    }
+    evaluations = {
+        str(event["version_id"]): event
+        for event in records
+        if event.get("event_type") == "evaluation_completed"
+    }
+    policy_kl = {
+        str(event["version_id"]): event.get("local_policy_kl_trace")
+        for event in records
+        if event.get("event_type") == "policy_kl_measured"
+    }
+    rows: list[dict[str, Any]] = []
+    for fallback, event in enumerate(
+        record
+        for record in records
+        if record.get("event_type") == "proposal_cycle_completed"
+    ):
+        iteration = _cycle_number(event.get("iteration_id"), fallback + 1)
+        selected_id = str(event["selected_version_id"])
+        for branch_index, raw_version_id in enumerate(
+            event.get("candidate_version_ids", ())
+        ):
+            version_id = str(raw_version_id)
+            version = versions.get(version_id, {})
+            evaluation = evaluations.get(version_id, {})
+            matches = evaluation.get("matches")
+            rows.append(
+                {
+                    "iteration": iteration,
+                    "iteration_id": event.get("iteration_id"),
+                    "branch_index": branch_index,
+                    "version_id": version_id,
+                    "selected": version_id == selected_id,
+                    "evaluation_status": evaluation.get(
+                        "status", version.get("evaluation_status")
+                    ),
+                    "target_win_rate": _win_rate(evaluation),
+                    "mean_score_margin": _score_margin(matches),
+                    "mean_local_policy_kl": _mean(policy_kl.get(version_id)),
+                }
+            )
     return rows
 
 
@@ -309,14 +440,22 @@ def _set_iteration_axis(axis: Any, iterations: list[int]) -> None:
     axis.set_xlabel("HL iteration")
 
 
-def _plot(rows: list[Mapping[str, Any]], png: Path, svg: Path) -> None:
+def _plot(
+    rows: list[Mapping[str, Any]],
+    branches: list[Mapping[str, Any]],
+    png: Path,
+    svg: Path,
+) -> None:
     import matplotlib
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
     x = [row["iteration"] for row in rows]
-    figure, axes = plt.subplots(1, 3, figsize=(17, 5.2), constrained_layout=True)
+    figure, axes_grid = plt.subplots(
+        2, 2, figsize=(14, 9), constrained_layout=True
+    )
+    axes = axes_grid.ravel()
 
     def line(axis, field, label, **kwargs):
         axis.plot(x, [row.get(field) for row in rows], marker="o", label=label, **kwargs)
@@ -328,6 +467,23 @@ def _plot(rows: list[Mapping[str, Any]], png: Path, svg: Path) -> None:
                 [iteration] * len(trace), trace, color="#1565c0", alpha=0.18,
                 s=18,
             )
+    branch_x = [int(row["iteration"]) for row in branches]
+    branch_kl = [row.get("mean_local_policy_kl") for row in branches]
+    valid_branch_kl = [
+        (iteration, value)
+        for iteration, value in zip(branch_x, branch_kl)
+        if value is not None
+    ]
+    if valid_branch_kl:
+        axes[0].scatter(
+            [item[0] for item in valid_branch_kl],
+            [item[1] for item in valid_branch_kl],
+            color="#90caf9",
+            edgecolor="#1565c0",
+            alpha=0.7,
+            s=38,
+            label="four rollout candidates",
+        )
     line(
         axes[0],
         "mean_local_policy_kl",
@@ -346,6 +502,16 @@ def _plot(rows: list[Mapping[str, Any]], png: Path, svg: Path) -> None:
     axes[2].set_ylabel("win rate")
     axes[2].set_ylim(-0.02, 1.02)
 
+    line(
+        axes[3],
+        "mean_score_margin",
+        "reporting-panel mean margin",
+        color="#e76f51",
+    )
+    axes[3].axhline(0.0, color="#555555", linewidth=1, alpha=0.5)
+    axes[3].set_title("Score Margin vs HL Iteration")
+    axes[3].set_ylabel("Rollman score − Ghosts score")
+
     for axis in axes:
         _set_iteration_axis(axis, x)
         axis.grid(alpha=0.25)
@@ -363,12 +529,15 @@ def write_hl_report(
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     rows = derive_curve_rows(records)
+    branches = derive_branch_rows(records)
     curves_csv = output / "curves.csv"
     matches_csv = output / "matches.csv"
     curriculum_csv = output / "curriculum.csv"
+    branches_csv = output / "branches.csv"
     png = output / "curves.png"
     svg = output / "curves.svg"
     _write_csv(curves_csv, rows, CURVE_FIELDS)
+    _write_csv(branches_csv, branches, BRANCH_FIELDS)
     _write_csv(
         curriculum_csv,
         derive_curriculum_rows(records),
@@ -387,11 +556,12 @@ def write_hl_report(
         "error",
     ]
     _write_csv(matches_csv, matches, match_fields)
-    _plot(rows, png, svg)
+    _plot(rows, branches, png, svg)
     return {
         "curves_csv": curves_csv,
         "matches_csv": matches_csv,
         "curriculum_csv": curriculum_csv,
+        "branches_csv": branches_csv,
         "curves_png": png,
         "curves_svg": svg,
     }

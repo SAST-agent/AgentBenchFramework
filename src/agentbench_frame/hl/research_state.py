@@ -10,6 +10,12 @@ from typing import Any, Mapping, Optional
 
 
 _SECRET = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}")
+_REDUCER_FIELDS = {
+    "stable_knowledge",
+    "failed_hypotheses",
+    "open_questions",
+    "recent_comparisons",
+}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -133,3 +139,48 @@ class ResearchState:
             raise ValueError(
                 f"research state exceeds max_bytes={self.max_bytes}: {len(payload)}"
             )
+
+
+def apply_reducer_update(
+    current: ResearchState,
+    update_path: str | Path,
+    *,
+    proposal_cycle: int,
+    search_parent_version_id: str,
+    official_champion_version_id: Optional[str],
+    exploration_debt: int,
+) -> ResearchState:
+    """Apply model-authored findings while keeping factual pointers framework-owned."""
+
+    source = Path(update_path)
+    value = json.loads(source.read_text(encoding="utf-8"))
+    if not isinstance(value, Mapping):
+        raise ValueError("reducer update must be an object")
+    if set(value) != _REDUCER_FIELDS:
+        raise ValueError(
+            "invalid reducer update fields: "
+            f"expected={sorted(_REDUCER_FIELDS)}, actual={sorted(value)}"
+        )
+    text_fields: dict[str, tuple[str, ...]] = {}
+    for field in ("stable_knowledge", "failed_hypotheses", "open_questions"):
+        raw = value[field]
+        if not isinstance(raw, list) or not all(
+            isinstance(item, str) and item.strip() for item in raw
+        ):
+            raise ValueError(f"reducer update {field} must be non-empty strings")
+        text_fields[field] = tuple(item.strip() for item in raw)
+    comparisons = value["recent_comparisons"]
+    if not isinstance(comparisons, list) or not all(
+        isinstance(item, Mapping) for item in comparisons
+    ):
+        raise ValueError("reducer update recent_comparisons must be objects")
+    return current.advance(
+        proposal_cycle=proposal_cycle,
+        search_parent_version_id=search_parent_version_id,
+        official_champion_version_id=official_champion_version_id,
+        stable_knowledge=text_fields["stable_knowledge"],
+        failed_hypotheses=text_fields["failed_hypotheses"],
+        open_questions=text_fields["open_questions"],
+        recent_comparisons=tuple(dict(item) for item in comparisons),
+        exploration_debt=exploration_debt,
+    )

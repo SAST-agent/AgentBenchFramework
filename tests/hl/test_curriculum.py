@@ -52,6 +52,30 @@ def test_weakest_failed_selects_largest_rank_from_complete_certification():
     assert select_weakest_failed(summary) == "rank15"
 
 
+def test_empirical_hardest_to_easiest_order_selects_easiest_failed_target():
+    from agentbench_frame.hl.curriculum import (
+        CertificationSummary,
+        rerank_certification,
+        select_weakest_failed,
+    )
+
+    summary = CertificationSummary(
+        pass_rates={"ghost-a": 0.0, "ghost-b": 1.0, "ghost-c": 0.0},
+        ranks={"ghost-a": 99, "ghost-b": 1, "ghost-c": 2},
+        passing_opponents=1,
+        passed_opponents=("ghost-b",),
+        failed_opponents=("ghost-a", "ghost-c"),
+    )
+
+    reranked = rerank_certification(
+        summary,
+        hardest_to_easiest=("ghost-a", "ghost-b", "ghost-c"),
+    )
+
+    assert reranked.ranks == {"ghost-a": 1, "ghost-b": 2, "ghost-c": 3}
+    assert select_weakest_failed(reranked) == "ghost-c"
+
+
 def test_certification_summary_rejects_incomplete_or_missing_opponents():
     from agentbench_frame.hl.curriculum import summarize_certification
 

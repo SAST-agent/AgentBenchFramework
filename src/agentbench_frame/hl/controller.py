@@ -16,7 +16,11 @@ from agentbench_frame.hl.events import HLEventWriter
 from agentbench_frame.hl.experience import ExperienceManager
 from agentbench_frame.hl.lineage import LineageManager, ParentDecision
 from agentbench_frame.hl.proposal import BranchBrief, load_branch_briefs
-from agentbench_frame.hl.selection import CandidateDiagnostics
+from agentbench_frame.hl.research_state import ResearchState, apply_reducer_update
+from agentbench_frame.hl.selection import (
+    CandidateDiagnostics,
+    select_linear_successor,
+)
 from agentbench_frame.tracking.provider import ProviderInvocation
 
 
@@ -36,6 +40,7 @@ class IterationResult:
     parent_version_id: str
     candidates: tuple[CandidateResult, ...]
     selected: CandidateResult
+    search_parent_version_id: str
     rollback: Optional[ParentDecision]
     finalists: tuple[CandidateResult, ...] = ()
 
@@ -47,6 +52,7 @@ class ProposalCycleResult:
     candidates: tuple[CandidateResult, ...]
     finalists: tuple[CandidateResult, ...]
     selected: CandidateResult
+    search_parent_version_id: str
     planner: ProviderInvocation
     reducer: ProviderInvocation
     reducer_input_path: Path
@@ -73,6 +79,8 @@ class HLController:
         elo_ledger: RoleEloLedger | None = None,
         elo_candidate_id: str = "hl-run",
         anchor_human_opponents: bool = True,
+        research_state_path: str | Path | None = None,
+        research_state_max_bytes: int = 16384,
     ) -> None:
         self.workspace = Path(workspace)
         self.run_root = Path(run_root)
@@ -88,6 +96,10 @@ class HLController:
         self.elo_ledger = elo_ledger or RoleEloLedger()
         self.elo_candidate_id = elo_candidate_id
         self.anchor_human_opponents = anchor_human_opponents
+        self.research_state_path = (
+            None if research_state_path is None else Path(research_state_path)
+        )
+        self.research_state_max_bytes = research_state_max_bytes
         self._iteration_count = 0
         self._coding_agent_acts = 0
         self._sessions: dict[str, str] = {}
@@ -468,6 +480,7 @@ class HLController:
         defer_experience: bool = False,
         branch_briefs: tuple[BranchBrief, ...] | None = None,
         promote_champion: bool = True,
+        parent_evaluation: CandidateEvaluation | None = None,
     ) -> IterationResult:
         if not self._started:
             raise RuntimeError("initialize must be called before run_act")
@@ -660,12 +673,31 @@ class HLController:
                     : self.iteration.finalist_count
                 ]
             ) or (selected,)
+        search_parent_version_id = selected.version.version_id
+        if not promote_champion and parent_evaluation is not None:
+            try:
+                parent_diagnostics = CandidateDiagnostics.from_matches(
+                    version_id=parent_id,
+                    branch_index=-1,
+                    matches=parent_evaluation.matches,
+                )
+                selected_diagnostics = CandidateDiagnostics.from_matches(
+                    version_id=selected.version.version_id,
+                    branch_index=selected.branch_index,
+                    matches=selected.evaluation.matches,
+                )
+                search_parent_version_id = select_linear_successor(
+                    parent_diagnostics,
+                    (selected_diagnostics,),
+                ).search_parent_version_id
+            except ValueError:
+                search_parent_version_id = selected.version.version_id
         promoted = (
-            self.lineage.select_version(selected.version.version_id)
+            self.lineage.select_version(search_parent_version_id)
             if promote_champion
-            else self.lineage.select_search_parent(selected.version.version_id)
+            else self.lineage.select_search_parent(search_parent_version_id)
         )
-        self.version_store.checkout(selected.version.version_id)
+        self.version_store.checkout(search_parent_version_id)
         if promoted:
             self.events.write(
                 "champion_promoted",
@@ -675,16 +707,20 @@ class HLController:
         self.events.write(
             "candidate_selected" if promote_champion else "search_parent_selected",
             iteration_id=iteration_id,
-            version_id=selected.version.version_id,
-            act_id=selected.act_id,
+            version_id=search_parent_version_id,
+            act_id=self.version_store.get(search_parent_version_id).act_id,
         )
-        if not defer_experience:
+        if (
+            not defer_experience
+            and search_parent_version_id == selected.version.version_id
+        ):
             self.commit_experience(selected)
         return IterationResult(
             iteration_id=iteration_id,
             parent_version_id=parent_id,
             candidates=tuple(results),
             selected=selected,
+            search_parent_version_id=search_parent_version_id,
             rollback=rollback,
             finalists=finalists,
         )
@@ -693,6 +729,8 @@ class HLController:
         self,
         *,
         parent_version_id: str | None = None,
+        defer_experience: bool = False,
+        parent_evaluation: CandidateEvaluation | None = None,
     ) -> ProposalCycleResult:
         """Run one planner, four sibling candidates, and one reducer."""
 
@@ -776,6 +814,7 @@ class HLController:
             defer_experience=True,
             branch_briefs=briefs,
             promote_champion=False,
+            parent_evaluation=parent_evaluation,
         )
         finalists = iteration.finalists
         if iteration.selected not in finalists:
@@ -793,7 +832,10 @@ class HLController:
                     "schema_version": "1.0",
                     "iteration_id": iteration_id,
                     "parent_version_id": parent_id,
-                    "selected_version_id": iteration.selected.version.version_id,
+                    "selected_version_id": iteration.search_parent_version_id,
+                    "best_candidate_version_id": (
+                        iteration.selected.version.version_id
+                    ),
                     "candidates": [
                         {
                             "branch_index": candidate.branch_index,
@@ -814,7 +856,7 @@ class HLController:
             + "\n",
             encoding="utf-8",
         )
-        self.version_store.checkout(iteration.selected.version.version_id)
+        self.version_store.checkout(iteration.search_parent_version_id)
         reducer_output = control_root / "research_state_update.json"
         if reducer_output.exists():
             reducer_output.unlink()
@@ -856,6 +898,24 @@ class HLController:
             target = proposal_root / "research_state_update.json"
             shutil.copy2(reducer_output, target)
             persisted_reducer_output = str(target)
+            if self.research_state_path is not None:
+                current_state = ResearchState.load_or_create(
+                    self.research_state_path,
+                    max_bytes=self.research_state_max_bytes,
+                )
+                next_state = apply_reducer_update(
+                    current_state,
+                    target,
+                    proposal_cycle=self._iteration_count,
+                    search_parent_version_id=(
+                        iteration.search_parent_version_id
+                    ),
+                    official_champion_version_id=(
+                        self.lineage.champion_version_id
+                    ),
+                    exploration_debt=current_state.exploration_debt + 1,
+                )
+                next_state.write(self.research_state_path)
         self.events.write(
             "reducer_completed",
             act_id=reducer_act_id,
@@ -868,18 +928,24 @@ class HLController:
             "proposal_cycle_completed",
             iteration_id=iteration_id,
             parent_version_id=parent_id,
-            selected_version_id=iteration.selected.version.version_id,
+            selected_version_id=iteration.search_parent_version_id,
             candidate_version_ids=[
                 candidate.version.version_id for candidate in iteration.candidates
             ],
         )
-        self.commit_experience(iteration.selected)
+        if (
+            not defer_experience
+            and iteration.search_parent_version_id
+            == iteration.selected.version.version_id
+        ):
+            self.commit_experience(iteration.selected)
         return ProposalCycleResult(
             iteration_id=iteration_id,
             parent_version_id=parent_id,
             candidates=iteration.candidates,
             finalists=finalists,
             selected=iteration.selected,
+            search_parent_version_id=iteration.search_parent_version_id,
             planner=planner,
             reducer=reducer,
             reducer_input_path=reducer_input,

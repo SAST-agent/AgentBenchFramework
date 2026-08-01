@@ -540,7 +540,16 @@ def test_k4_proposal_cycle_uses_one_parent_and_reducer_sees_all_feedback(tmp_pat
                 )
             elif "phase=reducer" in prompt:
                 (control / "research_state_update.json").write_text(
-                    json.dumps({"candidate_branches": [0, 1, 2, 3]}),
+                    json.dumps(
+                        {
+                            "stable_knowledge": ["branch 1 improved the gate"],
+                            "failed_hypotheses": ["branch 0 regressed"],
+                            "open_questions": ["portal timing"],
+                            "recent_comparisons": [
+                                {"selected_branch": 1, "branches": [0, 1, 2, 3]}
+                            ],
+                        }
+                    ),
                     encoding="utf-8",
                 )
             else:
@@ -556,6 +565,13 @@ def test_k4_proposal_cycle_uses_one_parent_and_reducer_sees_all_feedback(tmp_pat
 
     workspace = _workspace(tmp_path)
     provider = ProposalProvider()
+    research_state_path = tmp_path / "research_state.json"
+    from agentbench_frame.hl.research_state import ResearchState
+
+    ResearchState.empty(max_bytes=4096).advance(
+        official_champion_version_id="v000000",
+        active_target="rank15",
+    ).write(research_state_path)
     controller = HLController(
         workspace=workspace,
         run_root=tmp_path,
@@ -575,6 +591,8 @@ def test_k4_proposal_cycle_uses_one_parent_and_reducer_sees_all_feedback(tmp_pat
             f"phase={values['phase']} branch={values.get('branch_index')} "
             f"brief={values.get('branch_brief')} input={values.get('reducer_input')}"
         ),
+        research_state_path=research_state_path,
+        research_state_max_bytes=4096,
     )
     origin = controller.initialize(evaluate=True)
 
@@ -596,6 +614,140 @@ def test_k4_proposal_cycle_uses_one_parent_and_reducer_sees_all_feedback(tmp_pat
         3,
     }
     assert len(provider.calls) == 6
+    research = ResearchState.load_or_create(
+        research_state_path,
+        max_bytes=4096,
+    )
+    assert research.proposal_cycle == 1
+    assert research.search_parent_version_id == result.selected.version.version_id
+    assert research.official_champion_version_id == origin.version_id
+    assert research.active_target == "rank15"
+    assert research.recent_comparisons[0]["selected_branch"] == 1
+
+
+def test_k4_cycle_keeps_current_parent_when_every_candidate_regresses(tmp_path):
+    from agentbench_frame.hl.codebase import VersionStore
+    from agentbench_frame.hl.config import IterationConfig, RollbackConfig
+    from agentbench_frame.hl.controller import HLController
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+    from agentbench_frame.hl.events import HLEventWriter
+    from agentbench_frame.hl.lineage import LineageManager
+
+    class Provider(FakeProvider):
+        def invoke(self, *, prompt, workspace, raw_output_path, session_id=None):
+            import json
+
+            control = Path(workspace, ".agentbench")
+            control.mkdir(parents=True, exist_ok=True)
+            if "planner" in prompt:
+                (control / "branch_briefs.json").write_text(
+                    json.dumps(
+                        {
+                            "branches": [
+                                {
+                                    "branch_index": index,
+                                    "diagnosis": f"d-{index}",
+                                    "mechanism": (
+                                        "portal search",
+                                        "ghost prediction",
+                                        "shield timing",
+                                        "junction escape",
+                                    )[index],
+                                    "expected_change": f"e-{index}",
+                                    "falsifier": f"f-{index}",
+                                }
+                                for index in range(4)
+                            ]
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            elif "candidate" in prompt:
+                Path(workspace, "agent.py").write_text(
+                    f"VALUE = {len(self.calls) + 1}\n", encoding="utf-8"
+                )
+            elif "reducer" in prompt:
+                (control / "research_state_update.json").write_text(
+                    json.dumps(
+                        {
+                            "stable_knowledge": [],
+                            "failed_hypotheses": ["all branches regressed"],
+                            "open_questions": [],
+                            "recent_comparisons": [],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            return super().invoke(
+                prompt=prompt,
+                workspace=workspace,
+                raw_output_path=raw_output_path,
+                session_id=session_id,
+            )
+
+    parent_evaluation = CandidateEvaluation(
+        status="complete",
+        score=0.0,
+        matches=(
+                {
+                    "status": "complete",
+                    "result": "loss",
+                    "opponent": "rank15",
+                    "seed": 101,
+                    "rollman_score": 90,
+                "ghosts_score": 100,
+            },
+        ),
+    )
+    candidate_evaluations = [
+        CandidateEvaluation(
+            status="complete",
+            score=0.0,
+            matches=(
+                {
+                    "status": "complete",
+                    "result": "loss",
+                    "opponent": "rank15",
+                    "seed": 101,
+                    "rollman_score": margin,
+                    "ghosts_score": 100,
+                },
+            ),
+        )
+        for margin in (10, 20, 30, 40)
+    ]
+
+    workspace = _workspace(tmp_path)
+    provider = Provider(["", "", "", "", "", ""])
+    evaluator = FakeEvaluator([])
+    evaluator.evaluate = lambda version: candidate_evaluations.pop(0)
+    controller = HLController(
+        workspace=workspace,
+        run_root=tmp_path,
+        provider=provider,
+        evaluator=evaluator,
+        version_store=VersionStore(workspace, tmp_path / "versions"),
+        lineage=LineageManager(),
+        events=HLEventWriter(tmp_path / "events.jsonl", run_id="run-k4"),
+        iteration=IterationConfig(
+            candidates_per_cycle=4,
+            planner_enabled=True,
+            reducer_enabled=True,
+            finalist_count=2,
+        ),
+        rollback=RollbackConfig(),
+        prompt_factory=lambda **values: f"phase={values['phase']}",
+    )
+    origin = controller.initialize()
+
+    result = controller.run_proposal_cycle(
+        parent_version_id=origin.version_id,
+        parent_evaluation=parent_evaluation,
+    )
+
+    assert result.search_parent_version_id == origin.version_id
+    assert controller.lineage.lineage_head_version_id == origin.version_id
+    assert result.selected.version.version_id != origin.version_id
 
 
 def test_curriculum_can_defer_experience_until_candidate_validation(tmp_path):

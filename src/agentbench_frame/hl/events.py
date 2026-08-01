@@ -48,6 +48,7 @@ KNOWN_EVENT_TYPES = frozenset(
         "finalists_selected",
         "reducer_completed",
         "proposal_cycle_completed",
+        "reporting_panel_completed",
     }
 )
 _SECRET_KEYS = frozenset({"api_key", "authorization", "access_token", "secret"})
@@ -189,6 +190,18 @@ _EVENT_FIELDS = {
             "parent_version_id",
             "selected_version_id",
             "candidate_version_ids",
+        },
+        set(),
+    ),
+    "reporting_panel_completed": (
+        {
+            "iteration_id",
+            "proposal_cycle",
+            "version_id",
+            "status",
+            "score",
+            "mean_score_margin",
+            "matches",
         },
         set(),
     ),

@@ -665,6 +665,9 @@ def _run_real(
 ) -> int:
     # Imported lazily so validate and dry-run never initialize model/runtime state.
     from agentbench_frame.games.rollman.candidate_runner import __file__ as candidate_runner
+    from agentbench_frame.games.rollman.diagnostics import (
+        calibrate_opponent_difficulty,
+    )
     from agentbench_frame.games.rollman.evaluator import RollmanEvaluator
     from agentbench_frame.games.rollman.logic_runner import __file__ as logic_runner
     from agentbench_frame.games.rollman.match import ProcessSpec, run_match
@@ -677,15 +680,17 @@ def _run_real(
     )
     from agentbench_frame.games.rollman.state_tracker import FrozenStateTracker
     from agentbench_frame.hl.codebase import VersionStore
-    from agentbench_frame.hl.context import IterationContext
+    from agentbench_frame.hl.context import IterationContext, compile_game_digest
     from agentbench_frame.hl.controller import HLController
     from agentbench_frame.hl.curriculum import (
         CurriculumManager,
+        rerank_certification,
         summarize_certification,
     )
     from agentbench_frame.hl.events import HLEventWriter, read_events
     from agentbench_frame.hl.lineage import LineageManager
     from agentbench_frame.hl.provider import CodexSessionProvider
+    from agentbench_frame.hl.research_state import ResearchState
     _validate(config)
     if resume:
         if not run_dir.is_dir():
@@ -803,6 +808,15 @@ def _run_real(
         },
     )
     iteration_context = IterationContext(bundle)
+    game_digest_path = compile_game_digest(
+        bundle,
+        run_dir / "context" / "game_digest.json",
+    )
+    research_state_path = run_dir / "research_state.json"
+    if not resume and not research_state_path.is_file():
+        ResearchState.empty(
+            max_bytes=config.run.context.research_state_max_bytes
+        ).write(research_state_path)
     experience = ExperienceManager(
         run_dir / "experience",
         compress_every_acts=config.run.experience.compress_every_acts,
@@ -921,6 +935,74 @@ def _run_real(
                 "trace": match.get("trace"),
                 }
             )
+        previous_measurements = {
+            "benchmark_score": (
+                None if evaluation is None else evaluation.score
+            ),
+            "evaluation_status": (
+                None if evaluation is None else evaluation.status
+            ),
+            "curriculum_stagnation_count": (
+                0
+                if curriculum_manager is None
+                else curriculum_manager.state.stagnation_count
+            ),
+        }
+        active_target = (
+            None
+            if curriculum_manager is None
+            else curriculum_manager.state.active_target
+        )
+        locked_opponents = (
+            ()
+            if curriculum_manager is None
+            else curriculum_manager.state.locked_opponents
+        )
+        phase = values.get("phase", "candidate")
+        if phase == "planner":
+            return iteration_context.build_planner_prompt(
+                act_id=values["act_id"],
+                iteration_id=values["iteration_id"],
+                parent_version_id=values["parent_version_id"],
+                workspace=workspace,
+                game_digest_path=game_digest_path,
+                research_state_path=research_state_path,
+                replay_evidence=evidence,
+                previous_measurements=previous_measurements,
+                active_target=active_target,
+            )
+        if phase == "reducer":
+            reducer_input = Path(values["reducer_input"])
+            reducer_value = json.loads(
+                reducer_input.read_text(encoding="utf-8")
+            )
+            return iteration_context.build_reducer_prompt(
+                act_id=values["act_id"],
+                iteration_id=values["iteration_id"],
+                selected_version_id=str(
+                    reducer_value["selected_version_id"]
+                ),
+                workspace=workspace,
+                game_digest_path=game_digest_path,
+                research_state_path=research_state_path,
+                reducer_input_path=reducer_input,
+            )
+        if phase == "candidate" and values.get("branch_brief") is not None:
+            return iteration_context.build_candidate_prompt(
+                act_id=values["act_id"],
+                branch_index=values["branch_index"],
+                branch_count=values["branch_count"],
+                parent_version_id=values["parent_version_id"],
+                workspace=workspace,
+                game_digest_path=game_digest_path,
+                research_state_path=research_state_path,
+                replay_evidence=evidence,
+                previous_measurements=previous_measurements,
+                experience_path=experience.path,
+                branch_brief=values["branch_brief"],
+                active_target=active_target,
+                locked_opponents=locked_opponents,
+            )
         return iteration_context.build_prompt(
             act_id=values["act_id"],
             branch_index=values["branch_index"],
@@ -928,30 +1010,10 @@ def _run_real(
             parent_version_id=values["parent_version_id"],
             workspace=workspace,
             replay_evidence=evidence,
-            previous_measurements={
-                "benchmark_score": (
-                    None if evaluation is None else evaluation.score
-                ),
-                "evaluation_status": (
-                    None if evaluation is None else evaluation.status
-                ),
-                "curriculum_stagnation_count": (
-                    0
-                    if curriculum_manager is None
-                    else curriculum_manager.state.stagnation_count
-                ),
-            },
+            previous_measurements=previous_measurements,
             experience_path=experience.path,
-            active_target=(
-                None
-                if curriculum_manager is None
-                else curriculum_manager.state.active_target
-            ),
-            locked_opponents=(
-                ()
-                if curriculum_manager is None
-                else curriculum_manager.state.locked_opponents
-            ),
+            active_target=active_target,
+            locked_opponents=locked_opponents,
         )
 
     controller = HLController(
@@ -966,7 +1028,35 @@ def _run_real(
         rollback=config.run.rollback,
         prompt_factory=prompt_factory,
         experience_manager=experience,
+        research_state_path=research_state_path,
+        research_state_max_bytes=(
+            config.run.context.research_state_max_bytes
+        ),
     )
+
+    def sync_research_state() -> None:
+        state = ResearchState.load_or_create(
+            research_state_path,
+            max_bytes=config.run.context.research_state_max_bytes,
+        )
+        state.advance(
+            search_parent_version_id=(
+                controller.lineage.lineage_head_version_id
+            ),
+            official_champion_version_id=(
+                controller.lineage.champion_version_id
+            ),
+            active_target=(
+                None
+                if curriculum_manager is None
+                else curriculum_manager.state.active_target
+            ),
+            locked_opponents=(
+                ()
+                if curriculum_manager is None
+                else curriculum_manager.state.locked_opponents
+            ),
+        ).write(research_state_path)
 
     def measure_iteration(iteration_result: Any) -> set[str]:
         parent_evaluation = evaluations_by_version.get(
@@ -1034,8 +1124,21 @@ def _run_real(
             opponent.opponent_id: opponent
             for opponent in prepared_pool
         }
+        difficulty_path = run_dir / "opponent-difficulty.json"
+        empirical_order: tuple[str, ...] | None = None
+        if difficulty_path.is_file():
+            difficulty_value = json.loads(
+                difficulty_path.read_text(encoding="utf-8")
+            )
+            empirical_order = tuple(difficulty_value["hardest_to_easiest"])
+
+        def empirical_rank(opponent_id: str) -> int:
+            if empirical_order is None:
+                return opponent_by_id[opponent_id].rank
+            return empirical_order.index(opponent_id) + 1
 
         def certify_curriculum_version(version: Any):
+            nonlocal empirical_order
             version_store.checkout(version.version_id)
             certification = evaluator.certify(version)
             controller.record_matches(
@@ -1055,6 +1158,39 @@ def _run_real(
                 if certification.status == "complete"
                 else None
             )
+            if summary is not None:
+                if empirical_order is None:
+                    empirical_order = calibrate_opponent_difficulty(
+                        certification.matches
+                    )
+                    if len(empirical_order) != len(pool):
+                        raise ValueError(
+                            "opponent calibration requires every valid human Ghost"
+                        )
+                    difficulty_path.write_text(
+                        json.dumps(
+                            {
+                                "schema_version": "1.0",
+                                "reference_version_id": version.version_id,
+                                "hardest_to_easiest": list(empirical_order),
+                                "criterion": [
+                                    "ghost_points",
+                                    "mean_ghost_minus_rollman_margin",
+                                    "worst_margin",
+                                    "opponent_id",
+                                ],
+                            },
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            indent=2,
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                summary = rerank_certification(
+                    summary,
+                    hardest_to_easiest=empirical_order,
+                )
             writer.write(
                 "certification_completed",
                 version_id=version.version_id,
@@ -1295,16 +1431,19 @@ def _run_real(
                     evaluator.last_evaluation
                 )
         else:
-            if config.run.origin.mode != "imported_version":
-                raise ValueError(
-                    "weakest_failed curriculum requires imported_version origin"
+            if config.run.origin.mode == "imported_version":
+                assert config.run.origin.source_run is not None
+                assert config.run.origin.source_version is not None
+                origin = controller.initialize_imported(
+                    source_run=config.run.origin.source_run,
+                    source_version_id=config.run.origin.source_version,
                 )
-            assert config.run.origin.source_run is not None
-            assert config.run.origin.source_version is not None
-            origin = controller.initialize_imported(
-                source_run=config.run.origin.source_run,
-                source_version_id=config.run.origin.source_version,
-            )
+            else:
+                if provider is None:
+                    raise RuntimeError(
+                        "provider credential is required for model bootstrap"
+                    )
+                origin = controller.bootstrap().version
             certification, origin_summary = certify_curriculum_version(
                 origin
             )
@@ -1344,7 +1483,7 @@ def _run_real(
                 active_target_rank=(
                     None
                     if active_target is None
-                    else opponent_by_id[active_target].rank
+                    else empirical_rank(active_target)
                 ),
                 locked_opponents=list(
                     curriculum_manager.state.locked_opponents
@@ -1377,7 +1516,7 @@ def _run_real(
                 "curriculum_target_selected",
                 version_id=origin.version_id,
                 active_target=active_target,
-                active_target_rank=opponent_by_id[active_target].rank,
+                active_target_rank=empirical_rank(active_target),
                 locked_opponents=list(
                     curriculum_manager.state.locked_opponents
                 ),
@@ -1386,7 +1525,19 @@ def _run_real(
             evaluator.set_learning_opponent(
                 opponent_by_id[active_target]
             )
-            evaluator.last_evaluation = controller.retry_head_evaluation()
+            if (
+                controller.lineage.versions[origin.version_id].status
+                == "complete"
+            ):
+                evaluator.last_evaluation = evaluator.evaluate(origin)
+                controller.record_matches(
+                    version=origin,
+                    act_id=origin.act_id,
+                    phase="learning",
+                    matches=evaluator.last_evaluation.matches,
+                )
+            else:
+                evaluator.last_evaluation = controller.retry_head_evaluation()
             if evaluator.last_evaluation.status != "complete":
                 _json(
                     {
@@ -1415,6 +1566,7 @@ def _run_real(
                 evaluator.last_evaluation
             )
             next_parent = origin.version_id
+            sync_research_state()
 
         completed_here = 0
         while not certified and (
@@ -1426,9 +1578,19 @@ def _run_real(
                 raise RuntimeError(
                     "provider credential is required for a model act"
                 )
-            iteration_result = controller.run_act(
-                parent_version_id=next_parent,
-                defer_experience=True,
+            iteration_result = (
+                controller.run_proposal_cycle(
+                    parent_version_id=next_parent,
+                    defer_experience=True,
+                    parent_evaluation=evaluations_by_version.get(
+                        next_parent
+                    ),
+                )
+                if config.run.iteration.planner_enabled
+                else controller.run_act(
+                    parent_version_id=next_parent,
+                    defer_experience=True,
+                )
             )
             completed_here += 1
             stop_reason = _iteration_stop_reason(iteration_result)
@@ -1454,10 +1616,10 @@ def _run_real(
                 )
                 return 2
             failed_measurements = measure_iteration(iteration_result)
-            selected = iteration_result.selected
-            if selected.version.version_id in failed_measurements:
+            best_candidate = iteration_result.selected
+            if best_candidate.version.version_id in failed_measurements:
                 rollback_invalid_candidate(
-                    version_id=selected.version.version_id,
+                    version_id=best_candidate.version.version_id,
                     parent_version_id=iteration_result.parent_version_id,
                     reason="measurement_failed",
                 )
@@ -1465,7 +1627,7 @@ def _run_real(
                     {
                         "run_dir": str(run_dir),
                         "status": "measurement_failed",
-                        "version_id": selected.version.version_id,
+                        "version_id": best_candidate.version.version_id,
                         "next_parent_version_id": (
                             iteration_result.parent_version_id
                         ),
@@ -1473,7 +1635,81 @@ def _run_real(
                     }
                 )
                 return 2
-            controller.commit_experience(selected)
+            search_parent_id = iteration_result.search_parent_version_id
+            if search_parent_id == best_candidate.version.version_id:
+                selected = best_candidate
+                controller.commit_experience(selected)
+            else:
+                parent_evaluation = evaluations_by_version.get(
+                    search_parent_id
+                )
+                if (
+                    parent_evaluation is None
+                    or parent_evaluation.status != "complete"
+                ):
+                    raise ValueError(
+                        "retained search parent lacks a complete evaluation"
+                    )
+                parent_version = version_store.get(search_parent_id)
+                selected = dataclasses.replace(
+                    best_candidate,
+                    act_id=parent_version.act_id,
+                    branch_index=-1,
+                    version=parent_version,
+                    evaluation=parent_evaluation,
+                    pending_experience_path=None,
+                )
+            if config.run.evaluation.reporting_panel_every_cycle:
+                reporting = evaluator.evaluate_reporting_panel(
+                    selected.version,
+                    seeds=tuple(
+                        900_001 + offset
+                        for offset in range(
+                            config.run.evaluation.reporting_seeds_per_opponent
+                        )
+                    ),
+                )
+                controller.record_matches(
+                    version=selected.version,
+                    act_id=selected.act_id,
+                    phase="reporting",
+                    matches=reporting.matches,
+                )
+                reporting_margins = [
+                    float(match["rollman_score"])
+                    - float(match["ghosts_score"])
+                    for match in reporting.matches
+                    if match.get("status") == "complete"
+                    and isinstance(match.get("rollman_score"), (int, float))
+                    and isinstance(match.get("ghosts_score"), (int, float))
+                ]
+                writer.write(
+                    "reporting_panel_completed",
+                    iteration_id=iteration_result.iteration_id,
+                    proposal_cycle=int(
+                        iteration_result.iteration_id.rsplit("-", 1)[-1]
+                    ),
+                    version_id=selected.version.version_id,
+                    status=reporting.status,
+                    score=reporting.score,
+                    mean_score_margin=(
+                        sum(reporting_margins) / len(reporting_margins)
+                        if reporting_margins
+                        else None
+                    ),
+                    matches=list(reporting.matches),
+                )
+                if reporting.status != "complete":
+                    _json(
+                        {
+                            "run_dir": str(run_dir),
+                            "status": "incomplete_reporting_panel",
+                            "version_id": selected.version.version_id,
+                            **controller.summary(),
+                        }
+                    )
+                    return 2
+            evaluator.last_evaluation = selected.evaluation
             assert selected.evaluation.score is not None
             gate_decision = curriculum_manager.observe_gate(
                 version_id=selected.version.version_id,
@@ -1501,7 +1737,25 @@ def _run_real(
                         }
                     )
                     return 2
-            next_parent = gate_decision.parent_version_id
+            next_parent = (
+                selected.version.version_id
+                if config.run.iteration.planner_enabled
+                else gate_decision.parent_version_id
+            )
+            if config.run.iteration.planner_enabled:
+                state = ResearchState.load_or_create(
+                    research_state_path,
+                    max_bytes=config.run.context.research_state_max_bytes,
+                )
+                state.advance(
+                    search_parent_version_id=next_parent,
+                    exploration_debt=(
+                        0
+                        if next_parent != iteration_result.parent_version_id
+                        else state.exploration_debt
+                    ),
+                ).write(research_state_path)
+            sync_research_state()
             if gate_decision.kind == "stagnated":
                 writer.write(
                     "curriculum_stagnated",
@@ -1519,18 +1773,32 @@ def _run_real(
                         curriculum_manager.state.stagnation_count
                     ),
                 )
-                _json(
-                    {
-                        "run_dir": str(run_dir),
-                        "certified": False,
-                        "status": "stagnated",
-                        "active_target": (
+                if config.run.iteration.planner_enabled:
+                    resumed_parent = curriculum_manager.resume_after_stagnation()
+                    writer.write(
+                        "curriculum_resumed",
+                        version_id=next_parent,
+                        active_target=(
                             curriculum_manager.state.active_target
                         ),
-                        **controller.summary(),
-                    }
-                )
-                return 0
+                        stage_best_version_id=resumed_parent,
+                        stage_best_score=(
+                            curriculum_manager.state.stage_best_score
+                        ),
+                    )
+                else:
+                    _json(
+                        {
+                            "run_dir": str(run_dir),
+                            "certified": False,
+                            "status": "stagnated",
+                            "active_target": (
+                                curriculum_manager.state.active_target
+                            ),
+                            **controller.summary(),
+                        }
+                    )
+                    return 0
             if (
                 selected.evaluation.score
                 < config.run.evaluation.required_win_rate
@@ -1592,7 +1860,16 @@ def _run_real(
                     )
                 evaluator.last_evaluation = parent_evaluation
                 evaluations_by_version[next_parent] = parent_evaluation
+                sync_research_state()
                 continue
+            if controller.lineage.promote_champion(
+                selected.version.version_id
+            ):
+                writer.write(
+                    "champion_promoted",
+                    version_id=selected.version.version_id,
+                    score=selected.evaluation.score,
+                )
             writer.write(
                 "curriculum_stage_promoted",
                 version_id=selected.version.version_id,
@@ -1611,6 +1888,7 @@ def _run_real(
                     version_id=selected.version.version_id,
                     passing_human_opponents=summary.passing_opponents,
                 )
+                sync_research_state()
                 break
             active_target = certification_decision.next_target
             assert active_target is not None
@@ -1618,7 +1896,7 @@ def _run_real(
                 "curriculum_target_selected",
                 version_id=selected.version.version_id,
                 active_target=active_target,
-                active_target_rank=opponent_by_id[active_target].rank,
+                active_target_rank=empirical_rank(active_target),
                 locked_opponents=list(
                     curriculum_manager.state.locked_opponents
                 ),
@@ -1664,6 +1942,7 @@ def _run_real(
                 improved=True,
             )
             next_parent = selected.version.version_id
+            sync_research_state()
 
         _json(
             {

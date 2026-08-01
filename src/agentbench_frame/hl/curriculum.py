@@ -110,6 +110,33 @@ def select_weakest_failed(
     )
 
 
+def rerank_certification(
+    summary: CertificationSummary,
+    *,
+    hardest_to_easiest: Iterable[str],
+) -> CertificationSummary:
+    """Replace filename ranks with one frozen empirical Ghost order."""
+
+    order = tuple(str(opponent) for opponent in hardest_to_easiest)
+    expected = set(summary.pass_rates)
+    if len(order) != len(expected) or set(order) != expected:
+        raise ValueError("empirical order must contain every certified opponent once")
+    ranks = {opponent: index + 1 for index, opponent in enumerate(order)}
+    passed = tuple(
+        opponent for opponent in order if opponent in summary.passed_opponents
+    )
+    failed = tuple(
+        opponent for opponent in order if opponent in summary.failed_opponents
+    )
+    return CertificationSummary(
+        pass_rates=summary.pass_rates,
+        ranks=ranks,
+        passing_opponents=summary.passing_opponents,
+        passed_opponents=passed,
+        failed_opponents=failed,
+    )
+
+
 class CurriculumManager:
     """Own target, locked pool, safe stage origin, and stagnation state."""
 

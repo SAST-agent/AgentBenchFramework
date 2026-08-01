@@ -188,6 +188,28 @@ class HLEventTests(unittest.TestCase):
             self.assertEqual(event["event_type"], "experience_rebuilt")
             self.assertEqual(event["accepted_updates"], 0)
 
+    def test_reporting_panel_event_has_integer_cycle_and_dense_metrics(self):
+        from agentbench_frame.hl.events import HLEventWriter, read_events
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as directory:
+            path = f"{directory}/events.jsonl"
+            writer = HLEventWriter(path, run_id="run-k4")
+            writer.write(
+                "reporting_panel_completed",
+                iteration_id="iter-000003",
+                proposal_cycle=3,
+                version_id="v000012",
+                status="complete",
+                score=0.5,
+                mean_score_margin=-12.5,
+                matches=[],
+            )
+
+            event = read_events(path)[0]
+            self.assertEqual(event["proposal_cycle"], 3)
+            self.assertEqual(event["mean_score_margin"], -12.5)
+
 
 if __name__ == "__main__":
     unittest.main()

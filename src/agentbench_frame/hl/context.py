@@ -345,6 +345,132 @@ Act 预算：
 8. 只在 candidate workspace 内完成 `python -m py_compile ai.py` 和候选侧 smoke test，不搜索 Framework 命令。不要直接修改 Experience Skill；将四个字符串数组 stable_knowledge、failed_hypotheses、replay_evidence、active_questions 写入 workspace/.agentbench/experience_update.json，由 Framework 在候选测量完整通过后合并。
 """
 
+    def build_planner_prompt(
+        self,
+        *,
+        act_id: str,
+        iteration_id: str,
+        parent_version_id: str,
+        workspace: str | Path,
+        game_digest_path: str | Path,
+        research_state_path: str | Path,
+        replay_evidence: list[Mapping[str, Any]],
+        previous_measurements: Mapping[str, Any],
+        active_target: Optional[str] = None,
+    ) -> str:
+        evidence = json.dumps(
+            replay_evidence,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        measurements = json.dumps(
+            previous_measurements,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return f"""# Rollman HL hypothesis planner {act_id}
+
+proposal cycle: {iteration_id}
+common parent: {parent_version_id}
+active target: {active_target or "none"}
+
+只读输入：
+- compact game digest: {Path(game_digest_path).resolve()}
+- authoritative context manifest: {self.bundle.manifest_path}
+- explicit research state: {Path(research_state_path).resolve()}
+- candidate workspace: {Path(workspace).resolve()}
+- previous measurements: {measurements}
+- bounded replay evidence: {evidence}
+
+先读取 game digest、research state 和所有 evidence summary。只有诊断依赖精确规则语义时，才按 manifest 定点读取权威规则对应章节；不要求每轮完整重读静态长文。不得读取人类对手源码、其他 run 或其他候选版本。
+
+基于同一份证据，提出恰好 4 个机制上不同、可证伪的 Rollman 改进方向。禁止把同一机制的阈值、权重或参数变化伪装成四种方案；禁止 grid search。允许 if/else、路径规划、搜索、状态机、有限记忆和策略代码增长。
+
+将严格 JSON 数组写入 workspace/.agentbench/branch_briefs.json。每项必须且只能包含：branch_index（0..3）、diagnosis、mechanism、expected_change、falsifier。diagnosis 必须引用具体回放 level/round/事件。不要修改候选策略代码。
+"""
+
+    def build_candidate_prompt(
+        self,
+        *,
+        act_id: str,
+        branch_index: int,
+        branch_count: int,
+        parent_version_id: str,
+        workspace: str | Path,
+        game_digest_path: str | Path,
+        research_state_path: str | Path,
+        replay_evidence: list[Mapping[str, Any]],
+        previous_measurements: Mapping[str, Any],
+        experience_path: str | Path,
+        branch_brief: Mapping[str, Any],
+        active_target: Optional[str] = None,
+        locked_opponents: Sequence[str] = (),
+    ) -> str:
+        if int(branch_brief.get("branch_index", -1)) != branch_index:
+            raise ValueError("branch brief index does not match candidate branch")
+        base = self.build_prompt(
+            act_id=act_id,
+            branch_index=branch_index,
+            branch_count=branch_count,
+            parent_version_id=parent_version_id,
+            workspace=workspace,
+            replay_evidence=replay_evidence,
+            previous_measurements=previous_measurements,
+            experience_path=experience_path,
+            active_target=active_target,
+            locked_opponents=locked_opponents,
+        )
+        base = base.replace(
+            "- context manifest:",
+            f"- compact game digest: {Path(game_digest_path).resolve()}\n"
+            f"- explicit research state: {Path(research_state_path).resolve()}\n"
+            "- authoritative context manifest:",
+            1,
+        ).replace(
+            "1. 先阅读 context manifest 指向的规则、决策空间和 Replay Skill，再阅读 workspace 中的代码。",
+            "1. 先读取 compact game digest、research state、指定 evidence summary 和 workspace 代码；只有改动依赖精确规则语义时才按 manifest 定点核对权威章节，不要求每轮完整重读静态长文。",
+        )
+        brief = json.dumps(
+            dict(branch_brief),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return base + f"""
+
+本候选的唯一结构化 branch brief：{brief}
+必须实现并检验这个机制；不得改做其他分支，也不得只调整无证据参数。
+"""
+
+    def build_reducer_prompt(
+        self,
+        *,
+        act_id: str,
+        iteration_id: str,
+        selected_version_id: str,
+        workspace: str | Path,
+        game_digest_path: str | Path,
+        research_state_path: str | Path,
+        reducer_input_path: str | Path,
+    ) -> str:
+        return f"""# Rollman HL comparative reducer {act_id}
+
+proposal cycle: {iteration_id}
+selected search parent: {selected_version_id}
+
+只读输入：
+- compact game digest: {Path(game_digest_path).resolve()}
+- current research state: {Path(research_state_path).resolve()}
+- four-candidate factual packet: {Path(reducer_input_path).resolve()}
+- selected candidate workspace: {Path(workspace).resolve()}
+
+比较四个机制的实际比赛反馈。Framework 记录的分数、回放和测量高于模型推断；不得把没有证据的解释写成稳定知识。策略膨胀和局部 if/else 不构成失败理由。不得修改候选代码、版本指针、对手课程或认证结论。
+
+将严格 JSON 对象写入 workspace/.agentbench/research_state_update.json，必须且只能包含四个数组字段：stable_knowledge、failed_hypotheses、open_questions、recent_comparisons。前三项只能包含非空字符串；recent_comparisons 每项为简短对象。不得修改 proposal_cycle、search_parent、official_champion、active_target、locked_opponents 或 exploration_debt，这些字段由 Framework 根据事实维护。
+"""
+
 
 def write_checkpoint(
     path: str | Path,

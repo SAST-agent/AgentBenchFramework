@@ -253,6 +253,74 @@ def test_curriculum_prompt_rejects_evidence_from_another_opponent(tmp_path):
         )
 
 
+def test_k4_role_prompts_use_digest_research_state_and_exact_branch_brief(tmp_path):
+    from agentbench_frame.hl.context import ContextBundle, IterationContext
+
+    bundle = ContextBundle.create(
+        tmp_path / "bundle",
+        _digest_files(tmp_path / "assets"),
+    )
+    context = IterationContext(bundle)
+    digest = tmp_path / "game_digest.json"
+    research = tmp_path / "research_state.json"
+    reducer_input = tmp_path / "reducer_input.json"
+    for path in (digest, research, reducer_input):
+        path.write_text("{}\n", encoding="utf-8")
+    evidence = [{"opponent": "rank15", "summary": "summary.json"}]
+
+    planner = context.build_planner_prompt(
+        act_id="act-planner",
+        iteration_id="iter-000001",
+        parent_version_id="v000001",
+        workspace=tmp_path / "candidate",
+        game_digest_path=digest,
+        research_state_path=research,
+        replay_evidence=evidence,
+        previous_measurements={"score": 0.0},
+        active_target="rank15",
+    )
+    candidate = context.build_candidate_prompt(
+        act_id="act-b02",
+        branch_index=2,
+        branch_count=4,
+        parent_version_id="v000001",
+        workspace=tmp_path / "candidate",
+        game_digest_path=digest,
+        research_state_path=research,
+        replay_evidence=evidence,
+        previous_measurements={"score": 0.0},
+        experience_path=tmp_path / "experience" / "SKILL.md",
+        branch_brief={
+            "branch_index": 2,
+            "diagnosis": "round 12 entered a trap",
+            "mechanism": "time-expanded escape search",
+            "expected_change": "survive the junction",
+            "falsifier": "capture time does not improve",
+        },
+        active_target="rank15",
+    )
+    reducer = context.build_reducer_prompt(
+        act_id="act-reducer",
+        iteration_id="iter-000001",
+        selected_version_id="v000004",
+        workspace=tmp_path / "candidate",
+        game_digest_path=digest,
+        research_state_path=research,
+        reducer_input_path=reducer_input,
+    )
+
+    assert str(digest) in planner
+    assert str(research) in planner
+    assert "branch_briefs.json" in planner
+    assert "恰好 4" in planner
+    assert "time-expanded escape search" in candidate
+    assert "候选 3/4" in candidate
+    assert "完整重读" in candidate
+    assert str(reducer_input) in reducer
+    assert "research_state_update.json" in reducer
+    assert "不得修改" in reducer
+
+
 def test_bootstrap_prompt_creates_interpretable_origin_without_fake_replay(tmp_path):
     from agentbench_frame.hl.context import ContextBundle, IterationContext
 

@@ -302,3 +302,109 @@ def test_report_writes_curriculum_csv_and_curve_fields(tmp_path):
     assert rows[1]["target_gate_score"] == "0.5"
     assert rows[1]["passing_human_opponents"] == "15"
     assert rows[1]["full_pool_win_rate"] == "0.9"
+
+
+def test_k4_report_uses_proposal_cycle_as_integer_x_and_keeps_four_branches(
+    tmp_path,
+):
+    from agentbench_frame.hl.report import (
+        derive_branch_rows,
+        derive_curve_rows,
+        write_hl_report,
+    )
+
+    events = [
+        {
+            "event_type": "version_created",
+            "version_id": "v0",
+            "act_id": "bootstrap",
+            "evaluation_status": "complete",
+            "benchmark_score": 0.0,
+        },
+        {
+            "event_type": "candidate_selected",
+            "iteration_id": "iter-000000",
+            "version_id": "v0",
+            "act_id": "bootstrap",
+        },
+        *[
+            {
+                "event_type": "version_created",
+                "version_id": f"v{index}",
+                "act_id": f"act-b{index - 1}",
+                "evaluation_status": "complete",
+                "benchmark_score": score,
+            }
+            for index, score in enumerate((0.1, 0.0, 0.2, 0.0), start=1)
+        ],
+        *[
+            {
+                "event_type": "evaluation_completed",
+                "version_id": f"v{index}",
+                "status": "complete",
+                "benchmark_score": score,
+                "wins": int(score > 0),
+                "draws": 0,
+                "losses": int(score == 0),
+                "matches": [
+                    {
+                        "status": "complete",
+                        "result": "win" if score > 0 else "loss",
+                        "rollman_score": 10 * index,
+                        "ghosts_score": 50,
+                    }
+                ],
+            }
+            for index, score in enumerate((0.1, 0.0, 0.2, 0.0), start=1)
+        ],
+        *[
+            {
+                "event_type": "policy_kl_measured",
+                "version_id": f"v{index}",
+                "local_policy_kl_trace": [0.1 * index],
+            }
+            for index in range(1, 5)
+        ],
+        {
+            "event_type": "search_parent_selected",
+            "iteration_id": "iter-000001",
+            "version_id": "v3",
+            "act_id": "act-b2",
+        },
+        {
+            "event_type": "reporting_panel_completed",
+            "iteration_id": "iter-000001",
+            "proposal_cycle": 1,
+            "version_id": "v3",
+            "status": "complete",
+            "score": 0.625,
+            "mean_score_margin": 14.0,
+            "matches": [
+                {"status": "complete", "result": "win"},
+                {"status": "complete", "result": "loss"},
+            ],
+        },
+        {
+            "event_type": "proposal_cycle_completed",
+            "iteration_id": "iter-000001",
+            "parent_version_id": "v0",
+            "selected_version_id": "v3",
+            "candidate_version_ids": ["v1", "v2", "v3", "v4"],
+        },
+    ]
+
+    rows = derive_curve_rows(events)
+    branches = derive_branch_rows(events)
+
+    assert [row["iteration"] for row in rows] == [0, 1]
+    assert rows[1]["version_id"] == "v3"
+    assert rows[1]["full_pool_win_rate"] == 0.625
+    assert rows[1]["mean_score_margin"] == 14.0
+    assert len(branches) == 4
+    assert {row["iteration"] for row in branches} == {1}
+    assert {row["branch_index"] for row in branches} == {0, 1, 2, 3}
+
+    outputs = write_hl_report(events, tmp_path)
+    assert outputs["branches_csv"].is_file()
+    svg = outputs["curves_svg"].read_text(encoding="utf-8")
+    assert "Score Margin vs HL Iteration" in svg
