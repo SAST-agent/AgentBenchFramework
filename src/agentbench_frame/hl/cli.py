@@ -630,16 +630,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if args.dry_run:
         _json(_dry_run(config, run_dir=run_dir, workspace=workspace))
         return 0
-    if args.acts == 0 and config.run.origin.mode != "imported_version":
-        print(
-            "run --acts 0 requires origin.mode=imported_version",
-            file=sys.stderr,
-        )
-        return 2
-    provider_environment = (
-        None if args.acts == 0 else _provider_environment(config)
+    needs_provider = (
+        args.acts != 0 or config.run.origin.mode == "model_bootstrap"
     )
-    if args.acts != 0 and provider_environment is None:
+    provider_environment = (
+        _provider_environment(config) if needs_provider else None
+    )
+    if needs_provider and provider_environment is None:
         print(
             f"missing provider credential: {config.run.provider.env_key}",
             file=sys.stderr,

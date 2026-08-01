@@ -337,3 +337,44 @@ def test_imported_run_accepts_zero_acts_without_provider_credential(
     assert code == 0
     assert calls[0]["acts"] == 0
     assert calls[0]["provider_environment"] is None
+
+
+def test_model_bootstrap_run_accepts_zero_proposal_cycles_with_provider(
+    tmp_path, monkeypatch
+):
+    from agentbench_frame.hl import cli
+    from agentbench_frame.hl.local_config import LocalHLConfig
+
+    config = LocalHLConfig.load(CONFIG)
+    calls = []
+    monkeypatch.setattr(cli, "_load", lambda _path: config)
+    monkeypatch.setattr(
+        cli,
+        "_provider_environment",
+        lambda _config: {"AGENTBENCH_API_KEY": "runtime-value"},
+    )
+    monkeypatch.setattr(
+        cli,
+        "_run_real",
+        lambda *args, **kwargs: calls.append(kwargs) or 0,
+    )
+
+    code = cli.main(
+        [
+            "run",
+            "--config",
+            str(CONFIG),
+            "--run-dir",
+            str(tmp_path / "run"),
+            "--workspace",
+            str(tmp_path / "candidate"),
+            "--acts",
+            "0",
+        ]
+    )
+
+    assert code == 0
+    assert calls[0]["acts"] == 0
+    assert calls[0]["provider_environment"] == {
+        "AGENTBENCH_API_KEY": "runtime-value"
+    }
