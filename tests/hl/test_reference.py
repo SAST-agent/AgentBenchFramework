@@ -128,3 +128,94 @@ def test_reference_state_set_id_matches_spec(tmp_path):
     )
     rss = ReferenceStateSet(spec_id="bench-v1", samples=[rs])
     assert rss.spec_id == "bench-v1"
+
+
+def test_reference_sample_transcript_roundtrip(tmp_path):
+    """A sample captured from a recorded roll carries the ordered judger→AI
+    frame transcript from the `id` frame through the decision-point
+    `roundbegin` (inclusive), and its decision-point fields come FROM that
+    `roundbegin` frame. save→load preserves transcript + decision fields."""
+    # A 3-frame seat-0 transcript: id, off-turn see notification, roundbegin
+    # decision point. The decision-point fields are taken FROM this roundbegin.
+    id_frame = {"type": "id", "id": 0, "birth_pos": [0, 0]}
+    see_frame = {"type": "see", "player": 0, "round": 1,
+                 "see": [{"pos": [1, 2], "type": "Box"}]}
+    roundbegin = {
+        "type": "roundbegin", "round": 1, "inturn": 0, "status": 0,
+        "state": [0, 0, 1], "hp": 3, "keys": 0,
+        "attack": [1], "move": [True, False, False, False,
+                                False, False, False, False],
+        "detect": True, "interprops": ["KeyMachine"],
+        "tools": {"LandMine": [2, 1], "Sticky": [1, 0], "Kit": 1, "Transport": 0},
+    }
+    transcript = (id_frame, see_frame, roundbegin)
+
+    # decision-point fields are projected from the roundbegin frame
+    legal_actions = {
+        "attack": roundbegin["attack"],
+        "move": roundbegin["move"],
+        "detect": roundbegin["detect"],
+        "interprops": roundbegin["interprops"],
+    }
+    inventory = {"LandMine": 1, "Sticky": 1, "Transport": 0, "Kit": 1}
+
+    rs = ReferenceSample(
+        observation=dict(roundbegin),
+        legal_actions=legal_actions,
+        inventory=inventory,
+        status=int(roundbegin["status"]),
+        seat=0,
+        opponent="rank01",
+        transcript=transcript,
+    )
+    rss = ReferenceStateSet(spec_id="bench-v1", samples=[rs])
+    path = tmp_path / "nu.json"
+    rss.save(path)
+    loaded = ReferenceStateSet.load(path)
+    assert len(loaded.samples) == 1
+    s = loaded.samples[0]
+
+    # transcript preserved: same length, same dicts, same order
+    assert len(s.transcript) == 3
+    assert s.transcript == transcript
+    assert s.transcript[0] == id_frame
+    assert s.transcript[1] == see_frame
+    assert s.transcript[2] == roundbegin
+    # decision-point fields match the roundbegin frame
+    assert s.legal_actions == legal_actions
+    assert s.status == roundbegin["status"]
+    assert s.inventory == inventory
+
+
+def test_missing_transcript_raises_not_silent(tmp_path):
+    """A legacy single-frame ν (transcript=()) is still a valid data carrier:
+    the bare constructor and from_dict MUST accept it (unit fixtures rely on
+    this). The probe-side fail-fast rejection is added in §3, not here.
+
+    TODO(§3): the probe's `probe_one` MUST raise `ReferenceSampleError`
+    mentioning "re-record" when handed an empty transcript. That contract is
+    tested in tests/hl/test_probe.py via the §3 work — NOT in §1.
+    """
+    rs = ReferenceSample(
+        observation={"round": 1},
+        legal_actions={"attack": [], "move": [False] * 8,
+                       "detect": False, "interprops": []},
+        inventory={"LandMine": 0, "Sticky": 0, "Transport": 0, "Kit": 0},
+        status=0, seat=0, opponent="rank01",
+        transcript=(),
+    )
+    # bare constructor accepts empty transcript
+    assert rs.transcript == ()
+
+    # from_dict round-trips an empty transcript to ()
+    d = rs.to_dict()
+    assert d["transcript"] == []
+    rs2 = ReferenceSample.from_dict(d)
+    assert rs2.transcript == ()
+
+    # save→load preserves emptiness
+    rss = ReferenceStateSet(spec_id="bench-v1", samples=[rs])
+    path = tmp_path / "nu.json"
+    rss.save(path)
+    loaded = ReferenceStateSet.load(path)
+    assert loaded.samples[0].transcript == ()

@@ -40,13 +40,23 @@ class BenchmarkSpec:
 
 @dataclass(frozen=True)
 class ReferenceSample:
-    """One decision point captured for the reference set."""
+    """One decision point captured for the reference set.
+
+    Carries the ordered judger→AI frame transcript from the ``id`` frame
+    through the decision-point ``roundbegin`` (inclusive) — recorded from a
+    real game so the probe can replay the candidate's world model faithfully
+    (spec: "Reference sample carries the full frame transcript"). The probe
+    boundary enforces non-empty transcript (§3); the dataclass itself stays
+    a dumb carrier and accepts ``transcript=()`` so legacy unit fixtures and
+    ``reference_seed.py`` still construct.
+    """
     observation: Dict[str, Any]
     legal_actions: Dict[str, Any]   # the get_legal_actions() dict
     inventory: Dict[str, int]
     status: int
     seat: int
     opponent: str
+    transcript: Tuple[Dict[str, Any], ...] = ()
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -56,10 +66,12 @@ class ReferenceSample:
             "status": self.status,
             "seat": self.seat,
             "opponent": self.opponent,
+            "transcript": [dict(f) for f in self.transcript],
         }
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "ReferenceSample":
+        transcript = tuple(dict(f) for f in (d.get("transcript") or ()))
         return cls(
             observation=dict(d["observation"]),
             legal_actions=dict(d["legal_actions"]),
@@ -67,6 +79,7 @@ class ReferenceSample:
             status=int(d["status"]),
             seat=int(d["seat"]),
             opponent=str(d["opponent"]),
+            transcript=transcript,
         )
 
 
