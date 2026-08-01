@@ -71,8 +71,9 @@ def _mean(values: Any) -> float | None:
 def _fixed_pool_elo(matches: Any) -> float | None:
     """Order-invariant Elo estimate against fixed 1500 anchors.
 
-    Jeffreys smoothing keeps all-win/all-loss panels finite while preserving
-    comparability when reporting panels contain different numbers of games.
+    The empirical score is transformed through the standard Elo logistic
+    inverse.  Only exact 0/1 panels are clipped by half a game so finite values
+    remain available without shrinking every smaller panel toward 1500.
     """
 
     if not isinstance(matches, list) or not matches:
@@ -92,7 +93,11 @@ def _fixed_pool_elo(matches: Any) -> float | None:
         games += 1
     if not games:
         return None
-    probability = (score + 0.5) / (games + 1.0)
+    probability = score / games
+    if probability <= 0.0:
+        probability = 0.5 / (games + 1.0)
+    elif probability >= 1.0:
+        probability = 1.0 - 0.5 / (games + 1.0)
     return 1500.0 + 400.0 * math.log10(
         probability / (1.0 - probability)
     )
