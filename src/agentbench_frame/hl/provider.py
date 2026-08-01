@@ -338,6 +338,7 @@ class CodexSessionProvider:
                 self.run_root / "matches",
                 self.run_root / "measurement",
                 self.run_root / "proposals",
+                self.run_root / "distillation",
                 self.run_root / "research_state.json",
             )
         )
