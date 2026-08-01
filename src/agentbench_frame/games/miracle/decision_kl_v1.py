@@ -74,7 +74,10 @@ def _strict_nonnegative_number(value: Any, label: str) -> float:
 
 @dataclass(frozen=True, slots=True)
 class DecisionKLEvidence:
-    """Raw decision evidence from which trajectory KL must be recomputed."""
+    """Synthetic inputs from which mechanism-only KL must be recomputed.
+
+    This structure carries no issuer-bound policy or occupancy provenance.
+    """
 
     decision_step: int
     state_before: Mapping[str, Any]
@@ -159,7 +162,7 @@ class DecisionKLRecord:
 
 @dataclass(frozen=True)
 class TrajectoryKLSummary:
-    """Arithmetic-mean trajectory value plus diagnostic-only aggregates."""
+    """Fake-only arithmetic-mean result plus diagnostic-only aggregates."""
 
     status: str
     trajectory_kl: float | None
@@ -175,8 +178,24 @@ class TrajectoryKLSummary:
     smoothing: str = SMOOTHING
     log_base: str = "e"
     unit: str = UNIT
-    rollout_source: str = ROLLOUT_SOURCE
+    evidence_scope: str = "synthetic_fake_only"
+    authoritative_readiness: bool = False
+    rollout_source_contract: str = ROLLOUT_SOURCE
+    verified_rollout_source: None = None
+    policy_binding_verified: bool = False
     aggregation: str = "arithmetic_mean"
+
+    def __post_init__(self) -> None:
+        if self.evidence_scope != "synthetic_fake_only":
+            raise ValueError("trajectory KL evidence scope must remain fake-only")
+        if self.authoritative_readiness is not False:
+            raise ValueError("mechanism-only trajectory KL is not authoritative")
+        if self.rollout_source_contract != ROLLOUT_SOURCE:
+            raise ValueError("trajectory KL rollout contract identity is invalid")
+        if self.verified_rollout_source is not None:
+            raise ValueError("trajectory KL does not verify rollout provenance")
+        if self.policy_binding_verified is not False:
+            raise ValueError("trajectory KL does not verify policy binding")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -194,7 +213,11 @@ class TrajectoryKLSummary:
             "smoothing": self.smoothing,
             "log_base": self.log_base,
             "unit": self.unit,
-            "rollout_source": self.rollout_source,
+            "evidence_scope": self.evidence_scope,
+            "authoritative_readiness": self.authoritative_readiness,
+            "rollout_source_contract": self.rollout_source_contract,
+            "verified_rollout_source": self.verified_rollout_source,
+            "policy_binding_verified": self.policy_binding_verified,
             "aggregation": self.aggregation,
         }
 
@@ -433,7 +456,7 @@ def _missing_summary(
 def compute_trajectory_kl(
     evidence: Sequence[DecisionKLEvidence],
 ) -> TrajectoryKLSummary:
-    """Recompute and aggregate trusted local KL from raw decision evidence."""
+    """Recompute fake-only local KL without asserting policy provenance."""
 
     if not isinstance(evidence, Sequence) or isinstance(evidence, (str, bytes)):
         raise TypeError("evidence must be a sequence")

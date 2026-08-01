@@ -83,6 +83,13 @@ checks the supplied identity, and recomputes local KL before aggregation.
 record, mapping, uploaded scalar, `local_kl`, `reported_local_kl`, or a
 decision-change value to the trajectory API is rejected.
 
+`TrajectoryKLSummary` labels this boundary in every machine-readable output:
+`evidence_scope=synthetic_fake_only`, `authoritative_readiness=false`,
+`verified_rollout_source=null`, and `policy_binding_verified=false`.
+`rollout_source_contract=new_policy` records only the target contract; it is
+not a claim that the supplied states came from verified new-policy occupancy.
+The ambiguous `rollout_source` evidence field is therefore not emitted.
+
 Expected domain unavailability is represented by a JSON-safe, enumerated
 reason and a null trace position. This includes non-finite ActionSupport,
 missing or extra distribution actions, invalid probability values, invalid

@@ -25,6 +25,10 @@ production allowlist digest
 Production approvals are empty. Ordinary run data cannot add an approval.
 Tests may temporarily inject a fake digest in test scope only.
 
+Preflight reads bounded manifest bytes, computes their SHA-256, and rejects an
+unapproved digest before UTF-8 decoding, JSON parsing, or canonicalization.
+Only independently approved bytes reach the manifest parser.
+
 `preflight_replay_reading()` accepts only `role=train`. A validation or test
 artifact remains forbidden even if its file is renamed. Both manifest and
 replay must be canonical UTF-8 JSON without BOM, extra fields, NaN, Infinity,

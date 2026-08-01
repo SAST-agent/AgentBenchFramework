@@ -246,6 +246,31 @@ def test_open_rechecks_independent_approval_and_manifest_bytes(tmp_path, monkeyp
     assert root.exists()
 
 
+def test_unapproved_manifest_is_rejected_before_json_parsing(tmp_path, monkeypatch):
+    root, manifest_path, _, _, _, _ = artifact_fixture(tmp_path)
+    manifest_path.write_bytes(b'{' + b'"nested":[' * 2000 + b']' * 2000 + b'}')
+    monkeypatch.setattr(replay, "APPROVED_TRAINING_REPLAY_MANIFESTS", frozenset())
+    calls = []
+
+    def reject_parser(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise AssertionError("unapproved bytes reached JSON parsing")
+
+    monkeypatch.setattr(replay, "_strict_object_bytes", reject_parser)
+    with pytest.raises(ValueError, match="approved"):
+        replay.preflight_replay_reading(manifest_path, approved_root=root)
+    assert calls == []
+
+
+def test_approved_deep_manifest_recursion_fails_closed(tmp_path, monkeypatch):
+    root, manifest_path, _, _, _, _ = artifact_fixture(tmp_path)
+    payload = b'{"nested":' + b'[' * 2000 + b'0' + b']' * 2000 + b'}'
+    manifest_path.write_bytes(payload)
+    approve(monkeypatch, hashlib.sha256(payload).hexdigest())
+    with pytest.raises(ValueError, match="canonical|JSON"):
+        replay.preflight_replay_reading(manifest_path, approved_root=root)
+
+
 def test_valid_chosen_action_replacement_still_breaks_replay_sha(tmp_path, monkeypatch):
     (root, _, replay_path, _, document, _), context = approved_context(tmp_path, monkeypatch)
     document["decision_frames"][0]["chosen_action"] = document["decision_frames"][0]["action_support"]["actions"][1]

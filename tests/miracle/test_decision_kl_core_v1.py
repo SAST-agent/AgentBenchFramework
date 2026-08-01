@@ -1,6 +1,7 @@
 import inspect
 import json
 import math
+from dataclasses import replace
 
 import pytest
 
@@ -601,7 +602,35 @@ def test_empty_trajectory_is_incomplete_and_finite_trace_uses_arithmetic_mean():
     assert summary.trajectory_kl == pytest.approx(0.005)
     assert summary.sum_local_kl == pytest.approx(0.01)
     assert summary.unit == "nats / decision"
-    assert summary.rollout_source == "new_policy"
+    assert summary.rollout_source_contract == "new_policy"
+
+
+def test_summary_machine_readably_stays_fake_only_and_unverified():
+    summary = kl.compute_trajectory_kl([trajectory_evidence(0.0)])
+    payload = summary.to_dict()
+
+    assert payload["evidence_scope"] == "synthetic_fake_only"
+    assert payload["authoritative_readiness"] is False
+    assert payload["rollout_source_contract"] == "new_policy"
+    assert payload["verified_rollout_source"] is None
+    assert payload["policy_binding_verified"] is False
+    assert "rollout_source" not in payload
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("evidence_scope", "authoritative"),
+        ("authoritative_readiness", True),
+        ("rollout_source_contract", "old_policy"),
+        ("verified_rollout_source", "new_policy"),
+        ("policy_binding_verified", True),
+    ],
+)
+def test_summary_fake_only_boundary_cannot_be_overridden(field, value):
+    summary = kl.compute_trajectory_kl([trajectory_evidence(0.0)])
+    with pytest.raises(ValueError):
+        replace(summary, **{field: value})
 
 
 @pytest.mark.parametrize(

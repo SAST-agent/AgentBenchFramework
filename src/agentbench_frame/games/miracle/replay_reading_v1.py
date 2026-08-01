@@ -142,13 +142,18 @@ def _strict_object_bytes(payload: bytes, label: str) -> dict[str, Any]:
                 ValueError(f"non-standard JSON number {token}")
             ),
         )
-    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+    except (
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        RecursionError,
+        ValueError,
+    ) as exc:
         raise ValueError(f"{label} must be strict canonical JSON") from exc
     if not isinstance(value, dict):
         raise ValueError(f"{label} must be a JSON object")
     try:
         canonical = canonical_replay_json_bytes(value)
-    except (TypeError, ValueError) as exc:
+    except (RecursionError, TypeError, ValueError) as exc:
         raise ValueError(f"{label} contains invalid JSON data") from exc
     if payload != canonical:
         raise ValueError(f"{label} is not canonical JSON")
@@ -860,10 +865,10 @@ def _read_and_validate(
         )
         if expected_bytes is not None and manifest_bytes != expected_bytes:
             raise ValueError("manifest bytes changed after preflight")
-        manifest = _strict_object_bytes(manifest_bytes, "replay manifest")
         digest = hashlib.sha256(manifest_bytes).hexdigest()
         if digest not in APPROVED_TRAINING_REPLAY_MANIFESTS:
             raise ValueError("replay manifest is not independently approved")
+        manifest = _strict_object_bytes(manifest_bytes, "replay manifest")
         fields = {
             "schema_version", "replay_artifact_path", "replay_sha256", "match_plan_sha256",
             "case_identity", "role", "seeds", "acting_policy", "champion",
