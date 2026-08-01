@@ -113,6 +113,40 @@ def test_k_candidates_are_siblings_and_gate_selects_best_complete_score(tmp_path
     assert "branch=0/3" in checkpoint.read_text(encoding="utf-8")
 
 
+def test_stream_failed_bootstrap_can_be_recovered_without_second_provider_call(
+    tmp_path,
+):
+    from agentbench_frame.hl.events import read_events
+
+    provider = FakeProvider([])
+    controller = _controller(
+        tmp_path,
+        provider,
+        FakeEvaluator([0.25]),
+    )
+    (controller.workspace / "agent.py").write_text(
+        "VALUE = 99\n", encoding="utf-8"
+    )
+
+    version = controller.recover_bootstrap(
+        failed_act_id="act-000001-b00",
+        raw_output_ref=str(tmp_path / "provider" / "failed.jsonl"),
+        failure_reason="provider_stream_disconnected_after_workspace_edit",
+    )
+
+    assert provider.calls == []
+    assert controller.lineage.lineage_head_version_id == version.version_id
+    assert controller.lineage.champion_version_id == version.version_id
+    events = read_events(tmp_path / "events.jsonl")
+    recovered = [
+        event
+        for event in events
+        if event["event_type"] == "bootstrap_recovered"
+    ][0]
+    assert recovered["failed_act_id"] == "act-000001-b00"
+    assert recovered["version_id"] == version.version_id
+
+
 def test_equal_win_rates_select_better_score_margin_instead_of_first_branch(tmp_path):
     from agentbench_frame.hl.evaluator import CandidateEvaluation
 

@@ -49,6 +49,7 @@ KNOWN_EVENT_TYPES = frozenset(
         "reducer_completed",
         "proposal_cycle_completed",
         "reporting_panel_completed",
+        "bootstrap_recovered",
     }
 )
 _SECRET_KEYS = frozenset({"api_key", "authorization", "access_token", "secret"})
@@ -202,6 +203,16 @@ _EVENT_FIELDS = {
             "score",
             "mean_score_margin",
             "matches",
+        },
+        set(),
+    ),
+    "bootstrap_recovered": (
+        {
+            "failed_act_id",
+            "raw_output_ref",
+            "failure_reason",
+            "version_id",
+            "content_hash",
         },
         set(),
     ),

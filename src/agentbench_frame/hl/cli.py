@@ -832,6 +832,39 @@ def _run_real(
     )
     events_path = run_dir / "events.jsonl"
     historical = read_events(events_path)
+    failed_bootstrap_event = next(
+        (
+            event
+            for event in reversed(historical)
+            if event.get("event_type") == "act_completed"
+            and event.get("act_id") == "act-000001-b00"
+            and event.get("status") == "failed"
+        ),
+        None,
+    )
+    bootstrap_recovery: dict[str, Any] | None = None
+    if (
+        resume
+        and failed_bootstrap_event is not None
+        and not any(
+            event.get("event_type") == "version_created"
+            for event in historical
+        )
+    ):
+        raw_ref = failed_bootstrap_event.get("raw_output_ref")
+        raw_path = None if raw_ref is None else Path(str(raw_ref))
+        if (
+            raw_path is not None
+            and raw_path.is_file()
+            and (workspace / "ai.py").is_file()
+            and "stream disconnected before completion"
+            in raw_path.read_text(encoding="utf-8")
+        ):
+            bootstrap_recovery = {
+                "failed_act_id": str(failed_bootstrap_event["act_id"]),
+                "raw_output_ref": str(raw_path),
+                "failure_reason": "provider_stream_disconnected_after_workspace_edit",
+            }
     lineage = (
         LineageManager.from_events(
             historical,
@@ -1242,7 +1275,7 @@ def _run_real(
             and event.get("reason") == "all_human_opponents_defeated"
             for event in historical
         )
-        if resume:
+        if resume and bootstrap_recovery is None:
             controller.resume(historical)
             curriculum_manager = CurriculumManager.from_events(
                 historical,
@@ -1431,7 +1464,9 @@ def _run_real(
                     evaluator.last_evaluation
                 )
         else:
-            if config.run.origin.mode == "imported_version":
+            if bootstrap_recovery is not None:
+                origin = controller.recover_bootstrap(**bootstrap_recovery)
+            elif config.run.origin.mode == "imported_version":
                 assert config.run.origin.source_run is not None
                 assert config.run.origin.source_version is not None
                 origin = controller.initialize_imported(

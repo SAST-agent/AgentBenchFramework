@@ -245,6 +245,56 @@ class HLController:
         self._started = True
         return result
 
+    def recover_bootstrap(
+        self,
+        *,
+        failed_act_id: str,
+        raw_output_ref: str,
+        failure_reason: str,
+    ) -> Version:
+        """Adopt a fully materialized bootstrap after a terminal stream failure."""
+
+        if self._started:
+            raise RuntimeError("controller already initialized")
+        if not any(path.is_file() for path in self.workspace.iterdir()):
+            raise ValueError("recovered bootstrap workspace is empty")
+        version = self.version_store.snapshot(
+            parent_version_id=None,
+            act_id=f"{failed_act_id}-recovered",
+            edit_type="recovered_bootstrap",
+        )
+        evaluation = self.evaluator.evaluate(version)
+        self.lineage.record_evaluation(
+            version.version_id,
+            parent_version_id=None,
+            status=evaluation.status,
+            score=evaluation.score,
+        )
+        self._write_version_event(version, evaluation, selected=True)
+        self.events.write(
+            "candidate_selected",
+            iteration_id="iter-000000",
+            version_id=version.version_id,
+            act_id=version.act_id,
+        )
+        self.events.write(
+            "bootstrap_recovered",
+            failed_act_id=failed_act_id,
+            raw_output_ref=raw_output_ref,
+            failure_reason=failure_reason,
+            version_id=version.version_id,
+            content_hash=version.content_hash,
+        )
+        if evaluation.status == "complete":
+            self.events.write(
+                "champion_promoted",
+                version_id=version.version_id,
+                score=evaluation.score,
+            )
+        self._coding_agent_acts = 1
+        self._started = True
+        return version
+
     def initialize_imported(
         self,
         *,
