@@ -997,7 +997,7 @@ def _run_real(
         RollmanMeasurementRunner,
     )
     from agentbench_frame.games.rollman.state_tracker import FrozenStateTracker
-    from agentbench_frame.hl.codebase import VersionStore
+    from agentbench_frame.hl.codebase import Version, VersionStore
     from agentbench_frame.hl.context import IterationContext, compile_game_digest
     from agentbench_frame.hl.controller import HLController
     from agentbench_frame.hl.curriculum import (
@@ -1086,24 +1086,32 @@ def _run_real(
         ),
         cwd=logic_root,
     )
-    candidate_factory = lambda version: ProcessSpec(
-        argv=(
-            sys.executable,
-            str(Path(candidate_runner).resolve()),
-            "--workspace",
-            str(workspace),
-            "--sdk-root",
-            str(config.paths.pacman_sdk_root),
-        ),
-        cwd=workspace,
-        untrusted=True,
-        read_roots=(
-            workspace,
-            config.paths.pacman_sdk_root,
-            Path(candidate_runner).resolve().parents[3],
-        ),
-        denied_paths=(config.source_path.parents[2] / ".env",),
-    )
+    def candidate_factory(version: Version) -> ProcessSpec:
+        snapshot_workspace = (
+            run_dir / "versions" / "objects" / version.content_hash
+        )
+        if not snapshot_workspace.is_dir():
+            raise FileNotFoundError(
+                f"missing candidate snapshot object: {version.content_hash}"
+            )
+        return ProcessSpec(
+            argv=(
+                sys.executable,
+                str(Path(candidate_runner).resolve()),
+                "--workspace",
+                str(snapshot_workspace),
+                "--sdk-root",
+                str(config.paths.pacman_sdk_root),
+            ),
+            cwd=snapshot_workspace,
+            untrusted=True,
+            read_roots=(
+                snapshot_workspace,
+                config.paths.pacman_sdk_root,
+                Path(candidate_runner).resolve().parents[3],
+            ),
+            denied_paths=(config.source_path.parents[2] / ".env",),
+        )
     evaluator = RollmanEvaluator(
         logic=logic,
         candidate_factory=candidate_factory,

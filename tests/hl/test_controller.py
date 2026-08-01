@@ -196,9 +196,11 @@ def test_staged_k4_evaluation_gives_all_quick_feedback_and_only_two_finalists(tm
     from agentbench_frame.hl.lineage import LineageManager
 
     class StagedEvaluator:
-        def __init__(self):
+        def __init__(self, workspace):
+            self.workspace = workspace
             self.quick_calls = []
             self.finalist_calls = []
+            self.finalist_workspace_values = {}
 
         def quick_screen(self, version):
             self.quick_calls.append(version.version_id)
@@ -222,6 +224,12 @@ def test_staged_k4_evaluation_gives_all_quick_feedback_and_only_two_finalists(tm
 
         def evaluate_finalist(self, version):
             self.finalist_calls.append(version.version_id)
+            value = int(
+                (self.workspace / "agent.py")
+                .read_text(encoding="utf-8")
+                .split("=")[1]
+            )
+            self.finalist_workspace_values[version.version_id] = value
             win = version.version_id == "v000002"
             return CandidateEvaluation(
                 status="complete",
@@ -249,7 +257,7 @@ def test_staged_k4_evaluation_gives_all_quick_feedback_and_only_two_finalists(tm
             return CandidateEvaluation(status="complete", score=points, matches=matches)
 
     workspace = _workspace(tmp_path)
-    evaluator = StagedEvaluator()
+    evaluator = StagedEvaluator(workspace)
     controller = HLController(
         workspace=workspace,
         run_root=tmp_path,
@@ -275,6 +283,10 @@ def test_staged_k4_evaluation_gives_all_quick_feedback_and_only_two_finalists(tm
 
     assert len(evaluator.quick_calls) == 4
     assert set(evaluator.finalist_calls) == {"v000002", "v000003"}
+    assert evaluator.finalist_workspace_values == {
+        "v000002": 2,
+        "v000003": 3,
+    }
     assert len(result.finalists) == 2
     assert result.selected.version.version_id == "v000002"
     assert len(result.selected.evaluation.matches) == 2

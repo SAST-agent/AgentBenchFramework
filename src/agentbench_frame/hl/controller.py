@@ -695,6 +695,7 @@ class HLController:
                 if result.version.version_id not in finalist_ids:
                     updated_results.append(result)
                     continue
+                self.version_store.checkout(result.version.version_id)
                 finalist_evaluation = self.evaluator.evaluate_finalist(
                     result.version
                 )
