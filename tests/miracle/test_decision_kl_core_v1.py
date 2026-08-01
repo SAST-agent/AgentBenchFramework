@@ -416,6 +416,67 @@ def test_trajectory_evidence_schema_has_no_self_reported_scalar_input():
             kl.compute_trajectory_kl([{**payload, forbidden: 0.0}])
 
 
+def test_decision_evidence_recursively_snapshots_all_caller_owned_mappings():
+    state = empty_observation()
+    state["snapshot_probe"] = {"items": ["before", {"nested": "before"}]}
+    support = kl.build_trusted_action_support(state)
+    supplied_identity = identity(support)
+    first, second = support.action_ids
+    old_distribution = {first: 0.5, second: 0.5}
+    new_distribution = {first: 0.5, second: 0.5}
+    evidence = kl.DecisionKLEvidence(
+        decision_step=1,
+        state_before=state,
+        support_identity=supplied_identity,
+        old_distribution=old_distribution,
+        new_distribution=new_distribution,
+    )
+
+    state["snapshot_probe"]["items"][1]["nested"] = "after"
+    state["snapshot_probe"]["items"].append("after")
+    supplied_identity["action_ids"].reverse()
+    supplied_identity["support_id"] = "0" * 64
+    old_distribution[first], old_distribution[second] = 1.0, 0.0
+    new_distribution[first], new_distribution[second] = 0.0, 1.0
+
+    assert evidence.state_before["snapshot_probe"]["items"] == (
+        "before",
+        {"nested": "before"},
+    )
+    assert evidence.support_identity["support_id"] == support.support_id
+    assert evidence.support_identity["action_ids"] == support.action_ids
+    assert dict(evidence.old_distribution) == {first: 0.5, second: 0.5}
+    assert dict(evidence.new_distribution) == {first: 0.5, second: 0.5}
+    with pytest.raises(TypeError):
+        evidence.state_before["snapshot_probe"]["items"][1]["nested"] = "mutated"
+    with pytest.raises(AttributeError):
+        evidence.support_identity["action_ids"].append("forged")
+    with pytest.raises(TypeError):
+        evidence.old_distribution[first] = 1.0
+    with pytest.raises(TypeError):
+        evidence.new_distribution[first] = 0.0
+
+    summary = kl.compute_trajectory_kl([evidence])
+    assert summary.status == "complete"
+    assert summary.trajectory_kl == 0.0
+    json.dumps(summary.to_dict(), allow_nan=False)
+
+
+def test_decision_evidence_rejects_arbitrary_nested_objects():
+    state = empty_observation()
+    state["unsupported"] = object()
+    support = kl.build_trusted_action_support(empty_observation())
+    probabilities = {action_id: 1 / len(support.action_ids) for action_id in support.action_ids}
+    with pytest.raises(TypeError, match="unsupported"):
+        kl.DecisionKLEvidence(
+            decision_step=1,
+            state_before=state,
+            support_identity=identity(support),
+            old_distribution=probabilities,
+            new_distribution=probabilities,
+        )
+
+
 def test_trajectory_recomputes_from_distributions_and_ignores_no_uploaded_kl():
     baseline = kl.compute_trajectory_kl([trajectory_evidence(0.002)])
     changed = kl.compute_trajectory_kl([trajectory_evidence(0.008)])
@@ -589,6 +650,85 @@ def test_threshold_failure_has_priority_over_other_incomplete_decisions():
     assert summary.threshold_passed is False
     assert summary.reason == "old_positive_new_zero"
     assert summary.trace == (None, None)
+
+
+def test_trajectory_preserves_ordered_per_decision_provenance_and_priority():
+    state = empty_observation()
+    support = kl.build_trusted_action_support(state)
+    first, second = support.action_ids
+    wind = [7, 3, 0, 1, 0, 0, 0, [-1, -1, -1]]
+    unavailable = kl.DecisionKLEvidence(
+        decision_step=1,
+        state_before=empty_observation(artifact=wind),
+        support_identity={
+            "schema_version": "unavailable",
+            "support_id": "0" * 64,
+            "action_ids": [],
+        },
+        old_distribution={},
+        new_distribution={},
+    )
+    nonstrict_mass = trajectory_evidence(
+        step=2,
+        state_before=state,
+        old_distribution={first: 1.0000000009, second: 0.0},
+        new_distribution={first: 1.0, second: 0.0},
+    )
+    strict_zero = trajectory_evidence(
+        step=3,
+        state_before=state,
+        old_distribution={first: 1.0, second: 0.0},
+        new_distribution={first: 0.0, second: 1.0},
+    )
+
+    summary = kl.compute_trajectory_kl(
+        [unavailable, nonstrict_mass, strict_zero]
+    )
+    assert summary.status == "threshold_failed"
+    assert summary.reason == "old_positive_new_zero"
+    assert summary.trace == (None, None, None)
+    assert tuple(record.decision_step for record in summary.decision_records) == (1, 2, 3)
+
+    records = summary.to_dict()["decision_records"]
+    core_fields = (
+        "decision_step",
+        "status",
+        "local_kl",
+        "reason",
+        "schema_version",
+        "support_id",
+        "action_ids",
+    )
+    assert [{field: record[field] for field in core_fields} for record in records] == [
+        {
+            "decision_step": 1,
+            "status": "incomplete",
+            "local_kl": None,
+            "reason": "action_support_not_finitely_enumerable",
+            "schema_version": None,
+            "support_id": None,
+            "action_ids": [],
+        },
+        {
+            "decision_step": 2,
+            "status": "incomplete",
+            "local_kl": None,
+            "reason": "old_distribution_mass_not_strict",
+            "schema_version": support.schema_version,
+            "support_id": support.support_id,
+            "action_ids": list(support.action_ids),
+        },
+        {
+            "decision_step": 3,
+            "status": "threshold_failed",
+            "local_kl": None,
+            "reason": "old_positive_new_zero",
+            "schema_version": support.schema_version,
+            "support_id": support.support_id,
+            "action_ids": list(support.action_ids),
+        },
+    ]
+    json.dumps(summary.to_dict(), allow_nan=False)
 
 
 def test_empty_trajectory_is_incomplete_and_finite_trace_uses_arithmetic_mean():

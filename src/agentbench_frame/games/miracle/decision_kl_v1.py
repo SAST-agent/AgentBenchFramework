@@ -7,10 +7,10 @@ old/new probability distributions.
 
 from __future__ import annotations
 
-import copy
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 from agentbench_frame.eval.measurement import ActionSupport
@@ -72,6 +72,56 @@ def _strict_nonnegative_number(value: Any, label: str) -> float:
     return number
 
 
+def _freeze_json_value(
+    value: Any, label: str, active_containers: set[int] | None = None
+) -> Any:
+    """Copy JSON-shaped input into mappings and sequences that cannot mutate."""
+
+    if value is None or type(value) in {bool, int, float, str}:
+        return value
+    if active_containers is None:
+        active_containers = set()
+    if isinstance(value, Mapping):
+        container_id = id(value)
+        if container_id in active_containers:
+            raise ValueError(f"{label} contains a cyclic container")
+        active_containers.add(container_id)
+        try:
+            frozen: dict[str, Any] = {}
+            for key, item in value.items():
+                if type(key) is not str:
+                    raise TypeError(f"{label} contains an unsupported mapping key")
+                frozen[key] = _freeze_json_value(
+                    item, f"{label}.{key}", active_containers
+                )
+            return MappingProxyType(frozen)
+        finally:
+            active_containers.remove(container_id)
+    if type(value) in {list, tuple}:
+        container_id = id(value)
+        if container_id in active_containers:
+            raise ValueError(f"{label} contains a cyclic container")
+        active_containers.add(container_id)
+        try:
+            return tuple(
+                _freeze_json_value(item, f"{label}[{index}]", active_containers)
+                for index, item in enumerate(value)
+            )
+        finally:
+            active_containers.remove(container_id)
+    raise TypeError(f"{label} contains an unsupported value type")
+
+
+def _thaw_json_value(value: Any) -> Any:
+    """Return a detached mutable JSON-shaped value for the rule enumerator."""
+
+    if isinstance(value, Mapping):
+        return {key: _thaw_json_value(item) for key, item in value.items()}
+    if type(value) in {list, tuple}:
+        return [_thaw_json_value(item) for item in value]
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class DecisionKLEvidence:
     """Synthetic inputs from which mechanism-only KL must be recomputed.
@@ -95,6 +145,17 @@ class DecisionKLEvidence:
             raise TypeError("old_distribution must be an action-ID mapping")
         if not isinstance(self.new_distribution, Mapping):
             raise TypeError("new_distribution must be an action-ID mapping")
+        for field_name in (
+            "state_before",
+            "support_identity",
+            "old_distribution",
+            "new_distribution",
+        ):
+            object.__setattr__(
+                self,
+                field_name,
+                _freeze_json_value(getattr(self, field_name), field_name),
+            )
 
 
 @dataclass(frozen=True)
@@ -161,12 +222,54 @@ class DecisionKLRecord:
 
 
 @dataclass(frozen=True)
+class _IncompleteDecisionRecord:
+    decision_step: int
+    reason: str
+    status: str = "incomplete"
+    local_kl: None = None
+    schema_version: None = None
+    support_id: None = None
+    action_ids: tuple[()] = ()
+    direction: str = DIRECTION
+    smoothing: str = SMOOTHING
+    log_base: str = "e"
+
+    def __post_init__(self) -> None:
+        _strict_step(self.decision_step)
+        if self.reason not in _INCOMPLETE_REASONS:
+            raise ValueError("incomplete decision reason is invalid")
+        if (
+            self.status != "incomplete"
+            or self.local_kl is not None
+            or self.schema_version is not None
+            or self.support_id is not None
+            or self.action_ids != ()
+        ):
+            raise ValueError("unavailable support identity must remain unknown")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "decision_step": self.decision_step,
+            "schema_version": self.schema_version,
+            "support_id": self.support_id,
+            "action_ids": list(self.action_ids),
+            "status": self.status,
+            "local_kl": self.local_kl,
+            "reason": self.reason,
+            "direction": self.direction,
+            "smoothing": self.smoothing,
+            "log_base": self.log_base,
+        }
+
+
+@dataclass(frozen=True)
 class TrajectoryKLSummary:
     """Fake-only arithmetic-mean result plus diagnostic-only aggregates."""
 
     status: str
     trajectory_kl: float | None
     trace: tuple[float | None, ...]
+    decision_records: tuple[DecisionKLRecord | _IncompleteDecisionRecord, ...]
     threshold_passed: bool | None
     reason: str | None
     sum_local_kl: float | None
@@ -186,6 +289,21 @@ class TrajectoryKLSummary:
     aggregation: str = "arithmetic_mean"
 
     def __post_init__(self) -> None:
+        trace = tuple(self.trace)
+        records = tuple(self.decision_records)
+        if any(
+            type(record) not in {DecisionKLRecord, _IncompleteDecisionRecord}
+            for record in records
+        ):
+            raise TypeError("decision_records must contain trusted local records")
+        if tuple(record.decision_step for record in records) != tuple(
+            range(1, len(records) + 1)
+        ):
+            raise ValueError("decision_records must be strict, ordered, and continuous")
+        if trace != tuple(record.local_kl for record in records):
+            raise ValueError("trajectory trace must match decision_records")
+        object.__setattr__(self, "trace", trace)
+        object.__setattr__(self, "decision_records", records)
         if self.evidence_scope != "synthetic_fake_only":
             raise ValueError("trajectory KL evidence scope must remain fake-only")
         if self.authoritative_readiness is not False:
@@ -202,6 +320,7 @@ class TrajectoryKLSummary:
             "status": self.status,
             "trajectory_kl": self.trajectory_kl,
             "trace": list(self.trace),
+            "decision_records": [record.to_dict() for record in self.decision_records],
             "threshold_passed": self.threshold_passed,
             "reason": self.reason,
             "sum_local_kl": self.sum_local_kl,
@@ -222,25 +341,13 @@ class TrajectoryKLSummary:
         }
 
 
-@dataclass(frozen=True)
-class _IncompleteDecisionRecord:
-    decision_step: int
-    reason: str
-    status: str = "incomplete"
-    local_kl: None = None
-
-    def __post_init__(self) -> None:
-        _strict_step(self.decision_step)
-        if self.reason not in _INCOMPLETE_REASONS:
-            raise ValueError("incomplete decision reason is invalid")
-
-
 def build_trusted_action_support(observation: Mapping[str, Any]) -> ActionSupport:
     """Derive complete canonical support from a trusted visible observation."""
 
     if not isinstance(observation, Mapping):
         raise TypeError("observation must be an object")
-    legal = enumerate_legal_commands(copy.deepcopy(dict(observation)))
+    frozen_observation = _freeze_json_value(observation, "observation")
+    legal = enumerate_legal_commands(_thaw_json_value(frozen_observation))
     return build_action_support(legal)
 
 
@@ -437,6 +544,7 @@ def _percentile(values: Sequence[float], fraction: float) -> float:
 def _missing_summary(
     status: str,
     trace: tuple[float | None, ...],
+    records: tuple[DecisionKLRecord | _IncompleteDecisionRecord, ...],
     reason: str,
     threshold_passed: bool | None,
 ) -> TrajectoryKLSummary:
@@ -444,6 +552,7 @@ def _missing_summary(
         status,
         None,
         trace,
+        records,
         threshold_passed,
         reason,
         None,
@@ -461,7 +570,7 @@ def compute_trajectory_kl(
     if not isinstance(evidence, Sequence) or isinstance(evidence, (str, bytes)):
         raise TypeError("evidence must be a sequence")
     if not evidence:
-        return _missing_summary("incomplete", (), "empty_trajectory", None)
+        return _missing_summary("incomplete", (), (), "empty_trajectory", None)
     records: list[DecisionKLRecord | _IncompleteDecisionRecord] = []
     for expected_step, item in enumerate(evidence, start=1):
         if type(item) is not DecisionKLEvidence:
@@ -486,19 +595,28 @@ def compute_trajectory_kl(
             )
         )
     trace = tuple(record.local_kl for record in records)
+    frozen_records = tuple(records)
     failed = next(
         (record for record in records if record.status == "threshold_failed"), None
     )
     if failed is not None:
         return _missing_summary(
-            "threshold_failed", trace, failed.reason or "threshold_failed", False
+            "threshold_failed",
+            trace,
+            frozen_records,
+            failed.reason or "threshold_failed",
+            False,
         )
     incomplete = next(
         (record for record in records if record.status == "incomplete"), None
     )
     if incomplete is not None:
         return _missing_summary(
-            "incomplete", trace, incomplete.reason or "incomplete_decision", None
+            "incomplete",
+            trace,
+            frozen_records,
+            incomplete.reason or "incomplete_decision",
+            None,
         )
     values = [record.local_kl for record in records]
     if any(value is None for value in values):
@@ -511,6 +629,7 @@ def compute_trajectory_kl(
         "complete" if passed else "threshold_failed",
         mean,
         tuple(finite),
+        frozen_records,
         passed,
         None if passed else "trajectory_kl_above_threshold",
         total,

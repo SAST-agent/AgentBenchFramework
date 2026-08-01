@@ -77,7 +77,10 @@ the value from the captured distributions and trusted support identity.
 
 `compute_trajectory_kl()` accepts only `DecisionKLEvidence`: the decision
 step, complete `state_before`, captured support identity, and complete old/new
-distributions. For every item it regenerates ActionSupport from the state,
+distributions. Construction recursively copies these four mappings, freezes
+nested mappings, and converts nested arrays to immutable sequences; later
+caller mutation cannot change the evidence or its calculation. Unsupported
+non-JSON-shaped nested objects are rejected. For every item it regenerates ActionSupport from the state,
 checks the supplied identity, and recomputes local KL before aggregation.
 `DecisionKLRecord` is computation output only; passing a publicly constructed
 record, mapping, uploaded scalar, `local_kl`, `reported_local_kl`, or a
@@ -89,6 +92,12 @@ decision-change value to the trajectory API is rejected.
 `rollout_source_contract=new_policy` records only the target contract; it is
 not a claim that the supplied states came from verified new-policy occupancy.
 The ambiguous `rollout_source` evidence field is therefore not emitted.
+The ordered `decision_records` output contains exactly one immutable record per
+input decision, retaining decision step, status, local value, reason, and
+support identity. When support cannot be enumerated, its record uses null
+schema/support IDs and an empty action-ID array rather than inventing identity.
+The trajectory-level reason retains its existing failure-priority semantics and
+does not replace these local records.
 
 Expected domain unavailability is represented by a JSON-safe, enumerated
 reason and a null trace position. This includes non-finite ActionSupport,

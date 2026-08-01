@@ -42,8 +42,18 @@ the files and rechecks approval, bytes, digest, role, replay SHA, and all nested
 identities. A normally constructed or `object.__new__` context is rejected;
 packet/role replacement and nested manifest mutation cannot become trust.
 
-Paths are confined to the approved root. Symlink/reparse components, missing
-files, and path replacement fail closed. Manifest-contained replay paths reject
+Paths are confined to the approved root. On Linux, the approved root and every
+relative replay component are opened from retained directory descriptors with
+`openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_XDEV)`; this rejects
+cross-device mounts and same-device bind mounts. Other POSIX platforms fail
+closed because `O_NOFOLLOW` and device numbers alone cannot prove the same
+mount boundary. On Windows, only the drive or UNC-share anchor is opened by
+pathname; every descendant is opened atomically relative to its retained parent
+handle through `NtCreateFile(RootDirectory=...)`, with reparse-point checks and
+exact final-handle paths. Before every relative read, both the retained root and
+the current lexical root must still match the approved file identity and path.
+Every ancestor and the final component must be a real directory; symlink/reparse components,
+missing files, and path replacement fail closed. Manifest-contained replay paths reject
 `..`, absolute paths, Windows drives, and ADS syntax. The approved root and
 supplied manifest path must be absolute; relative inputs are rejected rather
 than interpreted against process CWD. Mixed filesystem separators are checked across the complete raw path

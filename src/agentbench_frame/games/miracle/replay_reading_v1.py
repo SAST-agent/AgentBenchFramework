@@ -7,10 +7,13 @@ starts a Judge, policy, Provider, runner, workspace, store, log, or session.
 from __future__ import annotations
 
 import copy
-import os
+import ctypes
 import hashlib
 import json
 import math
+import ntpath
+import os
+import platform
 import stat
 import weakref
 from collections.abc import Mapping
@@ -42,7 +45,6 @@ MAX_SYNTHETIC_REPLAY_BYTES = 16 * 1024 * 1024
 APPROVED_TRAINING_REPLAY_MANIFESTS: frozenset[str] = frozenset()
 _SAFE_OPEN_BARRIER = None
 if os.name == "nt":
-    import ctypes
     from ctypes import wintypes
     class _WinFileInfo(ctypes.Structure):
         _fields_ = [
@@ -101,7 +103,9 @@ if os.name == "nt":
     _INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
     _GENERIC_READ = 0x80000000
     _FILE_LIST_DIRECTORY = 0x0001
+    _FILE_TRAVERSE = 0x0020
     _FILE_READ_ATTRIBUTES = 0x0080
+    _SYNCHRONIZE = 0x00100000
     _FILE_SHARE_READ = 0x0001
     _OPEN_EXISTING = 3
     _FILE_ATTRIBUTE_DIRECTORY = 0x0010
@@ -109,6 +113,69 @@ if os.name == "nt":
     _FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
     _FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
     _FILE_TYPE_DISK = 0x0001
+    _OBJ_CASE_INSENSITIVE = 0x00000040
+    _FILE_DIRECTORY_FILE = 0x00000001
+    _FILE_SYNCHRONOUS_IO_NONALERT = 0x00000020
+    _FILE_NON_DIRECTORY_FILE = 0x00000040
+    _FILE_OPEN = 0x00000001
+
+    class _WinUnicodeString(ctypes.Structure):
+        _fields_ = [
+            ("Length", wintypes.USHORT),
+            ("MaximumLength", wintypes.USHORT),
+            ("Buffer", wintypes.LPWSTR),
+        ]
+
+    class _WinObjectAttributes(ctypes.Structure):
+        _fields_ = [
+            ("Length", wintypes.ULONG),
+            ("RootDirectory", wintypes.HANDLE),
+            ("ObjectName", ctypes.POINTER(_WinUnicodeString)),
+            ("Attributes", wintypes.ULONG),
+            ("SecurityDescriptor", wintypes.LPVOID),
+            ("SecurityQualityOfService", wintypes.LPVOID),
+        ]
+
+    class _WinIoStatusBlock(ctypes.Structure):
+        _fields_ = [
+            ("Status", wintypes.LONG),
+            ("Information", ctypes.c_size_t),
+        ]
+
+    _ntdll = ctypes.WinDLL("ntdll", use_last_error=True)
+    _NtCreateFile = _ntdll.NtCreateFile
+    _NtCreateFile.argtypes = (
+        ctypes.POINTER(wintypes.HANDLE),
+        wintypes.DWORD,
+        ctypes.POINTER(_WinObjectAttributes),
+        ctypes.POINTER(_WinIoStatusBlock),
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+    )
+    _NtCreateFile.restype = wintypes.LONG
+
+
+class _OpenHow(ctypes.Structure):
+    _fields_ = [
+        ("flags", ctypes.c_uint64),
+        ("mode", ctypes.c_uint64),
+        ("resolve", ctypes.c_uint64),
+    ]
+
+
+_OPENAT2_SYSCALL_BY_MACHINE = {
+    "aarch64": 437,
+    "x86_64": 437,
+    "amd64": 437,
+}
+_RESOLVE_NO_XDEV = 0x01
+_RESOLVE_NO_SYMLINKS = 0x04
+_RESOLVE_BENEATH = 0x08
 
 
 def _json_compatible(value: Any) -> Any:
@@ -276,46 +343,98 @@ class _ApprovedRoot:
         if os.name == "nt":
             return _read_relative_windows(self, parts, relative, label, limit)
         return _read_relative_posix(self, parts, relative, label, limit)
+
+
+def _posix_open_component(parent_fd: int, component: str, flags: int) -> int:
+    """Open one Linux path component without symlink or mount traversal."""
+
+    if os.name == "nt" or platform.system() != "Linux":
+        raise NotImplementedError("Linux openat2 is required for approved roots")
+    syscall_number = _OPENAT2_SYSCALL_BY_MACHINE.get(platform.machine().lower())
+    if syscall_number is None:
+        raise NotImplementedError("openat2 syscall number is unknown on this platform")
+    if (
+        type(component) is not str
+        or not component
+        or component in {".", ".."}
+        or "/" in component
+        or "\x00" in component
+    ):
+        raise ValueError("approved replay root component is unsafe")
+    encoded = os.fsencode(component)
+    how = _OpenHow(
+        flags=flags,
+        mode=0,
+        resolve=_RESOLVE_NO_XDEV | _RESOLVE_NO_SYMLINKS | _RESOLVE_BENEATH,
+    )
+    libc = ctypes.CDLL(None, use_errno=True)
+    syscall = libc.syscall
+    syscall.restype = ctypes.c_long
+    result = syscall(
+        ctypes.c_long(syscall_number),
+        ctypes.c_int(parent_fd),
+        ctypes.c_char_p(encoded),
+        ctypes.byref(how),
+        ctypes.c_size_t(ctypes.sizeof(how)),
+    )
+    if result < 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error), component)
+    return int(result)
+
+
 def _open_approved_root(
     root: Path, expected_identity: tuple[Any, ...] | None = None
 ) -> _ApprovedRoot:
     root_path = os.path.abspath(_bind_exact_path(root, "approved replay root", allow_string=False))
     if os.name == "nt":
-        approved = _open_windows_root(root_path)
+        approved = _open_windows_root(root_path, expected_identity)
     else:
         nofollow = getattr(os, "O_NOFOLLOW", None)
         directory = getattr(os, "O_DIRECTORY", None)
-        if nofollow is None or directory is None or os.open not in os.supports_dir_fd:
+        if nofollow is None or directory is None:
             raise ValueError("platform cannot prove safe approved-root traversal")
+        flags = (
+            os.O_RDONLY
+            | nofollow
+            | directory
+            | getattr(os, "O_CLOEXEC", 0)
+        )
+        opened: list[int] = []
         try:
-            with ExitStack() as ownership:
-                fd = os.open(
-                    root_path,
-                    os.O_RDONLY
-                    | nofollow
-                    | directory
-                    | getattr(os, "O_CLOEXEC", 0),
-                )
-                ownership.callback(os.close, fd)
+            anchor_fd = os.open("/", flags)
+            opened.append(anchor_fd)
+            info = os.fstat(anchor_fd)
+            if not stat.S_ISDIR(info.st_mode):
+                raise ValueError("filesystem anchor must be a real directory")
+            anchor_device = info.st_dev
+            current_fd = anchor_fd
+            components = tuple(part for part in root_path.split("/") if part)
+            for component in components:
+                fd = _posix_open_component(current_fd, component, flags)
+                opened.append(fd)
                 info = os.fstat(fd)
                 if not stat.S_ISDIR(info.st_mode):
                     raise ValueError("approved replay root must be a real directory")
-                approved = _ApprovedRoot(
-                    root_path,
-                    ("posix", info.st_dev, info.st_ino),
-                    fd,
-                )
-                ownership.pop_all()
-        except OSError:
+                if info.st_dev != anchor_device:
+                    raise ValueError("approved replay root crosses a mount device")
+                current_fd = fd
+            final_fd = opened[-1]
+            approved = _ApprovedRoot(
+                root_path,
+                ("posix", info.st_dev, info.st_ino),
+                final_fd,
+            )
+            if expected_identity is not None and not _root_identities_match(
+                approved.identity, expected_identity
+            ):
+                raise ValueError("approved replay root identity changed")
+            opened.pop()
+        except (OSError, NotImplementedError):
             raise ValueError("approved replay root is unsafe or unavailable") from None
-    try:
-        if expected_identity is not None and not _root_identities_match(
-            approved.identity, expected_identity
-        ):
-            raise ValueError("approved replay root identity changed")
-    except Exception:
-        approved.close()
-        raise
+        finally:
+            for fd in reversed(opened):
+                os.close(fd)
     return approved
 def _read_relative_posix(
     root: _ApprovedRoot,
@@ -326,7 +445,7 @@ def _read_relative_posix(
 ) -> bytes:
     nofollow = getattr(os, "O_NOFOLLOW", None)
     directory = getattr(os, "O_DIRECTORY", None)
-    if nofollow is None or directory is None or os.open not in os.supports_dir_fd:
+    if nofollow is None or directory is None:
         raise ValueError("platform cannot prove safe relative-file traversal")
     try:
         with ExitStack() as ownership:
@@ -334,13 +453,13 @@ def _read_relative_posix(
             ownership.callback(os.close, current_fd)
             for index, part in enumerate(parts[:-1]):
                 _safe_open_barrier(label, relative, index)
-                next_fd = os.open(
+                next_fd = _posix_open_component(
+                    current_fd,
                     part,
                     os.O_RDONLY
                     | nofollow
                     | directory
                     | getattr(os, "O_CLOEXEC", 0),
-                    dir_fd=current_fd,
                 )
                 ownership.callback(os.close, next_fd)
                 info = os.fstat(next_fd)
@@ -351,13 +470,13 @@ def _read_relative_posix(
                 if info.st_dev != root.identity[1]: raise ValueError(f"{label} crosses approved-root device")
                 current_fd = next_fd
             _safe_open_barrier(label, relative, len(parts) - 1)
-            file_fd = os.open(
+            file_fd = _posix_open_component(
+                current_fd,
                 parts[-1],
                 os.O_RDONLY
                 | nofollow
                 | getattr(os, "O_CLOEXEC", 0)
                 | getattr(os, "O_NONBLOCK", 0),
-                dir_fd=current_fd,
             )
             ownership.callback(os.close, file_fd)
             before = os.fstat(file_fd)
@@ -438,8 +557,39 @@ def _win_is_beneath(path: str, root: str) -> bool:
         )
     except ValueError:
         return False
+
+
+def _win_comparable_path(path: str) -> str:
+    normalized = path
+    if normalized[:8].lower() == "\\\\?\\unc\\":
+        normalized = "\\\\" + normalized[8:]
+    elif normalized.startswith("\\\\?\\"):
+        normalized = normalized[4:]
+    return ntpath.normcase(ntpath.normpath(normalized))
+
+
+def _win_paths_match(actual: str, expected: str) -> bool:
+    return _win_comparable_path(actual) == _win_comparable_path(expected)
+
+
+def _win_validate_opened_handle(
+    handle: Any, information: Any, *, directory: bool, label: str
+) -> None:
+    attributes = information.dwFileAttributes
+    if attributes & _FILE_ATTRIBUTE_REPARSE_POINT:
+        raise ValueError(f"{label} contains a reparse-point component")
+    is_directory = bool(attributes & _FILE_ATTRIBUTE_DIRECTORY)
+    if directory != is_directory:
+        kind = "directory" if directory else "regular file"
+        raise ValueError(f"{label} component is not a {kind}")
+    if not directory and _GetFileType(handle) != _FILE_TYPE_DISK:
+        raise ValueError(f"{label} final object is not a regular disk file")
+
+
 def _win_open_checked(path: str, *, directory: bool, label: str) -> tuple[Any, Any]:
-    access = _FILE_READ_ATTRIBUTES | (_FILE_LIST_DIRECTORY if directory else _GENERIC_READ)
+    access = _FILE_READ_ATTRIBUTES | (
+        _FILE_LIST_DIRECTORY | _FILE_TRAVERSE if directory else _GENERIC_READ
+    )
     flags = _FILE_FLAG_OPEN_REPARSE_POINT
     if directory:
         flags |= _FILE_FLAG_BACKUP_SEMANTICS
@@ -456,34 +606,129 @@ def _win_open_checked(path: str, *, directory: bool, label: str) -> tuple[Any, A
         raise ValueError(f"{label} is unsafe or unavailable")
     try:
         information = _win_information(handle, label)
-        attributes = information.dwFileAttributes
-        if attributes & _FILE_ATTRIBUTE_REPARSE_POINT:
-            raise ValueError(f"{label} contains a reparse-point component")
-        is_directory = bool(attributes & _FILE_ATTRIBUTE_DIRECTORY)
-        if directory != is_directory:
-            kind = "directory" if directory else "regular file"
-            raise ValueError(f"{label} component is not a {kind}")
-        if not directory and _GetFileType(handle) != _FILE_TYPE_DISK:
-            raise ValueError(f"{label} final object is not a regular disk file")
+        _win_validate_opened_handle(
+            handle, information, directory=directory, label=label
+        )
         return handle, information
     except Exception:
         _CloseHandle(handle)
         raise
-def _open_windows_root(root_path: str) -> _ApprovedRoot:
-    handle, information = _win_open_checked(
-        root_path, directory=True, label="approved replay root"
+
+
+def _win_open_relative_checked(
+    parent_handle: Any, component: str, *, directory: bool, label: str
+) -> tuple[Any, Any]:
+    """Atomically open one exact child relative to an already checked handle."""
+
+    if (
+        os.name != "nt"
+        or type(component) is not str
+        or not component
+        or component in {".", ".."}
+        or any(character in component for character in "\\/:")
+        or "\x00" in component
+    ):
+        raise ValueError(f"{label} relative component is unsafe")
+    buffer = ctypes.create_unicode_buffer(component)
+    encoded_length = len(component.encode("utf-16-le"))
+    name = _WinUnicodeString(
+        Length=encoded_length,
+        MaximumLength=encoded_length + 2,
+        Buffer=ctypes.cast(buffer, wintypes.LPWSTR),
     )
+    attributes = _WinObjectAttributes(
+        Length=ctypes.sizeof(_WinObjectAttributes),
+        RootDirectory=parent_handle,
+        ObjectName=ctypes.pointer(name),
+        Attributes=_OBJ_CASE_INSENSITIVE,
+        SecurityDescriptor=None,
+        SecurityQualityOfService=None,
+    )
+    io_status = _WinIoStatusBlock()
+    handle = wintypes.HANDLE()
+    access = _SYNCHRONIZE | _FILE_READ_ATTRIBUTES | (
+        _FILE_LIST_DIRECTORY | _FILE_TRAVERSE if directory else _GENERIC_READ
+    )
+    options = (
+        _FILE_FLAG_OPEN_REPARSE_POINT
+        | _FILE_SYNCHRONOUS_IO_NONALERT
+        | (_FILE_DIRECTORY_FILE if directory else _FILE_NON_DIRECTORY_FILE)
+    )
+    status = _NtCreateFile(
+        ctypes.byref(handle),
+        access,
+        ctypes.byref(attributes),
+        ctypes.byref(io_status),
+        None,
+        0,
+        _FILE_SHARE_READ,
+        _FILE_OPEN,
+        options,
+        None,
+        0,
+    )
+    if status < 0 or handle.value in (None, _INVALID_HANDLE_VALUE):
+        raise ValueError(f"{label} is unsafe or unavailable")
+    opened_handle = handle.value
     try:
+        information = _win_information(opened_handle, label)
+        _win_validate_opened_handle(
+            opened_handle, information, directory=directory, label=label
+        )
+        return opened_handle, information
+    except Exception:
+        _CloseHandle(opened_handle)
+        raise
+def _open_windows_root(
+    root_path: str, expected_identity: tuple[Any, ...] | None = None
+) -> _ApprovedRoot:
+    drive, tail = ntpath.splitdrive(root_path)
+    if not drive or not tail.startswith(("\\", "/")):
+        raise ValueError("approved replay root must have a trusted Windows anchor")
+    anchor = drive + "\\"
+    components = tuple(
+        component for component in tail.replace("/", "\\").split("\\") if component
+    )
+    handles: list[Any] = []
+    try:
+        current_path = anchor
+        handle, information = _win_open_checked(
+            anchor, directory=True, label="approved replay root"
+        )
+        handles.append(handle)
         final_path = _win_final_path(handle, "approved replay root")
-        return _ApprovedRoot(
+        if not _win_paths_match(final_path, anchor):
+            raise ValueError("approved replay root anchor path changed")
+        current_handle = handle
+        for component in components:
+            current_path = ntpath.join(current_path, component)
+            handle, information = _win_open_relative_checked(
+                current_handle,
+                component,
+                directory=True,
+                label="approved replay root",
+            )
+            handles.append(handle)
+            final_path = _win_final_path(handle, "approved replay root")
+            if not _win_paths_match(final_path, current_path):
+                raise ValueError("approved replay root component path changed")
+            current_handle = handle
+        final_handle = handles[-1]
+        approved = _ApprovedRoot(
             root_path,
             _win_identity(information),
-            handle,
+            final_handle,
             final_path,
         )
-    except Exception:
-        _CloseHandle(handle)
-        raise
+        if expected_identity is not None and not _root_identities_match(
+            approved.identity, expected_identity
+        ):
+            raise ValueError("approved replay root identity changed")
+        handles.pop()
+        return approved
+    finally:
+        for handle in reversed(handles):
+            _CloseHandle(handle)
 def _win_read(handle: Any, label: str, limit: int) -> bytes:
     chunks: list[bytes] = []
     remaining = limit + 1
@@ -501,6 +746,37 @@ def _win_read(handle: Any, label: str, limit: int) -> bytes:
         remaining -= read.value
         if remaining == 0:
             raise ValueError(f"{label} exceeds its frozen byte limit")
+
+
+def _win_revalidate_root(root: _ApprovedRoot) -> None:
+    """Prove that the retained and current lexical roots still identify one object."""
+
+    retained_information = _win_information(root.handle, "approved replay root")
+    if not _root_identities_match(
+        _win_identity(retained_information), root.identity
+    ):
+        raise ValueError("approved replay root identity changed")
+    if not _win_paths_match(
+        _win_final_path(root.handle, "approved replay root"), root.final_path
+    ):
+        raise ValueError("approved replay root path changed")
+    current_handle, current_information = _win_open_checked(
+        root.path, directory=True, label="approved replay root"
+    )
+    try:
+        if not _root_identities_match(
+            _win_identity(current_information), root.identity
+        ):
+            raise ValueError("approved replay root identity changed")
+        if not _win_paths_match(
+            _win_final_path(current_handle, "approved replay root"),
+            root.final_path,
+        ):
+            raise ValueError("approved replay root path changed")
+    finally:
+        _CloseHandle(current_handle)
+
+
 def _read_relative_windows(
     root: _ApprovedRoot,
     parts: tuple[str, ...],
@@ -510,13 +786,13 @@ def _read_relative_windows(
 ) -> bytes:
     directory_handles: list[Any] = []
     file_handle: Any = None
-    current_path = root.path
     try:
+        _win_revalidate_root(root)
+        current_handle = root.handle
         for index, part in enumerate(parts[:-1]):
             _safe_open_barrier(label, relative, index)
-            current_path = os.path.join(current_path, part)
-            handle, information = _win_open_checked(
-                current_path, directory=True, label=label
+            handle, information = _win_open_relative_checked(
+                current_handle, part, directory=True, label=label
             )
             try:
                 handle_path = _win_final_path(handle, label)
@@ -530,10 +806,10 @@ def _read_relative_windows(
                 _CloseHandle(handle)
                 raise ValueError(f"{label} crosses approved-root volume")
             directory_handles.append(handle)
+            current_handle = handle
         _safe_open_barrier(label, relative, len(parts) - 1)
-        file_path = os.path.join(current_path, parts[-1])
-        file_handle, before = _win_open_checked(
-            file_path, directory=False, label=label
+        file_handle, before = _win_open_relative_checked(
+            current_handle, parts[-1], directory=False, label=label
         )
         if not _win_is_beneath(_win_final_path(file_handle, label), root.final_path):
             raise ValueError(f"{label} escapes approved root")

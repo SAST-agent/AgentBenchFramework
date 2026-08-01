@@ -1,4 +1,5 @@
 import copy
+import errno
 import gc
 import hashlib
 import inspect
@@ -490,6 +491,500 @@ def test_symlink_component_is_rejected_without_reading_target(tmp_path, monkeypa
         os.symlink(outside, replay_path)
     with pytest.raises(ValueError, match="reparse|unsafe"):
         replay.preflight_replay_reading(manifest_path, approved_root=root)
+
+
+def test_posix_approved_root_rejects_intermediate_ancestor_symlink(monkeypatch):
+    opened = []
+    closed = []
+    directory_flags = os.O_RDONLY | 0x100 | 0x200 | 0x400
+
+    def open_component(path, flags, *, dir_fd=None):
+        opened.append((path, flags, dir_fd))
+        if path == "approved":
+            raise OSError("synthetic ancestor symlink rejected by O_NOFOLLOW")
+        return 71 + len(opened) - 1
+
+    info = SimpleNamespace(st_mode=stat.S_IFDIR | 0o700, st_dev=3, st_ino=9)
+    _install_fake_posix(
+        monkeypatch,
+        open_file=open_component,
+        fstat=lambda _fd: info,
+        close=closed.append,
+    )
+    monkeypatch.setattr(
+        replay.os.path, "abspath", lambda _path: "/trusted/approved/root"
+    )
+
+    with pytest.raises(ValueError, match="approved replay root.*unsafe|unavailable"):
+        with replay._open_approved_root(Path("synthetic-root")):
+            pass
+
+    assert opened == [
+        ("/", directory_flags, None),
+        ("trusted", directory_flags, 71),
+        ("approved", directory_flags, 72),
+    ]
+    assert closed == [72, 71]
+
+
+def test_windows_approved_root_rejects_intermediate_ancestor_reparse(monkeypatch):
+    root_path = r"C:\trusted\approved\root"
+    opened = []
+    closed = []
+
+    def open_checked(path, *, directory, label):
+        assert path == "C:\\"
+        opened.append((None, path, directory, label))
+        return path, _fake_windows_information(directory=True, file_id=1)
+
+    def open_relative(parent_handle, component, *, directory, label):
+        opened.append((parent_handle, component, directory, label))
+        if component == "approved":
+            raise ValueError(
+                "approved replay root contains a reparse-point component"
+            )
+        handle = replay.ntpath.join(parent_handle, component)
+        return handle, _fake_windows_information(
+            directory=True, file_id=len(opened)
+        )
+
+    monkeypatch.setattr(replay.os, "name", "nt")
+    monkeypatch.setattr(replay.os.path, "abspath", lambda _path: root_path)
+    monkeypatch.setattr(replay, "_win_open_checked", open_checked)
+    monkeypatch.setattr(replay, "_win_open_relative_checked", open_relative)
+    monkeypatch.setattr(replay, "_win_final_path", lambda handle, _label: handle)
+    monkeypatch.setattr(replay, "_CloseHandle", closed.append)
+
+    with pytest.raises(ValueError, match="reparse-point component"):
+        with replay._open_approved_root(Path("synthetic-root")):
+            pass
+
+    assert opened == [
+        (None, "C:\\", True, "approved replay root"),
+        ("C:\\", "trusted", True, "approved replay root"),
+        (r"C:\trusted", "approved", True, "approved replay root"),
+    ]
+    assert closed == [r"C:\trusted", "C:\\"]
+
+
+def test_posix_approved_root_rejects_cross_device_mount_ancestor(monkeypatch):
+    opened = []
+    closed = []
+
+    def open_component(path, flags, *, dir_fd=None):
+        fd = 71 + len(opened)
+        opened.append((path, flags, dir_fd, fd))
+        return fd
+
+    def fstat(fd):
+        device = 1 if fd in {71, 72} else 2
+        return SimpleNamespace(st_mode=stat.S_IFDIR | 0o700, st_dev=device, st_ino=fd)
+
+    _install_fake_posix(
+        monkeypatch,
+        open_file=open_component,
+        fstat=fstat,
+        close=closed.append,
+    )
+    monkeypatch.setattr(
+        replay,
+        "_posix_open_component",
+        lambda parent_fd, component, flags: open_component(
+            component, flags, dir_fd=parent_fd
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        replay.os.path, "abspath", lambda _path: "/trusted/mount/root"
+    )
+
+    with pytest.raises(ValueError, match="mount|device|cross"):
+        with replay._open_approved_root(Path("synthetic-root")):
+            pass
+
+    assert [call[0] for call in opened] == ["/", "trusted", "mount"]
+    assert closed == [73, 72, 71]
+
+
+def test_posix_approved_root_rejects_same_device_bind_mount(monkeypatch):
+    opened = []
+    closed = []
+
+    def legacy_open(path, flags, *, dir_fd=None):
+        fd = 81 + len(opened)
+        opened.append((path, flags, dir_fd, fd))
+        return fd
+
+    def protected_open(parent_fd, component, flags):
+        if component == "mount":
+            raise OSError(errno.EXDEV, "openat2 rejected same-device bind mount")
+        return legacy_open(component, flags, dir_fd=parent_fd)
+
+    info = SimpleNamespace(st_mode=stat.S_IFDIR | 0o700, st_dev=1, st_ino=9)
+    _install_fake_posix(
+        monkeypatch,
+        open_file=legacy_open,
+        fstat=lambda _fd: info,
+        close=closed.append,
+    )
+    monkeypatch.setattr(
+        replay, "_posix_open_component", protected_open, raising=False
+    )
+    monkeypatch.setattr(
+        replay.os.path, "abspath", lambda _path: "/trusted/mount/root"
+    )
+
+    with pytest.raises(ValueError, match="unsafe|mount|unavailable"):
+        with replay._open_approved_root(Path("synthetic-root")):
+            pass
+
+    assert [call[0] for call in opened] == ["/", "trusted"]
+    assert closed == [82, 81]
+
+
+def test_posix_approved_root_fails_closed_without_mount_safe_primitive(monkeypatch):
+    opened = []
+    closed = []
+
+    def legacy_open(path, _flags, *, dir_fd=None):
+        fd = 91 + len(opened)
+        opened.append((path, dir_fd, fd))
+        return fd
+
+    info = SimpleNamespace(st_mode=stat.S_IFDIR | 0o700, st_dev=1, st_ino=9)
+    _install_fake_posix(
+        monkeypatch,
+        open_file=legacy_open,
+        fstat=lambda _fd: info,
+        close=closed.append,
+    )
+    monkeypatch.setattr(
+        replay,
+        "_posix_open_component",
+        lambda *_args: (_ for _ in ()).throw(
+            NotImplementedError("openat2 unavailable")
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(replay.os.path, "abspath", lambda _path: "/trusted/root")
+
+    with pytest.raises(ValueError, match="cannot prove|unsafe|unavailable"):
+        with replay._open_approved_root(Path("synthetic-root")):
+            pass
+
+    assert opened == [("/", None, 91)]
+    assert closed == [91]
+
+
+def test_linux_openat2_component_uses_no_xdev_no_symlinks_and_beneath(monkeypatch):
+    captured = {}
+
+    class FakeSyscall:
+        restype = None
+
+        def __call__(self, number, parent_fd, path, how_pointer, size):
+            how = replay.ctypes.cast(
+                how_pointer, replay.ctypes.POINTER(replay._OpenHow)
+            ).contents
+            captured.update(
+                number=number.value,
+                parent_fd=parent_fd.value,
+                path=path.value,
+                flags=how.flags,
+                mode=how.mode,
+                resolve=how.resolve,
+                size=size.value,
+            )
+            return 123
+
+    monkeypatch.setattr(replay.os, "name", "posix")
+    monkeypatch.setattr(replay.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(replay.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(
+        replay.ctypes,
+        "CDLL",
+        lambda *_args, **_kwargs: SimpleNamespace(syscall=FakeSyscall()),
+    )
+
+    assert replay._posix_open_component(17, "child", 0x701) == 123
+    assert captured == {
+        "number": 437,
+        "parent_fd": 17,
+        "path": b"child",
+        "flags": 0x701,
+        "mode": 0,
+        "resolve": (
+            replay._RESOLVE_NO_XDEV
+            | replay._RESOLVE_NO_SYMLINKS
+            | replay._RESOLVE_BENEATH
+        ),
+        "size": replay.ctypes.sizeof(replay._OpenHow),
+    }
+
+
+def test_linux_openat2_unknown_architecture_fails_closed(monkeypatch):
+    monkeypatch.setattr(replay.os, "name", "posix")
+    monkeypatch.setattr(replay.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(replay.platform, "machine", lambda: "unverified-arch")
+    with pytest.raises(NotImplementedError, match="unknown"):
+        replay._posix_open_component(17, "child", 0x701)
+
+
+def _fake_windows_information(*, directory, file_id, size=0, volume=5):
+    timestamp = SimpleNamespace(dwHighDateTime=0, dwLowDateTime=0)
+    return SimpleNamespace(
+        dwFileAttributes=(replay._FILE_ATTRIBUTE_DIRECTORY if directory else 0),
+        ftCreationTime=timestamp,
+        ftLastWriteTime=timestamp,
+        nFileSizeHigh=0,
+        nFileSizeLow=size,
+        nNumberOfLinks=1,
+        dwVolumeSerialNumber=volume,
+        nFileIndexHigh=0,
+        nFileIndexLow=file_id,
+    )
+
+
+@pytest.mark.parametrize(
+    ("root_path", "anchor", "components"),
+    [
+        (
+            r"C:\trusted\approved\root",
+            "C:\\",
+            ("trusted", "approved", "root"),
+        ),
+        (
+            r"\\server\share\approved\root",
+            "\\\\server\\share\\",
+            ("approved", "root"),
+        ),
+    ],
+    ids=["drive", "unc-share"],
+)
+def test_windows_approved_root_opens_components_relative_to_anchor_handles(
+    monkeypatch, root_path, anchor, components
+):
+    closed = []
+    relative_calls = []
+    paths = {401: anchor}
+    infos = {401: _fake_windows_information(directory=True, file_id=1)}
+    current_path = anchor
+    for offset, component in enumerate(components, start=1):
+        current_path = replay.ntpath.join(current_path, component)
+        handle = 401 + offset
+        paths[handle] = current_path
+        infos[handle] = _fake_windows_information(
+            directory=True, file_id=offset + 1
+        )
+
+    def open_anchor(path, *, directory, label):
+        assert path == anchor
+        assert directory is True
+        return 401, infos[401]
+
+    def open_relative(parent_handle, component, *, directory, label):
+        relative_calls.append((parent_handle, component, directory, label))
+        handle = parent_handle + 1
+        assert paths[handle] == replay.ntpath.join(paths[parent_handle], component)
+        return handle, infos[handle]
+
+    monkeypatch.setattr(replay.os, "name", "nt")
+    monkeypatch.setattr(replay.os.path, "abspath", lambda _path: root_path)
+    monkeypatch.setattr(replay, "_win_open_checked", open_anchor)
+    monkeypatch.setattr(
+        replay, "_win_open_relative_checked", open_relative, raising=False
+    )
+    monkeypatch.setattr(
+        replay, "_win_final_path", lambda handle, _label: paths[handle]
+    )
+    monkeypatch.setattr(replay, "_CloseHandle", closed.append)
+
+    with replay._open_approved_root(Path("synthetic-root")) as approved:
+        assert approved.handle == 401 + len(components)
+        assert approved.final_path == root_path
+
+    assert relative_calls == [
+        (401 + index, component, True, "approved replay root")
+        for index, component in enumerate(components)
+    ]
+    final_handle = 401 + len(components)
+    assert closed == list(range(final_handle - 1, 400, -1)) + [final_handle]
+
+
+def test_windows_read_rejects_replaced_lexical_root_identity(monkeypatch):
+    root_path = r"C:\trusted\approved\root"
+    target_path = root_path + r"\payload"
+    approved = replay._ApprovedRoot(
+        root_path,
+        ("windows", 5, 0, 111),
+        111,
+        root_path,
+    )
+    closed = []
+    reads = []
+    approved_info = _fake_windows_information(directory=True, file_id=111)
+    replaced_info = _fake_windows_information(directory=True, file_id=999)
+    payload_info = _fake_windows_information(directory=False, file_id=1001, size=1)
+
+    def open_checked(path, *, directory, label):
+        if directory:
+            assert path == root_path
+            return 999, replaced_info
+        assert path == target_path
+        return 1001, payload_info
+
+    monkeypatch.setattr(replay.os, "name", "nt")
+    monkeypatch.setattr(replay, "_win_open_checked", open_checked)
+    monkeypatch.setattr(
+        replay,
+        "_win_information",
+        lambda handle, _label: approved_info if handle == 111 else payload_info,
+    )
+    monkeypatch.setattr(
+        replay,
+        "_win_final_path",
+        lambda handle, _label: root_path if handle in {111, 999} else target_path,
+    )
+    monkeypatch.setattr(
+        replay, "_win_read", lambda *_args: reads.append("read") or b"X"
+    )
+    monkeypatch.setattr(replay, "_CloseHandle", closed.append)
+
+    with pytest.raises(ValueError, match="root identity|root.*changed"):
+        replay._read_relative_windows(
+            approved, ("payload",), "payload", "replay path", 8
+        )
+
+    assert reads == []
+    assert closed == [999]
+
+
+@pytest.mark.parametrize(
+    "root_path",
+    [r"C:\trusted\approved\root", r"\\server\share\approved\root"],
+    ids=["drive", "unc-share"],
+)
+def test_windows_read_opens_every_child_relative_to_approved_handles(
+    monkeypatch, root_path
+):
+    approved = replay._ApprovedRoot(
+        root_path,
+        ("windows", 5, 0, 111),
+        111,
+        root_path,
+    )
+    closed = []
+    relative_calls = []
+    root_info = _fake_windows_information(directory=True, file_id=111)
+    directory_info = _fake_windows_information(directory=True, file_id=222)
+    payload_info = _fake_windows_information(directory=False, file_id=333, size=1)
+    child_paths = {
+        111: root_path,
+        222: root_path + r"\nested",
+        333: root_path + r"\nested\payload",
+        444: root_path,
+    }
+
+    def open_checked(path, *, directory, label):
+        assert path == root_path
+        assert directory is True
+        return 444, root_info
+
+    def open_relative(parent_handle, component, *, directory, label):
+        relative_calls.append((parent_handle, component, directory, label))
+        if component == "nested":
+            assert parent_handle == 111
+            return 222, directory_info
+        assert component == "payload" and parent_handle == 222
+        return 333, payload_info
+
+    monkeypatch.setattr(replay.os, "name", "nt")
+    monkeypatch.setattr(replay, "_win_open_checked", open_checked)
+    monkeypatch.setattr(
+        replay, "_win_open_relative_checked", open_relative, raising=False
+    )
+    monkeypatch.setattr(
+        replay,
+        "_win_information",
+        lambda handle, _label: {
+            111: root_info,
+            222: directory_info,
+            333: payload_info,
+            444: root_info,
+        }[handle],
+    )
+    monkeypatch.setattr(
+        replay, "_win_final_path", lambda handle, _label: child_paths[handle]
+    )
+    monkeypatch.setattr(replay, "_win_read", lambda *_args: b"X")
+    monkeypatch.setattr(replay, "_CloseHandle", closed.append)
+
+    assert replay._read_relative_windows(
+        approved,
+        ("nested", "payload"),
+        "nested/payload",
+        "replay path",
+        8,
+    ) == b"X"
+    assert relative_calls == [
+        (111, "nested", True, "replay path"),
+        (222, "payload", False, "replay path"),
+    ]
+    assert closed == [444, 333, 222]
+
+
+def test_windows_relative_open_failure_closes_every_owned_handle_once(monkeypatch):
+    root_path = r"C:\trusted\approved\root"
+    approved = replay._ApprovedRoot(
+        root_path,
+        ("windows", 5, 0, 111),
+        111,
+        root_path,
+    )
+    root_info = _fake_windows_information(directory=True, file_id=111)
+    directory_info = _fake_windows_information(directory=True, file_id=222)
+    closed = []
+
+    def open_relative(parent_handle, component, *, directory, label):
+        if component == "nested":
+            return 222, directory_info
+        raise ValueError("synthetic relative reparse rejection")
+
+    monkeypatch.setattr(replay.os, "name", "nt")
+    monkeypatch.setattr(
+        replay,
+        "_win_open_checked",
+        lambda *_args, **_kwargs: (444, root_info),
+    )
+    monkeypatch.setattr(
+        replay, "_win_open_relative_checked", open_relative, raising=False
+    )
+    monkeypatch.setattr(
+        replay,
+        "_win_information",
+        lambda handle, _label: root_info if handle in {111, 444} else directory_info,
+    )
+    monkeypatch.setattr(
+        replay,
+        "_win_final_path",
+        lambda handle, _label: (
+            root_path if handle in {111, 444} else root_path + r"\nested"
+        ),
+    )
+    monkeypatch.setattr(replay, "_CloseHandle", closed.append)
+
+    with pytest.raises(ValueError, match="relative reparse"):
+        replay._read_relative_windows(
+            approved,
+            ("nested", "payload"),
+            "nested/payload",
+            "replay path",
+            8,
+        )
+
+    assert closed == [444, 222]
+
+
 @pytest.mark.parametrize("blocked", ["manifest", "replay"])
 def test_preflight_reads_from_safe_open_handle_without_pathname_reopen(
     tmp_path, monkeypatch, blocked
@@ -724,6 +1219,13 @@ def _install_fake_posix(monkeypatch, *, open_file, fstat, close, dup=None):
     monkeypatch.setattr(replay.os, "fstat", fstat)
     monkeypatch.setattr(replay.os, "close", close)
     monkeypatch.setattr(replay.os, "supports_dir_fd", {open_file})
+    monkeypatch.setattr(
+        replay,
+        "_posix_open_component",
+        lambda parent_fd, component, flags: open_file(
+            component, flags, dir_fd=parent_fd
+        ),
+    )
     if dup is not None:
         monkeypatch.setattr(replay.os, "dup", dup)
 class _FakePosixReader:
@@ -779,6 +1281,31 @@ def test_fake_posix_success_flags_dirfd_chain_bounded_short_reads_and_close_orde
     assert backend.open_calls == [("one", directory_flags, 101, 102), ("two", directory_flags, 102, 103), ("file", final_flags, 103, 104)]
     assert backend.read_calls == [7, 5, 3, 1]
     assert backend.closed == [104, 103, 102, 101]
+
+
+def test_fake_posix_relative_read_rejects_same_device_bind_mount(monkeypatch):
+    backend = _FakePosixReader()
+    backend.install(monkeypatch)
+    original = replay._posix_open_component
+
+    def reject_bind_mount(parent_fd, component, flags):
+        if component == "two":
+            raise OSError(errno.EXDEV, "openat2 rejected same-device bind mount")
+        return original(parent_fd, component, flags)
+
+    monkeypatch.setattr(replay, "_posix_open_component", reject_bind_mount)
+    root = replay._ApprovedRoot("approved", ("posix", 1, 2), 100)
+    with pytest.raises(ValueError, match="unsafe|unavailable"):
+        replay._read_relative_posix(
+            root,
+            ("one", "two", "file"),
+            "one/two/file",
+            "replay path",
+            32,
+        )
+    assert backend.closed == [102, 101]
+
+
 @pytest.mark.parametrize(
     ("failure", "closed"),
     [("open_1", [102, 101]), ("open_2", [103, 102, 101]), ("fstat_102", [102, 101]),
@@ -847,13 +1374,19 @@ def test_fake_posix_fstat_failures_close_all_opened_fds_once(monkeypatch, stage)
      ("posix", 1, 2, 3)],
 )
 def test_root_identity_rejects_schema_and_exact_type_drift(monkeypatch, identity):
-    closed = []
+    closed, opened = [], []
     info = SimpleNamespace(st_mode=stat.S_IFDIR | 0o755, st_dev=1, st_ino=2)
-    _install_fake_posix(monkeypatch, open_file=lambda *_a, **_k: 61,
+    def open_component(*_args, **_kwargs):
+        fd = 61 + len(opened)
+        opened.append(fd)
+        return fd
+    _install_fake_posix(monkeypatch, open_file=open_component,
                         fstat=lambda _fd: info, close=closed.append)
+    monkeypatch.setattr(replay.os.path, "abspath", lambda _path: "/approved")
     with pytest.raises(ValueError, match="identity"):
         replay._open_approved_root(Path("approved"), identity)
-    assert closed == [61]
+    assert opened == [61, 62]
+    assert closed == [62, 61]
 def test_context_registry_rejects_complete_field_copy_and_old_sentinel(tmp_path, monkeypatch):
     _, context = approved_context(tmp_path, monkeypatch)
     forged = object.__new__(replay.ReplayReadingContext)
