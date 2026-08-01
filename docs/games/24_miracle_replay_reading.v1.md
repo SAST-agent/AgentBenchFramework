@@ -30,15 +30,24 @@ artifact remains forbidden even if its file is renamed. Both manifest and
 replay must be canonical UTF-8 JSON without BOM, extra fields, NaN, Infinity,
 or alternate whitespace serialization.
 
-The issued `ReplayReadingContext` contains no mutable ReplayPacket. It retains
-only immutable canonical manifest bytes, their digest, an approved-root
-relative path, and an internal issuer identity. `open_replay_reading()` rereads
+The issued `ReplayReadingContext` contains no mutable ReplayPacket or open file
+handle. A closure-owned weak registry binds each preflight-created object to a
+strict immutable field snapshot; copied or modified contexts are not issued.
+`open_replay_reading()` rereads
 the files and rechecks approval, bytes, digest, role, replay SHA, and all nested
 identities. A normally constructed or `object.__new__` context is rejected;
 packet/role replacement and nested manifest mutation cannot become trust.
 
-Paths are confined to the approved root. Symlinks, `..`, absolute paths,
-Windows drives, ADS syntax, missing files, and path replacement fail closed.
+Paths are confined to the approved root. Symlink/reparse components, missing
+files, and path replacement fail closed. Manifest-contained replay paths reject
+`..`, absolute paths, Windows drives, and ADS syntax. The approved root and
+supplied manifest path must be absolute; relative inputs are rejected rather
+than interpreted against process CWD. Mixed filesystem separators are checked across the complete raw path
+before `splitdrive` or normalization; Windows device namespace paths are rejected. An exact `Path` exposes
+only the separator form retained by `pathlib`; discarded lexical spelling cannot be recovered.
+Manifest reads are capped at `MAX_REPLAY_MANIFEST_BYTES = 262144`; synthetic replay
+reads are capped at `MAX_SYNTHETIC_REPLAY_BYTES = 16777216`. The same bounded
+fd/handle supplies the bytes and the before/after identity and metadata checks.
 
 ## DecisionFrame
 

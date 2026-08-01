@@ -267,11 +267,22 @@ def validate_distribution(
     for action_id in support.action_ids:
         value = distribution[action_id]
         label = f"probability[{action_id!r}]"
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
+        if type(value) not in (int, float):
             raise _DistributionValidationError(
                 "probability_type",
                 f"{label} must be an int or float, not bool",
             )
+        if type(value) is int:
+            if value < 0:
+                raise _DistributionValidationError(
+                    "probability_negative",
+                    f"{label} must be non-negative",
+                )
+            if value > 1:
+                raise _DistributionValidationError(
+                    "probability_sum_mismatch",
+                    "distribution probability sum must equal 1 within 1e-9",
+                )
         number = float(value)
         if not math.isfinite(number):
             raise _DistributionValidationError(
@@ -335,6 +346,16 @@ def _compute_local_kl(
         return _incomplete_local_record(
             step, support, f"new_distribution_{exc.code}"
         )
+    old_mass = math.fsum(old.values())
+    new_mass = math.fsum(new.values())
+    if abs(old_mass - 1.0) > _STRICT_MASS_ROUNDOFF:
+        return _incomplete_local_record(
+            step, support, "old_distribution_mass_not_strict"
+        )
+    if abs(new_mass - 1.0) > _STRICT_MASS_ROUNDOFF:
+        return _incomplete_local_record(
+            step, support, "new_distribution_mass_not_strict"
+        )
     for action_id in support.action_ids:
         old_probability = old[action_id]
         new_probability = new[action_id]
@@ -348,16 +369,6 @@ def _compute_local_kl(
                 None,
                 "old_positive_new_zero",
             )
-    old_mass = math.fsum(old.values())
-    new_mass = math.fsum(new.values())
-    if abs(old_mass - 1.0) > _STRICT_MASS_ROUNDOFF:
-        return _incomplete_local_record(
-            step, support, "old_distribution_mass_not_strict"
-        )
-    if abs(new_mass - 1.0) > _STRICT_MASS_ROUNDOFF:
-        return _incomplete_local_record(
-            step, support, "new_distribution_mass_not_strict"
-        )
     terms = [
         old_probability
         * (math.log(old_probability) - math.log(new[action_id]))

@@ -111,6 +111,85 @@ def test_zero_probability_rules_are_structured_and_json_safe():
     json.dumps(infinite.to_dict(), allow_nan=False)
 
 
+@pytest.mark.parametrize(
+    ("old", "new", "reason"),
+    [
+        (
+            {"a": 1.0000000009, "b": 0.0},
+            {"a": 0.0, "b": 1.0},
+            "old_distribution_mass_not_strict",
+        ),
+        (
+            {"a": 1.0, "b": 0.0},
+            {"a": 0.0, "b": 1.0000000009},
+            "new_distribution_mass_not_strict",
+        ),
+        (
+            {"a": 1.0000000009, "b": 0.0},
+            {"a": 0.0, "b": 1.0000000009},
+            "old_distribution_mass_not_strict",
+        ),
+    ],
+    ids=["old-nonstrict", "new-nonstrict", "old-priority"],
+)
+def test_strict_mass_checks_precede_old_positive_new_zero(old, new, reason):
+    summary = local(old, new)
+    assert summary.status == "incomplete"
+    assert summary.trajectory_kl is None
+    assert summary.threshold_passed is None
+    assert summary.reason == reason
+    assert summary.trace == (None,)
+
+
+@pytest.mark.parametrize(
+    ("side", "value", "reason"),
+    [
+        ("old", 10**10000, "old_distribution_probability_sum_mismatch"),
+        ("new", 10**10000, "new_distribution_probability_sum_mismatch"),
+        ("old", -(10**10000), "old_distribution_probability_negative"),
+        ("new", -(10**10000), "new_distribution_probability_negative"),
+    ],
+    ids=["old-huge-positive", "new-huge-positive", "old-huge-negative", "new-huge-negative"],
+)
+def test_huge_integer_probability_is_structured_incomplete(side, value, reason):
+    old = {"a": 0.5, "b": 0.5}
+    new = {"a": 0.5, "b": 0.5}
+    (old if side == "old" else new)["a"] = value
+    summary = local(old, new)
+    assert summary.status == "incomplete"
+    assert summary.trajectory_kl is None
+    assert summary.threshold_passed is None
+    assert summary.reason == reason
+    assert summary.trace == (None,)
+    json.dumps(summary.to_dict(), allow_nan=False)
+
+
+def test_strict_zero_failure_keeps_priority_over_mass_incomplete_step():
+    state = empty_observation()
+    support = kl.build_trusted_action_support(state)
+    first, second = support.action_ids
+    mass_incomplete = kl.DecisionKLEvidence(
+        decision_step=1,
+        state_before=state,
+        support_identity=identity(support),
+        old_distribution={first: 1.0000000009, second: 0.0},
+        new_distribution={first: 0.0, second: 1.0},
+    )
+    strict_zero = kl.DecisionKLEvidence(
+        decision_step=2,
+        state_before=state,
+        support_identity=identity(support),
+        old_distribution={first: 1.0, second: 0.0},
+        new_distribution={first: 0.0, second: 1.0},
+    )
+    summary = kl.compute_trajectory_kl([mass_incomplete, strict_zero])
+    assert summary.status == "threshold_failed"
+    assert summary.trajectory_kl is None
+    assert summary.threshold_passed is False
+    assert summary.reason == "old_positive_new_zero"
+    assert summary.trace == (None, None)
+
+
 @pytest.mark.parametrize("forgery", ["schema", "action_id", "illegal_command"])
 def test_public_local_kl_cannot_trust_caller_constructed_support(forgery):
     state_before = empty_observation()
