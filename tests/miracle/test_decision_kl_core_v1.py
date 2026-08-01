@@ -164,6 +164,30 @@ def test_huge_integer_probability_is_structured_incomplete(side, value, reason):
     json.dumps(summary.to_dict(), allow_nan=False)
 
 
+@pytest.mark.parametrize(
+    ("side", "reason"),
+    [
+        ("old", "old_distribution_probability_sum_mismatch"),
+        ("new", "new_distribution_probability_sum_mismatch"),
+    ],
+)
+def test_multiple_large_finite_probabilities_are_structured_incomplete(
+    side, reason
+):
+    valid = {"a": 0.5, "b": 0.5}
+    oversized = {"a": 1e308, "b": 1e308}
+    summary = local(
+        oversized if side == "old" else valid,
+        oversized if side == "new" else valid,
+    )
+    assert summary.status == "incomplete"
+    assert summary.trajectory_kl is None
+    assert summary.threshold_passed is None
+    assert summary.reason == reason
+    assert summary.trace == (None,)
+    json.dumps(summary.to_dict(), allow_nan=False)
+
+
 def test_strict_zero_failure_keeps_priority_over_mass_incomplete_step():
     state = empty_observation()
     support = kl.build_trusted_action_support(state)

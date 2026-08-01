@@ -207,6 +207,34 @@ def test_context_has_no_mutable_packet_or_role_and_nested_view_is_frozen(tmp_pat
     assert packet.role == "train"
 
 
+def test_open_returns_deeply_immutable_validated_packet(tmp_path, monkeypatch):
+    _, context = approved_context(tmp_path, monkeypatch)
+    packet = replay.open_replay_reading(context)
+    frame = packet.decision_frames[0]
+
+    assert isinstance(packet.case_identity, MappingProxyType)
+    assert isinstance(frame.state_before, MappingProxyType)
+    assert isinstance(frame.state_before["observation"], MappingProxyType)
+    assert isinstance(frame.action_support["actions"], tuple)
+    assert isinstance(frame.chosen_action["command"], MappingProxyType)
+    assert isinstance(packet.terminal, MappingProxyType)
+
+    with pytest.raises(TypeError):
+        packet.case_identity["case_id"] = "forged"
+    with pytest.raises(TypeError):
+        frame.state_before["observation"]["camp"] = 1
+    with pytest.raises(TypeError):
+        frame.action_support["actions"][0]["command"]["player"] = 1
+    with pytest.raises(TypeError):
+        frame.chosen_action["command"]["player"] = 1
+    with pytest.raises(TypeError):
+        packet.terminal["reward"] = 0.0
+    with pytest.raises(AttributeError):
+        frame.action_support["actions"].append("forged")
+
+    assert replay.render_replay_timeline(context).endswith("\n")
+
+
 def test_open_rechecks_independent_approval_and_manifest_bytes(tmp_path, monkeypatch):
     (root, manifest_path, _, manifest, _, _), context = approved_context(tmp_path, monkeypatch)
     monkeypatch.setattr(replay, "APPROVED_TRAINING_REPLAY_MANIFESTS", frozenset())
@@ -348,6 +376,47 @@ def test_frame_chain_and_terminal_consistency_are_strict(tmp_path, monkeypatch):
         approve(monkeypatch, hashlib.sha256(manifest_path.read_bytes()).hexdigest())
         with pytest.raises(ValueError, match="continuous|terminal"):
             replay.preflight_replay_reading(manifest_path, approved_root=root)
+
+
+@pytest.mark.parametrize(
+    ("frame_reward", "terminal_reward"),
+    [
+        (2**53, 2**53 + 1),
+        (10**1000, 10**1000),
+    ],
+    ids=["adjacent-above-2**53", "overflowing-integer"],
+)
+def test_invalid_integer_rewards_fail_closed(
+    tmp_path, monkeypatch, frame_reward, terminal_reward
+):
+    root, manifest_path, replay_path, manifest, document, _ = artifact_fixture(
+        tmp_path
+    )
+    document["decision_frames"][-1]["reward"] = frame_reward
+    document["terminal"]["reward"] = terminal_reward
+    rebind_and_approve(
+        monkeypatch, manifest_path, replay_path, manifest, document
+    )
+    with pytest.raises(ValueError, match="reward"):
+        replay.preflight_replay_reading(manifest_path, approved_root=root)
+
+
+def test_exact_large_integer_reward_is_normalized_once_for_frame_and_terminal(
+    tmp_path, monkeypatch
+):
+    root, manifest_path, replay_path, manifest, document, _ = artifact_fixture(
+        tmp_path
+    )
+    document["decision_frames"][-1]["reward"] = 2**53
+    document["terminal"]["reward"] = 2**53
+    rebind_and_approve(
+        monkeypatch, manifest_path, replay_path, manifest, document
+    )
+    context = replay.preflight_replay_reading(manifest_path, approved_root=root)
+    packet = replay.open_replay_reading(context)
+    assert type(packet.decision_frames[-1].reward) is float
+    assert type(packet.terminal["reward"]) is float
+    assert packet.decision_frames[-1].reward == packet.terminal["reward"]
 
 
 @pytest.mark.parametrize("damage", ["bom", "truncated", "noncanonical", "nan"])

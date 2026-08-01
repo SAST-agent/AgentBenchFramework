@@ -111,10 +111,18 @@ if os.name == "nt":
     _FILE_TYPE_DISK = 0x0001
 
 
+def _json_compatible(value: Any) -> Any:
+    if type(value) in (dict, MappingProxyType):
+        return {key: _json_compatible(item) for key, item in value.items()}
+    if type(value) in (list, tuple):
+        return [_json_compatible(item) for item in value]
+    return value
+
+
 def canonical_replay_json_bytes(value: Any) -> bytes:
     return (
         json.dumps(
-            value,
+            _json_compatible(value),
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
@@ -176,9 +184,14 @@ def _strict_seed(value: Any, label: str) -> int:
 def _strict_number(value: Any, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{label} must be an int or float, not bool")
-    number = float(value)
+    try:
+        number = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"{label} must be finite") from exc
     if not math.isfinite(number):
         raise ValueError(f"{label} must be finite")
+    if type(value) is int and int(number) != value:
+        raise ValueError(f"{label} integer must be exactly representable as a float")
     return number
 
 
@@ -679,7 +692,7 @@ class ReplayPacket:
 def _deep_freeze(value: Any) -> Any:
     if isinstance(value, Mapping):
         return MappingProxyType({key: _deep_freeze(item) for key, item in value.items()})
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return tuple(_deep_freeze(item) for item in value)
     return value
 
@@ -765,8 +778,9 @@ def _validate_frame(value: Any, expected_step: int, *, case, seeds, policy, cham
     if value["outcome"] not in {"win", "loss", "draw", "ongoing"}:
         raise ValueError("DecisionFrame outcome is invalid")
     return DecisionFrame(
-        step, before, copy.deepcopy(dict(supplied)), copy.deepcopy(dict(chosen)),
-        copy.deepcopy(dict(value["acting_identity_refs"])), after,
+        step, _deep_freeze(before), _deep_freeze(dict(supplied)),
+        _deep_freeze(dict(chosen)),
+        _deep_freeze(dict(value["acting_identity_refs"])), _deep_freeze(after),
         _strict_number(value["reward"], "DecisionFrame reward"), value["outcome"],
         value["terminated"], value["truncated"], value["case_identity_ref"],
         value["seed_bundle_ref"],
@@ -812,15 +826,25 @@ def _validate_replay(value: Mapping[str, Any], manifest: Mapping[str, Any], mani
     if not isinstance(terminal, Mapping) or set(terminal) != terminal_fields:
         raise ValueError("terminal record is incomplete or extra")
     terminal_reward = _strict_number(terminal["reward"], "terminal reward")
-    _strict_text(terminal["termination_reason"], "termination reason")
+    termination_reason = _strict_text(
+        terminal["termination_reason"], "termination reason"
+    )
     if terminal["outcome"] not in {"win", "loss", "draw"} or not isinstance(terminal["terminated"], bool) or not isinstance(terminal["truncated"], bool):
         raise ValueError("terminal record is invalid")
     last = parsed[-1]
     if not (last.terminated or last.truncated) or (last.outcome, last.reward, last.terminated, last.truncated) != (terminal["outcome"], terminal_reward, terminal["terminated"], terminal["truncated"]):
         raise ValueError("terminal record disagrees with the last DecisionFrame")
+    normalized_terminal = {
+        "outcome": terminal["outcome"],
+        "reward": terminal_reward,
+        "termination_reason": termination_reason,
+        "terminated": terminal["terminated"],
+        "truncated": terminal["truncated"],
+    }
     return ReplayPacket(
         manifest_sha, manifest["replay_sha256"], manifest["match_plan_sha256"],
-        case, "train", seeds, policy, champion, parsed, copy.deepcopy(dict(terminal)),
+        _deep_freeze(case), "train", _deep_freeze(seeds), _deep_freeze(policy),
+        _deep_freeze(champion), parsed, _deep_freeze(normalized_terminal),
     )
 
 

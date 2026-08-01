@@ -294,9 +294,21 @@ def validate_distribution(
                 "probability_negative",
                 f"{label} must be non-negative",
             )
+        if number > 1.0 + _DISTRIBUTION_SUM_TOLERANCE:
+            raise _DistributionValidationError(
+                "probability_sum_mismatch",
+                "distribution probability sum must equal 1 within 1e-9",
+            )
         validated[action_id] = number
+    try:
+        total = math.fsum(validated.values())
+    except OverflowError as exc:
+        raise _DistributionValidationError(
+            "probability_sum_mismatch",
+            "distribution probability sum must equal 1 within 1e-9",
+        ) from exc
     if not math.isclose(
-        math.fsum(validated.values()),
+        total,
         1.0,
         rel_tol=0.0,
         abs_tol=_DISTRIBUTION_SUM_TOLERANCE,
