@@ -513,6 +513,85 @@ def _pending_planner_recovery(
     return recovered
 
 
+def _bootstrap_recovery_candidate(
+    historical: list[dict[str, Any]],
+    *,
+    workspace: str | Path,
+    provider: Any,
+) -> dict[str, Any] | None:
+    """Validate an interrupted model-bootstrap workspace before evaluation.
+
+    A bootstrap may finish editing ``ai.py`` before its provider stream reaches a
+    terminal event.  Recovery is deliberately conservative: it is allowed only
+    for the single bootstrap act, before any version exists, after the provider's
+    normal access audit reports no violations, and when the raw stream proves
+    that a file edit completed (or records the legacy disconnect marker).
+    """
+
+    if any(event.get("event_type") == "version_created" for event in historical):
+        return None
+    failed = next(
+        (
+            event
+            for event in reversed(historical)
+            if event.get("event_type") == "act_completed"
+            and event.get("act_id") == "act-000001-b00"
+            and event.get("status") == "failed"
+        ),
+        None,
+    )
+    if failed is None or not hasattr(provider, "recover_completed_output"):
+        return None
+    raw_ref = failed.get("raw_output_ref")
+    raw_path = None if raw_ref is None else Path(str(raw_ref))
+    workspace_path = Path(workspace)
+    if (
+        raw_path is None
+        or not raw_path.is_file()
+        or not (workspace_path / "ai.py").is_file()
+    ):
+        return None
+
+    try:
+        recovered = provider.recover_completed_output(
+            raw_output_path=raw_path,
+            workspace=workspace_path,
+        )
+    except Exception:
+        return None
+    metadata = recovered.metadata if isinstance(recovered.metadata, dict) else {}
+    if metadata.get("access_policy_violations"):
+        return None
+
+    raw_text = raw_path.read_text(encoding="utf-8")
+    legacy_disconnect = "stream disconnected before completion" in raw_text
+    completed_file_change = False
+    for line in raw_text.splitlines():
+        try:
+            payload = json.loads(line)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if (
+            payload.get("type") == "item.completed"
+            and isinstance(payload.get("item"), dict)
+            and payload["item"].get("type") == "file_change"
+        ):
+            completed_file_change = True
+            break
+    if not legacy_disconnect and not completed_file_change:
+        return None
+
+    return {
+        "failed_act_id": str(failed["act_id"]),
+        "raw_output_ref": str(raw_path),
+        "failure_reason": (
+            "provider_stream_disconnected_after_workspace_edit"
+            if legacy_disconnect
+            else "provider_interrupted_after_workspace_edit"
+        ),
+    }
+
+
 def _curriculum_evaluation_from_events(
     events: list[dict[str, Any]],
     *,
@@ -654,10 +733,13 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
 def _cmd_resume(args: argparse.Namespace) -> int:
     config = _load(args.config)
-    provider_environment = (
-        None if args.acts == 0 else _provider_environment(config)
+    needs_provider = (
+        args.acts != 0 or config.run.origin.mode == "model_bootstrap"
     )
-    if args.acts != 0 and provider_environment is None:
+    provider_environment = (
+        _provider_environment(config) if needs_provider else None
+    )
+    if needs_provider and provider_environment is None:
         print(
             f"missing provider credential: {config.run.provider.env_key}",
             file=sys.stderr,
@@ -908,39 +990,15 @@ def _run_real(
         if resume and provider is not None
         else None
     )
-    failed_bootstrap_event = next(
-        (
-            event
-            for event in reversed(historical)
-            if event.get("event_type") == "act_completed"
-            and event.get("act_id") == "act-000001-b00"
-            and event.get("status") == "failed"
-        ),
-        None,
-    )
-    bootstrap_recovery: dict[str, Any] | None = None
-    if (
-        resume
-        and failed_bootstrap_event is not None
-        and not any(
-            event.get("event_type") == "version_created"
-            for event in historical
+    bootstrap_recovery = (
+        _bootstrap_recovery_candidate(
+            historical,
+            workspace=workspace,
+            provider=provider,
         )
-    ):
-        raw_ref = failed_bootstrap_event.get("raw_output_ref")
-        raw_path = None if raw_ref is None else Path(str(raw_ref))
-        if (
-            raw_path is not None
-            and raw_path.is_file()
-            and (workspace / "ai.py").is_file()
-            and "stream disconnected before completion"
-            in raw_path.read_text(encoding="utf-8")
-        ):
-            bootstrap_recovery = {
-                "failed_act_id": str(failed_bootstrap_event["act_id"]),
-                "raw_output_ref": str(raw_path),
-                "failure_reason": "provider_stream_disconnected_after_workspace_edit",
-            }
+        if resume and provider is not None
+        else None
+    )
     lineage = (
         LineageManager.from_events(
             historical,

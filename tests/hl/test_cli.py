@@ -270,6 +270,53 @@ def test_pending_planner_is_recovered_from_valid_persisted_stream(tmp_path):
     assert provider.calls == [(raw, workspace)]
 
 
+def test_interrupted_bootstrap_with_clean_file_change_is_recoverable(tmp_path):
+    from agentbench_frame.hl.cli import _bootstrap_recovery_candidate
+    from agentbench_frame.tracking.provider import ProviderInvocation
+
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    (workspace / "ai.py").write_text("def ai_func(state): return 1\n", encoding="utf-8")
+    raw = tmp_path / "run" / "provider" / "act-000001-b00.jsonl"
+    raw.parent.mkdir(parents=True)
+    raw.write_text(
+        json.dumps(
+            {
+                "type": "item.completed",
+                "item": {"type": "file_change"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    class Provider:
+        def recover_completed_output(self, *, raw_output_path, workspace):
+            return ProviderInvocation(
+                status="failed",
+                metadata={"access_policy_violations": []},
+            )
+
+    recovery = _bootstrap_recovery_candidate(
+        [
+            {
+                "event_type": "act_completed",
+                "act_id": "act-000001-b00",
+                "status": "failed",
+                "raw_output_ref": str(raw),
+            }
+        ],
+        workspace=workspace,
+        provider=Provider(),
+    )
+
+    assert recovery == {
+        "failed_act_id": "act-000001-b00",
+        "raw_output_ref": str(raw),
+        "failure_reason": "provider_interrupted_after_workspace_edit",
+    }
+
+
 def test_imported_run_accepts_zero_acts_without_provider_credential(
     tmp_path, monkeypatch
 ):
@@ -375,6 +422,47 @@ def test_model_bootstrap_run_accepts_zero_proposal_cycles_with_provider(
 
     assert code == 0
     assert calls[0]["acts"] == 0
+    assert calls[0]["provider_environment"] == {
+        "AGENTBENCH_API_KEY": "runtime-value"
+    }
+
+
+def test_model_bootstrap_resume_uses_provider_for_zero_cycle_recovery(
+    tmp_path, monkeypatch
+):
+    from agentbench_frame.hl import cli
+    from agentbench_frame.hl.local_config import LocalHLConfig
+
+    config = LocalHLConfig.load(CONFIG)
+    calls = []
+    monkeypatch.setattr(cli, "_load", lambda _path: config)
+    monkeypatch.setattr(
+        cli,
+        "_provider_environment",
+        lambda _config: {"AGENTBENCH_API_KEY": "runtime-value"},
+    )
+    monkeypatch.setattr(
+        cli,
+        "_run_real",
+        lambda *args, **kwargs: calls.append(kwargs) or 0,
+    )
+
+    code = cli.main(
+        [
+            "resume",
+            "--config",
+            str(CONFIG),
+            "--run-dir",
+            str(tmp_path / "run"),
+            "--workspace",
+            str(tmp_path / "candidate"),
+            "--acts",
+            "0",
+        ]
+    )
+
+    assert code == 0
+    assert calls[0]["resume"] is True
     assert calls[0]["provider_environment"] == {
         "AGENTBENCH_API_KEY": "runtime-value"
     }
