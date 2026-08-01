@@ -13,15 +13,17 @@ Wire protocol — asymmetric (see ``candidates/v1/agent.py``):
 * AI -> probe (AI->judger, ``convert_to_bytes``): 4-byte big-endian length
   + UTF-8 JSON (binary, signed).
 The probe sends the candidate an ``id`` frame once, then for each reference
-decision point sends a synthesized ``roundbegin`` frame and reads action
-frames until the candidate emits ``finish`` (or times out / disconnects).
+decision point replays the recorded transcript prefix — feeding the judger→AI
+frames in order (the ``id`` frame, off-turn notifications, earlier
+roundbegins) and finally the decision-point ``roundbegin``, then reads the
+first action frame the candidate emits (or times out / disconnects).
 
-Fidelity: the probe presents *one* decision point per sample using the
-sample's observation as the ``roundbegin`` state. It does not replay a full
-game; the reference set was captured (or constructed) to be self-contained per
-decision point. Decision points with status in {Died, Escaped, Skip, Error}
-produce no emitted primitive (no decision point) — consistent with
-``distribution.py``.
+Fidelity: the probe replays the recorded transcript so the candidate's world
+model is faithfully reconstructed at the decision point. A reference sample
+without a transcript is rejected (``ReferenceSampleError``) — a legacy
+single-frame ν cannot build the candidate's world model. Decision points with
+status in {Died, Escaped, Skip, Error} produce no emitted primitive (no
+decision point) — consistent with ``distribution.py``.
 
 Missing / unresponsive candidates yield ``None`` (missing), never coerced to a
 default. Illegal / out-of-support emissions are flagged, not coerced.
@@ -44,6 +46,13 @@ from agentbench_frame.hl.distribution import (
     FINISH,
 )
 from agentbench_frame.hl.reference import ReferenceSample
+
+
+class ReferenceSampleError(ValueError):
+    """Raised when a reference sample cannot be probed — e.g. it carries no
+    recorded transcript (a legacy hand-authored single-frame ν) and so cannot
+    faithfully reconstruct the candidate's world model. Fail-fast: never
+    silently coerce to a uniform distribution that masks ``policy_kl = 0``."""
 
 
 @dataclass(frozen=True)
@@ -98,15 +107,17 @@ class ReferenceProbe:
     crash to that one decision point; the judger itself TLEs-and-continues the
     same way, so this mirrors real play.
 
-    ``probe_one(sample)`` starts a fresh process, sends ``id`` + the
-    ``roundbegin`` for that sample, reads the emitted action, and closes the
-    process. ``probe_set(samples)`` loops ``probe_one`` (so each sample gets
-    its own process). ``close()`` is a no-op kept for API compatibility (each
-    ``probe_one`` already cleans up its own process).
+    ``probe_one(sample)`` starts a fresh process, replays the sample's
+    transcript prefix (the recorded ``id`` frame + off-turn notifications +
+    earlier roundbegins, ending at the decision-point ``roundbegin``), reads
+    the emitted action, and closes the process. ``probe_set(samples)`` loops
+    ``probe_one`` (so each sample gets its own process). ``close()`` is a
+    no-op kept for API compatibility (each ``probe_one`` already cleans up
+    its own process).
 
     **Hard wall-clock timeout.** The read loop inside ``_probe_one_impl`` is
-    deadline-bounded, but the two ``_write_frame`` calls (the ``id`` frame in
-    ``_start`` and the ``roundbegin`` in ``probe_one``) do a blocking
+    deadline-bounded, but the ``_write_frame`` calls (the ``id`` frame in
+    ``_start`` and each transcript prefix frame in ``probe_one``) do a blocking
     ``flush()`` with NO deadline guard. A candidate that spawns but never
     drains stdin blocks that ``flush()`` forever once the frame exceeds the OS
     pipe buffer — *before* the read deadline is ever reached — which is exactly
@@ -117,7 +128,9 @@ class ReferenceProbe:
     ``flush`` raises ``BrokenPipeError`` / its read returns EOF) and returns
     ``None`` (missing). The worker is fully joined before ``probe_one``
     returns, so there is no race on ``self._proc`` across the sequential
-    samples of ``probe_set``.
+    samples of ``probe_set``. The join deadline accounts for the prefix feed:
+    ``self.timeout + _ACK_DRAIN + prefix_slack + 0.5`` where
+    ``prefix_slack = min(self.timeout, 0.05 * len(transcript))``.
     """
 
     # Grace given to the worker thread to finish after a hard-timeout
@@ -130,6 +143,13 @@ class ReferenceProbe:
     # ``self.timeout`` here, leaving no budget for the actual decision-point
     # read. Kept small and fixed so the read loop owns the real timeout budget.
     _ACK_DRAIN: float = 1.0
+    # Per-prefix-frame drain grace: after feeding each non-last transcript
+    # frame, drain the candidate's interleaved out-frames for up to this long
+    # so stale prefix actions don't mask the decision-point emission. Small
+    # and fixed: a synchronous candidate's response is already in the queue by
+    # the time we drain (returns immediately); a non-responding frame (e.g. an
+    # off-turn ``see``) burns at most this much per prefix frame.
+    _PREFIX_DRAIN: float = 0.02
 
     def __init__(self, *, cmd, cwd, timeout: float = 5.0):
         self.cmd = list(cmd)
@@ -177,8 +197,13 @@ class ReferenceProbe:
         except queue.Empty:
             return None
 
-    def _start(self) -> None:
-        """Spawn a fresh candidate process for one sample."""
+    def _start(self, id_frame: Optional[Dict[str, Any]] = None) -> None:
+        """Spawn a fresh candidate process for one sample and send the ``id``
+        frame. If ``id_frame`` is None, a default ``{"type":"id","id":0,
+        "birth_pos":[0,0]}`` is sent (the legacy behaviour); otherwise the
+        caller-supplied frame is sent verbatim (used by transcript replay to
+        feed the recorded ``id`` frame so the candidate's birth position
+        matches the reference roll)."""
         env = dict(os.environ)
         # scrub uv-poisoning env vars (CLAUDE.md gotcha)
         for k in ("PYTHONHOME", "PYTHONPATH"):
@@ -192,8 +217,9 @@ class ReferenceProbe:
         self._reader_thread = None
         self._start_reader()
         # Send the id frame so the candidate sets its player id. seat 0.
-        _write_frame(self._proc.stdin, {"type": "id", "id": 0,
-                                        "birth_pos": [0, 0]})
+        if id_frame is None:
+            id_frame = {"type": "id", "id": 0, "birth_pos": [0, 0]}
+        _write_frame(self._proc.stdin, id_frame)
         # The candidate replies with an id-ack; drain it (best-effort, small —
         # candidates that don't ack must not burn the whole timeout here).
         self._read_frame(self._ACK_DRAIN)
@@ -215,79 +241,113 @@ class ReferenceProbe:
         worker.start()
         # The body budget = ack-drain (``_ACK_DRAIN``) + the read loop
         # (``self.timeout``) + a small slack for the roundbegin write / close.
-        # Bound the worker by that sum so a normal sample always finishes
-        # before the join; only a genuinely stuck sample trips the force-kill.
-        worker.join(self.timeout + self._ACK_DRAIN + 0.5)
+        # The transcript prefix grows the body: each prefix frame is a write
+        # (and a small drain grace for stale out-frames). Bound the slack by
+        # ``min(self.timeout, 0.05 * len(transcript))`` — 50 ms per prefix
+        # frame, capped at the read timeout so a very long prefix cannot
+        # double the wall-clock bound. A normal sample always finishes before
+        # the join; only a genuinely stuck sample trips the force-kill.
+        prefix_slack = min(self.timeout, 0.05 * len(sample.transcript))
+        worker.join(self.timeout + self._ACK_DRAIN + prefix_slack + 0.5)
         if worker.is_alive():
             # Force-kill the candidate so its pipes close and the worker's
             # blocked flush()/read() unblock, letting the worker exit.
             self._force_kill()
             worker.join(self._KILL_GRACE)
             return None  # missing — same contract as any unresponsive candidate
+        if holder.get("error") is not None:
+            # Fail-fast: a ReferenceSampleError (e.g. missing transcript) must
+            # propagate, not be swallowed to None — silently returning None
+            # would mask policy_kl = 0.
+            raise holder["error"]
         return holder["result"]
 
     def _probe_one_impl_safe(self, sample: ReferenceSample, las: LegalActionSet,
                              holder: Dict[str, Any]) -> None:
         """Worker entry: run ``_probe_one_impl`` and capture its result (or
-        None on any exception, so a worker crash never propagates to the
-        main thread)."""
+        None on any non-fatal exception). ``ReferenceSampleError`` is captured
+        into ``holder["error"]`` so ``probe_one`` can re-raise it — the fail-
+        fast contract must not be coerced to a silent None."""
         try:
             holder["result"] = self._probe_one_impl(sample, las)
+        except ReferenceSampleError as e:
+            holder["error"] = e
         except Exception:
             holder["result"] = None
 
+    def _drain_queue(self, grace: float) -> None:
+        """Best-effort drain of any frames the candidate has emitted, so the
+        candidate's stdout never fills and stale prefix actions don't mask the
+        decision-point emission. Drains for up to ``grace`` seconds, returning
+        as soon as a read times out (no more frames immediately available)."""
+        deadline = time.monotonic() + grace
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            if self._read_frame(remaining) is None:
+                break  # timeout or disconnect — nothing more to drain now
+
     def _probe_one_impl(self, sample: ReferenceSample, las: LegalActionSet
                         ) -> Optional[EmittedAction]:
+        # Fail-fast: a reference sample without a transcript cannot faithfully
+        # reconstruct the candidate's world model (a legacy single-frame ν).
+        # Never silently coerce to a uniform distribution that masks policy_kl=0.
+        if len(sample.transcript) == 0:
+            raise ReferenceSampleError(
+                "reference sample has no transcript — re-record this ν "
+                "(legacy single-frame ν cannot build the candidate's "
+                "world model)")
+
+        # The transcript's first frame is normally the recorded ``id`` frame
+        # (the recorder always emits it first). If so, send it via ``_start``
+        # so the candidate's birth position matches the reference roll, and
+        # replay the rest as the prefix. If the transcript doesn't begin with
+        # an ``id`` frame (defensive — hand-built transcripts), send the
+        # default id and replay the whole transcript as the prefix.
+        if sample.transcript[0].get("type") == "id":
+            id_frame = sample.transcript[0]
+            prefix = sample.transcript[1:]
+        else:
+            id_frame = None
+            prefix = sample.transcript
+
         # One fresh process per sample (see class docstring): a candidate that
         # crashes after its action must not poison the next sample.
         try:
-            self._start()
+            self._start(id_frame=id_frame)
         except OSError:
             return None  # couldn't spawn -> missing
         if self._proc is None or self._proc.poll() is not None:
             return None
 
-        # Present the decision point as a roundbegin for player 0. The sample's
-        # observation IS the roundbegin frame: the judger carries the turn
-        # fields at the TOP LEVEL (the candidate reads root["inturn"],
-        # root["status"], root["state"]=round number, root["tools"],
-        # root["others"]; see candidates/v1/agent.py::start_turn). Send it
-        # top-level — do NOT nest under "state" or the candidate never sees its
-        # turn (inturn missing -> skips play -> no emission). Defaults fill any
-        # field a partial observation omits without clobbering provided ones.
-        frame = dict(sample.observation)
-        frame.setdefault("type", "roundbegin")
-        frame.setdefault("inturn", 0)
-        frame.setdefault("state", frame.get("round", 1))  # round number
-        frame.setdefault("status", sample.status)
-        frame.setdefault("hp", 200)
-        frame.setdefault("keys", [0])
-        frame.setdefault("pos", [0, 0, 1])
-        frame.setdefault("tools", {"LandMine": [0, 0], "Sticky": [0, 0],
-                                    "Kit": 0, "Transport": 0})
-        frame.setdefault("others", [
-            {"player_id": 1, "status": 0, "keys": [0], "hp": 200},
-            {"player_id": 2, "status": 0, "keys": [0], "hp": 200},
-            {"player_id": 3, "status": 0, "keys": [0], "hp": 200},
-        ])
-        try:
-            _write_frame(self._proc.stdin, frame)
-        except OSError:
-            self._close_proc()
-            return None
+        # Feed the prefix frames in order. The reader thread (already running
+        # from ``_start``) continuously drains the candidate's interleaved
+        # out-frames so the candidate's stdout never fills and blocks the
+        # write. We do NOT reply to the candidate's prefix actions — only
+        # drain. For all but the last prefix frame, also drain the queue with
+        # a small grace so stale prefix actions don't get captured as the
+        # decision-point emission. The LAST frame in the transcript is the
+        # decision-point ``roundbegin``; after feeding it we capture the first
+        # emitted action.
+        last_idx = len(prefix) - 1
+        for i, frame in enumerate(prefix):
+            try:
+                _write_frame(self._proc.stdin, frame)
+            except OSError:
+                self._close_proc()
+                return None
+            if i < last_idx:
+                self._drain_queue(self._PREFIX_DRAIN)
 
-        # Read action frames until the candidate emits its first action (the
-        # behavioral choice at this decision point) or ``finish``. The real
-        # candidate protocol (``candidates/v1/agent.py``) sends ONE action
-        # then reads the judger's per-action reply before continuing — it
-        # never sends ``finish`` on its own, and the probe doesn't synthesize
-        # that reply, so the candidate blocks after the first action. We
-        # therefore return as soon as we capture the first action: draining
-        # to ``finish`` would burn the whole read timeout per sample (it
-        # never arrives) — minutes of dead time per act. This is safe because
-        # each sample is a fresh process (no turn state to preserve), and the
-        # measurement already records only the first action. ``None`` is
-        # reserved for a truly unresponsive candidate (no emission at all).
+        # Capture the first primitive the candidate emits at the decision
+        # point. The real candidate protocol sends ONE action then reads the
+        # judger's per-action reply before continuing — it never sends
+        # ``finish`` on its own, and the probe doesn't synthesize that reply,
+        # so the candidate blocks after the first action. We therefore return
+        # as soon as we capture the first action: draining to ``finish`` would
+        # burn the whole read timeout per sample. ``None`` is reserved for a
+        # truly unresponsive candidate (no emission at all).
         emitted: Optional[Tuple[Any, ...]] = None
         out_of_support = False
         deadline = time.monotonic() + self.timeout
@@ -309,7 +369,7 @@ class ReferenceProbe:
             emitted = token
             if token not in las.tokens:
                 out_of_support = True
-            break  # captured the first action — return promptly (no finish to drain to)
+            break  # captured the first action — return promptly
         self._close_proc()
         if emitted is None:
             return None  # truly no emission

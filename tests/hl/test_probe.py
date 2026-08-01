@@ -26,7 +26,8 @@ from agentbench_frame.hl.reference import ReferenceSample
 from agentbench_frame.hl.distribution import (
     enumerate_legal_actions, FINISH,
 )
-from agentbench_frame.hl.probe import ReferenceProbe, EmittedAction
+from agentbench_frame.hl.probe import ReferenceProbe, EmittedAction, \
+    ReferenceSampleError
 
 # A minimal echo candidate speaking the REAL LostSpace wire format: reads
 # 4 ASCII digits + JSON (judger->AI, ``convert_byte_str_for_ai`` — same
@@ -79,13 +80,43 @@ def _make_echo_workspace(tmp_path: Path) -> Path:
     return ws
 
 
+def _make_transcript(observation, *, status=0, move_mask=None,
+                     extra_roundbegins=()):
+    """Build a minimal valid transcript: ``[id, (earlier roundbegins...),
+    roundbegin]``. The last frame is the decision-point roundbegin, built from
+    ``observation`` with the same setdefault defaults the old single-frame
+    probe path used (so the candidate reads top-level ``inturn``/``status``/
+    ``state``/``tools``/``others``). ``extra_roundbegines`` prepends additional
+    roundbegin frames before the decision point (to exercise prefix feed /
+    drain)."""
+    rb = dict(observation)
+    rb.setdefault("type", "roundbegin")
+    rb.setdefault("inturn", 0)
+    rb.setdefault("state", rb.get("round", 1))  # round number
+    rb.setdefault("status", status)
+    rb.setdefault("hp", 200)
+    rb.setdefault("keys", [0])
+    rb.setdefault("pos", [0, 0, 1])
+    rb.setdefault("tools", {"LandMine": [0, 0], "Sticky": [0, 0],
+                            "Kit": 0, "Transport": 0})
+    rb.setdefault("others", [
+        {"player_id": 1, "status": 0, "keys": [0], "hp": 200},
+        {"player_id": 2, "status": 0, "keys": [0], "hp": 200},
+        {"player_id": 3, "status": 0, "keys": [0], "hp": 200},
+    ])
+    id_frame = {"type": "id", "id": 0, "birth_pos": [0, 0]}
+    return (id_frame,) + tuple(extra_roundbegins) + (rb,)
+
+
 def _alive_sample():
+    obs = {"round": 1, "inturn": 0}
     return ReferenceSample(
-        observation={"round": 1, "inturn": 0},
+        observation=obs,
         legal_actions={"attack": [], "move": [False]*8, "detect": False,
                        "interprops": []},
         inventory={"LandMine": 0, "Sticky": 0, "Transport": 0, "Kit": 0},
         status=0, seat=0, opponent="rank01",
+        transcript=_make_transcript(obs),
     )
 
 
@@ -225,12 +256,14 @@ def test_probe_drives_real_bundled_baseline():
     probe = ReferenceProbe(
         cmd=[sys.executable, str(ra_path)], cwd=str(ra_path.parent),
         timeout=2.0)
+    obs = {"round": 1, "inturn": 0}
     sample = ReferenceSample(
-        observation={"round": 1, "inturn": 0},
+        observation=obs,
         legal_actions={"attack": [], "move": [True] * 8, "detect": False,
                        "interprops": []},
         inventory={"LandMine": 0, "Sticky": 0, "Transport": 0, "Kit": 0},
         status=0, seat=0, opponent="rank01",
+        transcript=_make_transcript(obs, move_mask=[True] * 8),
     )
     emitted = probe.probe_one(sample)
     probe.close()
@@ -285,12 +318,14 @@ while True:
     h = cb.snapshot(parent_version_id=None)
     cmd, cwd = candidate_command(h, store=cb.store, dest=tmp_path / "stage")
     probe = ReferenceProbe(cmd=cmd, cwd=cwd, timeout=10.0)
+    obs = {"round": 1, "inturn": 0}
     sample = ReferenceSample(
-        observation={"round": 1, "inturn": 0},
+        observation=obs,
         legal_actions={"attack": [], "move": [True] * 8, "detect": False,
                        "interprops": []},
         inventory={"LandMine": 0, "Sticky": 0, "Transport": 0, "Kit": 0},
         status=0, seat=0, opponent="rank01",
+        transcript=_make_transcript(obs, move_mask=[True] * 8),
     )
     t0 = time.monotonic()
     emitted = probe.probe_one(sample)
@@ -330,12 +365,14 @@ while True:
     # Observation padded past the pipe buffer so the roundbegin frame's flush
     # blocks (the candidate never reads it). The pad is an extra field the
     # probe forwards verbatim — enumerate_legal_actions ignores it.
+    big_obs = {"round": 1, "inturn": 0, "pad": "x" * 20000}
     big = ReferenceSample(
-        observation={"round": 1, "inturn": 0, "pad": "x" * 20000},
+        observation=big_obs,
         legal_actions={"attack": [], "move": [False] * 8, "detect": False,
                        "interprops": []},
         inventory={"LandMine": 0, "Sticky": 0, "Transport": 0, "Kit": 0},
         status=0, seat=0, opponent="rank01",
+        transcript=_make_transcript(big_obs),
     )
     t0 = time.monotonic()
     emitted = probe.probe_one(big)
@@ -343,3 +380,223 @@ while True:
     probe.close()
     assert emitted is None          # missing, not coerced
     assert elapsed < 10.0           # hard wall-clock bound, not infinite
+
+
+# ---- §3: transcript replay tests ----
+
+# A candidate that emits a specific move on its turn (for in-support replay).
+MOVE_CANDIDATE = r'''
+import json, sys
+
+def read_frame():
+    hdr = sys.stdin.buffer.read(4)
+    if len(hdr) < 4: return None
+    n = int(hdr.decode("utf-8"))
+    body = sys.stdin.buffer.read(n)
+    return json.loads(body.decode("utf-8"))
+
+def send(frame):
+    s = json.dumps(frame)
+    sys.stdout.buffer.write(len(s).to_bytes(4, "big", signed=True) + s.encode("utf-8"))
+    sys.stdout.buffer.flush()
+
+while True:
+    msg = read_frame()
+    if msg is None: break
+    t = msg.get("type")
+    if t == "id":
+        send({"type": "id", "player_num": 1, "player_list": [1,1,1,1]})
+    elif t == "roundbegin":
+        if msg.get("inturn") == 0:
+            send({"type": "action", "action": ["move", 0]})
+        # off-turn roundbegin: no reply
+    elif t == "action":
+        send({"type": "action", "action": ["finish"]})
+    # offround / notifications: no reply
+'''
+
+
+def _make_move_workspace(tmp_path: Path, candidate_src: str = MOVE_CANDIDATE) -> Path:
+    ws = tmp_path / "workspace"
+    ws.mkdir()
+    (ws / "agent.py").write_text(candidate_src, encoding="utf-8")
+    (ws / "manifest.toml").write_text(
+        'shape = "single_file"\nentrypoint = "agent.py"\n', encoding="utf-8")
+    return ws
+
+
+def test_probe_replay_in_support_emission(tmp_path):
+    """§3.3 headline: replaying a recorded transcript yields an in-support
+    primitive. The candidate reaches the decision point with its world model
+    faithfully reconstructed and emits a legal ``["move", 0]``."""
+    ws = _make_move_workspace(tmp_path)
+    cb = HLCodebase(root=ws, store=tmp_path / "store")
+    h = cb.snapshot(parent_version_id=None)
+    cmd, cwd = candidate_command(h, store=cb.store, dest=tmp_path / "stage")
+
+    probe = ReferenceProbe(cmd=cmd, cwd=cwd, timeout=5.0)
+    obs = {"round": 1, "inturn": 0}
+    sample = ReferenceSample(
+        observation=obs,
+        legal_actions={"attack": [], "move": [True] + [False]*7,
+                       "detect": False, "interprops": []},
+        inventory={"LandMine": 0, "Sticky": 0, "Transport": 0, "Kit": 0},
+        status=0, seat=0, opponent="rank01",
+        transcript=_make_transcript(obs, move_mask=[True] + [False]*7),
+    )
+    emitted = probe.probe_one(sample)
+    probe.close()
+    assert isinstance(emitted, EmittedAction)
+    assert emitted.out_of_support is False
+    assert emitted.primitive == ("move", 0)
+
+
+def test_probe_replay_no_deadlock_on_many_prefix_outframes(tmp_path):
+    """§3.4: a candidate that emits an action after every input frame must
+    not deadlock the probe's writer (the reader thread drains stdout). The
+    probe must complete within the hard bound, not hang."""
+    # Candidate that echoes a finish action after EVERY input frame (id,
+    # roundbegin, off-turn notifications, everything).
+    echo_all = ECHO_CANDIDATE.replace(
+        'elif t == "roundbegin":',
+        'elif t == "roundbegin" or t == "see" or t == "offround" or t == "action":')
+    ws = _make_move_workspace(tmp_path, candidate_src=echo_all)
+    cb = HLCodebase(root=ws, store=tmp_path / "store")
+    h = cb.snapshot(parent_version_id=None)
+    cmd, cwd = candidate_command(h, store=cb.store, dest=tmp_path / "stage")
+
+    # Build a transcript with several prefix frames (off-turn notifications)
+    # before the decision-point roundbegin, so the candidate emits on each.
+    obs = {"round": 3, "inturn": 0}
+    extra = (
+        {"type": "see", "round": 1, "inturn": 0},
+        {"type": "see", "round": 2, "inturn": 0},
+        {"type": "offround", "round": 2, "inturn": 0},
+    )
+    sample = ReferenceSample(
+        observation=obs,
+        legal_actions={"attack": [], "move": [True] + [False]*7,
+                       "detect": False, "interprops": []},
+        inventory={"LandMine": 0, "Sticky": 0, "Transport": 0, "Kit": 0},
+        status=0, seat=0, opponent="rank01",
+        transcript=_make_transcript(obs, extra_roundbegins=extra),
+    )
+    probe = ReferenceProbe(cmd=cmd, cwd=cwd, timeout=5.0)
+    t0 = time.monotonic()
+    emitted = probe.probe_one(sample)
+    elapsed = time.monotonic() - t0
+    probe.close()
+    # completes within the hard bound, no hang
+    assert elapsed < 15.0
+    # may or may not capture an action (the echo candidate emits finish), but
+    # the key assertion is that it returns at all rather than hanging.
+    assert elapsed < 15.0  # no deadlock
+
+
+def test_probe_replay_stall_returns_none_in_time(tmp_path):
+    """§3.5: a candidate that spawns, reads but never writes yields a missing
+    emission (None) within the hard wall-clock timeout — not a hang."""
+    silent = r'''
+import json, sys
+def read_frame():
+    hdr = sys.stdin.buffer.read(4)
+    if len(hdr) < 4: return None
+    n = int(hdr.decode("utf-8"))
+    sys.stdin.buffer.read(n)
+    return {}
+while True:
+    if read_frame() is None: break
+    # never reply, just keep reading
+'''
+    ws = _make_move_workspace(tmp_path, candidate_src=silent)
+    cb = HLCodebase(root=ws, store=tmp_path / "store")
+    h = cb.snapshot(parent_version_id=None)
+    cmd, cwd = candidate_command(h, store=cb.store, dest=tmp_path / "stage")
+
+    obs = {"round": 1, "inturn": 0}
+    sample = ReferenceSample(
+        observation=obs,
+        legal_actions={"attack": [], "move": [True] + [False]*7,
+                       "detect": False, "interprops": []},
+        inventory={"LandMine": 0, "Sticky": 0, "Transport": 0, "Kit": 0},
+        status=0, seat=0, opponent="rank01",
+        transcript=_make_transcript(obs),
+    )
+    probe = ReferenceProbe(cmd=cmd, cwd=cwd, timeout=2.0)
+    t0 = time.monotonic()
+    emitted = probe.probe_one(sample)
+    elapsed = time.monotonic() - t0
+    probe.close()
+    assert emitted is None  # missing, not coerced
+    # returns within the hard bound (timeout + ack_drain + prefix_slack + grace)
+    assert elapsed < 10.0
+
+
+def test_probe_replay_preserves_hard_timeout(tmp_path):
+    """§3.2: a candidate that sleeps forever after the decision-point
+    roundbegin yields None within the hard bound and the process is reaped."""
+    sleeper = r'''
+import json, sys, time
+def read_frame():
+    hdr = sys.stdin.buffer.read(4)
+    if len(hdr) < 4: return None
+    n = int(hdr.decode("utf-8"))
+    return json.loads(sys.stdin.buffer.read(n).decode("utf-8"))
+def send(frame):
+    s = json.dumps(frame)
+    sys.stdout.buffer.write(len(s).to_bytes(4, "big", signed=True) + s.encode("utf-8"))
+    sys.stdout.buffer.flush()
+while True:
+    msg = read_frame()
+    if msg is None: break
+    t = msg.get("type")
+    if t == "id":
+        send({"type": "id", "player_num": 1, "player_list": [1,1,1,1]})
+    elif t == "roundbegin":
+        # sleep forever — never emit at the decision point
+        time.sleep(1000)
+'''
+    ws = _make_move_workspace(tmp_path, candidate_src=sleeper)
+    cb = HLCodebase(root=ws, store=tmp_path / "store")
+    h = cb.snapshot(parent_version_id=None)
+    cmd, cwd = candidate_command(h, store=cb.store, dest=tmp_path / "stage")
+
+    obs = {"round": 1, "inturn": 0}
+    sample = ReferenceSample(
+        observation=obs,
+        legal_actions={"attack": [], "move": [True] + [False]*7,
+                       "detect": False, "interprops": []},
+        inventory={"LandMine": 0, "Sticky": 0, "Transport": 0, "Kit": 0},
+        status=0, seat=0, opponent="rank01",
+        transcript=_make_transcript(obs),
+    )
+    probe = ReferenceProbe(cmd=cmd, cwd=cwd, timeout=2.0)
+    t0 = time.monotonic()
+    emitted = probe.probe_one(sample)
+    elapsed = time.monotonic() - t0
+    probe.close()
+    assert emitted is None  # missing, hard timeout
+    assert elapsed < 10.0   # within the hard wall-clock bound
+
+
+def test_probe_rejects_missing_transcript(tmp_path):
+    """§1.3 fail-fast at the probe boundary: a reference sample with
+    ``transcript=()`` raises ``ReferenceSampleError`` (not silently coerced
+    to None / uniform, which would mask ``policy_kl = 0``)."""
+    ws = _make_move_workspace(tmp_path)
+    cb = HLCodebase(root=ws, store=tmp_path / "store")
+    h = cb.snapshot(parent_version_id=None)
+    cmd, cwd = candidate_command(h, store=cb.store, dest=tmp_path / "stage")
+
+    probe = ReferenceProbe(cmd=cmd, cwd=cwd, timeout=5.0)
+    sample = ReferenceSample(
+        observation={"round": 1, "inturn": 0},
+        legal_actions={"attack": [], "move": [True] + [False]*7,
+                       "detect": False, "interprops": []},
+        inventory={"LandMine": 0, "Sticky": 0, "Transport": 0, "Kit": 0},
+        status=0, seat=0, opponent="rank01",
+        # NO transcript — legacy single-frame ν
+    )
+    with pytest.raises(ReferenceSampleError, match="re-record"):
+        probe.probe_one(sample)
+    probe.close()

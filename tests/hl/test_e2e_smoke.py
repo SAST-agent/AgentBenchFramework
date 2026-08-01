@@ -76,15 +76,34 @@ def _spec() -> BenchmarkSpec:
 
 def _ref_set() -> ReferenceStateSet:
     # two decision points with 2 legal actions (move + finish) so KL is
-    # meaningful (non-degenerate A(s))
+    # meaningful (non-degenerate A(s)). Each sample carries a minimal
+    # transcript (id + roundbegin) so the probe's transcript-replay path is
+    # exercised (the §3 fail-fast rejects samples without transcripts).
     samples = []
     for i in range(2):
+        obs = {"round": i + 1, "inturn": 0}
+        rb = dict(obs)
+        rb.setdefault("type", "roundbegin")
+        rb.setdefault("state", i + 1)
+        rb.setdefault("status", 0)
+        rb.setdefault("hp", 200)
+        rb.setdefault("keys", [0])
+        rb.setdefault("pos", [0, 0, 1])
+        rb.setdefault("tools", {"LandMine": [0, 0], "Sticky": [0, 0],
+                                 "Kit": 0, "Transport": 0})
+        rb.setdefault("others", [
+            {"player_id": 1, "status": 0, "keys": [0], "hp": 200},
+            {"player_id": 2, "status": 0, "keys": [0], "hp": 200},
+            {"player_id": 3, "status": 0, "keys": [0], "hp": 200},
+        ])
+        id_frame = {"type": "id", "id": 0, "birth_pos": [0, 0]}
         samples.append(ReferenceSample(
-            observation={"round": i + 1, "inturn": 0},
+            observation=obs,
             legal_actions={"attack": [], "move": [True] + [False]*7,
                            "detect": False, "interprops": []},
             inventory={"LandMine": 0, "Sticky": 0, "Transport": 0, "Kit": 0},
             status=0, seat=0, opponent="rank01",
+            transcript=(id_frame, rb),
         ))
     return ReferenceStateSet(spec_id="smoke-v1", samples=tuple(samples))
 
