@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import shutil
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -14,6 +15,7 @@ from agentbench_frame.hl.evaluator import CandidateEvaluation
 from agentbench_frame.hl.events import HLEventWriter
 from agentbench_frame.hl.experience import ExperienceManager
 from agentbench_frame.hl.lineage import LineageManager, ParentDecision
+from agentbench_frame.hl.proposal import BranchBrief, load_branch_briefs
 from agentbench_frame.tracking.provider import ProviderInvocation
 
 
@@ -33,6 +35,19 @@ class IterationResult:
     parent_version_id: str
     candidates: tuple[CandidateResult, ...]
     selected: CandidateResult
+    rollback: Optional[ParentDecision]
+
+
+@dataclasses.dataclass(frozen=True)
+class ProposalCycleResult:
+    iteration_id: str
+    parent_version_id: str
+    candidates: tuple[CandidateResult, ...]
+    finalists: tuple[CandidateResult, ...]
+    selected: CandidateResult
+    planner: ProviderInvocation
+    reducer: ProviderInvocation
+    reducer_input_path: Path
     rollback: Optional[ParentDecision]
 
 
@@ -448,6 +463,7 @@ class HLController:
         *,
         parent_version_id: str | None = None,
         defer_experience: bool = False,
+        branch_briefs: tuple[BranchBrief, ...] | None = None,
     ) -> IterationResult:
         if not self._started:
             raise RuntimeError("initialize must be called before run_act")
@@ -470,6 +486,8 @@ class HLController:
         results: list[CandidateResult] = []
         pending_experience: dict[str, Path] = {}
         branch_count = self.iteration.candidates_per_act
+        if branch_briefs is not None and len(branch_briefs) != branch_count:
+            raise ValueError("branch briefs must match candidate count")
 
         for branch_index in range(branch_count):
             self.version_store.checkout(parent_id)
@@ -480,11 +498,17 @@ class HLController:
                 experience_update.unlink()
             act_id = f"act-{self._coding_agent_acts + 1:06d}-b{branch_index:02d}"
             prompt = self.prompt_factory(
+                phase="candidate",
                 act_id=act_id,
                 iteration_id=iteration_id,
                 branch_index=branch_index,
                 branch_count=branch_count,
                 parent_version_id=parent_id,
+                branch_brief=(
+                    None
+                    if branch_briefs is None
+                    else branch_briefs[branch_index].to_dict()
+                ),
             )
             raw_path = self.run_root / "provider" / f"{act_id}.jsonl"
             session_id = (
@@ -586,6 +610,214 @@ class HLController:
             rollback=rollback,
         )
 
+    def run_proposal_cycle(
+        self,
+        *,
+        parent_version_id: str | None = None,
+    ) -> ProposalCycleResult:
+        """Run one planner, four sibling candidates, and one reducer."""
+
+        if not self._started:
+            raise RuntimeError("initialize must be called before proposal cycle")
+        if self.iteration.candidates_per_cycle != 4:
+            raise ValueError("proposal cycle requires exactly four candidates")
+        if not self.iteration.planner_enabled or not self.iteration.reducer_enabled:
+            raise ValueError("proposal cycle requires planner and reducer")
+        parent_id = (
+            self.lineage.lineage_head_version_id
+            if parent_version_id is None
+            else parent_version_id
+        )
+        if parent_id is None:
+            raise ValueError("proposal cycle requires a parent")
+        self.version_store.checkout(parent_id)
+        iteration_id = f"iter-{self._iteration_count + 1:06d}"
+        self.events.write(
+            "proposal_cycle_started",
+            iteration_id=iteration_id,
+            parent_version_id=parent_id,
+            candidate_count=4,
+        )
+
+        control_root = self.workspace / ".agentbench"
+        control_root.mkdir(parents=True, exist_ok=True)
+        planner_output = control_root / "branch_briefs.json"
+        if planner_output.exists():
+            planner_output.unlink()
+        planner_act_id = f"act-{self._coding_agent_acts + 1:06d}-planner"
+        planner_prompt = self.prompt_factory(
+            phase="planner",
+            act_id=planner_act_id,
+            iteration_id=iteration_id,
+            branch_index=None,
+            branch_count=4,
+            parent_version_id=parent_id,
+            branch_brief=None,
+            reducer_input=None,
+        )
+        planner_raw = self.run_root / "provider" / f"{planner_act_id}.jsonl"
+        planner = self.provider.invoke(
+            prompt=planner_prompt,
+            workspace=self.workspace,
+            raw_output_path=planner_raw,
+            session_id=None,
+        )
+        self._coding_agent_acts += 1
+        self._write_checkpoint(
+            act_id=planner_act_id,
+            iteration_id=iteration_id,
+            branch_index=None,
+            parent_version_id=parent_id,
+            prompt=planner_prompt,
+            invocation=planner,
+        )
+        self._write_provider_event(
+            act_id=planner_act_id,
+            iteration_id=iteration_id,
+            branch_index=None,
+            invocation=planner,
+        )
+        if planner.status != "completed" or not planner_output.is_file():
+            raise RuntimeError("planner did not produce branch_briefs.json")
+        proposal_root = self.run_root / "proposals" / iteration_id
+        proposal_root.mkdir(parents=True, exist_ok=True)
+        persisted_briefs = proposal_root / "branch_briefs.json"
+        shutil.copy2(planner_output, persisted_briefs)
+        briefs = load_branch_briefs(persisted_briefs, expected_count=4)
+        self.events.write(
+            "planner_completed",
+            act_id=planner_act_id,
+            iteration_id=iteration_id,
+            status=planner.status,
+            branch_briefs=str(persisted_briefs),
+        )
+
+        iteration = self.run_act(
+            parent_version_id=parent_id,
+            defer_experience=True,
+            branch_briefs=briefs,
+        )
+        completed = sorted(
+            (
+                candidate
+                for candidate in iteration.candidates
+                if candidate.evaluation.status == "complete"
+                and candidate.evaluation.score is not None
+            ),
+            key=lambda candidate: (
+                -float(candidate.evaluation.score),
+                candidate.branch_index,
+            ),
+        )
+        finalists = tuple(completed[: self.iteration.finalist_count])
+        if iteration.selected not in finalists:
+            finalists = (iteration.selected, *finalists)[: self.iteration.finalist_count]
+        self.events.write(
+            "finalists_selected",
+            iteration_id=iteration_id,
+            version_ids=[candidate.version.version_id for candidate in finalists],
+        )
+
+        reducer_input = proposal_root / "reducer_input.json"
+        reducer_input.write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "iteration_id": iteration_id,
+                    "parent_version_id": parent_id,
+                    "selected_version_id": iteration.selected.version.version_id,
+                    "candidates": [
+                        {
+                            "branch_index": candidate.branch_index,
+                            "act_id": candidate.act_id,
+                            "version_id": candidate.version.version_id,
+                            "status": candidate.evaluation.status,
+                            "score": candidate.evaluation.score,
+                            "brief": briefs[candidate.branch_index].to_dict(),
+                            "matches": list(candidate.evaluation.matches),
+                        }
+                        for candidate in iteration.candidates
+                    ],
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        self.version_store.checkout(iteration.selected.version.version_id)
+        reducer_output = control_root / "research_state_update.json"
+        if reducer_output.exists():
+            reducer_output.unlink()
+        reducer_act_id = f"act-{self._coding_agent_acts + 1:06d}-reducer"
+        reducer_prompt = self.prompt_factory(
+            phase="reducer",
+            act_id=reducer_act_id,
+            iteration_id=iteration_id,
+            branch_index=None,
+            branch_count=4,
+            parent_version_id=parent_id,
+            branch_brief=None,
+            reducer_input=str(reducer_input),
+        )
+        reducer_raw = self.run_root / "provider" / f"{reducer_act_id}.jsonl"
+        reducer = self.provider.invoke(
+            prompt=reducer_prompt,
+            workspace=self.workspace,
+            raw_output_path=reducer_raw,
+            session_id=None,
+        )
+        self._coding_agent_acts += 1
+        self._write_checkpoint(
+            act_id=reducer_act_id,
+            iteration_id=iteration_id,
+            branch_index=None,
+            parent_version_id=parent_id,
+            prompt=reducer_prompt,
+            invocation=reducer,
+        )
+        self._write_provider_event(
+            act_id=reducer_act_id,
+            iteration_id=iteration_id,
+            branch_index=None,
+            invocation=reducer,
+        )
+        persisted_reducer_output: str | None = None
+        if reducer_output.is_file():
+            target = proposal_root / "research_state_update.json"
+            shutil.copy2(reducer_output, target)
+            persisted_reducer_output = str(target)
+        self.events.write(
+            "reducer_completed",
+            act_id=reducer_act_id,
+            iteration_id=iteration_id,
+            status=reducer.status,
+            input_path=str(reducer_input),
+            output_path=persisted_reducer_output,
+        )
+        self.events.write(
+            "proposal_cycle_completed",
+            iteration_id=iteration_id,
+            parent_version_id=parent_id,
+            selected_version_id=iteration.selected.version.version_id,
+            candidate_version_ids=[
+                candidate.version.version_id for candidate in iteration.candidates
+            ],
+        )
+        self.commit_experience(iteration.selected)
+        return ProposalCycleResult(
+            iteration_id=iteration_id,
+            parent_version_id=parent_id,
+            candidates=iteration.candidates,
+            finalists=finalists,
+            selected=iteration.selected,
+            planner=planner,
+            reducer=reducer,
+            reducer_input_path=reducer_input,
+            rollback=iteration.rollback,
+        )
+
     def commit_experience(self, candidate: CandidateResult) -> Path | None:
         """Commit a selected candidate's staged Experience update once."""
 
@@ -638,7 +870,7 @@ class HLController:
         *,
         act_id: str,
         iteration_id: str,
-        branch_index: int,
+        branch_index: int | None,
         invocation: ProviderInvocation,
     ) -> None:
         usage = invocation.usage
@@ -663,7 +895,7 @@ class HLController:
         *,
         act_id: str,
         iteration_id: str,
-        branch_index: int,
+        branch_index: int | None,
         parent_version_id: str,
         prompt: str,
         invocation: ProviderInvocation,

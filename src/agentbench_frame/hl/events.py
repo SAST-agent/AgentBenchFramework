@@ -42,6 +42,11 @@ KNOWN_EVENT_TYPES = frozenset(
         "experience_rebuilt",
         "checkpoint_created",
         "run_completed",
+        "proposal_cycle_started",
+        "planner_completed",
+        "finalists_selected",
+        "reducer_completed",
+        "proposal_cycle_completed",
     }
 )
 _SECRET_KEYS = frozenset({"api_key", "authorization", "access_token", "secret"})
@@ -163,6 +168,28 @@ _EVENT_FIELDS = {
     ),
     "checkpoint_created": ({"act_id", "iteration_id", "path", "parent_version_id"}, {"thread_id"}),
     "run_completed": ({"reason", "version_id"}, {"passing_human_opponents"}),
+    "proposal_cycle_started": (
+        {"iteration_id", "parent_version_id", "candidate_count"},
+        set(),
+    ),
+    "planner_completed": (
+        {"act_id", "iteration_id", "status", "branch_briefs"},
+        set(),
+    ),
+    "finalists_selected": ({"iteration_id", "version_ids"}, set()),
+    "reducer_completed": (
+        {"act_id", "iteration_id", "status", "input_path", "output_path"},
+        set(),
+    ),
+    "proposal_cycle_completed": (
+        {
+            "iteration_id",
+            "parent_version_id",
+            "selected_version_id",
+            "candidate_version_ids",
+        },
+        set(),
+    ),
 }
 
 
@@ -195,6 +222,7 @@ def _validate_record(record: Mapping[str, Any]) -> None:
         "source_content_hash", "active_target", "stage_origin_version_id",
         "stage_best_version_id", "completed_target", "next_target",
         "error_type", "error_message", "rejected_version_id",
+        "branch_briefs", "input_path", "output_path", "selected_version_id",
     ):
         if field in record and record[field] is not None and not isinstance(record[field], str):
             raise ValueError(f"{event_type}.{field} must be a string or null")
@@ -207,6 +235,7 @@ def _validate_record(record: Mapping[str, Any]) -> None:
         "ghosts_score",
         "active_target_rank", "stagnation_count",
         "accepted_updates",
+        "candidate_count",
     ):
         value = record.get(field)
         if value is not None and (not isinstance(value, int) or isinstance(value, bool)):
@@ -230,6 +259,7 @@ def _validate_record(record: Mapping[str, Any]) -> None:
         "matches", "action_support", "local_policy_kl_trace",
         "episode_local_policy_kl",
         "locked_opponents", "lost_locked_opponents",
+        "version_ids", "candidate_version_ids",
     ):
         if field in record and not isinstance(record[field], list):
             raise ValueError(f"{event_type}.{field} must be a list")
