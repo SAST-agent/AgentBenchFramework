@@ -76,6 +76,55 @@ def test_main_curve_measurement_skips_rejected_sibling_when_parent_is_retained()
     assert _measurement_candidates(iteration) == ()
 
 
+def test_resume_does_not_remeasure_parent_retained_by_completed_proposal():
+    from agentbench_frame.hl.cli import _pending_measurement_candidate
+
+    events = [
+        {
+            "event_type": "version_created",
+            "version_id": "v1",
+            "parent_version_id": "v0",
+            "evaluation_status": "complete",
+        },
+        {
+            "event_type": "search_parent_selected",
+            "iteration_id": "iter-000002",
+            "version_id": "v1",
+        },
+        {
+            "event_type": "proposal_cycle_completed",
+            "iteration_id": "iter-000002",
+            "parent_version_id": "v1",
+            "selected_version_id": "v1",
+        },
+        {
+            "event_type": "curriculum_gate_completed",
+            "version_id": "v1",
+        },
+    ]
+
+    assert _pending_measurement_candidate(events) is None
+
+
+def test_resume_finalizes_no_change_proposal_without_measurement_events():
+    from agentbench_frame.hl.cli import _pending_proposal_finalization
+
+    events = [
+        {
+            "event_type": "proposal_cycle_completed",
+            "iteration_id": "iter-000002",
+            "parent_version_id": "v1",
+            "selected_version_id": "v1",
+        }
+    ]
+
+    assert _pending_proposal_finalization(events) == (
+        "iter-000002",
+        "v1",
+        "v1",
+    )
+
+
 def test_hl_validate_reports_open_ended_k1_rollback_defaults(capsys):
     from agentbench_frame.hl.cli import main
 

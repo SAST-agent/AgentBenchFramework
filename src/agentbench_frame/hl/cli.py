@@ -172,6 +172,7 @@ def _pending_measurement_candidate(
     if selected_index is None:
         return None
     version_id = str(events[selected_index]["version_id"])
+    iteration_id = str(events[selected_index].get("iteration_id") or "")
     created = next(
         (
             event
@@ -188,6 +189,21 @@ def _pending_measurement_candidate(
     ):
         return None
     later = events[selected_index + 1 :]
+    completed_cycle = next(
+        (
+            event
+            for event in later
+            if event.get("event_type") == "proposal_cycle_completed"
+            and str(event.get("iteration_id") or "") == iteration_id
+        ),
+        None,
+    )
+    if (
+        completed_cycle is not None
+        and str(completed_cycle.get("selected_version_id"))
+        == str(completed_cycle.get("parent_version_id"))
+    ):
+        return None
     if any(
         event.get("event_type") == "measurement_failed"
         and str(event.get("version_id")) == version_id
@@ -243,7 +259,11 @@ def _pending_proposal_finalization(
         for event in later
         if str(event.get("version_id")) == version_id
     }
-    if not {"policy_kl_measured", "occupancy_measured"} <= measured:
+    no_change = version_id == parent_id
+    if (
+        not no_change
+        and not {"policy_kl_measured", "occupancy_measured"} <= measured
+    ):
         return None
     return iteration_id, version_id, parent_id
 
