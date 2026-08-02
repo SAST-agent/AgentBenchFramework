@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from .build import build_candidate
+from .match import run_match
 
 
 class DotoNotImplementedError(RuntimeError):
@@ -24,6 +25,22 @@ def _build(args: argparse.Namespace) -> int:
     return 0 if result.exit_code == 0 else 1
 
 
+def _match(args: argparse.Namespace) -> int:
+    result = run_match(
+        args.agent0,
+        args.agent1,
+        seed=args.seed,
+        output_dir=args.output_dir,
+        tag=args.tag,
+        frame_timeout=args.frame_timeout,
+        server_timeout=args.server_timeout,
+        server_dir=args.server_dir,
+        test_only=args.test_only,
+    )
+    print(json.dumps(result.to_json(), ensure_ascii=False, indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m agentbench_frame.doto",
@@ -34,8 +51,18 @@ def build_parser() -> argparse.ArgumentParser:
     build.add_argument("--player-ai", type=Path, required=True)
     build.add_argument("--output-dir", type=Path, required=True)
     build.set_defaults(func=_build)
+    match = subcommands.add_parser("match", help="run one official-protocol match")
+    match.add_argument("--agent0", type=Path, required=True)
+    match.add_argument("--agent1", type=Path, required=True)
+    match.add_argument("--seed", type=int, default=11)
+    match.add_argument("--output-dir", type=Path, required=True)
+    match.add_argument("--tag", required=True)
+    match.add_argument("--frame-timeout", type=float, default=1.0)
+    match.add_argument("--server-timeout", type=float, default=330.0)
+    match.add_argument("--server-dir", type=Path)
+    match.add_argument("--test-only", action="store_true")
+    match.set_defaults(func=_match)
     for name, help_text in (
-        ("match", "run one official-protocol match"),
         ("replay", "parse an official replay ZIP"),
         ("ig", "compare native policies on one trace"),
         ("loop", "run the replay-driven LLM iteration loop"),
