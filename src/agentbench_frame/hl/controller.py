@@ -1312,6 +1312,13 @@ class HLController:
             workspace=self.workspace,
             raw_output_path=reducer_raw,
             session_id=None,
+            **(
+                {"reasoning_effort": "high"}
+                if getattr(
+                    self.provider, "supports_structured_output", False
+                )
+                else {}
+            ),
         )
         self._coding_agent_acts += 1
         self._write_checkpoint(
