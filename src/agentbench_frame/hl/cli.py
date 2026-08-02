@@ -302,6 +302,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--filler", default=None,
                    help="command to pad empty seats (default: bundled sample AI)")
     p.add_argument("--acts", type=int, default=5)
+    p.add_argument("--min-kl", type=float, default=0.0,
+                   help="early-stop: from --stall-after acts on, if every "
+                        "trailing policy_kl.ig is below this (or missing), "
+                        "stop the loop (0 disables). Default 0.")
+    p.add_argument("--stall-after", type=int, default=5,
+                   help="act index from which the --min-kl early-stop is "
+                        "active. Default 5.")
     p.add_argument("--epsilon", type=float, default=0.1)
     p.add_argument("--pairs", type=int, default=3,
                    help="match pairs per eval. 4-player FFA is noisy; 5+ is "
@@ -353,6 +360,22 @@ def build_parser() -> argparse.ArgumentParser:
                         f"Available: {sorted(EVAL_POOLS)}. Overrides "
                         "--ladder-opponent/--opponent for the pool ranks.")
     return p
+
+
+def _kl_stalled(events_path, min_kl: float, window: int = 3) -> bool:
+    """True when the last ``window`` policy_kl events are all below ``min_kl``
+    (or unmeasurable) — consecutive acts with no valid policy update."""
+    from agentbench_frame.hl.events import read_events
+
+    kls = [e for e in read_events(events_path)
+           if e.get("event_type") == "policy_kl"]
+    if len(kls) < 2:
+        return False
+    for e in kls[-window:]:
+        ig = e.get("ig")
+        if ig is None or ig >= min_kl:
+            return False
+    return True
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -456,6 +479,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         raise SystemExit(f"[hl] model key {key!r} not in MODELS={list(models)}")
     entry = models[key]
     print(f"[hl] model         = {key} ({entry.provider}/{entry.model})", file=sys.stderr)
+    if entry.provider == "openai" and not entry.base_url:
+        raise SystemExit(
+            f"[hl] model {key!r} (provider=openai) has no {key.upper()}_BASE_URL "
+            "in .env; the openai SDK would silently target api.openai.com. "
+            "Set the base URL explicitly."
+        )
     runner = ApiCodingRunner(
         client=build_client(entry),
         system_prompt=_system_prompt(),
@@ -494,6 +523,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         version = ctrl.act(version_before=version)
         print("done" + (f" -> {version.version_id}" if version else " (no version)"),
               file=sys.stderr)
+        # Early-stop: from --stall-after acts on, if every trailing policy_kl
+        # event is KL<--min-kl (or missing), no valid update is landing — stop
+        # and keep the honest stream instead of burning budget on no-ops.
+        if (args.min_kl > 0 and (i + 1) >= args.stall_after
+                and _kl_stalled(events_path, args.min_kl)):
+            print(f"\n[hl] early stop: KL < {args.min_kl} for the last acts "
+                  f"(after {args.stall_after}); no valid policy update. "
+                  "Keeping the stream as-is.", file=sys.stderr)
+            break
 
     # Auto-render the score/IG iteration curves (doc Fix-E item 1). Best-effort:
     # a missing matplotlib must not fail the run.

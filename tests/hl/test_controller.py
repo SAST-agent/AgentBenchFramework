@@ -688,3 +688,77 @@ def test_consolidation_mission_fires_on_cadence_through_controller(tmp_path):
     assert str(store.path) in runner.prompts[1]
     # act 3 saw enough piling growth to trigger the nudge
     assert "CODE GROWTH" in runner.prompts[2]
+
+
+# ---- R1: append-only events + act-counter resume ----
+
+def test_controller_resumes_act_counter_and_appends(tmp_path):
+    """R1: a second controller on the same events_path appends (no truncation)
+    and resumes act numbering instead of restarting at 000001."""
+    ws = _make_workspace(tmp_path)
+    cb = HLCodebase(root=ws, store=tmp_path / "store")
+    v0 = cb.snapshot(parent_version_id=None)
+
+    def make_ctrl():
+        return HLIterationController(
+            codebase=cb, runner=FakeRunner(transform=lambda w: None,
+                                           edit_type="noop"),
+            spec=_spec(), reference=_ref_set(), run_id="r",
+            events_path=tmp_path / "e.jsonl",
+            evaluator_factory=_stub_evaluator_factory(
+                [_stub_result(0.5, "complete"), _stub_result(0.5, "complete")]),
+            probe_factory=_stub_probe_factory([[("finish",)]] * 4),
+            stage_root=tmp_path / "stage",
+        )
+
+    ctrl1 = make_ctrl()
+    v1 = ctrl1.act(version_before=v0)
+    ctrl2 = make_ctrl()
+    ctrl2.act(version_before=v1)
+
+    events = read_events(tmp_path / "e.jsonl")
+    acts = [e for e in events if e["event_type"] == "agent_act"]
+    assert len(acts) == 2  # second controller did NOT truncate the first
+    assert [e["act_id"] for e in acts] == ["r-000001", "r-000002"]
+
+
+# ---- R4: unified per-iteration IG + honest KL-missing reason ----
+
+def test_policy_kl_event_carries_ig_and_kl_missing_reason(tmp_path):
+    """R4: the policy_kl event exposes the unified per-iteration IG (ig ==
+    kl_mean) and an explicit top-level kl_missing_reason when strict KL is
+    unavailable (no ok samples) — never a fabricated 0."""
+    # single ν sample: A(s) = {finish, move-0}. old emits move-0 (ok); new
+    # emits move-5 (out-of-support on this sample) -> no ok pair -> KL missing.
+    ctrl, v0 = _two_act_controller(
+        tmp_path,
+        runner=FakeRunner(transform=lambda w: None, edit_type="noop"),
+        eval_results=[_stub_result(0.0, "complete")],
+        probe_emissions=[[("move", 0)], [("move", 5)]],  # [old], [new]
+    )
+    ctrl.act(version_before=v0)
+    events = read_events(tmp_path / "e.jsonl")
+    kl = next(e for e in events if e["event_type"] == "policy_kl")
+    assert kl["ig"] is None
+    assert kl["kl_mean"] is None
+    assert kl["n_ok"] == 0
+    assert kl["n_missing"] == 1
+    assert kl["kl_missing_reason"].startswith("no ok samples")
+    assert "chosen_not_in_support" in kl["kl_missing_reason"]
+
+
+def test_policy_kl_event_ig_equals_kl_mean_when_ok(tmp_path):
+    """R4: when KL is computable, ig == kl_mean (both ok-only) and no
+    kl_missing_reason is recorded."""
+    ctrl, v0 = _two_act_controller(
+        tmp_path,
+        runner=FakeRunner(transform=lambda w: None, edit_type="noop"),
+        eval_results=[_stub_result(0.0, "complete")],
+        probe_emissions=[[("move", 0)], [("finish",)]],  # flips -> KL>0
+    )
+    ctrl.act(version_before=v0)
+    events = read_events(tmp_path / "e.jsonl")
+    kl = next(e for e in events if e["event_type"] == "policy_kl")
+    assert kl["ig"] is not None and kl["ig"] > 0
+    assert kl["ig"] == kl["kl_mean"]
+    assert kl["kl_missing_reason"] is None

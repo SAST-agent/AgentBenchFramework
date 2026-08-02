@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Type
 
@@ -37,7 +38,7 @@ from agentbench_frame.hl.distribution import (
     ok_kl_values,
     LegalActionSet,
 )
-from agentbench_frame.hl.events import HLEventWriter
+from agentbench_frame.hl.events import HLEventWriter, read_events
 from agentbench_frame.hl.probe import ReferenceProbe, EmittedAction
 from agentbench_frame.hl.reference import (
     BenchmarkSpec, ReferenceStateSet, ReferenceSample,
@@ -89,8 +90,20 @@ class HLIterationController:
         self.promote_rank = promote_rank
         self._tier = 0
         self._last_eval_opponents: Optional[tuple] = None
-        self._events = HLEventWriter(run_id=run_id, path=events_path)
-        self._act_counter = 0
+        # Append-only stream (resume-safe): open in append mode so re-running a
+        # --name never truncates a prior research stream, and resume the act
+        # counter from existing agent_act events so act_ids keep numbering
+        # instead of colliding.
+        prior_acts = 0
+        try:
+            prior_acts = sum(
+                1 for e in read_events(events_path)
+                if e.get("event_type") == "agent_act"
+            )
+        except OSError:
+            prior_acts = 0
+        self._events = HLEventWriter(run_id=run_id, path=events_path, append=True)
+        self._act_counter = prior_acts
         # Self-summarized experience (HL std 5): persisted lessons fed back
         # into each act's prompt. None disables the feature.
         self._experience = experience
@@ -239,16 +252,31 @@ class HLIterationController:
                 version_before, version_after,
             )
             ok_kl = ok_kl_values(kl_trace)
+            kl_mean = (sum(ok_kl) / len(ok_kl)) if ok_kl else None
+            n_ok = len(ok_kl)
+            n_missing = sum(1 for p in kl_trace if p.status != "ok")
+            missing_reasons = [p.reason for p in kl_trace if p.reason]
+            # Honest top-level reason when strict KL cannot be computed (no ok
+            # samples) — never substitute another metric for the missing KL.
+            kl_missing_reason = None
+            if kl_mean is None and missing_reasons:
+                counts = Counter(missing_reasons)
+                kl_missing_reason = (
+                    f"no ok samples ({n_missing}/{len(kl_trace)} missing): "
+                    + ", ".join(f"{r} x{c}" for r, c in counts.most_common())
+                )
             self._events.write(
                 "policy_kl", act_id=act_id,
                 version_before=version_before.version_id,
                 version_after=version_after.version_id,
                 local_policy_kl_trace=[p.to_dict() for p in kl_trace],
                 per_sample_status=[p.status for p in kl_trace],
-                n_ok=len(ok_kl),
-                n_missing=sum(1 for p in kl_trace if p.status != "ok"),
-                missing_reasons=[p.reason for p in kl_trace if p.reason],
-                kl_mean=(sum(ok_kl) / len(ok_kl)) if ok_kl else None,
+                n_ok=n_ok,
+                n_missing=n_missing,
+                missing_reasons=missing_reasons,
+                kl_mean=kl_mean,
+                ig=kl_mean,  # unified per-iteration IG = mean local KL over ν
+                kl_missing_reason=kl_missing_reason,
                 epsilon=self.epsilon,
             )
             self._events.write(
@@ -378,8 +406,16 @@ class HLIterationController:
         replay = self._latest_replay()
         if replay is not None:
             return replay
-        if version is None or self._evaluator_factory is None:
+        if self._evaluator_factory is None:
             return None
+        # No replay yet: materialize one by evaluating the current workspace
+        # (the seeded candidate at validation time) if no version is in hand.
+        if version is None:
+            try:
+                version = self.codebase.snapshot(
+                    parent_version_id=None, edit_type="initial")
+            except Exception:
+                return None
         try:
             self._run_eval(version)
         except Exception:

@@ -54,6 +54,12 @@ MACRO_ACTIONS: Dict[int, str] = {
 #: The action-support set for IG computation. Fixed ordered macro ids,
 #: cross-version stable, and — by construction — the same source as the mask
 #: keys in :func:`compute_mask`. ``SUPPORT = tuple(MACRO_ACTIONS)``.
+#:
+#: Per-iteration IG ≡ the mean of the primitive-level
+#: ``local_policy_kl_trace`` ok-values over ν (the ``ig`` field on
+#: ``policy_kl`` events) — a strict KL over this support set, never a
+#: substitute metric. When no ok sample exists, KL is genuinely unavailable
+#: and the event records ``kl_missing_reason`` instead of a fabricated 0.
 SUPPORT: Tuple[int, ...] = tuple(MACRO_ACTIONS)
 
 

@@ -125,3 +125,42 @@ def test_distribution_reexports_status_and_enumerator():
         status=STATUS_DIED, inventory={},
     )
     assert len(las) == 0  # dead player: no decision point
+
+
+def test_status_constants_match_documented_game_enum():
+    """R3 cross-check: the contract's status enum matches GAME_RULES.md's
+    documented 0-5 player status values (Alive/Died/Escaped/Skip/
+    WaitForEscape/Error)."""
+    assert (STATUS_ALIVE, STATUS_DIED, STATUS_ESCAPED, STATUS_SKIP,
+            STATUS_WAIT_FOR_ESCAPE, STATUS_ERROR) == (0, 1, 2, 3, 4, 5)
+
+
+def test_enumerate_on_nu_v2_sample_agrees_with_compute_mask():
+    """R3 cross-check against a real recorded decision point: the primitive
+    A(s) enumeration and the macro-level mask derive from the same
+    legal_actions source."""
+    import json
+    from pathlib import Path
+
+    from agentbench_frame.hl import distribution as dist
+
+    nu = Path(__file__).resolve().parents[2] / "agentbench_data" \
+        / "reference" / "nu-v2.json"
+    if not nu.is_file():
+        pytest.skip("nu-v2.json not present")
+    data = json.loads(nu.read_text(encoding="utf-8"))
+    # round-8 sample: 2 keys, KeyMachine in interprops, only move dirs 0/1
+    sample = next(s for s in data["samples"]
+                  if s["observation"]["round"] == 8)
+    las = dist.enumerate_legal_actions(
+        sample["legal_actions"], status=sample["status"],
+        inventory=sample["inventory"])
+    mask = compute_mask(las.tokens)
+    # KeyMachine is present -> the interact macro is legal and names it
+    assert ("interact", "KeyMachine") in las
+    assert mask.mask[3] is True
+    assert "interact" in mask.reasons[3]
+    # finish is always legal for a live player
+    assert mask.mask[7] is True
+    # detect is legal (detect: true) and enumerates over the legal moves
+    assert mask.mask[6] is True
