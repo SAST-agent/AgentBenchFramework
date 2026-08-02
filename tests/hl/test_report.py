@@ -315,6 +315,111 @@ def test_fixed_pool_elo_is_order_independent_and_comparable_across_panel_sizes()
     )
 
 
+def test_fault_free_panel_metrics_do_not_count_opponent_tle_as_strategy_win():
+    """A protocol win caused by the Ghost process fault must not claim skill."""
+
+    from agentbench_frame.hl.report import _fault_free_panel_metrics
+
+    matches = [
+        {
+            "status": "complete",
+            "opponent": "rank01",
+            "result": "win",
+            "end_state": ["OK", "TLE"],
+            "rollman_score": 1000,
+            "ghosts_score": -900,
+        },
+        {
+            "status": "complete",
+            "opponent": "rank02",
+            "result": "win",
+            "end_state": ["OK", "OK"],
+            "rollman_score": 300,
+            "ghosts_score": 100,
+        },
+        {
+            "status": "complete",
+            "opponent": "rank03",
+            "result": "loss",
+            "end_state": ["OK", "OK"],
+            "rollman_score": 50,
+            "ghosts_score": 250,
+        },
+        {
+            "status": "complete",
+            "opponent": "rank04",
+            "result": "draw",
+            "end_state": ["OK", "OK"],
+            "rollman_score": 125,
+            "ghosts_score": 125,
+        },
+    ]
+
+    metrics = _fault_free_panel_metrics(matches)
+
+    assert metrics == {
+        "fault_free_pool_win_fraction": 0.375,
+        "fault_free_conditional_win_rate": 0.5,
+        "fault_free_coverage": 0.75,
+        "opponent_fault_rate": 0.25,
+        "fault_free_rollman_elo": 1500.0,
+        "fault_free_mean_score_margin": 0.0,
+    }
+
+
+def test_curve_rows_publish_official_and_fault_free_panel_results_separately():
+    from agentbench_frame.hl.report import derive_curve_rows
+
+    events = [
+        {
+            "event_type": "version_created",
+            "version_id": "v0",
+            "act_id": "origin",
+            "evaluation_status": "complete",
+            "benchmark_score": 0.0,
+        },
+        {
+            "event_type": "candidate_selected",
+            "iteration_id": "iter-000000",
+            "version_id": "v0",
+            "act_id": "origin",
+        },
+        {
+            "event_type": "reporting_panel_completed",
+            "iteration_id": "iter-000000",
+            "version_id": "v0",
+            "score": 1.0,
+            "mean_score_margin": 950.0,
+            "matches": [
+                {
+                    "status": "complete",
+                    "result": "win",
+                    "end_state": ["OK", "TLE"],
+                    "rollman_score": 1000,
+                    "ghosts_score": -900,
+                },
+                {
+                    "status": "complete",
+                    "result": "loss",
+                    "end_state": ["OK", "OK"],
+                    "rollman_score": 100,
+                    "ghosts_score": 300,
+                },
+            ],
+        },
+    ]
+
+    row = derive_curve_rows(events)[0]
+
+    assert row["full_pool_win_rate"] == 1.0
+    assert row["fault_free_pool_win_fraction"] == 0.0
+    assert row["fault_free_conditional_win_rate"] == 0.0
+    assert row["fault_free_coverage"] == 0.5
+    assert row["opponent_fault_rate"] == 0.5
+    assert row["fault_free_mean_score_margin"] == -200.0
+    assert row["fault_free_rollman_elo"] < 1500.0
+
+
 def test_origin_score_margin_comes_from_certification_when_no_reporting_panel():
     from agentbench_frame.hl.report import derive_curve_rows
 
@@ -575,6 +680,12 @@ def test_k4_report_uses_proposal_cycle_as_integer_x_and_keeps_four_branches(
     assert outputs["branches_csv"].is_file()
     svg = outputs["curves_svg"].read_text(encoding="utf-8")
     assert "Score Margin vs HL Iteration" in svg
+    assert "protocol official Elo" in svg
+    assert "fault-free Elo" in svg
+    assert "protocol official win rate" in svg
+    assert "fault-free pool win fraction" in svg
+    assert "opponent fault rate" in svg
+    assert "fault-free mean margin" in svg
     assert "four rollout candidates" not in svg
 
 

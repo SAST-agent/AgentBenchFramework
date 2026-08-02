@@ -441,6 +441,8 @@ def test_k4_role_prompts_use_digest_research_state_and_exact_branch_brief(tmp_pa
     assert "第 6 次工具调用结束前" in candidate
     assert "首次可编译修改" in candidate
     assert "不得顺序打印完整 ai.py" in candidate
+    assert "命令必须直接引用白名单中的完整文件路径" in candidate
+    assert "不得把 run 根目录或父目录保存为变量" in candidate
     assert str(repair_input) in repair
     assert "错误诊断" in repair
     assert "过宽" in repair
@@ -449,6 +451,8 @@ def test_k4_role_prompts_use_digest_research_state_and_exact_branch_brief(tmp_pa
     assert "第 6 次工具调用结束前" in repair
     assert "首次可编译修复" in repair
     assert "批量读取" in repair
+    assert "命令必须直接引用白名单中的完整文件路径" in repair
+    assert "不得把 run 根目录或父目录保存为变量" in repair
     assert str(reducer_input) in reducer
     assert "research_state_update.json" in reducer
     assert "不得修改" in reducer

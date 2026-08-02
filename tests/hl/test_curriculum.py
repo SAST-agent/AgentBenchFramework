@@ -52,6 +52,36 @@ def test_weakest_failed_selects_largest_rank_from_complete_certification():
     assert select_weakest_failed(summary) == "rank15"
 
 
+def test_certification_does_not_treat_opponent_tle_as_human_defeat():
+    from agentbench_frame.hl.curriculum import summarize_certification
+
+    summary = summarize_certification(
+        [
+            {
+                "status": "complete",
+                "opponent": "rank01",
+                "opponent_rank": 1,
+                "result": "win",
+                "end_state": ["OK", "TLE"],
+            },
+            {
+                "status": "complete",
+                "opponent": "rank02",
+                "opponent_rank": 2,
+                "result": "win",
+                "end_state": ["OK", "OK"],
+            },
+        ],
+        required_win_rate=0.5,
+        expected_opponents=2,
+    )
+
+    assert summary.pass_rates == {"rank01": 0.0, "rank02": 1.0}
+    assert summary.passing_opponents == 1
+    assert summary.passed_opponents == ("rank02",)
+    assert summary.failed_opponents == ("rank01",)
+
+
 def test_empirical_hardest_to_easiest_order_selects_easiest_failed_target():
     from agentbench_frame.hl.curriculum import (
         CertificationSummary,

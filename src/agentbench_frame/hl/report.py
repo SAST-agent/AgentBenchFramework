@@ -27,7 +27,13 @@ CURVE_FIELDS = (
     "target_gate_score",
     "passing_human_opponents",
     "full_pool_win_rate",
+    "fault_free_pool_win_fraction",
+    "fault_free_conditional_win_rate",
+    "fault_free_coverage",
+    "opponent_fault_rate",
+    "fault_free_rollman_elo",
     "mean_score_margin",
+    "fault_free_mean_score_margin",
     "curriculum_event",
     "cumulative_prompt_tokens",
     "cumulative_completion_tokens",
@@ -125,6 +131,62 @@ def _score_margin(matches: Any) -> float | None:
         and isinstance(match.get("ghosts_score"), (int, float))
     ]
     return sum(margins) / len(margins) if margins else None
+
+
+def _fault_free_panel_metrics(matches: Any) -> dict[str, float | None]:
+    """Separate protocol outcomes from games completed by both role agents."""
+
+    empty = {
+        "fault_free_pool_win_fraction": None,
+        "fault_free_conditional_win_rate": None,
+        "fault_free_coverage": None,
+        "opponent_fault_rate": None,
+        "fault_free_rollman_elo": None,
+        "fault_free_mean_score_margin": None,
+    }
+    if not isinstance(matches, list):
+        return empty
+    complete = [
+        match
+        for match in matches
+        if isinstance(match, Mapping)
+        and match.get("status", "complete") == "complete"
+        and match.get("result") in {"win", "draw", "loss"}
+    ]
+    if not complete:
+        return empty
+    clean = [
+        match
+        for match in complete
+        if match.get("end_state") == ["OK", "OK"]
+        or match.get("end_state") == ("OK", "OK")
+    ]
+    score_values = {"win": 1.0, "draw": 0.5, "loss": 0.0}
+    clean_score = sum(score_values[str(match["result"])] for match in clean)
+    clean_margins = [
+        float(match["rollman_score"]) - float(match["ghosts_score"])
+        for match in clean
+        if isinstance(match.get("rollman_score"), (int, float))
+        and isinstance(match.get("ghosts_score"), (int, float))
+    ]
+    opponent_faults = sum(
+        isinstance(match.get("end_state"), (list, tuple))
+        and len(match["end_state"]) >= 2
+        and match["end_state"][1] != "OK"
+        for match in complete
+    )
+    return {
+        "fault_free_pool_win_fraction": clean_score / len(complete),
+        "fault_free_conditional_win_rate": (
+            clean_score / len(clean) if clean else None
+        ),
+        "fault_free_coverage": len(clean) / len(complete),
+        "opponent_fault_rate": opponent_faults / len(complete),
+        "fault_free_rollman_elo": _fixed_pool_elo(clean),
+        "fault_free_mean_score_margin": (
+            sum(clean_margins) / len(clean_margins) if clean_margins else None
+        ),
+    }
 
 
 def _win_rate(evaluation: Mapping[str, Any]) -> float | None:
@@ -297,6 +359,12 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
             str(selection.get("iteration_id")),
             reporting.get(version_id, {}),
         )
+        panel_matches = (
+            panel.get("matches")
+            if panel.get("matches")
+            else certification.get("matches")
+        )
+        fault_free = _fault_free_panel_metrics(panel_matches)
         kl_trace = policy_kl.get(version_id, [])
         win_rate = _win_rate(evaluation)
         no_change = bool(
@@ -344,6 +412,7 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
                     "passing_human_opponents"
                 ),
                 "full_pool_win_rate": certification.get("score"),
+                **fault_free,
                 "mean_score_margin": (
                     panel.get("mean_score_margin")
                     if panel.get("mean_score_margin") is not None
@@ -609,14 +678,45 @@ def _plot(
     axes[0].set_title("Information Gain vs HL Iteration")
     axes[0].set_ylabel("local policy KL (nats / decision)")
 
-    line(axes[1], "rollman_elo", "Rollman Elo", color="#7b2cbf")
+    line(
+        axes[1],
+        "rollman_elo",
+        "protocol official Elo",
+        color="#7b2cbf",
+    )
+    line(
+        axes[1],
+        "fault_free_rollman_elo",
+        "fault-free Elo",
+        color="#f4a261",
+    )
     axes[1].set_title("Elo vs HL Iteration")
     axes[1].set_ylabel("fixed-pool Elo")
+    axes[1].legend()
 
-    line(axes[2], "full_pool_win_rate", "full human pool", color="#00897b")
+    line(
+        axes[2],
+        "full_pool_win_rate",
+        "protocol official win rate",
+        color="#00897b",
+    )
+    line(
+        axes[2],
+        "fault_free_pool_win_fraction",
+        "fault-free pool win fraction",
+        color="#1565c0",
+    )
+    line(
+        axes[2],
+        "opponent_fault_rate",
+        "opponent fault rate",
+        color="#c62828",
+        linestyle="--",
+    )
     axes[2].set_title("Full-pool Win Rate vs HL Iteration")
     axes[2].set_ylabel("win rate")
     axes[2].set_ylim(-0.02, 1.02)
+    axes[2].legend()
 
     line(
         axes[3],
@@ -624,9 +724,16 @@ def _plot(
         "reporting-panel mean margin",
         color="#e76f51",
     )
+    line(
+        axes[3],
+        "fault_free_mean_score_margin",
+        "fault-free mean margin",
+        color="#264653",
+    )
     axes[3].axhline(0.0, color="#555555", linewidth=1, alpha=0.5)
     axes[3].set_title("Score Margin vs HL Iteration")
     axes[3].set_ylabel("Rollman score − Ghosts score")
+    axes[3].legend()
 
     for axis in axes:
         _set_iteration_axis(axis, x)

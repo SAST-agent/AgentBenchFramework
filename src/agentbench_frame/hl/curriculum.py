@@ -64,7 +64,15 @@ def summarize_certification(
         if opponent in ranks and ranks[opponent] != rank_value:
             raise ValueError(f"inconsistent rank for opponent {opponent}")
         ranks[opponent] = rank_value
-        results.setdefault(opponent, []).append(str(result))
+        end_state = match.get("end_state")
+        fault_free = (
+            end_state is None
+            or end_state == ["OK", "OK"]
+            or end_state == ("OK", "OK")
+        )
+        results.setdefault(opponent, []).append(
+            str(result) if fault_free else "loss"
+        )
     if len(results) != expected_opponents:
         raise ValueError(
             f"certification requires {expected_opponents} opponents"
