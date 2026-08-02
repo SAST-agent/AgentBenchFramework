@@ -82,6 +82,6 @@ paths:
   official_logic_root: "${AGENTBENCH_SAST_ROOT}/PacmanLogic"
   pacman_sdk_root: "${AGENTBENCH_SAST_ROOT}/PacmanSDK-python"
   human_manifest: "${AGENTBENCH_SAST_ROOT}/AgentBench/top_algorithms/corpus/29_rollman_ghost_final/MANIFEST.tsv"
-  workspace: ".agentbench/29_rollman/candidate-k4-repair-v1"
+  workspace: ".agentbench/29_rollman/candidate-k4-repair-v4-budget"
   runs_root: ".agentbench/29_rollman/runs"
   opponent_build_root: ".agentbench/29_rollman/opponents"

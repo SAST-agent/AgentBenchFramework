@@ -27,6 +27,7 @@ def test_rollman_k4_repair_config_freezes_native_budget_and_deadlines(
         10000,
         5000,
     )
+    assert config.paths.workspace.name == "candidate-k4-repair-v4-budget"
 
 
 def test_imported_source_run_resolves_from_repository_root(tmp_path):
