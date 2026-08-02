@@ -3,7 +3,9 @@ Canonical action space + measurement channel for HL policy KL.
 
 Grounded in ``Player.get_legal_actions()`` (``player.py:230-262``) and
 ``GameController.solve()`` (``GameController.py:185-255``); see
-``lostspace/GAME_RULES.md``.
+``lostspace/GAME_RULES.md`` and the Q3 contract in ``decision_space.py``
+(macro set / SUPPORT / termination / observation / mask live there — this
+module is the primitive-level measurement channel that consumes it).
 
 Design decisions (see plan.md §distribution):
 - **Granularity = primitive action.** One decision point = one wire primitive
@@ -34,6 +36,24 @@ import math
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+# Re-export the Q3 contract symbols from decision_space.py (single source).
+# Existing callers import these from ``distribution`` — keep that working.
+from agentbench_frame.hl.decision_space import (  # noqa: F401  (re-export)
+    STATUS_ALIVE,
+    STATUS_DIED,
+    STATUS_ESCAPED,
+    STATUS_ERROR,
+    STATUS_SKIP,
+    STATUS_WAIT_FOR_ESCAPE,
+    SUPPORT,
+    MACRO_ACTIONS,
+    ActionMask,
+    Termination,
+    compute_mask,
+    macro_id_of,
+    termination,
+)
+
 # ---- constants (mirror config.py; source-commented so drift is visible) ----
 
 # config.py:3
@@ -47,14 +67,6 @@ DIRECTION_SEQ: Tuple[Tuple[int, int, int], ...] = (
     (0, 1, 0), (0, -1, 0), (1, 0, 0), (-1, 0, 0),
     (1, -1, 0), (-1, 1, 0), (1, 1, 0), (-1, -1, 0),
 )
-
-# PlayerStatus (config.py:37-43)
-STATUS_ALIVE = 0
-STATUS_DIED = 1
-STATUS_ESCAPED = 2
-STATUS_SKIP = 3
-STATUS_WAIT_FOR_ESCAPE = 4
-STATUS_ERROR = 5
 
 #: The canonical "end turn" primitive, always legal for a live player.
 FINISH: Tuple[str, ...] = ("finish",)
@@ -130,7 +142,7 @@ def enumerate_legal_actions(
         state (status Died/Escaped/Skip/Error).
     """
     # No decision point: round auto-ends, the agent is not queried.
-    if status in (STATUS_DIED, STATUS_ESCAPED, STATUS_SKIP, STATUS_ERROR):
+    if termination(status).is_terminal:
         return LegalActionSet(tokens=(), state_id="")
 
     tokens: List[ActionToken] = [FINISH]
