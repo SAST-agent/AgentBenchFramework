@@ -4,7 +4,7 @@
 > 参照对象：`origin/zhongkaiyu` 的 `snakego/`（同框架、另一游戏 26_snakego 的 HL 实现）
 > 检查表：5 项目标（闭环 / 规则文档+回放验证 / obs+action 契约 / IG 数据+缺失原因 / 有效策略更新+曲线）
 > 日期：2026-08-01
-> 状态复核：2026-08-02（对照 HEAD 之后提交复核；Fix-C 已落地、total_tokens 已修，见 §0.5）
+> 状态复核：2026-08-02（对照 HEAD 之后提交复核；**Fix-A/B/C/D/E/F 全部落地**，见 §0.5）
 
 ---
 
@@ -12,12 +12,12 @@
 
 | Fix | 状态 | 证据 |
 |---|---|---|
-| **A** policy_kl 诚实性 | ❌ 未做 | `local_policy_kl_trace` 仍返回扁平 `List[float]`，`None` 仍喂进 `epsilon_smoothed_distribution` → uniform → KL=0（`controller.py:392-393`、`distribution.py:236`） |
-| **B** decision_space 契约文件 | ❌ 未做 | 无契约文件，Q3 仍散在 `distribution.py` |
+| **A** policy_kl 诚实性 | ✅ 已做 | `local_policy_kl_trace` 返回结构化 `PolicyKLPoint{kl,status,reason}`（`distribution.py:248-260`）；`None` 记 `no_emission` 不折 0（`distribution.py:321-326`）；`policy_kl` 事件带 `per_sample_status/n_ok/n_missing/missing_reasons/kl_mean`（`controller.py:237-248`）；`plot_curves` 只读 ok 值并兼容旧扁平事件（`plot_curves.py:126-133`）。提交 3b68d77。e2e 断言 `per_sample_status==[“ok”,”ok”]` |
+| **B** decision_space 契约文件 | ✅ 已做 | 新建 `hl/decision_space.py`：`MACRO_ACTIONS`/`SUPPORT`（macro 投影，显式非完整 primitive 空间）、`termination()`、`compute_mask`、`Observation`。`STATUS_*` 移入（单一来源），`distribution.py` 导入并 re-export（`probe/controller/reference_recorder/测试` 导入不变），terminal 判断委托 `termination()`。提交 bc3e298 |
 | **C** ν 从 instrumentation 记录 | ✅ 已做 | `reference_recorder.py`（c17189d）解析真实 `trace.jsonl` → 带 `transcript` 的 `ReferenceSample`；probe 重放 transcript（7eb3ab6）；`reference_seed.py` 降级为 TEST FIXTURE（79bc6b6） |
-| **D** REPLAY_SKILL act | ❌ 未做 | `GAME_RULES.md` 仍只注入 4 行 blurb（`context.py:42-47`） |
-| **E** 评测池+自动出图 | ❌ 未做 | `cli.py` 不自动调 `plot_curves`；`win_rate` 仍恒 0 |
-| **F** files_touched / total_tokens | 🟡 半成 | `total_tokens` 两个 runner 已填充（旧“恒 null”说法**过时**）；`files_touched` 仍恒 `[]` |
+| **D** REPLAY_SKILL act | ✅ 已做 | `lostspace/docs/REPLAY_SKILL.md`（合并 GAME_RULES+replay_format，6 节 + 「验证」节）；`context.py` 全文注入（不再 4 行 blurb）；`controller.rules_validation_act()` — agent 终稿报告 `FIELDS_CHECKED/SCORE_DIC/MISMATCHES`，harness 独立对照 replay `r[-1]`（pass/fail/no_score_claim，绝不假 pass），持久化 `RULES_VALIDATION.md` 于 workspace 外；`events.py` 加 `rules_validation` 事件；`cli --rules-validation`。提交 7bd95bf |
+| **E** 评测池+自动出图+三类分组 | ✅ 已做 | `cli` act 后自动 `plot_curves` 出图到 `<round>/figures/`；`--eval-pool default`（rank01/03/06/09）写进 `spec.notes[“eval_pool”]`；`hl/report.py` 三类分组（control_weight_tuning / hl_main / rejected_hl）→ `reports/README.md` + `curves.json`，`compare` 默认自动生成；**flat `win_rate=0` 可见且诚实标注，不假涨分**。提交 a5b94e1 |
+| **F** files_touched / total_tokens | ✅ 已做 | `ClaudeCodeRunner` 从工具调用解析 `files_touched`（`runner.py:340-378`），`ApiCodingRunner` str_replace 成功记 `[“agent.py”]`（`runner.py:500`）；`total_tokens` 缺失时 sum input+output，双缺失保持 `None`。提交 bc31005。**旧”恒 null/[]”说法过时** |
 
 **文档遗漏的根因（比手写 ν 更直接）：** 未提交的 `adapter.py` diff 加了 `Path(dest).resolve()` —— Windows `CreateProcess` 把相对 `argv[1]` 按 cwd 解析，相对 `dest` 嵌套成 `.hl_codebase/stage/.hl_codebase/...`，candidate 起不来，probe 把 OSError 吞成 `None` → uniform → **KL=0 掩盖**。该修复已于 50af612 提交。`record_real_nu.py`/`diag_emissions.py` 移入 `tools/hl/`。
 
