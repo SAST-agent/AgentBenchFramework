@@ -349,6 +349,74 @@ def test_provider_cools_down_next_act_after_rate_limit(tmp_path, monkeypatch):
     assert clock.sleeps == [30.0]
 
 
+def test_provider_retries_zero_usage_rate_limit_after_full_cooldown(
+    tmp_path, monkeypatch
+):
+    """A zero-work 429 should recover inside the same act after one cooldown."""
+
+    from agentbench_frame.hl.provider import CodexSessionProvider
+
+    limited = (
+        '{"type":"thread.started","thread_id":"thread-limited"}\n'
+        '{"type":"error","message":"exceeded retry limit, last status: 429 Too Many Requests"}\n'
+        '{"type":"turn.failed","error":{"message":"429 Too Many Requests"}}\n'
+    )
+    completed = (
+        '{"type":"thread.started","thread_id":"thread-recovered"}\n'
+        '{"type":"turn.completed","usage":{"input_tokens":20,"output_tokens":7}}\n'
+    )
+    outputs = iter((limited, completed))
+
+    def run(command, **_kwargs):
+        output = next(outputs)
+        return subprocess.CompletedProcess(
+            command,
+            1 if output == limited else 0,
+            output,
+            "",
+        )
+
+    class Clock:
+        def __init__(self):
+            self.now = 100.0
+            self.sleeps = []
+
+        def monotonic(self):
+            return self.now
+
+        def sleep(self, seconds):
+            self.sleeps.append(seconds)
+            self.now += seconds
+
+    clock = Clock()
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr("agentbench_frame.hl.provider.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("agentbench_frame.hl.provider.time.sleep", clock.sleep)
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    raw = tmp_path / "run" / "provider" / "act-rate-retry.jsonl"
+    provider = CodexSessionProvider(
+        _provider_config(
+            transport_retry_attempts=1,
+            transport_retry_backoff_seconds=2.0,
+            rate_limit_cooldown_seconds=30.0,
+        ),
+        run_root=tmp_path / "run",
+        environ={"AGENTBENCH_API_KEY": "sk-runtime-only"},
+    )
+
+    result = provider.invoke(
+        prompt="recover this planner act",
+        workspace=workspace,
+        raw_output_path=raw,
+    )
+
+    assert result.status == "completed"
+    assert result.metadata["transport_retry_count"] == 1
+    assert clock.sleeps == [30.0]
+    assert raw.with_name("act-rate-retry.attempt-1.jsonl").is_file()
+
+
 def test_provider_rejects_tool_reads_from_another_run(tmp_path):
     from agentbench_frame.hl.provider import CodexSessionProvider
 

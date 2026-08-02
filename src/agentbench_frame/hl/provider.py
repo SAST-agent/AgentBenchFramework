@@ -167,7 +167,8 @@ class CodexSessionProvider:
                 raw_output_path=raw_path,
                 session_id=session_id,
             )
-            if self._is_rate_limit_failure(result, raw_path):
+            rate_limited = self._is_rate_limit_failure(result, raw_path)
+            if rate_limited:
                 result.metadata["rate_limited"] = True
                 self._rate_limit_resume_at = max(
                     self._rate_limit_resume_at,
@@ -188,7 +189,12 @@ class CodexSessionProvider:
             attempt_path.parent.mkdir(parents=True, exist_ok=True)
             raw_path.replace(attempt_path)
             retry_outputs.append(str(attempt_path))
-            backoff = self.config.transport_retry_backoff_seconds * (2**attempt_index)
+            backoff = (
+                0.0
+                if rate_limited
+                else self.config.transport_retry_backoff_seconds
+                * (2**attempt_index)
+            )
             if backoff:
                 time.sleep(backoff)
         raise AssertionError("provider retry loop must return")
@@ -424,6 +430,7 @@ class CodexSessionProvider:
             "http status 502",
             "http status 503",
             "http status 504",
+            "429 too many requests",
         )
         return any(marker in diagnostic for marker in transport_markers)
 
