@@ -44,3 +44,4 @@ def test_frozen_rollman_repair_protocol_is_imported_k4_top2(monkeypatch):
     assert config.run.iteration.repair_top_k == 2
     assert config.run.iteration.repair_rounds == 1
     assert config.run.iteration.finalist_count == 2
+    assert config.run.evaluation.max_parallel_matches == 1

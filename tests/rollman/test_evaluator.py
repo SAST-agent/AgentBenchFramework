@@ -218,7 +218,7 @@ def test_candidate_runtime_error_is_not_scored_as_a_valid_loss(tmp_path):
     assert result.matches[0]["end_state"] == ["RE", "OK"]
 
 
-def test_game_judger_opponent_timeout_is_a_valid_candidate_win(tmp_path):
+def test_opponent_timeout_is_not_scored_as_a_candidate_win(tmp_path):
     def runner(**kwargs):
         return _Match(
             status="complete",
@@ -248,8 +248,10 @@ def test_game_judger_opponent_timeout_is_a_valid_candidate_win(tmp_path):
 
     result = evaluator.evaluate(_version())
 
-    assert result.status == "complete"
-    assert result.score == 1.0
+    assert result.status == "incomplete"
+    assert result.score is None
+    assert result.matches[0]["status"] == "incomplete"
+    assert result.matches[0]["error"] == "opponent ended with TLE"
     assert result.matches[0]["end_state"] == ["OK", "TLE"]
     assert result.matches[0]["result"] == "win"
 
