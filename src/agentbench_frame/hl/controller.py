@@ -587,11 +587,17 @@ class HLController:
             **prompt_values,
         )
         raw_path = self.run_root / "provider" / f"{act_id}.jsonl"
+        phase_overrides = (
+            {"reasoning_effort": "high"}
+            if getattr(self.provider, "supports_structured_output", False)
+            else {}
+        )
         invocation = self.provider.invoke(
             prompt=prompt,
             workspace=self.workspace,
             raw_output_path=raw_path,
             session_id=session_id,
+            **phase_overrides,
         )
         self._write_checkpoint(
             act_id=act_id,
