@@ -170,21 +170,30 @@ class HLConfigTests(unittest.TestCase):
         }
         bootstrap = HLRunConfig.from_mapping(base)
         self.assertEqual(bootstrap.origin.mode, "model_bootstrap")
-        for reset_field in ("reset_session", "reset_experience"):
-            with self.subTest(reset_field=reset_field), self.assertRaisesRegex(
-                ValueError, reset_field
-            ):
-                HLRunConfig.from_mapping(
-                    {
-                        **base,
-                        "origin": {
-                            "mode": "imported_version",
-                            "source_run": "run-a",
-                            "source_version": "v000001",
-                            reset_field: False,
-                        },
-                    }
-                )
+        with self.assertRaisesRegex(ValueError, "reset_session"):
+            HLRunConfig.from_mapping(
+                {
+                    **base,
+                    "origin": {
+                        "mode": "imported_version",
+                        "source_run": "run-a",
+                        "source_version": "v000001",
+                        "reset_session": False,
+                    },
+                }
+            )
+        continued = HLRunConfig.from_mapping(
+            {
+                **base,
+                "origin": {
+                    "mode": "imported_version",
+                    "source_run": "run-a",
+                    "source_version": "v000001",
+                    "reset_experience": False,
+                },
+            }
+        )
+        self.assertFalse(continued.origin.reset_experience)
 
     def test_k4_config_parses_linear_proposal_cycle(self):
         from agentbench_frame.hl.config import HLRunConfig

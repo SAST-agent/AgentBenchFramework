@@ -297,10 +297,6 @@ class HLRunConfig:
                 raise ValueError(
                     "weakest_failed curriculum requires origin.reset_session"
                 )
-            if not self.origin.reset_experience:
-                raise ValueError(
-                    "weakest_failed curriculum requires origin.reset_experience"
-                )
 
     @classmethod
     def from_mapping(cls, raw: Mapping[str, Any]) -> "HLRunConfig":

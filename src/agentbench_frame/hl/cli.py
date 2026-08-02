@@ -513,6 +513,16 @@ def _validate(config: LocalHLConfig) -> dict[str, Any]:
         "game": config.run.game,
         "max_acts": config.run.iteration.max_acts,
         "candidates_per_act": config.run.iteration.candidates_per_act,
+        "candidates_per_cycle": config.run.iteration.candidates_per_cycle,
+        "planner_enabled": config.run.iteration.planner_enabled,
+        "reducer_enabled": config.run.iteration.reducer_enabled,
+        "scope_contract_required": (
+            config.run.iteration.scope_contract_required
+        ),
+        "repair_enabled": config.run.iteration.repair_enabled,
+        "repair_top_k": config.run.iteration.repair_top_k,
+        "repair_rounds": config.run.iteration.repair_rounds,
+        "finalist_count": config.run.iteration.finalist_count,
         "rollback_enabled": config.run.rollback.enabled,
         "rollback_patience": config.run.rollback.patience,
         "context_mode": config.run.provider.context_mode,
@@ -549,6 +559,36 @@ def _ensure_candidate(workspace: Path) -> None:
         shutil.copy2(template, candidate)
 
 
+def _prepare_experience_root(
+    config: LocalHLConfig,
+    *,
+    run_dir: Path,
+    resume: bool,
+) -> Path:
+    experience_root = run_dir / "experience"
+    if (
+        not resume
+        and config.run.origin.mode == "imported_version"
+        and not config.run.origin.reset_experience
+    ):
+        assert config.run.origin.source_run is not None
+        source_state = (
+            Path(config.run.origin.source_run).resolve()
+            / "experience"
+            / "state.json"
+        )
+        if not source_state.is_file():
+            raise FileNotFoundError(
+                "imported origin requested experience continuation but source "
+                f"state is missing: {source_state}"
+            )
+        if source_state.stat().st_size > 1024 * 1024:
+            raise ValueError("source experience state exceeds 1 MiB")
+        experience_root.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_state, experience_root / "state.json")
+    return experience_root
+
+
 def _dry_run(
     config: LocalHLConfig,
     *,
@@ -569,7 +609,7 @@ def _dry_run(
         },
     )
     experience = ExperienceManager(
-        run_dir / "experience",
+        _prepare_experience_root(config, run_dir=run_dir, resume=False),
         compress_every_acts=config.run.experience.compress_every_acts,
     )
     return {
@@ -1400,7 +1440,7 @@ def _run_real(
             max_bytes=config.run.context.research_state_max_bytes
         ).write(research_state_path)
     experience = ExperienceManager(
-        run_dir / "experience",
+        _prepare_experience_root(config, run_dir=run_dir, resume=resume),
         compress_every_acts=config.run.experience.compress_every_acts,
     )
     provider = (
