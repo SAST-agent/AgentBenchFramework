@@ -436,6 +436,14 @@ def _open_approved_root(
             for fd in reversed(opened):
                 os.close(fd)
     return approved
+
+
+def _reopen_current_posix_root(root: _ApprovedRoot) -> _ApprovedRoot:
+    """Rebind a read to the current lexical root and its retained identity."""
+
+    return _open_approved_root(Path(root.path), root.identity)
+
+
 def _read_relative_posix(
     root: _ApprovedRoot,
     parts: tuple[str, ...],
@@ -449,7 +457,10 @@ def _read_relative_posix(
         raise ValueError("platform cannot prove safe relative-file traversal")
     try:
         with ExitStack() as ownership:
-            current_fd = os.dup(root.handle)
+            current_root = ownership.enter_context(
+                _reopen_current_posix_root(root)
+            )
+            current_fd = os.dup(current_root.handle)
             ownership.callback(os.close, current_fd)
             for index, part in enumerate(parts[:-1]):
                 _safe_open_barrier(label, relative, index)

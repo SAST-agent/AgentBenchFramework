@@ -8,6 +8,7 @@ import os
 import shutil
 import stat
 import weakref
+from contextlib import nullcontext
 from dataclasses import replace
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
@@ -1226,6 +1227,11 @@ def _install_fake_posix(monkeypatch, *, open_file, fstat, close, dup=None):
             component, flags, dir_fd=parent_fd
         ),
     )
+    monkeypatch.setattr(
+        replay,
+        "_reopen_current_posix_root",
+        lambda root: nullcontext(root),
+    )
     if dup is not None:
         monkeypatch.setattr(replay.os, "dup", dup)
 class _FakePosixReader:
@@ -1387,6 +1393,97 @@ def test_root_identity_rejects_schema_and_exact_type_drift(monkeypatch, identity
         replay._open_approved_root(Path("approved"), identity)
     assert opened == [61, 62]
     assert closed == [62, 61]
+
+
+def test_fake_posix_relative_read_revalidates_current_lexical_root(monkeypatch):
+    backend = _FakePosixReader()
+    backend.install(monkeypatch)
+    monkeypatch.setattr(
+        replay,
+        "_reopen_current_posix_root",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("approved replay root identity changed")
+        ),
+    )
+    root = replay._ApprovedRoot("approved", ("posix", 1, 2), 100)
+
+    with pytest.raises(ValueError, match="root identity"):
+        replay._read_relative_posix(
+            root,
+            ("one", "two", "file"),
+            "one/two/file",
+            "replay path",
+            32,
+        )
+
+    assert backend.open_calls == []
+    assert backend.closed == []
+
+
+def test_fake_posix_refreshed_root_and_relative_descriptors_close_once(monkeypatch):
+    backend = _FakePosixReader(b"closed")
+    backend.install(monkeypatch)
+    retained = replay._ApprovedRoot("approved", ("posix", 1, 2), 200)
+    refreshed = replay._ApprovedRoot("approved", ("posix", 1, 2), 100)
+    monkeypatch.setattr(
+        replay,
+        "_reopen_current_posix_root",
+        lambda _root: refreshed,
+    )
+
+    assert replay._read_relative_posix(
+        retained,
+        ("one", "two", "file"),
+        "one/two/file",
+        "replay path",
+        32,
+    ) == b"closed"
+
+    assert refreshed.handle is None
+    assert retained.handle == 200
+    assert backend.closed == [104, 103, 102, 101, 100]
+
+
+@pytest.mark.skipif(
+    os.name != "posix" or replay.platform.system() != "Linux",
+    reason="requires Linux openat2 and POSIX rename semantics",
+)
+@pytest.mark.parametrize("read_number", [1, 2], ids=["manifest", "replay"])
+def test_posix_each_read_rejects_lexical_root_replacement_and_closes_descriptors(
+    tmp_path, monkeypatch, read_number
+):
+    root, manifest_path, _, _, _, digest = artifact_fixture(tmp_path)
+    approve(monkeypatch, digest)
+    original_read = replay._read_relative_posix
+    original_open_root = replay._open_approved_root
+    moved = tmp_path / "approved-detached"
+    reads = 0
+    opened_roots = []
+
+    def tracked_open_root(*args, **kwargs):
+        approved = original_open_root(*args, **kwargs)
+        opened_roots.append(approved)
+        return approved
+
+    def replace_before_read(approved, parts, relative, label, limit):
+        nonlocal reads
+        reads += 1
+        if reads == read_number:
+            root.rename(moved)
+            shutil.copytree(moved, root)
+            assert (moved / "manifest.json").read_bytes() == manifest_path.read_bytes()
+            assert os.fstat(approved.handle).st_ino == approved.identity[2]
+        return original_read(approved, parts, relative, label, limit)
+
+    monkeypatch.setattr(replay, "_open_approved_root", tracked_open_root)
+    monkeypatch.setattr(replay, "_read_relative_posix", replace_before_read)
+
+    with pytest.raises(ValueError, match="root identity"):
+        replay.preflight_replay_reading(manifest_path, approved_root=root)
+
+    assert reads == read_number
+    assert opened_roots
+    assert all(approved.handle is None for approved in opened_roots)
 def test_context_registry_rejects_complete_field_copy_and_old_sentinel(tmp_path, monkeypatch):
     _, context = approved_context(tmp_path, monkeypatch)
     forged = object.__new__(replay.ReplayReadingContext)

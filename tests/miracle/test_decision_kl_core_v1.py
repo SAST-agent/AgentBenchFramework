@@ -828,3 +828,165 @@ def test_core_api_has_no_policy_environment_or_mutable_factory_inputs():
         assert not parameters & {
             "policy", "agent", "judge", "provider", "runner", "session", "factory"
         }
+
+
+@pytest.mark.parametrize("non_finite", [math.nan, math.inf, -math.inf])
+@pytest.mark.parametrize(
+    "nested_value",
+    [
+        pytest.param(lambda value: value, id="top-level-field"),
+        pytest.param(lambda value: {"ignored": value}, id="mapping-value"),
+        pytest.param(lambda value: ["ignored", value], id="list-element"),
+        pytest.param(lambda value: ("ignored", value), id="tuple-element"),
+        pytest.param(
+            lambda value: {"ignored": [{"deeper": (0, value)}]},
+            id="multi-level",
+        ),
+    ],
+)
+def test_observation_evidence_recursively_rejects_non_finite_floats(
+    non_finite, nested_value
+):
+    trusted_state = empty_observation()
+    support = kl.build_trusted_action_support(trusted_state)
+    state_before = empty_observation()
+    state_before["rule_irrelevant_evidence"] = nested_value(non_finite)
+    probabilities = {action_id: 1.0 / len(support.action_ids) for action_id in support.action_ids}
+
+    with pytest.raises(ValueError, match="finite"):
+        kl.DecisionKLEvidence(
+            decision_step=1,
+            state_before=state_before,
+            support_identity=identity(support),
+            old_distribution=probabilities,
+            new_distribution=probabilities,
+        )
+    with pytest.raises(ValueError, match="finite"):
+        kl.build_trusted_action_support(state_before)
+
+
+@pytest.mark.parametrize(
+    ("side", "value", "reason"),
+    [
+        ("old", math.nan, "old_distribution_probability_non_finite"),
+        ("old", math.inf, "old_distribution_probability_non_finite"),
+        ("new", -math.inf, "new_distribution_probability_non_finite"),
+    ],
+)
+def test_non_finite_probability_keeps_structured_distribution_reason(
+    side, value, reason
+):
+    state_before = empty_observation()
+    support = kl.build_trusted_action_support(state_before)
+    first, second = support.action_ids
+    distributions = {
+        "old": {first: 0.5, second: 0.5},
+        "new": {first: 0.5, second: 0.5},
+    }
+    distributions[side][first] = value
+
+    summary = kl.compute_trajectory_kl(
+        [
+            kl.DecisionKLEvidence(
+                decision_step=1,
+                state_before=state_before,
+                support_identity=identity(support),
+                old_distribution=distributions["old"],
+                new_distribution=distributions["new"],
+            )
+        ]
+    )
+
+    assert summary.status == "incomplete"
+    assert summary.reason == reason
+    assert summary.trace == (None,)
+    json.dumps(summary.to_dict(), allow_nan=False)
+
+
+@pytest.mark.parametrize(
+    ("field", "forged"),
+    [
+        ("acceptance_threshold", 0.02),
+        ("direction", "new||old"),
+        ("smoothing", "epsilon"),
+        ("log_base", "2"),
+        ("unit", "bits / decision"),
+        ("evidence_scope", "authoritative"),
+        ("authoritative_readiness", True),
+        ("rollout_source_contract", "old_policy"),
+        ("verified_rollout_source", "new_policy"),
+        ("policy_binding_verified", True),
+        ("aggregation", "sum"),
+    ],
+)
+def test_summary_scientific_contract_fields_cannot_be_relabelled(field, forged):
+    summary = kl.compute_trajectory_kl([trajectory_evidence(0.002)])
+    with pytest.raises(ValueError):
+        replace(summary, **{field: forged})
+
+
+def _summary_for_tamper_path(path):
+    if path == "complete":
+        return kl.compute_trajectory_kl(
+            [trajectory_evidence(0.002, step=1), trajectory_evidence(0.008, step=2)]
+        )
+    state_before = empty_observation()
+    support = kl.build_trusted_action_support(state_before)
+    first, second = support.action_ids
+    return kl.compute_trajectory_kl(
+        [
+            trajectory_evidence(
+                step=1,
+                state_before=state_before,
+                old_distribution={first: math.inf, second: 0.0},
+                new_distribution={first: 0.5, second: 0.5},
+            )
+        ]
+    )
+
+
+@pytest.mark.parametrize("path", ["complete", "incomplete"])
+@pytest.mark.parametrize(
+    ("field", "forged"),
+    [
+        ("trace", (999.0,)),
+        ("status", "forged"),
+        ("reason", "forged_reason"),
+        ("trajectory_kl", 999.0),
+        ("threshold_passed", False),
+        ("sum_local_kl", 999.0),
+        ("max_local_kl", 999.0),
+        ("p50_local_kl", 999.0),
+        ("p95_local_kl", 999.0),
+    ],
+)
+def test_summary_derived_fields_must_match_decision_records(path, field, forged):
+    summary = _summary_for_tamper_path(path)
+    if getattr(summary, field) == forged:
+        forged = None
+    with pytest.raises(ValueError):
+        replace(summary, **{field: forged})
+
+
+@pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "acceptance_threshold",
+        "trajectory_kl",
+        "sum_local_kl",
+        "max_local_kl",
+        "p50_local_kl",
+        "p95_local_kl",
+    ],
+)
+def test_summary_rejects_non_finite_scientific_numbers(field, value):
+    summary = kl.compute_trajectory_kl([trajectory_evidence(0.002)])
+    with pytest.raises(ValueError):
+        replace(summary, **{field: value})
+
+
+@pytest.mark.parametrize("path", ["complete", "incomplete"])
+def test_summary_to_dict_is_strict_json_safe_for_every_result_path(path):
+    summary = _summary_for_tamper_path(path)
+    json.dumps(summary.to_dict(), allow_nan=False)

@@ -73,11 +73,19 @@ def _strict_nonnegative_number(value: Any, label: str) -> float:
 
 
 def _freeze_json_value(
-    value: Any, label: str, active_containers: set[int] | None = None
+    value: Any,
+    label: str,
+    active_containers: set[int] | None = None,
+    *,
+    reject_non_finite: bool = True,
 ) -> Any:
     """Copy JSON-shaped input into mappings and sequences that cannot mutate."""
 
-    if value is None or type(value) in {bool, int, float, str}:
+    if value is None or type(value) in {bool, int, str}:
+        return value
+    if type(value) is float:
+        if reject_non_finite and not math.isfinite(value):
+            raise ValueError(f"{label} must contain only finite floats")
         return value
     if active_containers is None:
         active_containers = set()
@@ -92,7 +100,10 @@ def _freeze_json_value(
                 if type(key) is not str:
                     raise TypeError(f"{label} contains an unsupported mapping key")
                 frozen[key] = _freeze_json_value(
-                    item, f"{label}.{key}", active_containers
+                    item,
+                    f"{label}.{key}",
+                    active_containers,
+                    reject_non_finite=reject_non_finite,
                 )
             return MappingProxyType(frozen)
         finally:
@@ -104,7 +115,12 @@ def _freeze_json_value(
         active_containers.add(container_id)
         try:
             return tuple(
-                _freeze_json_value(item, f"{label}[{index}]", active_containers)
+                _freeze_json_value(
+                    item,
+                    f"{label}[{index}]",
+                    active_containers,
+                    reject_non_finite=reject_non_finite,
+                )
                 for index, item in enumerate(value)
             )
         finally:
@@ -154,7 +170,12 @@ class DecisionKLEvidence:
             object.__setattr__(
                 self,
                 field_name,
-                _freeze_json_value(getattr(self, field_name), field_name),
+                _freeze_json_value(
+                    getattr(self, field_name),
+                    field_name,
+                    reject_non_finite=field_name
+                    not in {"old_distribution", "new_distribution"},
+                ),
             )
 
 
@@ -262,6 +283,90 @@ class _IncompleteDecisionRecord:
         }
 
 
+def _percentile(values: Sequence[float], fraction: float) -> float:
+    ordered = sorted(values)
+    return ordered[max(0, math.ceil(fraction * len(ordered)) - 1)]
+
+
+def _exact_scientific_value(actual: Any, expected: Any) -> bool:
+    if type(actual) is not type(expected):
+        return False
+    if type(expected) is tuple:
+        return len(actual) == len(expected) and all(
+            _exact_scientific_value(left, right)
+            for left, right in zip(actual, expected, strict=True)
+        )
+    return actual == expected
+
+
+def _derived_trajectory_fields(
+    records: tuple[DecisionKLRecord | _IncompleteDecisionRecord, ...],
+) -> dict[str, Any]:
+    trace = tuple(record.local_kl for record in records)
+    missing = {
+        "trajectory_kl": None,
+        "sum_local_kl": None,
+        "max_local_kl": None,
+        "p50_local_kl": None,
+        "p95_local_kl": None,
+    }
+    if not records:
+        return {
+            "status": "incomplete",
+            "trace": trace,
+            "threshold_passed": None,
+            "reason": "empty_trajectory",
+            **missing,
+        }
+    failed = next(
+        (record for record in records if record.status == "threshold_failed"),
+        None,
+    )
+    if failed is not None:
+        return {
+            "status": "threshold_failed",
+            "trace": trace,
+            "threshold_passed": False,
+            "reason": failed.reason or "threshold_failed",
+            **missing,
+        }
+    incomplete = next(
+        (record for record in records if record.status == "incomplete"),
+        None,
+    )
+    if incomplete is not None:
+        return {
+            "status": "incomplete",
+            "trace": trace,
+            "threshold_passed": None,
+            "reason": incomplete.reason or "incomplete_decision",
+            **missing,
+        }
+    values = tuple(
+        _strict_nonnegative_number(record.local_kl, "decision record local_kl")
+        for record in records
+    )
+    try:
+        total = math.fsum(values)
+    except OverflowError as exc:
+        raise ValueError("trajectory aggregates must remain finite") from exc
+    mean = total / len(values)
+    if not math.isfinite(total) or not math.isfinite(mean):
+        raise ValueError("trajectory aggregates must remain finite")
+    passed = _passes_acceptance_threshold(mean)
+    return {
+        "status": "complete" if passed else "threshold_failed",
+        "trajectory_kl": mean,
+        "trace": values,
+        "threshold_passed": passed,
+        "reason": None if passed else "trajectory_kl_above_threshold",
+        "sum_local_kl": total,
+        "max_local_kl": max(values),
+        "p50_local_kl": _percentile(values, 0.50),
+        "p95_local_kl": _percentile(values, 0.95),
+    }
+
+
 @dataclass(frozen=True)
 class TrajectoryKLSummary:
     """Fake-only arithmetic-mean result plus diagnostic-only aggregates."""
@@ -289,7 +394,6 @@ class TrajectoryKLSummary:
     aggregation: str = "arithmetic_mean"
 
     def __post_init__(self) -> None:
-        trace = tuple(self.trace)
         records = tuple(self.decision_records)
         if any(
             type(record) not in {DecisionKLRecord, _IncompleteDecisionRecord}
@@ -300,20 +404,35 @@ class TrajectoryKLSummary:
             range(1, len(records) + 1)
         ):
             raise ValueError("decision_records must be strict, ordered, and continuous")
-        if trace != tuple(record.local_kl for record in records):
-            raise ValueError("trajectory trace must match decision_records")
-        object.__setattr__(self, "trace", trace)
+        contract = {
+            "acceptance_threshold": ACCEPTANCE_THRESHOLD,
+            "direction": DIRECTION,
+            "smoothing": SMOOTHING,
+            "log_base": "e",
+            "unit": UNIT,
+            "evidence_scope": "synthetic_fake_only",
+            "authoritative_readiness": False,
+            "rollout_source_contract": ROLLOUT_SOURCE,
+            "verified_rollout_source": None,
+            "policy_binding_verified": False,
+            "aggregation": "arithmetic_mean",
+        }
+        for field_name, expected in contract.items():
+            if not _exact_scientific_value(getattr(self, field_name), expected):
+                raise ValueError(
+                    f"trajectory KL {field_name} contract identity is invalid"
+                )
+        derived = _derived_trajectory_fields(records)
+        for field_name, expected in derived.items():
+            actual = tuple(self.trace) if field_name == "trace" else getattr(
+                self, field_name
+            )
+            if not _exact_scientific_value(actual, expected):
+                raise ValueError(
+                    f"trajectory KL {field_name} must match decision_records"
+                )
+        object.__setattr__(self, "trace", derived["trace"])
         object.__setattr__(self, "decision_records", records)
-        if self.evidence_scope != "synthetic_fake_only":
-            raise ValueError("trajectory KL evidence scope must remain fake-only")
-        if self.authoritative_readiness is not False:
-            raise ValueError("mechanism-only trajectory KL is not authoritative")
-        if self.rollout_source_contract != ROLLOUT_SOURCE:
-            raise ValueError("trajectory KL rollout contract identity is invalid")
-        if self.verified_rollout_source is not None:
-            raise ValueError("trajectory KL does not verify rollout provenance")
-        if self.policy_binding_verified is not False:
-            raise ValueError("trajectory KL does not verify policy binding")
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -534,11 +653,6 @@ def _compute_local_kl(
         "complete",
         value,
     )
-
-
-def _percentile(values: Sequence[float], fraction: float) -> float:
-    ordered = sorted(values)
-    return ordered[max(0, math.ceil(fraction * len(ordered)) - 1)]
 
 
 def _missing_summary(
