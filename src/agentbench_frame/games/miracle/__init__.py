@@ -114,6 +114,23 @@ from agentbench_frame.games.miracle.iteration_protocol import (
     preflight_replay,
     validate_bootstrap_template,
 )
+from agentbench_frame.games.miracle.decision_kl_v1 import (
+    DecisionKLEvidence,
+    DecisionKLRecord,
+    TrajectoryKLSummary,
+    build_trusted_action_support,
+    compute_trajectory_kl,
+    trusted_support_identity,
+    validate_distribution,
+)
+from agentbench_frame.games.miracle.replay_reading_v1 import (
+    DecisionFrame,
+    ReplayPacket,
+    ReplayReadingContext,
+    open_replay_reading,
+    preflight_replay_reading,
+    render_replay_timeline,
+)
 
 __all__ = [
     "GameOutcome", "WIN", "LOSS", "DRAW", "ERROR", "VALID_RESULTS",
@@ -155,4 +172,9 @@ __all__ = [
     "preflight_baseline_stored", "preflight_candidate_stored",
     "preflight_evaluation", "preflight_iteration", "preflight_learning", "preflight_match",
     "preflight_replay", "validate_bootstrap_template",
+    "DecisionKLEvidence", "DecisionKLRecord", "TrajectoryKLSummary", "build_trusted_action_support",
+    "compute_trajectory_kl", "trusted_support_identity",
+    "validate_distribution",
+    "DecisionFrame", "ReplayPacket", "ReplayReadingContext",
+    "open_replay_reading", "preflight_replay_reading", "render_replay_timeline",
 ]

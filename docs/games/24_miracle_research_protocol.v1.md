@@ -1,5 +1,14 @@
 # 24_miracle research protocol v1
 
+Target-contract authority:
+[24_miracle KL contract authority v1](24_miracle_kl_contract_authority.v1.md).
+This document also records existing lifecycle and manifest behavior. Any
+`KL(new||old)`, epsilon smoothing, or episode-sum definition below is explicitly
+legacy/unmigrated for 24_miracle; it remains documented because the active code
+has not yet been changed. The target is `KL(old||new)`, natural logarithm, no
+smoothing, new-policy occupancy, arithmetic mean, `nats / decision`, threshold
+`0.01`.
+
 The research/measurement contract has protocol version
 `24-miracle-research-v1`. The separately versioned frozen 72-case evaluation
 schema has benchmark version `24m-frozen-v1`. The manifest emits both values:
@@ -171,8 +180,10 @@ validation evidence cannot change its role.
 
 One HL/IG decision is exactly one legal atomic Judge command. Multi-command
 macro-actions and illegal commands are outside ActionSupport. This iteration
-contract does not alter epsilon `0.01`, `KL(new || old)`, new-policy rollout,
-or the requirement that missing probability queries produce incomplete KL.
+implementation still retains the legacy epsilon `0.01`, `KL(new || old)`,
+new-policy rollout, and incomplete-query behavior. Those fields describe
+unmigrated code, not the target 24_miracle KL contract. The authority document
+supersedes them as a migration target without silently changing runtime.
 
 Every strategy version is a canonical immutable UTF-8 JSON record containing
 the complete source snapshot, entrypoint, dependency list, source SHA-256,
@@ -250,8 +261,9 @@ change plan, or Experience Skill.
 
 There is no boolean completion API. `IterationAcceptanceManifest` derives its
 status from the independently approved evaluation plan and evidence: all cases
-must be complete, KL must retain epsilon `0.01`, `KL(new || old)`, new-policy
-rollout and full ActionSupport distributions, IG must be present, score gain
+must be complete, while the current legacy validator still requires epsilon
+`0.01`, `KL(new || old)`, new-policy rollout and full ActionSupport
+distributions. This is not evidence of target-contract migration. IG must be present, score gain
 must be positive, and blockers must be empty. The acceptance manifest itself
 also needs independent digest approval. Complete fake evidence is reported as
 `fake_only=true`; all three production approval sets are empty, so production
@@ -280,7 +292,15 @@ real experiment retains complete replays, auditable strategy changes, old and
 new immutable versions, at least one valid score improvement, complete real
 KL/IG, and score-iteration and IG-iteration curves.
 
-## Strict trajectory KL
+## Legacy strict trajectory KL (unmigrated implementation)
+
+The bullets in this section preserve the identity still emitted or required by
+the current manifest, lifecycle validators, tracking, and report path. They are
+legacy for 24_miracle and must not be presented as conforming to the target
+contract. The approved target is defined only by the
+[authority document](24_miracle_kl_contract_authority.v1.md):
+`KL(old||new)`, natural logarithm, no smoothing, new-policy occupancy,
+trajectory arithmetic mean, `nats / decision`, and threshold `0.01`.
 
 - epsilon: `0.01`
 - direction: `new||old`
@@ -296,6 +316,8 @@ actual categorical distribution and must not be disguised as one-hot.
 
 If support completeness or either distribution is unavailable, the episode is
 `incomplete`; trajectory and mean-local KL remain missing rather than zero.
+This fail-closed missing-data rule remains required by the target contract even
+though the direction, smoothing, primary aggregation, and unit must migrate.
 
 The authoritative observation frame is six ASCII decimal length bytes followed
 by UTF-8 JSON. `decode_ai_observation()` validates that frame and
