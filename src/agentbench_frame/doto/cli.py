@@ -10,15 +10,9 @@ from pathlib import Path
 from .build import build_candidate
 from .ig import compare_policies_on_trace, write_ig_artifacts
 from .match import run_match
+from .loop import run_loop
+from .loop_config import LoopConfig
 from .replay import iter_replay, summarize_replay
-
-
-class DotoNotImplementedError(RuntimeError):
-    pass
-
-
-def _pending(_args: argparse.Namespace) -> int:
-    raise DotoNotImplementedError("this DOTO command is not implemented yet")
 
 
 def _build(args: argparse.Namespace) -> int:
@@ -78,6 +72,14 @@ def _ig(args: argparse.Namespace) -> int:
     return 0
 
 
+def _loop(args: argparse.Namespace) -> int:
+    run_dir = run_loop(LoopConfig.load(args.config), data_dir=args.data_dir)
+    print(json.dumps({"status": "complete", "run_dir": str(run_dir),
+                      "score_curve": str(run_dir / "score_curve.json"),
+                      "ig_curve": str(run_dir / "ig_curve.json")}, ensure_ascii=False, indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m agentbench_frame.doto",
@@ -115,7 +117,9 @@ def build_parser() -> argparse.ArgumentParser:
     ig.add_argument("--timeout", type=float, default=1.0)
     ig.set_defaults(func=_ig)
     loop = subcommands.add_parser("loop", help="run the replay-driven LLM iteration loop")
-    loop.set_defaults(func=_pending)
+    loop.add_argument("--config", type=Path, required=True)
+    loop.add_argument("--data-dir", type=Path)
+    loop.set_defaults(func=_loop)
     return parser
 
 

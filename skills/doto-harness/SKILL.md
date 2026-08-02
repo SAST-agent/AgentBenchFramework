@@ -118,12 +118,29 @@ features KL/IG.
 
 ## Iteration and Results contract
 
-The `loop` command will read an OpenAI-compatible TOML config, compile/evaluate
-iteration 0, provide the current source plus budget-limited replay evidence to
+Create a TOML config following `examples/doto-loop.toml`, set only the named
+API-key environment variable, then run:
+
+```bash
+export OPENAI_API_KEY='<secret>'
+uv run python -m agentbench_frame.doto loop \
+  --config examples/doto-loop.toml \
+  --data-dir ../AgentBenchResults
+```
+
+The `loop` command reads an OpenAI-compatible Chat Completions config, compiles/evaluates
+iteration 0, provides the current source plus budget-limited replay evidence to
 the model, require one JSON object containing `analysis` and complete
 `player_ai_cpp`, compile and evaluate each candidate, and save immutable
 versions. SSE streaming is the default; API keys come only from the configured
-environment variable.
+environment variable. `max_context_tokens` defaults to 1,000,000 and
+`max_tokens` is omitted unless explicitly configured.
+
+Each update request exposes exactly: this Skill, the Replay Reader Skill, the
+fixed SDK reference, the current accepted complete `playerAI.cpp`, immediately
+previous metrics, deterministically selected observation/action frames, and the
+cumulative budget snapshot. It does not expose credentials or rejected source
+as the next current policy.
 
 Run output belongs under:
 
@@ -137,3 +154,8 @@ reads, provider token usage, compile/battle/API time, total wall time, raw score
 evolved score, gain, AUC, and strict KL statuses. Generated binaries, replay
 ZIPs, traces, responses, temporary configs, and Results are runtime artifacts,
 not repository source.
+
+Inspect `summary.json`, `score_curve.json`, `ig_curve.json`, `events.jsonl`, and
+each `iterations/iteration-NNNN/iteration.json`. A failed update remains a
+version-aligned null point; do not delete it or silently retry it as though it
+never consumed tokens, time, builds, reads, or rollouts.
