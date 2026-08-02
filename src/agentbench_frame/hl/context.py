@@ -303,6 +303,27 @@ class ContextBuilder:
         if active:
             parts.append(f"- evaluated against: {', '.join(active)}")
         parts.append(f"- behavior: {behavior}")
+        # Per-measurable-point first-action digest: name the exact decision
+        # points the edit did (not) move, so the next edit has a concrete
+        # target for a valid policy update (policy_kl > 0).
+        ref_points = fb.get("ref_points") or []
+        if ref_points:
+            rows = []
+            for r in ref_points:
+                flag = "CHANGED" if r["old"] != r["new"] else "UNCHANGED"
+                rows.append(
+                    f"  R{r['idx']} hp={r['hp']} keys={r['keys']} "
+                    f"kit={r['kit']} props={r['interprops']}: "
+                    f"old={r['old']} new={r['new']} ({flag})")
+            parts.append(
+                "- reference first-actions (both versions in-support):\n"
+                + "\n".join(rows)
+                + "\n  To register a policy update, change the FIRST action on "
+                  "at least one of these points this act (e.g. a different "
+                  "move direction, attack instead of heal, stop calling "
+                  "interact('Box') when the tile has no Box). The harness "
+                  "measures the first action the agent sends at each point."
+            )
         # No-op callout: the edit landed but changed zero reference decisions
         # and produced no occupancy shift. This is the exact failure mode that
         # stalled prior iterations (plausible edits in dead/dominated code).

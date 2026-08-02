@@ -247,8 +247,9 @@ class HLIterationController:
         # 6. probe BOTH versions over ν (Q2) → policy_kl + occupancy_shift
         kl_trace: List[PolicyKLPoint] = []
         occupancy_shift: Optional[float] = None
+        ref_digest: List[Dict[str, Any]] = []
         if version_before is not None and version_after is not None:
-            kl_trace, occupancy_shift = self._measure_policy_kl(
+            kl_trace, occupancy_shift, ref_digest = self._measure_policy_kl(
                 version_before, version_after,
             )
             ok_kl = ok_kl_values(kl_trace)
@@ -293,7 +294,7 @@ class HLIterationController:
         self._prev_feedback = self._assemble_feedback(
             ev_result=ev_result, kl_trace=kl_trace,
             occupancy_shift=occupancy_shift, run_result=run_result,
-            version_after=version_after,
+            version_after=version_after, ref_digest=ref_digest,
         )
 
         # 6.6 update the self-summarized experience store + rolling LOC history
@@ -588,7 +589,48 @@ class HLIterationController:
         # occupancy_shift: simple state-id distribution divergence across the
         # decision points each version actually reached (probed non-None).
         shift = self._occupancy_shift(emitted_old, emitted_new, legal_sets)
-        return trace, shift
+        # Per-ok-point first-action digest, fed into the NEXT act's prompt so
+        # the coding agent sees exactly which measurable decision points its
+        # edit did (not) move — the actionable target for a valid update.
+        digest = self._first_action_digest(
+            emitted_old, emitted_new, legal_sets, trace)
+        return trace, shift, digest
+
+    def _first_action_digest(self, emitted_old, emitted_new, legal_sets,
+                             trace) -> List[Dict[str, Any]]:
+        """Compact per-ok-point first-action digest for the next act's prompt.
+
+        Each entry names one reference decision point where BOTH versions
+        emitted an in-support primitive, the state it saw, and what each
+        version sent. The coding agent reads this to know exactly which
+        measurable decision its edit did (not) move — the actionable target
+        for a valid policy update. Capped at 8 rows to keep the prompt small.
+        """
+        out: List[Dict[str, Any]] = []
+        t = 0
+        for i, (a_old, a_new, las) in enumerate(
+                zip(emitted_old, emitted_new, legal_sets)):
+            if len(las) == 0:
+                continue
+            pt = trace[t]
+            t += 1
+            if pt.status != "ok":
+                continue
+            s = self.reference.samples[i]
+            obs = s.observation or {}
+            inv = s.inventory or {}
+            out.append({
+                "idx": i,
+                "hp": obs.get("hp"),
+                "keys": len(obs.get("keys") or []),
+                "kit": inv.get("Kit", 0),
+                "interprops": (s.legal_actions or {}).get("interprops", []),
+                "old": a_old,
+                "new": a_new,
+            })
+            if len(out) >= 8:
+                break
+        return out
 
     def _probe_version(self, version: VersionHandle) -> List[Optional[EmittedAction]]:
         from agentbench_frame.hl.adapter import candidate_command
@@ -612,13 +654,17 @@ class HLIterationController:
     def _assemble_feedback(
         self, *, ev_result, kl_trace: List[PolicyKLPoint],
         occupancy_shift: Optional[float], run_result, version_after,
+        ref_digest: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Pack the previous act's outcome + behavior-change measurement for the
         next act's prompt. All fields optional — missing stays missing.
 
         ``kl_mean``/``n_changed``/``n_total`` derive from the ok-only trace
         values: a ``no_emission``/``out_of_support`` point never enters a mean
-        or a changed-count denominator (Fix-A honesty)."""
+        or a changed-count denominator (Fix-A honesty).
+
+        ``ref_points`` = ``_first_action_digest`` output: the per-measurable-
+        point first actions so the next prompt names concrete targets."""
         summary = getattr(ev_result, "summary", None) if ev_result else None
         summary = summary or {}
         agg = (summary.get("lostspace") or {}).get("aggregate") or {}
@@ -638,6 +684,7 @@ class HLIterationController:
             "edit_type": getattr(version_after, "edit_type", None),
             "files_touched": list(run_result.files_touched) if run_result else [],
             "active_opponents": self._last_eval_opponents,
+            "ref_points": ref_digest or [],
         }
 
     def _record_experience(self, act_id: str, run_result, version_after) -> None:
