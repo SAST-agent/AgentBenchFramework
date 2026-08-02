@@ -22,5 +22,5 @@ uv run python -m agentbench_frame.hl \
   --acts 10 --pairs 2 --seats 0 --timeout 15 \
   --curriculum --promote-rank 2.0 \
   --model-key deepseek --max-turns 6 --max-tokens 16000 --claude-timeout 600 \
-  --min-kl 0.05 --stall-after 5 \
+  --min-kl 0.05 --stall-after 5 --save-traces \
   2>&1 | tee .hl_codebase/hl-deepseek-r8.run.log

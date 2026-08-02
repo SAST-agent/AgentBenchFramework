@@ -306,8 +306,17 @@ def run_match(
     timeout: float,
     replay_path: Path,
     trace_path: Path | None = None,
+    media_player_seat: int | None = None,
 ) -> dict[str, Any]:
     """Run a complete 4-player game.
+
+    Args:
+        media_player_seat: seat (0-3) registered as PlayDevice.MediaPlayer(2)
+            so the logic appends ``get_legal_actions()`` to that player's
+            roundbegin observations (player.py:226-227). The logic sends that
+            seat RAW json (communicate.py __send__); the harness re-wraps it in
+            the SDK 4-digit prefix before forwarding so the client works. All
+            other seats stay SDK(1). None = all SDK (previous behaviour).
 
     Returns a dict with:
       - ``winner``: player id with the top score, or ``None`` on a tie.
@@ -330,7 +339,13 @@ def run_match(
     try:
         init = json.dumps(
             {
-                "player_list": [1, 1, 1, 1],
+                # MediaPlayer(2) for the candidate seat so the logic appends
+                # get_legal_actions() to that player's detailed_dict
+                # (player.py:226-227) and the roundbegin trace carries
+                # attack/move/detect/interprops. Others stay SDK(1).
+                "player_list": [
+                    2 if i == media_player_seat else 1 for i in range(4)
+                ],
                 "player_num": 4,
                 "replay": str(replay_path.resolve()),
             },
@@ -436,7 +451,15 @@ def run_match(
                     }
                 )
                 try:
-                    ais[player].stdin.write(content.encode())
+                    # The logic sends MediaPlayer seats RAW json (communicate.py
+                    # __send__), but every candidate client reads the SDK's
+                    # 4-digit length prefix (sample_ai receive_data). Re-wrap
+                    # the raw json in the prefix so the client works while the
+                    # logic still appends legal_actions for the MediaPlayer seat.
+                    out_bytes = content.encode()
+                    if player == media_player_seat:
+                        out_bytes = f"{len(content):04d}".encode() + out_bytes
+                    ais[player].stdin.write(out_bytes)
                     ais[player].stdin.flush()
                 except OSError:
                     # The AI process has exited (broken pipe). Report it as a

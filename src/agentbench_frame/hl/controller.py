@@ -52,6 +52,27 @@ ProbeFactory = Callable[..., ReferenceProbe]
 EvaluatorFactory = Callable[..., Any]
 
 
+def _anchored_normalize(emitted: Optional[EmittedAction],
+                        fallback_pos, obs_pos) -> Optional[Any]:
+    """Normalize one version's emitted primitive to the A(s) token form.
+
+    The anchor is the position the CANDIDATE tracks — the probe-reported pos
+    (``emitted.pos``, advanced by echoed move replies), else the id-frame spawn
+    (``tracked_pos_from_transcript``), else the sample's obs pos. If the tracked
+    position differs from the decision-point state's position, the candidate's
+    coordinate emissions were computed from a stale frame and cannot be mapped
+    faithfully against A(s) — leave them unnormalized (``pos=None``) so they
+    register as honest ``out_of_support`` instead of a coincidental direction
+    match (the fabricated ν pins states to spawn, so this only triggers on
+    real-trace decision points the candidate didn't reach faithfully)."""
+    if emitted is None:
+        return None
+    anchor = (getattr(emitted, "pos", None) or None) or fallback_pos or obs_pos
+    if obs_pos and anchor and anchor != obs_pos:
+        return normalize_emitted(emitted.primitive, pos=None)
+    return normalize_emitted(emitted.primitive, pos=anchor)
+
+
 class HLIterationController:
     def __init__(
         self,
@@ -585,17 +606,11 @@ class HLIterationController:
         for i, (a, b, las) in enumerate(zip(emitted_old, emitted_new, legal_sets)):
             if len(las) == 0:
                 continue
-            # The anchor for coordinate->direction normalization is the
-            # position the CANDIDATE actually tracks (spawn derived from the
-            # replayed id frame), not the sample's obs pos — start_turn never
-            # updates pos from roundbegin, so the candidate acts from spawn.
             s_i = self.reference.samples[i]
-            pos = tracked_pos_from_transcript(s_i.transcript) or \
-                (s_i.observation or {}).get("pos")
-            chosen_old.append(
-                normalize_emitted(a.primitive, pos=pos) if a else None)
-            chosen_new.append(
-                normalize_emitted(b.primitive, pos=pos) if b else None)
+            fallback = tracked_pos_from_transcript(s_i.transcript)
+            obs_pos = (s_i.observation or {}).get("pos")
+            chosen_old.append(_anchored_normalize(a, fallback, obs_pos))
+            chosen_new.append(_anchored_normalize(b, fallback, obs_pos))
             aligned_legal.append(las)
 
         trace = local_policy_kl_trace(

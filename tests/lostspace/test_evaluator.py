@@ -32,7 +32,7 @@ class DeterministicMatchRunner:
     def __init__(self):
         self.calls = []
 
-    def __call__(self, logic_command, ai_commands, timeout, replay_path, trace_path=None):
+    def __call__(self, logic_command, ai_commands, timeout, replay_path, trace_path=None, **kwargs):
         index = len(self.calls)
         self.calls.append(
             {
@@ -149,7 +149,7 @@ class EvaluatorTest(unittest.TestCase):
             self.assertEqual(result.summary, summary)
 
     def test_artifact_paths_are_relative_to_run_directory(self):
-        def successful_runner(logic_command, ai_commands, timeout, replay_path, trace_path=None):
+        def successful_runner(logic_command, ai_commands, timeout, replay_path, trace_path=None, **kwargs):
             replay_path.write_text("[]")
             self.assertIsNotNone(trace_path)
             trace_path.write_text("{}\n")

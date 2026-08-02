@@ -203,7 +203,8 @@ def _seed_codebase(initial: Path, workspace: Path) -> None:
 
 
 def _evaluator_factory(logic_command: str, opponents: List[Opponent],
-                       filler_command: str, *, codebase, stage_root, data_root):
+                       filler_command: str, *, codebase, stage_root, data_root,
+                       save_traces: bool = False):
     """Build a fresh LostSpaceEvaluator per evaluated version."""
     from agentbench_frame.hl.adapter import candidate_command
 
@@ -239,6 +240,7 @@ def _evaluator_factory(logic_command: str, opponents: List[Opponent],
             pairs=spec.pairs, seats=spec.seats, timeout=spec.timeout,
             data_dir=data_root,
             save_replays=True,
+            save_traces=save_traces,
         )
     return make
 
@@ -350,6 +352,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "hits the cap before emitting its str_replace edit)")
     p.add_argument("--claude-timeout", type=float, default=600.0,
                    help="per-act API runner wall-clock timeout (seconds)")
+    p.add_argument("--save-traces", action="store_true",
+                   help="write per-match .trace.jsonl frame streams next to the "
+                        "replay artifacts, so the inert-agent / R6-stall "
+                        "behaviour can be root-caused from the actual frames")
     p.add_argument("--rules-validation", action="store_true",
                    help="before the edit loop, run one REPLAY_SKILL validation "
                         "act (doc Fix-D): the coding agent parses a real replay "
@@ -498,6 +504,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     eval_factory = _evaluator_factory(
         logic_command, opponents, filler,
         codebase=codebase, stage_root=stage_root, data_root=data_root,
+        save_traces=args.save_traces,
     )
 
     run_id = name

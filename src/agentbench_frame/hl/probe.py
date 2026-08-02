@@ -61,6 +61,9 @@ class EmittedAction:
     primitive: Tuple[Any, ...]    # canonical action token, or raw illegal action
     out_of_support: bool          # True if the emission was not in A(s)
     sample_index: int              # position in the reference set
+    pos: Optional[List[int]] = None  # the candidate's tracked position at
+                                     # emission (moves echoed during prefix
+                                     # replay); used as the normalize anchor
 
 
 def _write_frame(stream, frame: Dict[str, Any]) -> None:
@@ -158,6 +161,10 @@ class ReferenceProbe:
         self._proc: Optional[subprocess.Popen] = None
         self._frame_q: "queue.Queue[Optional[Dict[str, Any]]]" = queue.Queue()
         self._reader_thread: Optional[threading.Thread] = None
+        # The position the candidate tracks through prefix replay (updated by
+        # echoed move replies, mirroring candidates/v1/agent.py::move). Seeded
+        # from the id frame's birth_pos (+ z=1) like the candidate's init_game.
+        self._tracked_pos: Optional[List[int]] = None
 
     def _start_reader(self) -> None:
         """Spawn ONE thread that owns the candidate's stdout and pushes parsed
@@ -219,6 +226,13 @@ class ReferenceProbe:
         # Send the id frame so the candidate sets its player id. seat 0.
         if id_frame is None:
             id_frame = {"type": "id", "id": 0, "birth_pos": [0, 0]}
+        bp = id_frame.get("birth_pos")
+        if isinstance(bp, (list, tuple)) and len(bp) == 2:
+            self._tracked_pos = [bp[0], bp[1], 1]
+        elif isinstance(bp, (list, tuple)) and len(bp) >= 3:
+            self._tracked_pos = list(bp[:3])
+        else:
+            self._tracked_pos = [0, 0, 1]
         _write_frame(self._proc.stdin, id_frame)
         # The candidate replies with an id-ack; drain it (best-effort, small —
         # candidates that don't ack must not burn the whole timeout here).
@@ -288,6 +302,57 @@ class ReferenceProbe:
             if self._read_frame(remaining) is None:
                 break  # timeout or disconnect — nothing more to drain now
 
+    @staticmethod
+    def _move_target(action: Tuple[Any, ...]) -> Optional[List[int]]:
+        if (len(action) >= 2 and action[0] == "move"
+                and isinstance(action[1], (list, tuple))
+                and len(action[1]) == 3):
+            return list(action[1])
+        return None
+
+    def _success_reply(self, sample: ReferenceSample) -> Dict[str, Any]:
+        """A judger "action accepted" reply to an action the candidate sent
+        while replaying a PREFIX roundbegin. Field shapes matter: the bundled
+        client's ``move()`` reads ``hp``/``view``, ``view_box()`` reads
+        ``keys``/``tools`` — a bare ``{"success": True}`` would KeyError and
+        crash the candidate. The probe never sends this at the DECISION point
+        (there it captures the first action and closes)."""
+        return {
+            "type": "action", "success": True, "hp": 200, "status": 0,
+            "view": {}, "keys": [], "pos_info": None,
+            "tools": {"LandMine": [0, 0], "Sticky": [0, 0],
+                      "Transport": 0, "Kit": 0},
+        }
+
+    def _drain_reply(self, grace: float, sample: ReferenceSample) -> None:
+        """Drain the candidate's PREFIX actions, echoing a success reply per
+        action so its internal state advances (a move reply updates
+        ``self.player.pos`` in ``candidates/v1/agent.py::move``) instead of
+        blocking forever waiting for a judger that never replies. Position is
+        tracked so ``normalize_emitted`` can anchor at the candidate's real
+        roll, not the id-frame spawn. ``grace`` bounds the whole drain so a
+        candidate that keeps acting cannot stall the probe."""
+        deadline = time.monotonic() + grace
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            frame = self._read_frame(remaining)
+            if frame is None:
+                break  # timeout or disconnect — nothing more to drain now
+            if frame.get("type") != "action":
+                continue
+            action = frame.get("action")
+            if not isinstance(action, list) or not action:
+                continue
+            target = self._move_target(tuple(action))
+            if target is not None:
+                self._tracked_pos = target
+            try:
+                _write_frame(self._proc.stdin, self._success_reply(sample))
+            except OSError:
+                return
+
     def _probe_one_impl(self, sample: ReferenceSample, las: LegalActionSet
                         ) -> Optional[EmittedAction]:
         # Fail-fast: a reference sample without a transcript cannot faithfully
@@ -338,7 +403,10 @@ class ReferenceProbe:
                 self._close_proc()
                 return None
             if i < last_idx:
-                self._drain_queue(self._PREFIX_DRAIN)
+                # Echo success to the candidate's prefix actions so its
+                # internal pos tracks (real-trace ν only — the fabricated
+                # 2-frame ν has no prefix frames before the decision point).
+                self._drain_reply(self._PREFIX_DRAIN, sample)
 
         # Capture the first primitive the candidate emits at the decision
         # point. The real candidate protocol sends ONE action then reads the
@@ -373,8 +441,12 @@ class ReferenceProbe:
         self._close_proc()
         if emitted is None:
             return None  # truly no emission
+        # pos = the candidate's tracked position BEFORE the captured action
+        # (the emission was computed from that position — it is the correct
+        # normalize anchor). NOT advanced by the captured move: the candidate
+        # gets no reply at the decision point, and we never need the next pos.
         return EmittedAction(primitive=emitted, out_of_support=out_of_support,
-                              sample_index=-1)
+                              sample_index=-1, pos=self._tracked_pos)
 
     def probe_set(self, samples: Sequence[ReferenceSample]
                   ) -> List[Optional[EmittedAction]]:
@@ -384,7 +456,7 @@ class ReferenceProbe:
             if ea is not None:
                 ea = EmittedAction(primitive=ea.primitive,
                                    out_of_support=ea.out_of_support,
-                                   sample_index=i)
+                                   sample_index=i, pos=ea.pos)
             out.append(ea)
         return out
 

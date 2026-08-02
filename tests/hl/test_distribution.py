@@ -87,12 +87,25 @@ def test_detect_targets_are_edge_neighbors():
     assert len(detect_targets) == 2
 
 
-def test_wait_for_escape_only_escape_and_finish():
+def test_wait_for_escape_only_escape_abort_and_finish():
     las = enumerate_legal_actions(
         _legal(), status=4,  # WaitForEscape
         inventory={},
     )
-    assert set(las.tokens) == {("interact", "EscapeCapsule"), FINISH}
+    # While waiting only the ABORT variant is legal (interactive_props.py:113)
+    assert set(las.tokens) == {("interact", "EscapeCapsule", False), FINISH}
+
+
+def test_alive_escape_capsule_only_start_variant():
+    """Alive + capsule on tile: only the START (True) variant is legal.
+    A False (abort) emission here must be out_of_support — that is the exact
+    bug the rules doc caused (REPLAY_SKILL said False starts the escape)."""
+    las = enumerate_legal_actions(
+        _legal(interprops=["EscapeCapsule"]), status=0, inventory={},
+    )
+    assert ("interact", "EscapeCapsule", True) in las.tokens
+    assert ("interact", "EscapeCapsule", False) not in las.tokens
+    assert ("interact", "EscapeCapsule") not in las.tokens  # bare never emitted
 
 
 def test_dead_status_yields_empty_no_decision_point():
@@ -295,9 +308,17 @@ def test_normalize_emitted_attack_drops_coordinate():
 
 def test_normalize_emitted_interact_token_shapes():
     from agentbench_frame.hl.distribution import normalize_emitted
-    # escape-first sends the capsule flag; A(s) codes it bare.
+    # Escape-capsule flag is SEMANTIC and kept: True=start, False=abort. The
+    # seed client sends the capsule arg as int (1/0); map to bool so a true
+    # start still matches A(s), while a False-abort stays distinct.
+    assert normalize_emitted(("interact", "EscapeCapsule", True),
+                             pos=[0, 0, 1]) == ("interact", "EscapeCapsule", True)
     assert normalize_emitted(("interact", "EscapeCapsule", False),
-                             pos=[0, 0, 1]) == ("interact", "EscapeCapsule")
+                             pos=[0, 0, 1]) == ("interact", "EscapeCapsule", False)
+    assert normalize_emitted(("interact", "EscapeCapsule", 1),
+                             pos=[0, 0, 1]) == ("interact", "EscapeCapsule", True)
+    assert normalize_emitted(("interact", "EscapeCapsule", 0),
+                             pos=[0, 0, 1]) == ("interact", "EscapeCapsule", False)
     # Box-first sends a tool arg ("Key"); A(s) has bare Box.
     assert normalize_emitted(("interact", "Box", "Key"),
                              pos=[0, 0, 1]) == ("interact", "Box")
@@ -307,6 +328,25 @@ def test_normalize_emitted_interact_token_shapes():
     # 2-arg interacts pass through unchanged.
     assert normalize_emitted(("interact", "KeyMachine"),
                              pos=[0, 0, 1]) == ("interact", "KeyMachine")
+
+
+def test_escape_false_while_alive_is_out_of_support():
+    """A False (abort) emission while Alive must register as out_of_support in
+    the measurement channel — never ratified as a valid in-support escape."""
+    las = enumerate_legal_actions(
+        _legal(interprops=["EscapeCapsule"]), status=0, inventory={},
+    )
+    dist, oos = epsilon_smoothed_distribution(
+        chosen=("interact", "EscapeCapsule", False), legal=las, epsilon=0.1,
+        return_flag=True)
+    assert oos is True
+    assert dist == {t: 1.0 / len(las) for t in las.tokens}
+    # the START emission is in-support
+    dist2, oos2 = epsilon_smoothed_distribution(
+        chosen=("interact", "EscapeCapsule", True), legal=las, epsilon=0.1,
+        return_flag=True)
+    assert oos2 is False
+    assert dist2[("interact", "EscapeCapsule", True)] > 0.9
 
 
 def test_tracked_pos_from_transcript_uses_id_frame():

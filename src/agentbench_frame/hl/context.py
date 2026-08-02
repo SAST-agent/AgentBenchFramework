@@ -75,7 +75,10 @@ _DATA_SCHEMA_BLURB = (
     "success only when the action is valid. Win condition: interact with each "
     "of the 4 corner KeyMachines (collect 4 keys), then interact with the "
     "center EscapeCapsule. An agent that never calls interact('KeyMachine') "
-    "can never win."
+    "can never win. You START with your own key; each KeyMachine grants its "
+    "key at the start of your NEXT round. To START the escape you must send "
+    "`interact('EscapeCapsule', True)` — `False` only aborts an in-progress "
+    "escape and is rejected while Alive (`interactive_props.py:113`)."
 )
 
 
@@ -493,10 +496,18 @@ class ContextBuilder:
             d = ReplayView(replay_abs).seat0_digest()
         except Exception:
             return ""
-        died = f"died={d['died']}" + (
-            f"@round{d['died_round']}" if d["died_round"] is not None else "")
+        died = f"died={d['died']}"
+        if d["died_round"] is not None:
+            died += f"@round{d['died_round']}"
+            if d.get("attacked_near_death"):
+                died += "(attacked)"
         bits = [f"keys={d['keys']}", f"escaped={d['escaped']}", died,
                 f"ai_errors={d['ai_errors']}", f"rounds={d['n_rounds']}"]
+        if d.get("escape_starts") or d.get("escape_aborts"):
+            bits.append(f"escape_started={d['escape_starts']} "
+                        f"escape_aborted={d['escape_aborts']}")
+        if d.get("keys_by_round"):
+            bits.append(f"key_path={d['keys_by_round']}")
         if d["last_action"]:
             bits.append(f"last={d['last_action']}")
         # Loud callout: a game that ran long enough to collect keys but where
@@ -511,5 +522,11 @@ class ContextBuilder:
                 "(int/object-coded, never the string 'KeyMachine'). Call "
                 "interact('KeyMachine') and branch on result['success']. See "
                 "the Data schema section.")
+        # Escape-flag reminder whenever keys were collected but no win: the
+        # most common invisible failure is sending False (abort) while Alive,
+        # which the server rejects (interactive_props.py:113). Start = True.
+        if d.get("keys", 0) > 0 and not d.get("escaped"):
+            bits.append("escape=start needs interact('EscapeCapsule', True) "
+                        "(False only aborts while WaitForEscape)")
         return ("seat 0 last game: " + " ".join(bits)
                 + "  (replays are event-summarized; counts are lower bounds)")

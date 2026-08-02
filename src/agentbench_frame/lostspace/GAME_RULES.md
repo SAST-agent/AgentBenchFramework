@@ -60,10 +60,21 @@ The framework-side harness (how the framework spawns the logic + AIs) is at
 
 ## 2. Win condition & scoring
 
-A player **escapes (wins)** by collecting all **4 keys** and entering the
+A player **escapes (wins)** by holding all **4 keys** and entering the
 escape capsule — `Player.can_escaped()` returns true at 4 keys
 (`player.py:83-84`). The escape capsule sits at `(3,3,0)` on the top layer
 (`config.py:25`).
+
+Key timing (`interactive_props.py:144-157`): you **start with your own key**
+(`player.py:35` `key = {id}`); each KeyMachine grants its key at the start of
+your **NEXT** round and makes you Skip that round — a same-turn key-count
+check right after `interact("KeyMachine")` is always False.
+
+Escape start (`interactive_props.py:108-127`, `map.py:340`): you MUST send
+`["interact","EscapeCapsule",True]` to start. `False` only aborts an
+in-progress escape (legal only while `WaitForEscape`). After starting you enter
+`WaitForEscape` and must survive **3 of your own rounds** defenseless
+(`interactive_props.py:120`, `GameController.py:190-199`).
 
 Ranking at game-over (`GameController.gameover()`, `GameController.py:360-391`):
 1. Players who escaped, in escape order.
@@ -138,7 +149,8 @@ The wire-level action formats the AI sends back (parsed in
 | `interact` | `["interact", "Box"]` | loot a dropped Box |
 | `interact` | `["interact", "Materials", tool]` | gather materials → pick a tool |
 | `interact` | `["interact", "KeyMachine"]` | use a key machine (gain a key) |
-| `interact` | `["interact", "EscapeCapsule", False]` | start/abort escape |
+| `interact` | `["interact", "EscapeCapsule", True]` | start escape (need all 4 keys; enter WaitForEscape) |
+| `interact` | `["interact", "EscapeCapsule", False]` | abort an in-progress escape (only legal while WaitForEscape) |
 | `trap` | `["trap", "LandMine"\|"Sticky"]` | place a trap on your tile |
 | `tool` | `["tool", "Kit"]` | use a medkit (+100 HP) |
 | `tool` | `["tool", "Transport", [x,y,z]]` | teleport to a tile |

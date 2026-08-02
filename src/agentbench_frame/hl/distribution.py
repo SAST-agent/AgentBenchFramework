@@ -187,12 +187,20 @@ def normalize_emitted(primitive: Optional[ActionToken], *, pos=None) -> Optional
     if name == "interact" and len(primitive) >= 3:
         # Canonicalize interact token shapes to the A(s) form. The candidate
         # sends the capsule flag / Box tool argument on the wire
-        # (["interact","EscapeCapsule",False], ["interact","Box","Key"]) but
-        # A(s) codes them bare ("interact","EscapeCapsule") / ("interact",
-        # "Box") — without this an escape-first or Box-first edit collapses to
-        # out-of-support and the whole act's KL is dropped.
-        if primitive[1] == "EscapeCapsule" and isinstance(primitive[2], bool):
-            return ("interact", "EscapeCapsule")
+        # (["interact","EscapeCapsule",True|False], ["interact","Box","Key"]).
+        # The EscapeCapsule flag is SEMANTIC: True starts the escape (the only
+        # legal value while Alive), False aborts one (only legal while
+        # WaitForEscape). A(s) therefore carries the flag and an emission whose
+        # flag mismatches the player state is out-of-support — never collapse
+        # it, or the measurement ratifies an escape call the server rejects.
+        # The seed client sends the capsule arg as int (1/0); normalize int to
+        # its bool equivalent so the true start still matches A(s).
+        if primitive[1] == "EscapeCapsule" and primitive[2] is not None:
+            flag = primitive[2]
+            if isinstance(flag, bool):
+                return ("interact", "EscapeCapsule", flag)
+            if flag in (0, 1):
+                return ("interact", "EscapeCapsule", bool(flag))
         if primitive[1] == "Box":
             return ("interact", "Box")
         if primitive[1] == "Materials":
@@ -230,8 +238,9 @@ def enumerate_legal_actions(
 
     if status == STATUS_WAIT_FOR_ESCAPE:
         # solve() (GameController.py:190-199) only allows escape-capsule
-        # interact in this state, plus finish.
-        tokens.append(_canonical(("interact", "EscapeCapsule")))
+        # interact in this state, plus finish. While waiting, only the ABORT
+        # variant is legal (interactive_props.py:113-116).
+        tokens.append(_canonical(("interact", "EscapeCapsule", False)))
         tokens = sorted(set(tokens))
         return LegalActionSet(tokens=tuple(tokens), state_id=_state_id(tuple(tokens)))
 
@@ -253,7 +262,10 @@ def enumerate_legal_actions(
     if "KeyMachine" in interprops:
         tokens.append(_canonical(("interact", "KeyMachine")))
     if "EscapeCapsule" in interprops:
-        tokens.append(_canonical(("interact", "EscapeCapsule")))
+        # Alive: only the START variant is legal (interactive_props.py:113).
+        # An emission of ("interact","EscapeCapsule",False) here is
+        # out-of-support — it aborts, which the server rejects while Alive.
+        tokens.append(_canonical(("interact", "EscapeCapsule", True)))
 
     inv = {k: int(v or 0) for k, v in inventory.items()}
     for trap in TRAP_LIST:

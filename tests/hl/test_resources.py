@@ -169,6 +169,55 @@ def test_replay_view_seat0_digest_handles_empty(tmp_path):
     assert d["n_rounds"] == 1
 
 
+def test_replay_view_seat0_digest_distinguishes_escape_attempt_from_win(tmp_path):
+    """'escape_capsule' events are ATTEMPTS (start/abort), not a win; only an
+    'escaped' event means seat 0 actually escaped. The digest must separate
+    them so the agent sees how many times it tried (and with which flag)."""
+    replay = [
+        [[0, 0, 1], [6, 0, 1], [6, 6, 1], [0, 6, 1]],
+        # round 0: seat 0 starts an escape (True) then aborts (False)
+        [[{"type": "escape_capsule", "playerid": 0, "to_escape": True},
+          {"type": "escape_capsule", "playerid": 0, "to_escape": False}],
+         [], [], []],
+        # round 1: seat 0 actually escapes (the win)
+        [[{"type": "escaped", "playerid": 0}],
+         [], [], []],
+        {"0": 4, "1": 3, "2": 2, "3": 1},
+    ]
+    p = tmp_path / "r.json"
+    p.write_text(json.dumps(replay), encoding="utf-8")
+    d = ReplayView(p).seat0_digest()
+    assert d["escaped"] is True
+    assert d["escape_starts"] == 1
+    assert d["escape_aborts"] == 1
+    assert d["died"] is False
+
+
+def test_replay_view_seat0_digest_tracks_keys_and_attack_near_death(tmp_path):
+    """key_path shows the key trajectory (round+id); a death preceded by
+    another player's attack is flagged as attacked_near_death."""
+    replay = [
+        [[0, 0, 1], [6, 0, 1], [6, 6, 1], [0, 6, 1]],
+        # round 0: seat 0 takes a key
+        [[{"type": "getkey", "playerid": 0, "keyid": [0, 1]}],
+         [], [], []],
+        # round 1: player 1 attacks, seat 0 dies
+        [[{"type": "died", "playerid": 0}],
+         [{"type": "attack", "playerid": 1,
+           "attack": [[1, 3, 1], [1, 3, 1]]}],
+         [], []],
+        {"0": 2, "1": 3, "2": 4, "3": 1},
+    ]
+    p = tmp_path / "r.json"
+    p.write_text(json.dumps(replay), encoding="utf-8")
+    d = ReplayView(p).seat0_digest()
+    assert d["keys"] == 1
+    assert d["keys_by_round"] == "key@0=[0, 1]"
+    assert d["died"] is True
+    assert d["died_round"] == 1
+    assert d["attacked_near_death"] is True
+
+
 def test_by_opponent_reports_partial_credit_score_and_turns(tmp_path):
     """A5: by_opponent surfaces avg_score and avg_turns so the prompt has a
     gradient to climb even when win_rate is pinned at 0."""

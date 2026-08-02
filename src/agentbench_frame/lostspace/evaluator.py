@@ -200,6 +200,7 @@ class LostSpaceEvaluator:
                                     self.timeout,
                                     replay_path,
                                     trace_path=trace_path,
+                                    media_player_seat=candidate_seat,
                                 )
                                 record.update(match)
                                 ranking = match["ranking"]

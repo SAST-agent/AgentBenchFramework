@@ -166,6 +166,10 @@ class ReplayView:
         last_action: Optional[str] = None
         last_action_round: Optional[int] = None
         hist: Dict[str, int] = {}
+        escape_starts = 0
+        escape_aborts = 0
+        keys_traj: List[Tuple[int, Any]] = []
+        attacked_near_death = False
         for ri, rd in enumerate(rounds):
             if not isinstance(rd, list):
                 continue
@@ -179,8 +183,17 @@ class ReplayView:
                     hist[t] = hist.get(t, 0) + 1
                     if t == "getkey":
                         keys += 1
-                    elif t in ("escaped", "to_escape", "escape_capsule"):
+                        keys_traj.append((ri, a.get("keyid")))
+                    elif t == "escaped":
                         escaped = True
+                    elif t == "escape_capsule":
+                        # replay.interact_with_escapecapsule logs to_escape —
+                        # True = START (4 keys, enters WaitForEscape), False =
+                        # abort. Only a real 'escaped' event is a win.
+                        if a.get("to_escape"):
+                            escape_starts += 1
+                        else:
+                            escape_aborts += 1
                     elif t in ("died", "death"):
                         died = True
                         died_round = ri
@@ -189,6 +202,27 @@ class ReplayView:
                     if t != "move":
                         last_action = t
                         last_action_round = ri
+        # Death-cause proxy: another player attacked in the death round or the
+        # one before it. The replay's attack event does not name the target, so
+        # this is a heuristic (false positives possible), not attribution.
+        if died_round is not None:
+            for ri in (died_round, died_round - 1):
+                if ri < 0 or ri >= len(rounds):
+                    continue
+                rd = rounds[ri]
+                if not isinstance(rd, list):
+                    continue
+                for seat_entry in rd:
+                    if not isinstance(seat_entry, list):
+                        continue
+                    for a in seat_entry:
+                        if (isinstance(a, dict) and a.get("type") == "attack"
+                                and a.get("playerid") != seat):
+                            attacked_near_death = True
+        keys_by_round = " ".join(
+            f"key@{r}" + (f"={k}" if k is not None else "")
+            for r, k in keys_traj
+        )
         return {
             "n_rounds": len(rounds),
             "keys": keys,
@@ -199,6 +233,10 @@ class ReplayView:
             "last_action": last_action,
             "last_action_round": last_action_round,
             "hist": hist,
+            "escape_starts": escape_starts,
+            "escape_aborts": escape_aborts,
+            "keys_by_round": keys_by_round,
+            "attacked_near_death": attacked_near_death,
         }
 
 

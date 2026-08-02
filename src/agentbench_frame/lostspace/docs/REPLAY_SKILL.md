@@ -85,7 +85,8 @@ Wire formats the logic parses in `GameController.solve()`
 | `interact` | `["interact","Box"]` | loot a dropped Box | Box on your tile |
 | `interact` | `["interact","Materials",tool]` | gather materials → pick a tool | Materials on tile |
 | `interact` | `["interact","KeyMachine"]` | use a key machine (gain a key) | KeyMachine on tile |
-| `interact` | `["interact","EscapeCapsule",False]` | start/abort escape | capsule on tile; 4 keys to win |
+| `interact` | `["interact","EscapeCapsule",True]` | **start** escape | capsule on tile; need all 4 keys; enter WaitForEscape |
+| `interact` | `["interact","EscapeCapsule",False]` | **abort** an in-progress escape | only legal while WaitForEscape |
 | `trap` | `["trap","LandMine"\|"Sticky"]` | place a trap on your tile | have it in inventory |
 | `tool` | `["tool","Kit"]` | use medkit (+100 HP) | have Kit |
 | `tool` | `["tool","Transport",[x,y,z]]` | teleport | have Transport |
@@ -111,8 +112,16 @@ respawn (`GameController.player_died()` `:336-339`).
 - **Scoring** (`player.py`): **+1 per key-pickup** (`:45-48`), **+2 per kill**
   (`:76-77`), **−3 per death** (`:158`); death drops a Box of your keys
   (`:163`).
-- **Win condition** — collect all **4 keys** (one per KeyMachine) then enter
-  the escape capsule at `(3,3,0)` (`player.py:83-84`, `config.py:25`).
+- **Win condition** — hold all **4 keys** then enter the escape capsule at
+  `(3,3,0)` (`player.py:83-84`, `config.py:25`). You **start with your own key**
+  (`player.py:35` `key = {id}`). Each KeyMachine grants its key at the start
+  of your **NEXT** round and makes you Skip that round
+  (`interactive_props.py:144-157`); a same-turn key-count check right after
+  `interact("KeyMachine")` is always False.
+- **Escape** — start with `["interact","EscapeCapsule",True]`. You then enter
+  `WaitForEscape` and must survive **3 of your own rounds** defenseless — the
+  only legal action is `["interact","EscapeCapsule",False]` (abort)
+  (`interactive_props.py:120`, `GameController.py:190-199`).
 - **Vitals** — HP 200, SP 1 (refresh each of your small rounds,
   `GameController.py:121`), attack 70, LandMine 120, Kit +100, respawn 5
   rounds, detect cooldown 5, prop refresh 8 (`config.py`).
@@ -136,6 +145,9 @@ respawn (`GameController.player_died()` `:336-339`).
    dead or escaped, not just skipped.
 5. **`map_update` is not a player action** — it has no `playerid`; don't
    attribute it to seat 0.
+6. **Escape start flag is `True`, not `False`.** `["interact","EscapeCapsule",
+   False]` only **aborts** an in-progress escape; while Alive it is rejected
+   (`map.py:340`, `interactive_props.py:108-127`). To win you MUST send `True`.
 
 ## 5. Agent learning flow
 
