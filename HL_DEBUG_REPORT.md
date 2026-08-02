@@ -117,9 +117,39 @@ deepseek 编辑 API 调用 ~4-5 min/act (max_turns=6, max_tokens=16000) + 2 场 
 
 ---
 
+## 7. 2026-08-02 后修复验证 (trace 实证根因)
+
+5 项修复已落地 (`5c5c1f3`, 303 tests pass)。真实对局验证 (`--save-traces`,
+MediaPlayer seat0) 额外确认了 **胜率 0 的实证根因** — 之前只是假设:
+
+1. **规则文档 bug 已被 deepseek 采纳**: 文档说 `False` 启动逃生, deepseek
+   workspace 写了 `interact("EscapeCapsule", False)` → 服务端在 Alive 时拒绝。
+   已修文档 + workspace (True), 且测量通道现在保留 flag —
+   Alive 发 False → out_of_support, 不再把错误编辑当有效更新。
+2. **test_move 策略被 deepseek 改坏 (trace 实证)**: r8 workspace 的
+   `test_move()` (a) 删掉了 seed 的 key-spawn 吸引环 (v1: `bfs_move(spawn,3,-1)`),
+   (b) 把 KeyMachine 吸引从 `-3` 翻成 `+8` → BFS 值 = `+8·dist`, 取 max =
+   远离钥匙。实测 agent 漂到地图中央电梯 (1,3,2), 每回合发
+   `interact KeyMachine`/`Box`/`Materials` (全拒) + `move 到自己格子` (拒) +
+   `finish`, 直到被杀。**0 钥匙, 0 逃生尝试。** 这就是胜率恒 0 的直接原因。
+   - 修复: workspace 改回 `-3` (吸引, 同 seed/v2/v3)。
+   - 残留: seed 的 key-spawn 吸引环仍缺, 材料吸引 (add≈-8) 主导 `-3` → agent
+     仍可能漂向中部。这是下一 act 该让 deepseek 修的策略缺口 (已留注释)。
+3. **MediaPlayer 投影打通**: seat0 注册 `PlayDevice.MediaPlayer` → 96/100
+   roundbegin 带 `attack/move/detect/interprops`; `reference_recorder` 输出
+   96/96 样本非空 A(s)。`hl-nu-transcript-legal-gap` 关闭, 动态 ν 可落地。
+4. **harness 帧路由无 bug**: trace 逐帧核对, 候选发的每个动作都如实转发。
+
+**结论**: 框架测量管线 (R1–R5) 与对局 harness 都无阻塞 bug。胜率 0 的两层根因
+都在 **deepseek 的编辑本身**: (1) 采纳文档的 `False` 逃生 flag; (2) 改坏
+`test_move` 的钥匙导航。修复框架后 (flag-honest + MediaPlayer + --save-traces),
+agent 仍因 (2) 不收集钥匙 — 下一轮 HL act 的明确目标: 恢复钥匙导航。
+
 *附: 关键文件*
 - `src/agentbench_frame/hl/distribution.py` — `normalize_emitted` / `tracked_pos_from_transcript`
 - `src/agentbench_frame/hl/controller.py` — `_measure_policy_kl` (normalize 锚点修复)
 - `src/agentbench_frame/hl/nu_build.py` — nu-v2-t2 / nu-v2-t3 构造
 - `run_hl_deepseek.sh` — r8 运行脚本
 - 历史: r1–r7 事件在 `.hl_codebase/hl-deepseek-r{1..7}/events.jsonl`
+- 验证产物: `agentbench_data/verify/seat0-{mediaplayer,signfix,weight}.{json,trace.jsonl}`,
+  `recorder-out.json`
