@@ -15,7 +15,11 @@ from agentbench_frame.hl.evaluator import CandidateEvaluation
 from agentbench_frame.hl.events import HLEventWriter
 from agentbench_frame.hl.experience import ExperienceManager
 from agentbench_frame.hl.lineage import LineageManager, ParentDecision
-from agentbench_frame.hl.proposal import BranchBrief, load_branch_briefs
+from agentbench_frame.hl.proposal import (
+    BranchBrief,
+    branch_briefs_json_schema,
+    load_branch_briefs,
+)
 from agentbench_frame.hl.repair import (
     RepairSelection,
     build_repair_packet,
@@ -1090,12 +1094,47 @@ class HLController:
                 reducer_input=None,
             )
             planner_raw = self.run_root / "provider" / f"{planner_act_id}.jsonl"
-            planner = self.provider.invoke(
-                prompt=planner_prompt,
-                workspace=self.workspace,
-                raw_output_path=planner_raw,
-                session_id=None,
-            )
+            if getattr(self.provider, "supports_structured_output", False):
+                planner_raw.parent.mkdir(parents=True, exist_ok=True)
+                planner_schema = planner_raw.with_suffix(".schema.json")
+                planner_final = planner_raw.with_suffix(".final.json")
+                planner_schema.write_text(
+                    json.dumps(
+                        branch_briefs_json_schema(expected_count=4),
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        indent=2,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                if planner_final.exists():
+                    planner_final.unlink()
+                structured_prompt = planner_prompt + f"""
+
+结构化输出覆盖指令：不要写 workspace 文件，也不要修改任何文件。只读输入后，直接把最终答案返回为 JSON；CLI 将按 JSON Schema 保存到 `{planner_final}`。顶层必须是仅含 `branches` 的对象，`branches` 恰好四项。不要在最终 JSON 前后添加 Markdown 或解释。规划阶段使用 high 推理强度；把深入代码核查留给四个 xhigh 候选 act。
+"""
+                planner = self.provider.invoke(
+                    prompt=structured_prompt,
+                    workspace=self.workspace,
+                    raw_output_path=planner_raw,
+                    session_id=None,
+                    output_schema_path=planner_schema,
+                    output_last_message_path=planner_final,
+                    reasoning_effort="high",
+                    sandbox_mode="read-only",
+                )
+                planner_prompt = structured_prompt
+                if planner.status == "completed" and planner_final.is_file():
+                    load_branch_briefs(planner_final, expected_count=4)
+                    shutil.copy2(planner_final, planner_output)
+            else:
+                planner = self.provider.invoke(
+                    prompt=planner_prompt,
+                    workspace=self.workspace,
+                    raw_output_path=planner_raw,
+                    session_id=None,
+                )
             self._coding_agent_acts += 1
             self._write_checkpoint(
                 act_id=planner_act_id,

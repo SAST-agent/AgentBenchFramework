@@ -23,6 +23,51 @@ class BranchBrief:
         return dataclasses.asdict(self)
 
 
+def branch_briefs_json_schema(*, expected_count: int) -> dict[str, Any]:
+    """Return the strict Codex final-output schema for one planner cycle."""
+
+    if expected_count < 1:
+        raise ValueError("expected_count must be positive")
+    text_field = {"type": "string", "minLength": 1, "maxLength": 2000}
+    branches = {
+        "type": "array",
+        "minItems": expected_count,
+        "maxItems": expected_count,
+        "items": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": [
+                "branch_index",
+                "diagnosis",
+                "mechanism",
+                "activation_condition",
+                "preservation_contract",
+                "expected_change",
+                "falsifier",
+            ],
+            "properties": {
+                "branch_index": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": expected_count - 1,
+                },
+                "diagnosis": dict(text_field),
+                "mechanism": dict(text_field),
+                "activation_condition": dict(text_field),
+                "preservation_contract": dict(text_field),
+                "expected_change": dict(text_field),
+                "falsifier": dict(text_field),
+            },
+        },
+    }
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["branches"],
+        "properties": {"branches": branches},
+    }
+
+
 def _text(value: Any, field: str) -> str:
     normalized = " ".join(str(value).split())
     if not normalized:

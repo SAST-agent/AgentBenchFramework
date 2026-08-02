@@ -41,6 +41,30 @@ def test_first_and_resumed_commands_use_official_exec_shapes(tmp_path):
     assert "--ephemeral" not in resumed
 
 
+def test_structured_planner_command_uses_schema_output_and_phase_reasoning(tmp_path):
+    from agentbench_frame.hl.provider import CodexSessionProvider
+
+    provider = CodexSessionProvider(_provider_config(), run_root=tmp_path)
+    schema = tmp_path / "planner.schema.json"
+    output = tmp_path / "planner.json"
+
+    command = provider.build_command(
+        "produce four briefs",
+        tmp_path / "candidate",
+        session_id=None,
+        output_schema_path=schema,
+        output_last_message_path=output,
+        reasoning_effort="high",
+        sandbox_mode="read-only",
+    )
+
+    assert command[:4] == ["codex", "exec", "--json", "--sandbox"]
+    assert command[4] == "read-only"
+    assert command[command.index("--output-schema") + 1] == str(schema)
+    assert command[command.index("--output-last-message") + 1] == str(output)
+    assert "model_reasoning_effort=\"high\"" in command
+
+
 def test_provider_config_is_secret_free_and_excludes_key_from_agent_shells(tmp_path):
     from agentbench_frame.hl.provider import CodexSessionProvider
 

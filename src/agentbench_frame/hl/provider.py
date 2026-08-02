@@ -29,6 +29,7 @@ class CodexSessionProvider:
     """Invoke official ``codex exec`` and resume its persisted session."""
 
     provider_name = "codex"
+    supports_structured_output = True
 
     def __init__(
         self,
@@ -117,11 +118,28 @@ class CodexSessionProvider:
         workspace: str | Path,
         *,
         session_id: Optional[str],
+        output_schema_path: str | Path | None = None,
+        output_last_message_path: str | Path | None = None,
+        reasoning_effort: str | None = None,
+        sandbox_mode: str = "workspace-write",
     ) -> list[str]:
         if not prompt:
             raise ValueError("prompt is required")
         executable = self.config.executable
         model_args = ["-m", self.config.model] if self.config.model else []
+        structured_args: list[str] = []
+        if output_schema_path is not None:
+            structured_args.extend(
+                ["--output-schema", str(Path(output_schema_path))]
+            )
+        if output_last_message_path is not None:
+            structured_args.extend(
+                ["--output-last-message", str(Path(output_last_message_path))]
+            )
+        if reasoning_effort is not None:
+            structured_args.extend(
+                ["-c", f'model_reasoning_effort={_toml_string(reasoning_effort)}']
+            )
         if session_id and self.config.context_mode == "resumable":
             return [
                 executable,
@@ -129,6 +147,7 @@ class CodexSessionProvider:
                 "resume",
                 "--json",
                 *model_args,
+                *structured_args,
                 session_id,
                 prompt,
             ]
@@ -137,10 +156,11 @@ class CodexSessionProvider:
             "exec",
             "--json",
             "--sandbox",
-            "workspace-write",
+            sandbox_mode,
             "-C",
             str(workspace),
             *model_args,
+            *structured_args,
             prompt,
         ]
 
@@ -276,6 +296,10 @@ class CodexSessionProvider:
         workspace: str | Path,
         raw_output_path: str | Path,
         session_id: Optional[str] = None,
+        output_schema_path: str | Path | None = None,
+        output_last_message_path: str | Path | None = None,
+        reasoning_effort: str | None = None,
+        sandbox_mode: str = "workspace-write",
     ) -> ProviderInvocation:
         raw_path = Path(raw_output_path)
         retry_outputs: list[str] = []
@@ -287,6 +311,10 @@ class CodexSessionProvider:
                 workspace=workspace,
                 raw_output_path=raw_path,
                 session_id=session_id,
+                output_schema_path=output_schema_path,
+                output_last_message_path=output_last_message_path,
+                reasoning_effort=reasoning_effort,
+                sandbox_mode=sandbox_mode,
             )
             rate_limited = self._is_rate_limit_failure(result, raw_path)
             if rate_limited:
@@ -354,8 +382,20 @@ class CodexSessionProvider:
         workspace: str | Path,
         raw_output_path: str | Path,
         session_id: Optional[str] = None,
+        output_schema_path: str | Path | None = None,
+        output_last_message_path: str | Path | None = None,
+        reasoning_effort: str | None = None,
+        sandbox_mode: str = "workspace-write",
     ) -> ProviderInvocation:
-        command = self.build_command(prompt, workspace, session_id=session_id)
+        command = self.build_command(
+            prompt,
+            workspace,
+            session_id=session_id,
+            output_schema_path=output_schema_path,
+            output_last_message_path=output_last_message_path,
+            reasoning_effort=reasoning_effort,
+            sandbox_mode=sandbox_mode,
+        )
         started = time.monotonic()
         try:
             completed = self._run_command(
