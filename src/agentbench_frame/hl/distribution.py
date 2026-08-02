@@ -184,6 +184,21 @@ def normalize_emitted(primitive: Optional[ActionToken], *, pos=None) -> Optional
             return ("attack", int(primitive[-1]))
         except (TypeError, ValueError):
             pass
+    if name == "interact" and len(primitive) >= 3:
+        # Canonicalize interact token shapes to the A(s) form. The candidate
+        # sends the capsule flag / Box tool argument on the wire
+        # (["interact","EscapeCapsule",False], ["interact","Box","Key"]) but
+        # A(s) codes them bare ("interact","EscapeCapsule") / ("interact",
+        # "Box") — without this an escape-first or Box-first edit collapses to
+        # out-of-support and the whole act's KL is dropped.
+        if primitive[1] == "EscapeCapsule" and isinstance(primitive[2], bool):
+            return ("interact", "EscapeCapsule")
+        if primitive[1] == "Box":
+            return ("interact", "Box")
+        if primitive[1] == "Materials":
+            if primitive[2] in TOOL_LIST:
+                return ("interact", "Materials", primitive[2])
+            return ("interact", "Materials")
     return primitive
 
 

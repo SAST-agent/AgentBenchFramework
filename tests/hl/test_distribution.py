@@ -293,6 +293,22 @@ def test_normalize_emitted_attack_drops_coordinate():
     assert normalize_emitted(None, pos=[0, 0, 1]) is None
 
 
+def test_normalize_emitted_interact_token_shapes():
+    from agentbench_frame.hl.distribution import normalize_emitted
+    # escape-first sends the capsule flag; A(s) codes it bare.
+    assert normalize_emitted(("interact", "EscapeCapsule", False),
+                             pos=[0, 0, 1]) == ("interact", "EscapeCapsule")
+    # Box-first sends a tool arg ("Key"); A(s) has bare Box.
+    assert normalize_emitted(("interact", "Box", "Key"),
+                             pos=[0, 0, 1]) == ("interact", "Box")
+    # Materials keeps the tool arg (A(s) has ("interact","Materials","Kit")).
+    assert normalize_emitted(("interact", "Materials", "Kit"),
+                             pos=[0, 0, 1]) == ("interact", "Materials", "Kit")
+    # 2-arg interacts pass through unchanged.
+    assert normalize_emitted(("interact", "KeyMachine"),
+                             pos=[0, 0, 1]) == ("interact", "KeyMachine")
+
+
 def test_tracked_pos_from_transcript_uses_id_frame():
     from agentbench_frame.hl.distribution import tracked_pos_from_transcript
     # id birth_pos is 2D; the seeded candidate appends the z-layer (spawn).
