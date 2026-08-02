@@ -6,7 +6,7 @@ import dataclasses
 import json
 import shutil
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Mapping, Optional
 
 from agentbench_frame.arena.rating import RoleEloLedger
 from agentbench_frame.hl.codebase import Version, VersionStore
@@ -16,6 +16,11 @@ from agentbench_frame.hl.events import HLEventWriter
 from agentbench_frame.hl.experience import ExperienceManager
 from agentbench_frame.hl.lineage import LineageManager, ParentDecision
 from agentbench_frame.hl.proposal import BranchBrief, load_branch_briefs
+from agentbench_frame.hl.repair import (
+    RepairSelection,
+    build_repair_packet,
+    select_branch_representative,
+)
 from agentbench_frame.hl.research_state import ResearchState, apply_reducer_update
 from agentbench_frame.hl.selection import (
     CandidateDiagnostics,
@@ -43,6 +48,8 @@ class IterationResult:
     search_parent_version_id: str
     rollback: Optional[ParentDecision]
     finalists: tuple[CandidateResult, ...] = ()
+    repairs: tuple[RepairSelection, ...] = ()
+    representatives: tuple[CandidateResult, ...] = ()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -57,6 +64,8 @@ class ProposalCycleResult:
     reducer: ProviderInvocation
     reducer_input_path: Path
     rollback: Optional[ParentDecision]
+    repairs: tuple[RepairSelection, ...] = ()
+    representatives: tuple[CandidateResult, ...] = ()
 
 
 class HLController:
@@ -81,6 +90,9 @@ class HLController:
         anchor_human_opponents: bool = True,
         research_state_path: str | Path | None = None,
         research_state_max_bytes: int = 16384,
+        summary_resolver: (
+            Callable[[Mapping[str, Any]], Mapping[str, Any]] | None
+        ) = None,
     ) -> None:
         self.workspace = Path(workspace)
         self.run_root = Path(run_root)
@@ -100,6 +112,13 @@ class HLController:
             None if research_state_path is None else Path(research_state_path)
         )
         self.research_state_max_bytes = research_state_max_bytes
+        self.summary_resolver = summary_resolver or (
+            lambda match: {
+                key: match.get(key)
+                for key in ("replay", "trace")
+                if match.get(key) is not None
+            }
+        )
         self._iteration_count = 0
         self._coding_agent_acts = 0
         self._sessions: dict[str, str] = {}
@@ -523,6 +542,101 @@ class HLController:
             )
         return len(match_records)
 
+    def _run_coding_candidate(
+        self,
+        *,
+        iteration_id: str,
+        act_id: str,
+        branch_index: int,
+        branch_count: int,
+        parent_version_id: str,
+        phase: str,
+        prompt_values: dict[str, Any],
+        edit_type: str,
+        staged_evaluation: bool,
+        session_id: str | None = None,
+    ) -> CandidateResult:
+        """Invoke, snapshot, quick-screen, and register one immutable edit."""
+
+        self.version_store.checkout(parent_version_id)
+        experience_update = self.workspace / ".agentbench" / "experience_update.json"
+        if experience_update.exists():
+            experience_update.unlink()
+        prompt = self.prompt_factory(
+            phase=phase,
+            act_id=act_id,
+            iteration_id=iteration_id,
+            branch_index=branch_index,
+            branch_count=branch_count,
+            parent_version_id=parent_version_id,
+            **prompt_values,
+        )
+        raw_path = self.run_root / "provider" / f"{act_id}.jsonl"
+        invocation = self.provider.invoke(
+            prompt=prompt,
+            workspace=self.workspace,
+            raw_output_path=raw_path,
+            session_id=session_id,
+        )
+        self._write_checkpoint(
+            act_id=act_id,
+            iteration_id=iteration_id,
+            branch_index=branch_index,
+            parent_version_id=parent_version_id,
+            prompt=prompt,
+            invocation=invocation,
+        )
+        self._coding_agent_acts += 1
+        pending_path: Path | None = None
+        if experience_update.is_file():
+            pending_path = (
+                self.run_root / "experience" / "pending" / f"{act_id}.json"
+            )
+            pending_path.parent.mkdir(parents=True, exist_ok=True)
+            pending_path.write_bytes(experience_update.read_bytes())
+        version = self.version_store.snapshot(
+            parent_version_id=parent_version_id,
+            act_id=act_id,
+            edit_type=edit_type,
+        )
+        evaluation = (
+            (
+                self.evaluator.quick_screen(version)
+                if staged_evaluation
+                else self.evaluator.evaluate(version)
+            )
+            if invocation.status == "completed"
+            else CandidateEvaluation(
+                status=(
+                    invocation.status
+                    if invocation.status in {"failed", "timeout"}
+                    else "failed"
+                ),
+                score=None,
+                error=invocation.error,
+            )
+        )
+        thread_id = invocation.metadata.get("thread_id")
+        if thread_id:
+            self._sessions[version.version_id] = str(thread_id)
+        self.lineage.register_candidate(
+            version.version_id,
+            parent_version_id=parent_version_id,
+            status=evaluation.status,
+            score=evaluation.score,
+        )
+        result = CandidateResult(
+            act_id=act_id,
+            branch_index=branch_index,
+            version=version,
+            evaluation=evaluation,
+            provider=invocation,
+            pending_experience_path=pending_path,
+        )
+        self._write_act_event(iteration_id, result)
+        self._write_version_event(version, evaluation, selected=False)
+        return result
+
     def run_act(
         self,
         *,
@@ -551,7 +665,6 @@ class HLController:
         self._iteration_count += 1
         iteration_id = f"iter-{self._iteration_count:06d}"
         results: list[CandidateResult] = []
-        pending_experience: dict[str, Path] = {}
         branch_count = self.iteration.candidates_per_act
         if branch_briefs is not None and len(branch_briefs) != branch_count:
             raise ValueError("branch briefs must match candidate count")
@@ -563,97 +676,29 @@ class HLController:
         )
 
         for branch_index in range(branch_count):
-            self.version_store.checkout(parent_id)
-            experience_update = (
-                self.workspace / ".agentbench" / "experience_update.json"
-            )
-            if experience_update.exists():
-                experience_update.unlink()
             act_id = f"act-{self._coding_agent_acts + 1:06d}-b{branch_index:02d}"
-            prompt = self.prompt_factory(
-                phase="candidate",
-                act_id=act_id,
-                iteration_id=iteration_id,
-                branch_index=branch_index,
-                branch_count=branch_count,
-                parent_version_id=parent_id,
-                branch_brief=(
-                    None
-                    if branch_briefs is None
-                    else branch_briefs[branch_index].to_dict()
-                ),
-            )
-            raw_path = self.run_root / "provider" / f"{act_id}.jsonl"
-            session_id = (
-                self._sessions.get(parent_id)
-                if branch_count == 1
-                else None
-            )
-            invocation = self.provider.invoke(
-                prompt=prompt,
-                workspace=self.workspace,
-                raw_output_path=raw_path,
-                session_id=session_id,
-            )
-            self._write_checkpoint(
-                act_id=act_id,
-                iteration_id=iteration_id,
-                branch_index=branch_index,
-                parent_version_id=parent_id,
-                prompt=prompt,
-                invocation=invocation,
-            )
-            self._coding_agent_acts += 1
-            if experience_update.is_file():
-                pending_path = (
-                    self.run_root
-                    / "experience"
-                    / "pending"
-                    / f"{act_id}.json"
-                )
-                pending_path.parent.mkdir(parents=True, exist_ok=True)
-                pending_path.write_bytes(experience_update.read_bytes())
-                pending_experience[act_id] = pending_path
-            version = self.version_store.snapshot(
-                parent_version_id=parent_id,
-                act_id=act_id,
-                edit_type="candidate",
-            )
-            evaluation = (
-                (
-                    self.evaluator.quick_screen(version)
-                    if staged_evaluation
-                    else self.evaluator.evaluate(version)
-                )
-                if invocation.status == "completed"
-                else CandidateEvaluation(
-                    status=invocation.status
-                    if invocation.status in {"failed", "timeout"}
-                    else "failed",
-                    score=None,
-                    error=invocation.error,
+            results.append(
+                self._run_coding_candidate(
+                    iteration_id=iteration_id,
+                    act_id=act_id,
+                    branch_index=branch_index,
+                    branch_count=branch_count,
+                    parent_version_id=parent_id,
+                    phase="candidate",
+                    prompt_values={
+                        "branch_brief": (
+                            None
+                            if branch_briefs is None
+                            else branch_briefs[branch_index].to_dict()
+                        )
+                    },
+                    edit_type="candidate",
+                    staged_evaluation=staged_evaluation,
+                    session_id=(
+                        self._sessions.get(parent_id) if branch_count == 1 else None
+                    ),
                 )
             )
-            thread_id = invocation.metadata.get("thread_id")
-            if thread_id:
-                self._sessions[version.version_id] = str(thread_id)
-            self.lineage.register_candidate(
-                version.version_id,
-                parent_version_id=parent_id,
-                status=evaluation.status,
-                score=evaluation.score,
-            )
-            result = CandidateResult(
-                act_id=act_id,
-                branch_index=branch_index,
-                version=version,
-                evaluation=evaluation,
-                provider=invocation,
-                pending_experience_path=pending_experience.get(act_id),
-            )
-            results.append(result)
-            self._write_act_event(iteration_id, result)
-            self._write_version_event(version, evaluation, selected=False)
 
         def selection_key(result: CandidateResult) -> tuple[float, ...]:
             try:
@@ -675,12 +720,81 @@ class HLController:
                 )
             return diagnostics.key()
 
+        repairs: list[RepairSelection] = []
+        representatives: list[CandidateResult] = list(results)
+        if self.iteration.repair_enabled and self.iteration.repair_rounds:
+            if branch_briefs is None:
+                raise ValueError("repair cycle requires branch briefs")
+            if parent_evaluation is None:
+                raise ValueError("repair cycle requires the parent evaluation")
+            parent_result = CandidateResult(
+                act_id=self.version_store.get(parent_id).act_id,
+                branch_index=-1,
+                version=self.version_store.get(parent_id),
+                evaluation=parent_evaluation,
+                provider=ProviderInvocation(status="completed"),
+            )
+            eligible = sorted(
+                (
+                    result
+                    for result in results
+                    if result.evaluation.status == "complete"
+                ),
+                key=selection_key,
+                reverse=True,
+            )
+            repair_targets = eligible[: self.iteration.repair_top_k]
+            proposal_root = self.run_root / "proposals" / iteration_id
+            for initial in repair_targets:
+                repair_input = build_repair_packet(
+                    output_path=(
+                        proposal_root
+                        / f"repair_input-b{initial.branch_index:02d}.json"
+                    ),
+                    iteration_id=iteration_id,
+                    branch_brief=branch_briefs[initial.branch_index],
+                    parent=parent_result,
+                    candidate=initial,
+                    summary_resolver=self.summary_resolver,
+                )
+                act_id = (
+                    f"act-{self._coding_agent_acts + 1:06d}"
+                    f"-repair-b{initial.branch_index:02d}"
+                )
+                repaired = self._run_coding_candidate(
+                    iteration_id=iteration_id,
+                    act_id=act_id,
+                    branch_index=initial.branch_index,
+                    branch_count=branch_count,
+                    parent_version_id=initial.version.version_id,
+                    phase="repair",
+                    prompt_values={
+                        "branch_brief": branch_briefs[
+                            initial.branch_index
+                        ].to_dict(),
+                        "repair_input": str(repair_input),
+                    },
+                    edit_type="repair",
+                    staged_evaluation=staged_evaluation,
+                )
+                representative = select_branch_representative(initial, repaired)
+                representatives[initial.branch_index] = representative
+                repairs.append(
+                    RepairSelection(
+                        branch_index=initial.branch_index,
+                        initial=initial,
+                        repaired=repaired,
+                        representative=representative,
+                        repair_input_path=repair_input,
+                    )
+                )
+
         finalists: tuple[CandidateResult, ...] = ()
         if staged_evaluation:
             quick_completed = sorted(
                 (
                     result
-                    for result in results
+                    for result in representatives
                     if result.evaluation.status == "complete"
                 ),
                 key=selection_key,
@@ -690,10 +804,10 @@ class HLController:
                 result.version.version_id
                 for result in quick_completed[: self.iteration.finalist_count]
             }
-            updated_results: list[CandidateResult] = []
-            for result in results:
+            updated_representatives: list[CandidateResult] = []
+            for result in representatives:
                 if result.version.version_id not in finalist_ids:
-                    updated_results.append(result)
+                    updated_representatives.append(result)
                     continue
                 self.version_store.checkout(result.version.version_id)
                 finalist_evaluation = self.evaluator.evaluate_finalist(
@@ -704,20 +818,48 @@ class HLController:
                     finalist_evaluation,
                 )
                 updated = dataclasses.replace(result, evaluation=combined)
-                updated_results.append(updated)
+                updated_representatives.append(updated)
                 self._write_evaluation_event(result.version, combined)
-            results = updated_results
+            representatives = updated_representatives
+            updated_by_version = {
+                result.version.version_id: result for result in representatives
+            }
+            repairs = [
+                dataclasses.replace(
+                    repair,
+                    initial=updated_by_version.get(
+                        repair.initial.version.version_id, repair.initial
+                    ),
+                    repaired=(
+                        None
+                        if repair.repaired is None
+                        else updated_by_version.get(
+                            repair.repaired.version.version_id, repair.repaired
+                        )
+                    ),
+                    representative=updated_by_version[
+                        repair.representative.version.version_id
+                    ],
+                )
+                for repair in repairs
+            ]
+            if not repairs:
+                results = list(representatives)
             finalists = tuple(
                 result
-                for result in results
+                for result in representatives
                 if result.version.version_id in finalist_ids
             )
 
         completed = [
-            result for result in results if result.evaluation.status == "complete"
+            result
+            for result in representatives
+            if result.evaluation.status == "complete"
         ]
 
-        selected = max(completed, key=selection_key) if completed else results[0]
+        selected = (
+            max(completed, key=selection_key) if completed else representatives[0]
+        )
         if not finalists:
             finalists = tuple(
                 sorted(completed, key=selection_key, reverse=True)[
@@ -774,6 +916,8 @@ class HLController:
             search_parent_version_id=search_parent_version_id,
             rollback=rollback,
             finalists=finalists,
+            repairs=tuple(repairs),
+            representatives=tuple(representatives),
         )
 
     def run_proposal_cycle(
@@ -1021,6 +1165,8 @@ class HLController:
             reducer=reducer,
             reducer_input_path=reducer_input,
             rollback=iteration.rollback,
+            repairs=iteration.repairs,
+            representatives=iteration.representatives,
         )
 
     def commit_experience(self, candidate: CandidateResult) -> Path | None:

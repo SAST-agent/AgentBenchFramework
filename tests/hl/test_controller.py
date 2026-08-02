@@ -673,6 +673,154 @@ def test_k4_proposal_cycle_uses_one_parent_and_reducer_sees_all_feedback(tmp_pat
     assert research.recent_comparisons[0]["selected_branch"] == 1
 
 
+def test_top_two_linear_repair_keeps_four_branches_and_two_descendants(tmp_path):
+    import json
+
+    from agentbench_frame.hl.codebase import VersionStore
+    from agentbench_frame.hl.config import IterationConfig, RollbackConfig
+    from agentbench_frame.hl.controller import HLController
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+    from agentbench_frame.hl.events import HLEventWriter
+    from agentbench_frame.hl.lineage import LineageManager
+    from agentbench_frame.tracking.provider import ProviderInvocation
+
+    class RepairProvider:
+        def __init__(self):
+            self.calls = []
+
+        def invoke(self, *, prompt, workspace, raw_output_path, session_id=None):
+            self.calls.append(prompt)
+            control = Path(workspace, ".agentbench")
+            control.mkdir(parents=True, exist_ok=True)
+            if "phase=planner" in prompt:
+                (control / "branch_briefs.json").write_text(
+                    json.dumps(
+                        {
+                            "branches": [
+                                {
+                                    "branch_index": index,
+                                    "diagnosis": f"diagnosis-{index}",
+                                    "mechanism": ("route", "shield", "portal", "escape")[index],
+                                    "activation_condition": f"condition-{index}",
+                                    "preservation_contract": f"preserve-{index}",
+                                    "expected_change": f"expected-{index}",
+                                    "falsifier": f"falsifier-{index}",
+                                }
+                                for index in range(4)
+                            ]
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            elif "phase=candidate" in prompt or "phase=repair" in prompt:
+                Path(workspace, "agent.py").write_text(
+                    f"VALUE = {len(self.calls)}\n", encoding="utf-8"
+                )
+            elif "phase=reducer" in prompt:
+                (control / "research_state_update.json").write_text(
+                    json.dumps(
+                        {
+                            "stable_knowledge": [],
+                            "failed_hypotheses": [],
+                            "open_questions": [],
+                            "recent_comparisons": [],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            Path(raw_output_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(raw_output_path).write_text("{}\n", encoding="utf-8")
+            return ProviderInvocation(status="completed")
+
+    class RepairEvaluator:
+        def __init__(self):
+            self.quick_margins = iter((10, 40, 30, 20, 60, 25))
+
+        @staticmethod
+        def _evaluation(margin, seed=101):
+            return CandidateEvaluation(
+                status="complete",
+                score=1.0 if margin > 50 else 0.0,
+                matches=(
+                    {
+                        "status": "complete",
+                        "result": "win" if margin > 50 else "loss",
+                        "opponent": "rank15",
+                        "seed": seed,
+                        "rollman_score": 100 + margin,
+                        "ghosts_score": 100,
+                        "replay": f"replay-{margin}.jsonl",
+                        "trace": f"trace-{margin}.jsonl",
+                    },
+                ),
+            )
+
+        def evaluate(self, version):
+            return self._evaluation(0)
+
+        def quick_screen(self, version):
+            return self._evaluation(next(self.quick_margins))
+
+        def evaluate_finalist(self, version):
+            return self._evaluation(0, seed=102)
+
+        @staticmethod
+        def combine_stages(quick, finalist):
+            return CandidateEvaluation(
+                status="complete",
+                score=quick.score,
+                matches=(*quick.matches, *finalist.matches),
+            )
+
+    workspace = _workspace(tmp_path)
+    provider = RepairProvider()
+    controller = HLController(
+        workspace=workspace,
+        run_root=tmp_path,
+        provider=provider,
+        evaluator=RepairEvaluator(),
+        version_store=VersionStore(workspace, tmp_path / "versions"),
+        lineage=LineageManager(),
+        events=HLEventWriter(tmp_path / "events.jsonl", run_id="run-repair"),
+        iteration=IterationConfig(
+            candidates_per_cycle=4,
+            planner_enabled=True,
+            reducer_enabled=True,
+            finalist_count=2,
+            repair_enabled=True,
+            repair_top_k=2,
+            repair_rounds=1,
+        ),
+        rollback=RollbackConfig(),
+        prompt_factory=lambda **values: f"phase={values['phase']}",
+        summary_resolver=lambda match: {
+            "summary": f"summary-{match['seed']}.md",
+            "replay": match.get("replay"),
+            "trace": match.get("trace"),
+        },
+    )
+    origin = controller.initialize(evaluate=True)
+    parent_evaluation = controller.evaluator.evaluate(origin)
+
+    result = controller.run_proposal_cycle(
+        parent_version_id=origin.version_id,
+        parent_evaluation=parent_evaluation,
+    )
+
+    assert len(result.candidates) == 4
+    assert len(result.repairs) == 2
+    assert len(result.representatives) == 4
+    assert len(result.finalists) == 2
+    assert len(provider.calls) == 8
+    assert {
+        repair.repaired.version.parent_version_id for repair in result.repairs
+    } == {
+        repair.initial.version.version_id for repair in result.repairs
+    }
+    assert result.repairs[0].representative is result.repairs[0].repaired
+    assert result.repairs[1].representative is result.repairs[1].initial
+
+
 def test_failed_reducer_output_cannot_mutate_research_state(tmp_path):
     import json
 
