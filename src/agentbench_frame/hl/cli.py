@@ -193,7 +193,7 @@ def _opponent_distillation_required(
         research_state_path,
         max_bytes=research_state_max_bytes,
     )
-    return stagnation_count >= 3 or state.exploration_debt >= 3
+    return stagnation_count >= 2 or state.exploration_debt >= 2
 
 
 def _trace_fault_summary(trace: str | Path | None) -> dict[str, str] | None:
@@ -1276,6 +1276,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         workspace=workspace,
         acts=args.acts,
         resume=False,
+        replan_pending=False,
         provider_environment=provider_environment,
     )
 
@@ -1304,6 +1305,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
         ),
         acts=args.acts,
         resume=True,
+        replan_pending=args.replan_pending,
         provider_environment=provider_environment,
     )
 
@@ -1356,6 +1358,7 @@ def _run_real(
     workspace: Path,
     acts: int | None,
     resume: bool,
+    replan_pending: bool,
     provider_environment: dict[str, str] | None,
 ) -> int:
     # Imported lazily so validate and dry-run never initialize model/runtime state.
@@ -1551,7 +1554,7 @@ def _run_real(
             provider=provider,
             workspace=workspace,
         )
-        if resume and provider is not None
+        if resume and provider is not None and not replan_pending
         else None
     )
     bootstrap_recovery = (
@@ -1630,7 +1633,7 @@ def _run_real(
             version_store=version_store,
             evaluations_by_version=evaluations_by_version,
         )
-        if resume
+        if resume and not replan_pending
         else {}
     )
     pending_candidate_recoveries = (
@@ -1639,7 +1642,7 @@ def _run_real(
             version_store=version_store,
             evaluations_by_version=evaluations_by_version,
         )
-        if resume
+        if resume and not replan_pending
         else {}
     )
 
@@ -3238,6 +3241,7 @@ def main(argv: list[str] | None = None) -> int:
     resume.add_argument("--run-dir", required=True)
     resume.add_argument("--workspace")
     resume.add_argument("--acts", type=int)
+    resume.add_argument("--replan-pending", action="store_true")
     resume.set_defaults(handler=_cmd_resume)
     prepare = sub.add_parser("prepare-opponents")
     prepare.add_argument("--config", required=True)

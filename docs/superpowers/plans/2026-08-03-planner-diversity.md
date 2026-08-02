@@ -15,6 +15,8 @@
 - Preserve the existing `branch_briefs.json` schema.
 - Keep Rollman and Ghost role semantics asymmetric.
 - Preserve the primitive Rollman decision space used for KL.
+- Activate cached distillation after two stagnant cycles or an exploration debt of two.
+- Preserve audit history when explicitly replanning an interrupted cycle.
 
 ---
 
@@ -74,3 +76,29 @@ git commit -m "feat: diversify distillation-aware HL planning"
 ```
 
 Resume one atomic iteration from the existing run; verify the planner emits at least one predictive-distillation branch and at least one offensive branch before allowing candidate evaluation to continue.
+
+### Task 2: Replan an interrupted cycle under the active prompt contract
+
+**Files:**
+- Modify: `src/agentbench_frame/hl/cli.py`
+- Test: `tests/hl/test_cli.py`
+
+**Interfaces:**
+- Consumes: `agentbench hl resume --replan-pending`
+- Produces: a resumed run that ignores pending planner, candidate, and repair recovery references without deleting audit events
+
+- [ ] **Step 1: Make the two-cycle trigger and CLI flag tests fail**
+
+Assert that `_opponent_distillation_required` returns `True` for stagnation/debt two and that `main()` forwards `replan_pending=True` from the resume subcommand.
+
+- [ ] **Step 2: Implement the minimal threshold and recovery bypass**
+
+Use a threshold of two in `_opponent_distillation_required`; add the resume-only flag and pass it to `_run_real`, where it suppresses all three pending recovery collections.
+
+- [ ] **Step 3: Run focused and full regression tests**
+
+Run: `.venv/bin/pytest tests/hl/test_cli.py tests/hl/test_context.py -q`
+
+Run: `.venv/bin/pytest -q`
+
+Expected: all tests pass before `resume --replan-pending --acts 1` is executed.

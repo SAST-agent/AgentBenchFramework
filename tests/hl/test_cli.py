@@ -107,7 +107,7 @@ def test_opponent_distillation_uses_inherited_research_debt(tmp_path):
     ) is True
 
 
-def test_opponent_distillation_waits_when_all_stagnation_signals_are_low(tmp_path):
+def test_opponent_distillation_triggers_after_two_stagnant_cycles(tmp_path):
     from agentbench_frame.hl.cli import _opponent_distillation_required
     from agentbench_frame.hl.research_state import ResearchState
 
@@ -119,7 +119,7 @@ def test_opponent_distillation_waits_when_all_stagnation_signals_are_low(tmp_pat
         stagnation_count=2,
         research_state_path=state_path,
         research_state_max_bytes=16384,
-    ) is False
+    ) is True
 
 
 def test_main_curve_measurement_only_uses_linear_selected_successor():
@@ -491,6 +491,33 @@ def test_resume_accepts_zero_new_model_acts(monkeypatch):
         )
         == 0
     )
+
+
+def test_resume_can_replan_an_interrupted_proposal_cycle(tmp_path, monkeypatch):
+    from agentbench_frame.hl import cli
+    from agentbench_frame.hl.local_config import LocalHLConfig
+
+    config = LocalHLConfig.load(CONFIG)
+    calls = []
+    monkeypatch.setattr(cli, "_load", lambda _path: config)
+    monkeypatch.setattr(cli, "_run_real", lambda *args, **kwargs: calls.append(kwargs) or 0)
+
+    code = cli.main(
+        [
+            "resume",
+            "--config",
+            str(CONFIG),
+            "--run-dir",
+            str(tmp_path / "run"),
+            "--acts",
+            "0",
+            "--replan-pending",
+        ]
+    )
+
+    assert code == 0
+    assert calls[0]["resume"] is True
+    assert calls[0]["replan_pending"] is True
 
 
 def test_aggregate_report_cli_passes_integer_origin_and_run_paths(

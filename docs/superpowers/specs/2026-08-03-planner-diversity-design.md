@@ -23,6 +23,8 @@ The existing content-addressed distillation artifact remains the only opponent-m
 
 Without a shared distillation artifact, the planner retains mechanism diversity and replay-grounded causal requirements without claiming opponent-model evidence. Existing candidate activation, fixed-seed screening, finalist gates, rollback, full-pool reporting, and certification remain unchanged.
 
+Two consecutive stagnant cycles, or an exploration debt of two, activate the cached distillation intervention. The explicit `resume --replan-pending` option discards pending recovery references when a completed planner predates the active prompt contract; it preserves all audit events and reruns the planner under the same pending iteration identifier.
+
 ## Verification
 
-Prompt contract tests verify that the branch-role assignment appears only when a shared distillation is supplied, preserves the asymmetric-role warning, requires offensive diversity, and does not request an additional distillation run. The focused context tests and full test suite must pass before resuming API experiments.
+Prompt contract tests verify that the branch-role assignment appears only when a shared distillation is supplied, preserves the asymmetric-role warning, requires offensive diversity, and does not request an additional distillation run. CLI tests verify the two-cycle trigger and explicit pending-cycle replanning. The focused tests and full test suite must pass before resuming API experiments.
