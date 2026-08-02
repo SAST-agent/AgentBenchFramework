@@ -7,6 +7,9 @@ import json
 import os
 import shutil
 import stat
+import subprocess
+import sys
+import textwrap
 import weakref
 from contextlib import nullcontext
 from dataclasses import replace
@@ -167,6 +170,20 @@ def rebind_and_approve(
     return digest
 
 
+def replace_champion_identity(manifest, document, champion):
+    for container in (manifest, document):
+        container["champion"] = copy.deepcopy(champion)
+    for frame in document["decision_frames"]:
+        frame["acting_identity_refs"].update(
+            {
+                "champion_logical_id": champion["logical_id"],
+                "champion_version": champion["version"],
+                "champion_descriptor_sha256": champion["descriptor_sha256"],
+                "champion_artifact_sha256": champion["artifact_sha256"],
+            }
+        )
+
+
 def test_context_is_issuer_only_and_object_new_forgery_cannot_open(tmp_path):
     with pytest.raises(TypeError):
         replay.ReplayReadingContext()
@@ -300,6 +317,96 @@ def test_non_training_role_is_rejected_even_with_approved_filename(tmp_path, mon
     approve(monkeypatch, digest)
     with pytest.raises(ValueError, match="role=train"):
         replay.preflight_replay_reading(manifest_path, approved_root=root)
+
+
+def test_manifest_rejects_case_opponent_not_bound_to_champion(
+    tmp_path, monkeypatch
+):
+    root, manifest_path, replay_path, manifest, document, _ = artifact_fixture(
+        tmp_path
+    )
+    for container in (manifest, document):
+        container["case_identity"]["opponent"] = "rank02"
+    rebind_and_approve(
+        monkeypatch, manifest_path, replay_path, manifest, document
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="^case opponent does not match champion logical ID$",
+    ):
+        replay.preflight_replay_reading(manifest_path, approved_root=root)
+
+
+def test_digest_rebound_opponent_attack_is_rejected_after_test_approval(
+    tmp_path, monkeypatch
+):
+    root, manifest_path, replay_path, manifest, document, original_digest = (
+        artifact_fixture(tmp_path)
+    )
+    assert manifest["case_identity"]["opponent"] == "rank01"
+    for container in (manifest, document):
+        container["case_identity"]["opponent"] = "attacker-opponent"
+    rebound_digest = rebind_and_approve(
+        monkeypatch, manifest_path, replay_path, manifest, document
+    )
+    assert rebound_digest != original_digest
+    assert rebound_digest in replay.APPROVED_TRAINING_REPLAY_MANIFESTS
+
+    with pytest.raises(
+        ValueError,
+        match="^case opponent does not match champion logical ID$",
+    ):
+        replay.preflight_replay_reading(manifest_path, approved_root=root)
+
+
+def test_digest_rebound_champion_replacement_is_rejected_after_test_approval(
+    tmp_path, monkeypatch
+):
+    root, manifest_path, replay_path, manifest, document, original_digest = (
+        artifact_fixture(tmp_path)
+    )
+    replacement = {
+        "logical_id": "rank02",
+        "version": "replacement-v2",
+        "descriptor_sha256": "a" * 64,
+        "artifact_sha256": "b" * 64,
+    }
+    replace_champion_identity(manifest, document, replacement)
+    rebound_digest = rebind_and_approve(
+        monkeypatch, manifest_path, replay_path, manifest, document
+    )
+    assert rebound_digest != original_digest
+    assert manifest["replay_sha256"] == hashlib.sha256(
+        replay_path.read_bytes()
+    ).hexdigest()
+    assert rebound_digest in replay.APPROVED_TRAINING_REPLAY_MANIFESTS
+
+    with pytest.raises(
+        ValueError,
+        match="^case opponent does not match champion logical ID$",
+    ):
+        replay.preflight_replay_reading(manifest_path, approved_root=root)
+
+
+def test_valid_opponent_champion_binding_is_rechecked_by_lifecycle_open(
+    tmp_path, monkeypatch
+):
+    calls = []
+    original = replay._validate_case_champion_binding
+
+    def tracked(case, champion):
+        calls.append((case["opponent"], champion["logical_id"]))
+        return original(case, champion)
+
+    monkeypatch.setattr(replay, "_validate_case_champion_binding", tracked)
+    _, context = approved_context(tmp_path, monkeypatch)
+    assert calls == [("rank01", "rank01"), ("rank01", "rank01")]
+
+    calls.clear()
+    packet = replay.open_replay_reading(context)
+    assert packet.case_identity["opponent"] == packet.champion["logical_id"]
+    assert calls == [("rank01", "rank01"), ("rank01", "rank01")]
 
 
 @pytest.mark.parametrize("target", ["state", "action", "terminal", "identity"])
@@ -553,12 +660,12 @@ def test_windows_approved_root_rejects_intermediate_ancestor_reparse(monkeypatch
             directory=True, file_id=len(opened)
         )
 
-    monkeypatch.setattr(replay.os, "name", "nt")
-    monkeypatch.setattr(replay.os.path, "abspath", lambda _path: root_path)
+    monkeypatch.setattr(replay, "_NATIVE_WINDOWS", True)
+    monkeypatch.setattr(replay.ntpath, "abspath", lambda _path: root_path)
     monkeypatch.setattr(replay, "_win_open_checked", open_checked)
     monkeypatch.setattr(replay, "_win_open_relative_checked", open_relative)
     monkeypatch.setattr(replay, "_win_final_path", lambda handle, _label: handle)
-    monkeypatch.setattr(replay, "_CloseHandle", closed.append)
+    monkeypatch.setattr(replay, "_CloseHandle", closed.append, raising=False)
 
     with pytest.raises(ValueError, match="reparse-point component"):
         with replay._open_approved_root(Path("synthetic-root")):
@@ -702,7 +809,7 @@ def test_linux_openat2_component_uses_no_xdev_no_symlinks_and_beneath(monkeypatc
             )
             return 123
 
-    monkeypatch.setattr(replay.os, "name", "posix")
+    monkeypatch.setattr(replay, "_NATIVE_WINDOWS", False)
     monkeypatch.setattr(replay.platform, "system", lambda: "Linux")
     monkeypatch.setattr(replay.platform, "machine", lambda: "x86_64")
     monkeypatch.setattr(
@@ -728,7 +835,7 @@ def test_linux_openat2_component_uses_no_xdev_no_symlinks_and_beneath(monkeypatc
 
 
 def test_linux_openat2_unknown_architecture_fails_closed(monkeypatch):
-    monkeypatch.setattr(replay.os, "name", "posix")
+    monkeypatch.setattr(replay, "_NATIVE_WINDOWS", False)
     monkeypatch.setattr(replay.platform, "system", lambda: "Linux")
     monkeypatch.setattr(replay.platform, "machine", lambda: "unverified-arch")
     with pytest.raises(NotImplementedError, match="unknown"):
@@ -748,6 +855,143 @@ def _fake_windows_information(*, directory, file_id, size=0, volume=5):
         nFileIndexHigh=0,
         nFileIndexLow=file_id,
     )
+
+
+@pytest.mark.skipif(os.name != "posix", reason="requires a real POSIX interpreter")
+def test_posix_import_does_not_access_native_win32_apis():
+    script = textwrap.dedent(
+        """
+        import ctypes
+
+        calls = []
+        def forbidden(*args, **kwargs):
+            calls.append((args, kwargs))
+            raise AssertionError("Win32 API accessed during POSIX import")
+
+        ctypes.WinDLL = forbidden
+        from agentbench_frame.games.miracle import replay_reading_v1
+        assert calls == []
+        assert replay_reading_v1.os.name == "posix"
+        """
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
+
+
+@pytest.mark.skipif(os.name != "posix", reason="requires a real POSIX interpreter")
+def test_posix_exposes_all_pure_windows_constants_and_validation_helper():
+    names = (
+        "_INVALID_HANDLE_VALUE",
+        "_GENERIC_READ",
+        "_FILE_LIST_DIRECTORY",
+        "_FILE_TRAVERSE",
+        "_FILE_READ_ATTRIBUTES",
+        "_SYNCHRONIZE",
+        "_FILE_SHARE_READ",
+        "_OPEN_EXISTING",
+        "_FILE_ATTRIBUTE_DIRECTORY",
+        "_FILE_ATTRIBUTE_REPARSE_POINT",
+        "_FILE_FLAG_OPEN_REPARSE_POINT",
+        "_FILE_FLAG_BACKUP_SEMANTICS",
+        "_FILE_TYPE_DISK",
+        "_OBJ_CASE_INSENSITIVE",
+        "_FILE_DIRECTORY_FILE",
+        "_FILE_SYNCHRONOUS_IO_NONALERT",
+        "_FILE_NON_DIRECTORY_FILE",
+        "_FILE_OPEN",
+    )
+    assert all(type(getattr(replay, name)) is int for name in names)
+    replay._win_validate_opened_handle(
+        701,
+        _fake_windows_information(directory=True, file_id=1),
+        directory=True,
+        label="synthetic directory",
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "root", "expected"),
+    [
+        (r"C:\approved\child", r"C:\approved", True),
+        (r"D:\approved\child", r"C:\approved", False),
+        (r"C:\root-evil\child", r"C:\root", False),
+        (r"C:\approved\..\escape", r"C:\approved", False),
+        (r"c:\APPROVED\Child", r"C:\approved", True),
+        (r"\\server\share\approved\child", r"\\SERVER\SHARE\approved", True),
+        (r"\\server\other\approved\child", r"\\server\share\approved", False),
+    ],
+    ids=(
+        "drive-child",
+        "different-drive",
+        "prefix-collision",
+        "parent-escape",
+        "case-insensitive",
+        "unc-child",
+        "different-unc-share",
+    ),
+)
+def test_windows_beneath_uses_windows_semantics_on_every_host(
+    path, root, expected
+):
+    assert replay._win_is_beneath(path, root) is expected
+
+
+def test_windows_manifest_location_uses_ntpath_on_every_host(monkeypatch):
+    monkeypatch.setattr(replay, "_NATIVE_WINDOWS", True)
+    root, relative = replay._manifest_location(
+        Path(r"C:\approved"),
+        r"c:\APPROVED\nested\manifest.json",
+    )
+    assert replay.ntpath.normcase(str(root)) == r"c:\approved"
+    assert relative == "nested/manifest.json"
+
+    for escaped in (
+        r"C:\approved-evil\manifest.json",
+        r"D:\approved\manifest.json",
+    ):
+        with pytest.raises(ValueError, match="escapes"):
+            replay._manifest_location(Path(r"C:\approved"), escaped)
+
+
+@pytest.mark.parametrize("validation_fails", [False, True], ids=["success", "error"])
+def test_synthetic_windows_checked_open_has_explicit_handle_ownership(
+    monkeypatch, validation_fails
+):
+    closed = []
+    information = _fake_windows_information(directory=True, file_id=1)
+    monkeypatch.setattr(replay, "_CreateFileW", lambda *_args: 701, raising=False)
+    monkeypatch.setattr(
+        replay,
+        "_win_information",
+        lambda handle, _label: information,
+    )
+
+    def validate(*_args, **_kwargs):
+        if validation_fails:
+            raise ValueError("synthetic handle validation failure")
+
+    monkeypatch.setattr(replay, "_win_validate_opened_handle", validate)
+    monkeypatch.setattr(replay, "_CloseHandle", closed.append, raising=False)
+
+    if validation_fails:
+        with pytest.raises(ValueError, match="synthetic handle validation failure"):
+            replay._win_open_checked(
+                r"C:\approved", directory=True, label="approved replay root"
+            )
+        assert closed == [701]
+    else:
+        handle, returned = replay._win_open_checked(
+            r"C:\approved", directory=True, label="approved replay root"
+        )
+        assert (handle, returned) == (701, information)
+        assert closed == []
+        replay._CloseHandle(handle)
+        assert closed == [701]
 
 
 @pytest.mark.parametrize(
@@ -793,8 +1037,8 @@ def test_windows_approved_root_opens_components_relative_to_anchor_handles(
         assert paths[handle] == replay.ntpath.join(paths[parent_handle], component)
         return handle, infos[handle]
 
-    monkeypatch.setattr(replay.os, "name", "nt")
-    monkeypatch.setattr(replay.os.path, "abspath", lambda _path: root_path)
+    monkeypatch.setattr(replay, "_NATIVE_WINDOWS", True)
+    monkeypatch.setattr(replay.ntpath, "abspath", lambda _path: root_path)
     monkeypatch.setattr(replay, "_win_open_checked", open_anchor)
     monkeypatch.setattr(
         replay, "_win_open_relative_checked", open_relative, raising=False
@@ -802,7 +1046,7 @@ def test_windows_approved_root_opens_components_relative_to_anchor_handles(
     monkeypatch.setattr(
         replay, "_win_final_path", lambda handle, _label: paths[handle]
     )
-    monkeypatch.setattr(replay, "_CloseHandle", closed.append)
+    monkeypatch.setattr(replay, "_CloseHandle", closed.append, raising=False)
 
     with replay._open_approved_root(Path("synthetic-root")) as approved:
         assert approved.handle == 401 + len(components)
@@ -816,52 +1060,237 @@ def test_windows_approved_root_opens_components_relative_to_anchor_handles(
     assert closed == list(range(final_handle - 1, 400, -1)) + [final_handle]
 
 
-def test_windows_read_rejects_replaced_lexical_root_identity(monkeypatch):
-    root_path = r"C:\trusted\approved\root"
-    target_path = root_path + r"\payload"
+def _install_windows_root_revalidation_backend(
+    monkeypatch,
+    root_path,
+    *,
+    failure=None,
+    failure_depth=0,
+):
+    drive, tail = replay.ntpath.splitdrive(root_path)
+    anchor = drive + "\\"
+    components = tuple(component for component in tail.split("\\") if component)
+    retained_final_path = (
+        root_path + "-retained" if failure == "final-path" else root_path
+    )
     approved = replay._ApprovedRoot(
         root_path,
         ("windows", 5, 0, 111),
         111,
-        root_path,
+        retained_final_path,
     )
-    closed = []
+    root_handles = tuple(range(401, 402 + len(components)))
+    component_handles = root_handles[1:]
+    paths = {111: retained_final_path, 499: retained_final_path}
+    current_path = anchor
+    paths[root_handles[0]] = anchor
+    for handle, component in zip(component_handles, components):
+        current_path = replay.ntpath.join(current_path, component)
+        paths[handle] = current_path
+    target_path = retained_final_path + r"\payload"
+    paths[800] = target_path
+    root_infos = {
+        handle: _fake_windows_information(
+            directory=True,
+            file_id=(
+                999
+                if failure == "identity" and handle == root_handles[-1]
+                else (111 if handle == root_handles[-1] else handle)
+            ),
+        )
+        for handle in root_handles
+    }
+    retained_info = _fake_windows_information(directory=True, file_id=111)
+    target_info = _fake_windows_information(directory=False, file_id=800, size=1)
+    anchor_calls = []
+    root_relative_calls = []
+    target_calls = []
     reads = []
-    approved_info = _fake_windows_information(directory=True, file_id=111)
-    replaced_info = _fake_windows_information(directory=True, file_id=999)
-    payload_info = _fake_windows_information(directory=False, file_id=1001, size=1)
+    closed = []
 
     def open_checked(path, *, directory, label):
-        if directory:
-            assert path == root_path
-            return 999, replaced_info
-        assert path == target_path
-        return 1001, payload_info
+        assert directory is True
+        assert label == "approved replay root"
+        if path == root_path:
+            return 499, retained_info
+        assert path == anchor
+        anchor_calls.append(path)
+        return root_handles[0], root_infos[root_handles[0]]
 
-    monkeypatch.setattr(replay.os, "name", "nt")
+    def open_relative(parent_handle, component, *, directory, label):
+        if label == "approved replay root":
+            index = len(root_relative_calls)
+            handle = component_handles[index]
+            root_relative_calls.append(
+                (parent_handle, component, directory, label, handle)
+            )
+            if failure in {"reparse", "component"} and index == failure_depth:
+                closed.append(handle)
+                message = (
+                    "approved replay root contains a reparse-point component"
+                    if failure == "reparse"
+                    else "approved replay root component is unsafe or unavailable"
+                )
+                raise ValueError(message)
+            return handle, root_infos[handle]
+        target_calls.append((parent_handle, component, directory, label))
+        assert parent_handle == 111
+        assert component == "payload"
+        assert directory is False
+        return 800, target_info
+
+    monkeypatch.setattr(replay, "_NATIVE_WINDOWS", True)
     monkeypatch.setattr(replay, "_win_open_checked", open_checked)
+    monkeypatch.setattr(
+        replay, "_win_open_relative_checked", open_relative, raising=False
+    )
     monkeypatch.setattr(
         replay,
         "_win_information",
-        lambda handle, _label: approved_info if handle == 111 else payload_info,
+        lambda handle, _label: {
+            111: retained_info,
+            499: retained_info,
+            800: target_info,
+        }[handle],
     )
-    monkeypatch.setattr(
-        replay,
-        "_win_final_path",
-        lambda handle, _label: root_path if handle in {111, 999} else target_path,
-    )
+    monkeypatch.setattr(replay, "_win_final_path", lambda handle, _label: paths[handle])
     monkeypatch.setattr(
         replay, "_win_read", lambda *_args: reads.append("read") or b"X"
     )
-    monkeypatch.setattr(replay, "_CloseHandle", closed.append)
+    monkeypatch.setattr(replay, "_CloseHandle", closed.append, raising=False)
+    return approved, SimpleNamespace(
+        anchor=anchor,
+        components=components,
+        root_handles=root_handles,
+        anchor_calls=anchor_calls,
+        root_relative_calls=root_relative_calls,
+        target_calls=target_calls,
+        reads=reads,
+        closed=closed,
+    )
+
+
+@pytest.mark.parametrize(
+    ("root_path", "failure_depth"),
+    [
+        (r"C:\trusted\approved\root", 0),
+        (r"C:\trusted\approved\root", 2),
+        (r"\\server\share\approved\root", 0),
+        (r"\\server\share\approved\root", 1),
+    ],
+    ids=["drive-shallow", "drive-deep", "unc-shallow", "unc-deep"],
+)
+def test_windows_each_read_rejects_new_approved_root_ancestor_reparse(
+    monkeypatch, root_path, failure_depth
+):
+    approved, backend = _install_windows_root_revalidation_backend(
+        monkeypatch,
+        root_path,
+        failure="reparse",
+        failure_depth=failure_depth,
+    )
+
+    with pytest.raises(ValueError, match="reparse-point component"):
+        replay._read_relative_windows(
+            approved, ("payload",), "payload", "replay path", 8
+        )
+
+    assert backend.anchor_calls == [backend.anchor]
+    assert [call[1] for call in backend.root_relative_calls] == list(
+        backend.components[: failure_depth + 1]
+    )
+    opened_handles = list(backend.root_handles[: failure_depth + 2])
+    assert sorted(backend.closed) == sorted(opened_handles)
+    assert len(backend.closed) == len(set(backend.closed))
+    assert 111 not in backend.closed
+    assert backend.target_calls == []
+    assert backend.reads == []
+
+
+@pytest.mark.parametrize(
+    "root_path",
+    [r"C:\trusted\approved\root", r"\\server\share\approved\root"],
+    ids=["drive", "unc-share"],
+)
+def test_windows_each_read_revalidates_root_from_anchor_and_closes_temporaries(
+    monkeypatch, root_path
+):
+    approved, backend = _install_windows_root_revalidation_backend(
+        monkeypatch, root_path
+    )
+
+    assert replay._read_relative_windows(
+        approved, ("payload",), "payload", "replay path", 8
+    ) == b"X"
+
+    assert backend.anchor_calls == [backend.anchor]
+    assert backend.root_relative_calls == [
+        (
+            backend.root_handles[index],
+            component,
+            True,
+            "approved replay root",
+            backend.root_handles[index + 1],
+        )
+        for index, component in enumerate(backend.components)
+    ]
+    assert backend.target_calls == [(111, "payload", False, "replay path")]
+    assert backend.reads == ["read"]
+    expected_closed = list(backend.root_handles) + [800]
+    assert sorted(backend.closed) == sorted(expected_closed)
+    assert len(backend.closed) == len(set(backend.closed))
+    assert 111 not in backend.closed
+    assert approved.handle == 111
+
+
+@pytest.mark.parametrize(
+    ("failure", "message"),
+    [
+        ("identity", "root identity"),
+        ("final-path", "root path"),
+        ("component", "unsafe or unavailable"),
+    ],
+)
+def test_windows_root_revalidation_failure_closes_temporaries_before_target_open(
+    monkeypatch, failure, message
+):
+    approved, backend = _install_windows_root_revalidation_backend(
+        monkeypatch,
+        r"C:\trusted\approved\root",
+        failure=failure,
+        failure_depth=1,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        replay._read_relative_windows(
+            approved, ("payload",), "payload", "replay path", 8
+        )
+
+    expected_count = 3 if failure == "component" else len(backend.root_handles)
+    assert len(backend.closed) == expected_count
+    assert len(backend.closed) == len(set(backend.closed))
+    assert 111 not in backend.closed
+    assert approved.handle == 111
+    assert backend.target_calls == []
+    assert backend.reads == []
+
+
+def test_windows_read_rejects_replaced_lexical_root_identity(monkeypatch):
+    root_path = r"C:\trusted\approved\root"
+    approved, backend = _install_windows_root_revalidation_backend(
+        monkeypatch, root_path, failure="identity"
+    )
 
     with pytest.raises(ValueError, match="root identity|root.*changed"):
         replay._read_relative_windows(
             approved, ("payload",), "payload", "replay path", 8
         )
 
-    assert reads == []
-    assert closed == [999]
+    assert backend.reads == []
+    assert backend.target_calls == []
+    assert sorted(backend.closed) == sorted(backend.root_handles)
+    assert len(backend.closed) == len(set(backend.closed))
+    assert approved.handle == 111
 
 
 @pytest.mark.parametrize(
@@ -879,23 +1308,45 @@ def test_windows_read_opens_every_child_relative_to_approved_handles(
         root_path,
     )
     closed = []
+    root_relative_calls = []
     relative_calls = []
     root_info = _fake_windows_information(directory=True, file_id=111)
     directory_info = _fake_windows_information(directory=True, file_id=222)
     payload_info = _fake_windows_information(directory=False, file_id=333, size=1)
+    drive, tail = replay.ntpath.splitdrive(root_path)
+    anchor = drive + "\\"
+    root_components = tuple(component for component in tail.split("\\") if component)
+    root_handles = tuple(range(401, 402 + len(root_components)))
     child_paths = {
         111: root_path,
         222: root_path + r"\nested",
         333: root_path + r"\nested\payload",
-        444: root_path,
     }
+    root_infos = {}
+    current_path = anchor
+    child_paths[root_handles[0]] = anchor
+    root_infos[root_handles[0]] = _fake_windows_information(
+        directory=True, file_id=root_handles[0]
+    )
+    for handle, component in zip(root_handles[1:], root_components):
+        current_path = replay.ntpath.join(current_path, component)
+        child_paths[handle] = current_path
+        root_infos[handle] = _fake_windows_information(
+            directory=True,
+            file_id=111 if handle == root_handles[-1] else handle,
+        )
 
     def open_checked(path, *, directory, label):
-        assert path == root_path
+        assert path == anchor
         assert directory is True
-        return 444, root_info
+        return root_handles[0], root_infos[root_handles[0]]
 
     def open_relative(parent_handle, component, *, directory, label):
+        if label == "approved replay root":
+            index = len(root_relative_calls)
+            handle = root_handles[index + 1]
+            root_relative_calls.append((parent_handle, component, directory, label))
+            return handle, root_infos[handle]
         relative_calls.append((parent_handle, component, directory, label))
         if component == "nested":
             assert parent_handle == 111
@@ -903,7 +1354,7 @@ def test_windows_read_opens_every_child_relative_to_approved_handles(
         assert component == "payload" and parent_handle == 222
         return 333, payload_info
 
-    monkeypatch.setattr(replay.os, "name", "nt")
+    monkeypatch.setattr(replay, "_NATIVE_WINDOWS", True)
     monkeypatch.setattr(replay, "_win_open_checked", open_checked)
     monkeypatch.setattr(
         replay, "_win_open_relative_checked", open_relative, raising=False
@@ -915,14 +1366,14 @@ def test_windows_read_opens_every_child_relative_to_approved_handles(
             111: root_info,
             222: directory_info,
             333: payload_info,
-            444: root_info,
+            **root_infos,
         }[handle],
     )
     monkeypatch.setattr(
         replay, "_win_final_path", lambda handle, _label: child_paths[handle]
     )
     monkeypatch.setattr(replay, "_win_read", lambda *_args: b"X")
-    monkeypatch.setattr(replay, "_CloseHandle", closed.append)
+    monkeypatch.setattr(replay, "_CloseHandle", closed.append, raising=False)
 
     assert replay._read_relative_windows(
         approved,
@@ -935,7 +1386,19 @@ def test_windows_read_opens_every_child_relative_to_approved_handles(
         (111, "nested", True, "replay path"),
         (222, "payload", False, "replay path"),
     ]
-    assert closed == [444, 333, 222]
+    assert root_relative_calls == [
+        (
+            root_handles[index],
+            component,
+            True,
+            "approved replay root",
+        )
+        for index, component in enumerate(root_components)
+    ]
+    assert closed == (
+        list(reversed(root_handles[:-1])) + [root_handles[-1], 333, 222]
+    )
+    assert 111 not in closed
 
 
 def test_windows_relative_open_failure_closes_every_owned_handle_once(monkeypatch):
@@ -955,11 +1418,13 @@ def test_windows_relative_open_failure_closes_every_owned_handle_once(monkeypatc
             return 222, directory_info
         raise ValueError("synthetic relative reparse rejection")
 
-    monkeypatch.setattr(replay.os, "name", "nt")
+    monkeypatch.setattr(replay, "_NATIVE_WINDOWS", True)
     monkeypatch.setattr(
         replay,
-        "_win_open_checked",
-        lambda *_args, **_kwargs: (444, root_info),
+        "_open_windows_root",
+        lambda *_args, **_kwargs: replay._ApprovedRoot(
+            root_path, ("windows", 5, 0, 111), 444, root_path
+        ),
     )
     monkeypatch.setattr(
         replay, "_win_open_relative_checked", open_relative, raising=False
@@ -976,7 +1441,7 @@ def test_windows_relative_open_failure_closes_every_owned_handle_once(monkeypatc
             root_path if handle in {111, 444} else root_path + r"\nested"
         ),
     )
-    monkeypatch.setattr(replay, "_CloseHandle", closed.append)
+    monkeypatch.setattr(replay, "_CloseHandle", closed.append, raising=False)
 
     with pytest.raises(ValueError, match="relative reparse"):
         replay._read_relative_windows(
@@ -1153,6 +1618,7 @@ def test_timeline_percent_encodes_all_dynamic_text_and_command_json(
     champion_version = "champion\r|\\=v"
     for container in (manifest, document):
         container["case_identity"]["case_id"] = case_id
+        container["case_identity"]["opponent"] = champion_id
         container["acting_policy"]["version"] = policy_version
         container["champion"]["logical_id"] = champion_id
         container["champion"]["version"] = champion_version
@@ -1212,7 +1678,7 @@ def test_no_factories_workspace_judge_provider_policy_or_session_execution(tmp_p
     assert "import Judge" not in source
     assert replay.APPROVED_TRAINING_REPLAY_MANIFESTS != {"fake-production-digest"}
 def _install_fake_posix(monkeypatch, *, open_file, fstat, close, dup=None):
-    monkeypatch.setattr(replay.os, "name", "posix")
+    monkeypatch.setattr(replay, "_NATIVE_WINDOWS", False)
     for name, value in (
         ("O_NOFOLLOW", 0x100),
         ("O_DIRECTORY", 0x200),

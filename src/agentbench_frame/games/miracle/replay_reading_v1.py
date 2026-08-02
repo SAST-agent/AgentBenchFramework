@@ -44,7 +44,32 @@ MAX_SYNTHETIC_REPLAY_BYTES = 16 * 1024 * 1024
 # Production is intentionally empty. Tests may temporarily monkeypatch it.
 APPROVED_TRAINING_REPLAY_MANIFESTS: frozenset[str] = frozenset()
 _SAFE_OPEN_BARRIER = None
-if os.name == "nt":
+_NATIVE_WINDOWS = os.name == "nt"
+
+# Pure Win32/NT numeric values are platform-independent.  Keep them available
+# for synthetic validation on POSIX without importing a DLL or touching a
+# native Windows API.  Native structures and function bindings remain guarded
+# below.
+_INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+_GENERIC_READ = 0x80000000
+_FILE_LIST_DIRECTORY = 0x0001
+_FILE_TRAVERSE = 0x0020
+_FILE_READ_ATTRIBUTES = 0x0080
+_SYNCHRONIZE = 0x00100000
+_FILE_SHARE_READ = 0x0001
+_OPEN_EXISTING = 3
+_FILE_ATTRIBUTE_DIRECTORY = 0x0010
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x0400
+_FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
+_FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
+_FILE_TYPE_DISK = 0x0001
+_OBJ_CASE_INSENSITIVE = 0x00000040
+_FILE_DIRECTORY_FILE = 0x00000001
+_FILE_SYNCHRONOUS_IO_NONALERT = 0x00000020
+_FILE_NON_DIRECTORY_FILE = 0x00000040
+_FILE_OPEN = 0x00000001
+
+if _NATIVE_WINDOWS:
     from ctypes import wintypes
     class _WinFileInfo(ctypes.Structure):
         _fields_ = [
@@ -100,25 +125,6 @@ if os.name == "nt":
     _CloseHandle = _kernel32.CloseHandle
     _CloseHandle.argtypes = (wintypes.HANDLE,)
     _CloseHandle.restype = wintypes.BOOL
-    _INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
-    _GENERIC_READ = 0x80000000
-    _FILE_LIST_DIRECTORY = 0x0001
-    _FILE_TRAVERSE = 0x0020
-    _FILE_READ_ATTRIBUTES = 0x0080
-    _SYNCHRONIZE = 0x00100000
-    _FILE_SHARE_READ = 0x0001
-    _OPEN_EXISTING = 3
-    _FILE_ATTRIBUTE_DIRECTORY = 0x0010
-    _FILE_ATTRIBUTE_REPARSE_POINT = 0x0400
-    _FILE_FLAG_OPEN_REPARSE_POINT = 0x00200000
-    _FILE_FLAG_BACKUP_SEMANTICS = 0x02000000
-    _FILE_TYPE_DISK = 0x0001
-    _OBJ_CASE_INSENSITIVE = 0x00000040
-    _FILE_DIRECTORY_FILE = 0x00000001
-    _FILE_SYNCHRONOUS_IO_NONALERT = 0x00000020
-    _FILE_NON_DIRECTORY_FILE = 0x00000040
-    _FILE_OPEN = 0x00000001
-
     class _WinUnicodeString(ctypes.Structure):
         _fields_ = [
             ("Length", wintypes.USHORT),
@@ -332,7 +338,7 @@ class _ApprovedRoot:
     def close(self) -> None:
         if self.handle is None:
             return
-        if os.name == "nt":
+        if _NATIVE_WINDOWS:
             _CloseHandle(self.handle)
         else:
             os.close(self.handle)
@@ -341,7 +347,7 @@ class _ApprovedRoot:
         parts = _relative_parts(relative, label)
         if type(limit) is not int or limit <= 0:
             raise ValueError("safe read limit must be a positive strict integer")
-        if os.name == "nt":
+        if _NATIVE_WINDOWS:
             return _read_relative_windows(self, parts, relative, label, limit)
         return _read_relative_posix(self, parts, relative, label, limit)
 
@@ -349,7 +355,7 @@ class _ApprovedRoot:
 def _posix_open_component(parent_fd: int, component: str, flags: int) -> int:
     """Open one Linux path component without symlink or mount traversal."""
 
-    if os.name == "nt" or platform.system() != "Linux":
+    if _NATIVE_WINDOWS or platform.system() != "Linux":
         raise NotImplementedError("Linux openat2 is required for approved roots")
     syscall_number = _OPENAT2_SYSCALL_BY_MACHINE.get(platform.machine().lower())
     if syscall_number is None:
@@ -387,8 +393,9 @@ def _posix_open_component(parent_fd: int, component: str, flags: int) -> int:
 def _open_approved_root(
     root: Path, expected_identity: tuple[Any, ...] | None = None
 ) -> _ApprovedRoot:
-    root_path = os.path.abspath(_bind_exact_path(root, "approved replay root", allow_string=False))
-    if os.name == "nt":
+    raw_root = _bind_exact_path(root, "approved replay root", allow_string=False)
+    root_path = (ntpath if _NATIVE_WINDOWS else os.path).abspath(raw_root)
+    if _NATIVE_WINDOWS:
         approved = _open_windows_root(root_path, expected_identity)
     else:
         nofollow = getattr(os, "O_NOFOLLOW", None)
@@ -556,18 +563,18 @@ def _win_final_path(handle: Any, label: str) -> str:
         if not written:
             raise ValueError(f"{label} final handle path is unavailable")
         if written < len(buffer):
-            return os.path.normcase(os.path.normpath(buffer.value))
+            return _win_comparable_path(buffer.value)
         size = written
 def _win_is_beneath(path: str, root: str) -> bool:
     try:
-        normalized_root = os.path.normcase(os.path.normpath(root))
-        normalized_path = os.path.normcase(os.path.normpath(path))
+        normalized_root = _win_comparable_path(root)
+        normalized_path = _win_comparable_path(path)
         return (
             normalized_path != normalized_root
-            and os.path.commonpath((normalized_root, normalized_path))
+            and ntpath.commonpath((normalized_root, normalized_path))
             == normalized_root
         )
-    except ValueError:
+    except (AttributeError, TypeError, ValueError):
         return False
 
 
@@ -633,7 +640,7 @@ def _win_open_relative_checked(
     """Atomically open one exact child relative to an already checked handle."""
 
     if (
-        os.name != "nt"
+        not _NATIVE_WINDOWS
         or type(component) is not str
         or not component
         or component in {".", ".."}
@@ -761,7 +768,7 @@ def _win_read(handle: Any, label: str, limit: int) -> bytes:
 
 
 def _win_revalidate_root(root: _ApprovedRoot) -> None:
-    """Prove that the retained and current lexical roots still identify one object."""
+    """Reopen every lexical-root component and prove it matches the retained root."""
 
     retained_information = _win_information(root.handle, "approved replay root")
     if not _root_identities_match(
@@ -772,21 +779,11 @@ def _win_revalidate_root(root: _ApprovedRoot) -> None:
         _win_final_path(root.handle, "approved replay root"), root.final_path
     ):
         raise ValueError("approved replay root path changed")
-    current_handle, current_information = _win_open_checked(
-        root.path, directory=True, label="approved replay root"
-    )
-    try:
-        if not _root_identities_match(
-            _win_identity(current_information), root.identity
-        ):
-            raise ValueError("approved replay root identity changed")
+    with _open_windows_root(root.path, root.identity) as current_root:
         if not _win_paths_match(
-            _win_final_path(current_handle, "approved replay root"),
-            root.final_path,
+            current_root.final_path, root.final_path
         ):
             raise ValueError("approved replay root path changed")
-    finally:
-        _CloseHandle(current_handle)
 
 
 def _read_relative_windows(
@@ -843,12 +840,13 @@ def _read_relative_windows(
 def _validate_lexical_filesystem_path(value: str, label: str) -> None:
     if type(value) is not str or not value or "\x00" in value:
         raise ValueError(f"{label} lexical path is invalid")
-    if os.name == "nt" and value.startswith(("\\\\?\\", "\\\\.\\", "//?/", "//./")): raise ValueError(f"{label} uses an unsupported Windows device namespace")
-    if os.name == "nt" and "/" in value and "\\" in value: raise ValueError(f"{label} lexical path mixes separators")
-    drive, tail = os.path.splitdrive(value)
-    if drive and not os.path.isabs(value):
+    path_module = ntpath if _NATIVE_WINDOWS else os.path
+    if _NATIVE_WINDOWS and value.startswith(("\\\\?\\", "\\\\.\\", "//?/", "//./")): raise ValueError(f"{label} uses an unsupported Windows device namespace")
+    if _NATIVE_WINDOWS and "/" in value and "\\" in value: raise ValueError(f"{label} lexical path mixes separators")
+    drive, tail = path_module.splitdrive(value)
+    if drive and not path_module.isabs(value):
         raise ValueError(f"{label} lexical path is drive-relative")
-    if os.name == "nt":
+    if _NATIVE_WINDOWS:
         separator = "\\" if "\\" in tail else "/"
     else:
         if "\\" in tail:
@@ -873,16 +871,29 @@ def _manifest_location(root: Path, path: Path | str) -> tuple[Path, str]:
     raw_path = _bind_exact_path(path, "manifest path", allow_string=True)
     _validate_lexical_filesystem_path(raw_root, "approved replay root")
     _validate_lexical_filesystem_path(raw_path, "manifest path")
-    if not os.path.isabs(raw_root): raise ValueError("approved replay root must be absolute")
-    if not os.path.isabs(raw_path): raise ValueError("manifest path must be absolute")
-    absolute_root = Path(os.path.abspath(raw_root))
-    absolute_path = Path(os.path.abspath(raw_path))
-    try:
-        relative = absolute_path.relative_to(absolute_root).as_posix()
-    except ValueError as exc:
-        raise ValueError("manifest path escapes approved root") from exc
+    path_module = ntpath if _NATIVE_WINDOWS else os.path
+    if not path_module.isabs(raw_root): raise ValueError("approved replay root must be absolute")
+    if not path_module.isabs(raw_path): raise ValueError("manifest path must be absolute")
+    absolute_root_text = path_module.abspath(raw_root)
+    absolute_path_text = path_module.abspath(raw_path)
+    if _NATIVE_WINDOWS:
+        try:
+            common = ntpath.commonpath((absolute_root_text, absolute_path_text))
+        except ValueError as exc:
+            raise ValueError("manifest path escapes approved root") from exc
+        if ntpath.normcase(common) != ntpath.normcase(absolute_root_text):
+            raise ValueError("manifest path escapes approved root")
+        relative = ntpath.relpath(
+            absolute_path_text, absolute_root_text
+        ).replace("\\", "/")
+    else:
+        absolute_path = Path(absolute_path_text)
+        try:
+            relative = absolute_path.relative_to(Path(absolute_root_text)).as_posix()
+        except ValueError as exc:
+            raise ValueError("manifest path escapes approved root") from exc
     _relative_parts(relative, "manifest path")
-    return absolute_root, relative
+    return Path(absolute_root_text), relative
 
 
 def _validate_case(value: Any) -> dict[str, Any]:
@@ -928,6 +939,15 @@ def _validate_champion(value: Any) -> dict[str, str]:
         "descriptor_sha256": _strict_sha(value["descriptor_sha256"], "champion descriptor"),
         "artifact_sha256": _strict_sha(value["artifact_sha256"], "champion artifact"),
     }
+
+
+def _validate_case_champion_binding(
+    case: Mapping[str, Any], champion: Mapping[str, str]
+) -> None:
+    """Bind the declared case opponent to the pinned champion identity."""
+
+    if case["opponent"] != champion["logical_id"]:
+        raise ValueError("case opponent does not match champion logical ID")
 
 
 def _validate_state(value: Any, label: str) -> dict[str, Any]:
@@ -1092,6 +1112,7 @@ def _validate_replay(value: Mapping[str, Any], manifest: Mapping[str, Any], mani
     seeds = _validate_seeds(value["seeds"])
     policy = _validate_policy(value["acting_policy"])
     champion = _validate_champion(value["champion"])
+    _validate_case_champion_binding(case, champion)
     if any((
         value["match_plan_sha256"] != manifest["match_plan_sha256"],
         case != manifest["case_identity"], value["role"] != manifest["role"],
@@ -1169,6 +1190,9 @@ def _read_and_validate(
         manifest["seeds"] = _validate_seeds(manifest["seeds"])
         manifest["acting_policy"] = _validate_policy(manifest["acting_policy"])
         manifest["champion"] = _validate_champion(manifest["champion"])
+        _validate_case_champion_binding(
+            manifest["case_identity"], manifest["champion"]
+        )
         if manifest["role"] != "train":
             raise ValueError("Replay Reading accepts only independently approved role=train")
         replay_bytes = approved.read(
@@ -1213,7 +1237,9 @@ def _build_context_authority():
             raise ValueError("replay manifest role changed during preflight")
         context = object.__new__(ReplayReadingContext)
         object.__setattr__(
-            context, "_approved_root", os.path.abspath(os.fspath(root))
+            context,
+            "_approved_root",
+            (ntpath if _NATIVE_WINDOWS else os.path).abspath(os.fspath(root)),
         )
         object.__setattr__(
             context, "_approved_root_identity", _strict_root_identity(root_identity)

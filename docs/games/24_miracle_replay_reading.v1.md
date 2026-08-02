@@ -22,6 +22,11 @@ production allowlist digest
   -> match plan, case, role, seeds, policy, and champion identities
 ```
 
+The case opponent is not an independent self-reported label: every manifest
+validation and every replay reopen requires
+`case_identity.opponent == champion.logical_id`. Rebinding replay, manifest,
+and approval digests cannot waive that semantic identity invariant.
+
 Production approvals are empty. Ordinary run data cannot add an approval.
 Tests may temporarily inject a fake digest in test scope only.
 
@@ -51,7 +56,14 @@ mount boundary. On Windows, only the drive or UNC-share anchor is opened by
 pathname; every descendant is opened atomically relative to its retained parent
 handle through `NtCreateFile(RootDirectory=...)`, with reparse-point checks and
 exact final-handle paths. Before every relative read, both the retained root and
-the current lexical root must still match the approved file identity and path.
+the current lexical root must still match the approved file identity and path;
+the current root is reopened from its drive or UNC-share anchor through that
+same component-by-component, reparse-rejecting handle chain on every read.
+All Windows path parsing, normalization, case folding, and beneath/common-path
+checks use `ntpath`, including synthetic checks executed by a POSIX interpreter;
+they never inherit the host's `os.path` semantics. Platform-independent numeric
+Windows constants remain importable for those synthetic checks, while DLL,
+structure, and handle bindings are created only by a native Windows import.
 Every approved-root ancestor must be a real directory, and the final manifest
 or replay component must be a regular file; symlink/reparse components,
 missing files, and path replacement fail closed. Manifest-contained replay paths reject
