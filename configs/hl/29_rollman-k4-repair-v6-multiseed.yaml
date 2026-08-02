@@ -20,8 +20,8 @@ run:
       reminder_at_remaining_tokens: [20000, 10000, 5000]
       sampling_token_weight: 1.0
       prefill_token_weight: 1.0
-    timeout_seconds: 600
-    idle_timeout_seconds: 360
+    timeout_seconds: 420
+    idle_timeout_seconds: 300
   origin:
     mode: "imported_version"
     source_run: ".agentbench/29_rollman/runs/run-20260802-gpt55-k4-repair-v5-budget"
