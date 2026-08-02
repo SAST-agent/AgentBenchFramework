@@ -11,16 +11,16 @@ LOGIC_PY="C:/Users/27364/.conda/envs/torchy/python.exe"
 uv run python -m agentbench_frame.hl \
   --logic "cd /d \"$BACKEND\" && python main.py" \
   --logic-python "$LOGIC_PY" \
-  --reference ./agentbench_data/reference/nu-v2.json \
+  --reference ./agentbench_data/reference/nu-v2-t2.json \
   --ladder-opponent rank=10 \
   --ladder-opponent rank=8 \
   --ladder-opponent rank=6 \
   --ladder-opponent rank=4 \
   --ladder-opponent rank=2 \
   --ladder-opponent rank=1 \
-  --name hl-deepseek-r1 \
+  --name hl-deepseek-r3 \
   --acts 10 --pairs 2 --seats 0 --timeout 15 \
   --curriculum --promote-rank 2.0 \
   --model-key deepseek --max-turns 6 --claude-timeout 600 \
   --min-kl 0.05 --stall-after 5 \
-  2>&1 | tee .hl_codebase/hl-deepseek-r1.run.log
+  2>&1 | tee .hl_codebase/hl-deepseek-r3.run.log
