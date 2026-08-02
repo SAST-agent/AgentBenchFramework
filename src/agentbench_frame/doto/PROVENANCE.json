@@ -15,6 +15,8 @@
     "sdk/jsoncpp/jsoncpp.cpp": "1fe048d909953e867d2fb0e25c2be88ad123c1912d5ff176227493402ef23233",
     "sdk/logic.cpp": "804dc14072e803cd4fc1d58abb2aadc04c30d50f55fa4d0bc9ebfe105917bc30",
     "sdk/logic.h": "4656c0e549082ec39a2a262e0ac70da7bc527be8559499841a7c271468e360ea",
+    "sdk/log/log.cpp": "06e3ba5edb0682b85825260f0d5c85f0f1903b621571aed5d7e6d272c1d79015",
+    "sdk/log/log.h": "4a60fadef0df4eaee124f59c470149efa7c0f816cabf9e8f25a8b2c4317b8684",
     "sdk/main.cpp": "f8d22fdb7df2a5d6fc67afe03320a32d560917eece1ff035943595cd4e53ef30",
     "sdk/makefile": "507cf91c9a5a59483c8fa1c58cfb84195b573ab0185bd0ea719edfaa5843eaad",
     "sdk/playerAI.h": "a0f39d4a418232b6a6b33ca682f3362a15440921fd670f582bec58f93a7ab9a6"
