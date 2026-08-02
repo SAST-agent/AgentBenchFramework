@@ -117,6 +117,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     p.add_argument("--plot", action="store_true", default=True,
                    help="render the KL overlay after runs (default on)")
     p.add_argument("--no-plot", dest="plot", action="store_false")
+    p.add_argument("--report", action="store_true", default=True,
+                   help="write the three-group report (doc Fix-E) after runs "
+                        "(default on)")
+    p.add_argument("--no-report", dest="report", action="store_false")
     args = p.parse_args(argv)
 
     from agentbench_frame.hl import cli as hl_cli
@@ -155,6 +159,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             experiment_dir=codebase_root / args.experiment,
             out_dir=codebase_root / args.experiment / "figures")
         print(f"[compare] overlay -> {out}")
+    if args.report and streams:
+        from agentbench_frame.hl import report
+        out = report.generate(codebase_root / args.experiment)
+        print(f"[compare] report -> {out}")
     return 0
 
 

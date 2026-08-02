@@ -30,7 +30,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from typing import List, Optional, Sequence, Type
+from typing import Dict, List, Optional, Sequence, Tuple, Type
 
 from agentbench_frame.lostspace.evaluator import LostSpaceEvaluator, Opponent
 from agentbench_frame.lostspace import ladder
@@ -141,12 +141,34 @@ def _probe_logic_antlr4(logic_command: str) -> None:
         )
 
 
-def _resolve_opponents(args) -> List[Opponent]:
+#: Named frozen eval pools (doc Fix-E item 2): a reusable, cross-version-fixed
+#: opponent set so different runs share the same benchmark. The pool name is
+#: recorded in ``BenchmarkSpec.notes["eval_pool"]``.
+EVAL_POOLS: Dict[str, Tuple[str, ...]] = {
+    "default": ("rank01", "rank03", "rank06", "rank09"),
+}
+
+
+def _opponents_from_selectors(selectors: List[str]) -> List[Opponent]:
     opponents: List[Opponent] = []
-    for selector in args.ladder_opponent or []:
+    for selector in selectors:
         entry = ladder.resolve(selector)
         cmd, _cwd = ladder.launch_command(entry)
         opponents.append(Opponent(name=f"rank{entry.rank:02d}", command=cmd))
+    return opponents
+
+
+def _resolve_opponents(args) -> List[Opponent]:
+    opponents: List[Opponent] = []
+    eval_pool = getattr(args, "eval_pool", None)
+    if eval_pool:
+        if eval_pool not in EVAL_POOLS:
+            raise SystemExit(
+                f"--eval-pool {eval_pool!r} unknown; available: "
+                f"{sorted(EVAL_POOLS)}")
+        opponents = _opponents_from_selectors(list(EVAL_POOLS[eval_pool]))
+    else:
+        opponents = _opponents_from_selectors(list(args.ladder_opponent or []))
     for spec in args.opponent or []:
         if "=" not in spec:
             raise SystemExit(f"--opponent must be NAME=COMMAND, got {spec!r}")
@@ -154,7 +176,7 @@ def _resolve_opponents(args) -> List[Opponent]:
         opponents.append(Opponent(name=name, command=command))
     if not opponents:
         raise SystemExit("at least one of --ladder-opponent or --opponent "
-                         "is required")
+                         "(or --eval-pool) is required")
     names = [o.name for o in opponents]
     if len(set(names)) != len(names):
         raise SystemExit("opponent names must be unique")
@@ -325,6 +347,11 @@ def build_parser() -> argparse.ArgumentParser:
                         "claim against the replay's actual r[-1] and writes a "
                         "rules_validation event + RULES_VALIDATION.md. Needs "
                         "--data-dir/AGENTBENCH_DATA for replay lookup.")
+    p.add_argument("--eval-pool", default=None,
+                   help="named frozen eval pool (doc Fix-E): a fixed, "
+                        "reusable opponent set recorded in the BenchmarkSpec. "
+                        f"Available: {sorted(EVAL_POOLS)}. Overrides "
+                        "--ladder-opponent/--opponent for the pool ranks.")
     return p
 
 
@@ -394,6 +421,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         pairs=args.pairs, seats=args.seats, timeout=args.timeout,
         notes={"map": "mapconf2.map"},
     )
+    if args.eval_pool:
+        spec = BenchmarkSpec(
+            spec_id=spec.spec_id, opponents=spec.opponents,
+            pairs=spec.pairs, seats=spec.seats, timeout=spec.timeout,
+            notes={**spec.notes, "eval_pool": args.eval_pool},
+        )
     reference = ReferenceStateSet.load(args.reference)
 
     skill_path = (_PLAYBACK_SKILL if _PLAYBACK_SKILL.exists()
@@ -461,6 +494,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         version = ctrl.act(version_before=version)
         print("done" + (f" -> {version.version_id}" if version else " (no version)"),
               file=sys.stderr)
+
+    # Auto-render the score/IG iteration curves (doc Fix-E item 1). Best-effort:
+    # a missing matplotlib must not fail the run.
+    try:
+        from agentbench_frame.hl import plot_curves
+        data = plot_curves.read_iteration_curves(events_path)
+        figures = codebase_root / "figures"
+        out = plot_curves.plot(data, figures)
+        print(f"[hl] figures     : {', '.join(out.values())}", file=sys.stderr)
+    except (Exception, SystemExit) as e:
+        print(f"[hl] figures     : skipped ({type(e).__name__})", file=sys.stderr)
 
     events = read_events(events_path)
     versions = [e for e in events if e["event_type"] == "version"]
