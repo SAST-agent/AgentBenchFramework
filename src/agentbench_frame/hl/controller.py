@@ -33,6 +33,7 @@ from agentbench_frame.hl.distribution import (
     enumerate_legal_actions,
     epsilon_smoothed_distribution,
     normalize_emitted,
+    tracked_pos_from_transcript,
     policy_kl,
     local_policy_kl_trace,
     PolicyKLPoint,
@@ -584,7 +585,13 @@ class HLIterationController:
         for i, (a, b, las) in enumerate(zip(emitted_old, emitted_new, legal_sets)):
             if len(las) == 0:
                 continue
-            pos = (self.reference.samples[i].observation or {}).get("pos")
+            # The anchor for coordinate->direction normalization is the
+            # position the CANDIDATE actually tracks (spawn derived from the
+            # replayed id frame), not the sample's obs pos — start_turn never
+            # updates pos from roundbegin, so the candidate acts from spawn.
+            s_i = self.reference.samples[i]
+            pos = tracked_pos_from_transcript(s_i.transcript) or \
+                (s_i.observation or {}).get("pos")
             chosen_old.append(
                 normalize_emitted(a.primitive, pos=pos) if a else None)
             chosen_new.append(

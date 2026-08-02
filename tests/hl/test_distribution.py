@@ -291,3 +291,17 @@ def test_normalize_emitted_attack_drops_coordinate():
     assert normalize_emitted(("interact", "Box"), pos=[0, 0, 1]) == \
         ("interact", "Box")
     assert normalize_emitted(None, pos=[0, 0, 1]) is None
+
+
+def test_tracked_pos_from_transcript_uses_id_frame():
+    from agentbench_frame.hl.distribution import tracked_pos_from_transcript
+    # id birth_pos is 2D; the seeded candidate appends the z-layer (spawn).
+    assert tracked_pos_from_transcript(
+        [{"type": "id", "id": 0, "birth_pos": [0, 0]},
+         {"type": "roundbegin", "pos": [3, 2, 1]}]) == [0, 0, 1]
+    # 3D birth_pos passes through (first 3 elements).
+    assert tracked_pos_from_transcript(
+        [{"type": "id", "birth_pos": [1, 4, 0]}]) == [1, 4, 0]
+    # no id frame -> None (caller falls back to the sample obs pos).
+    assert tracked_pos_from_transcript([{"type": "roundbegin"}]) is None
+    assert tracked_pos_from_transcript(None) is None

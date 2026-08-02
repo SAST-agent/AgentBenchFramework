@@ -121,6 +121,31 @@ def _state_id(tokens: Tuple[ActionToken, ...]) -> str:
     return h[:16]
 
 
+def tracked_pos_from_transcript(transcript) -> Optional[List[int]]:
+    """The position a replaying candidate actually tracks.
+
+    The probe replays each sample's transcript (id frame + roundbegin). The
+    seeded candidate's ``init_game`` sets ``pos = birth_pos`` then appends the
+    z-layer (``spawn_pos.append(1)``), and ``start_turn`` does NOT update pos
+    from the roundbegin frame — so the candidate computes every move from the
+    SAME tracked position no matter what the sample's ``observation.pos``
+    claims. Deriving the ``normalize_emitted`` anchor from the id frame (not
+    the sample obs pos) is what lets move/tool/detect emissions match A(s):
+    the obs pos describes the decision-point STATE, not where the candidate
+    stands.
+    """
+    if not transcript:
+        return None
+    for f in transcript:
+        if isinstance(f, dict) and f.get("type") == "id":
+            bp = f.get("birth_pos")
+            if isinstance(bp, (list, tuple)) and len(bp) == 2:
+                return [bp[0], bp[1], 1]
+            if isinstance(bp, (list, tuple)) and len(bp) >= 3:
+                return list(bp[:3])
+    return None
+
+
 def normalize_emitted(primitive: Optional[ActionToken], *, pos=None) -> Optional[ActionToken]:
     """Map a candidate's wire-format primitive to the A(s) token form.
 
