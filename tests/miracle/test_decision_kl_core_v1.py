@@ -334,18 +334,6 @@ def test_support_identity_is_exact_and_not_self_reported(mutation):
         )
 
 
-def finite_record(value, step):
-    support = two_action_support()
-    return kl.DecisionKLRecord(
-        decision_step=step,
-        schema_version=support.schema_version,
-        support_id=support.support_id,
-        action_ids=support.action_ids,
-        status="complete",
-        local_kl=value,
-    )
-
-
 def trajectory_evidence(
     target_kl=0.0,
     *,
@@ -382,9 +370,16 @@ def trajectory_evidence(
 
 
 def test_trajectory_rejects_publicly_constructed_output_record():
-    forged = finite_record(0.0, 1)
-    with pytest.raises(TypeError, match="evidence"):
-        kl.compute_trajectory_kl([forged])
+    support = two_action_support()
+    with pytest.raises(TypeError, match="issued|calculator"):
+        kl.DecisionKLRecord(
+            decision_step=1,
+            schema_version=support.schema_version,
+            support_id=support.support_id,
+            action_ids=support.action_ids,
+            status="complete",
+            local_kl=0.0,
+        )
 
 
 def test_trajectory_evidence_schema_has_no_self_reported_scalar_input():
@@ -769,7 +764,7 @@ def test_summary_machine_readably_stays_fake_only_and_unverified():
 )
 def test_summary_fake_only_boundary_cannot_be_overridden(field, value):
     summary = kl.compute_trajectory_kl([trajectory_evidence(0.0)])
-    with pytest.raises(ValueError):
+    with pytest.raises((TypeError, ValueError)):
         replace(summary, **{field: value})
 
 
@@ -807,7 +802,10 @@ def test_incomplete_or_infinite_decision_cannot_produce_partial_scalar():
 
 
 def test_decision_steps_must_be_strict_continuous_integers():
-    for invalid in (True, 0, -1, 1.0, "1"):
+    class IntegerSubclass(int):
+        pass
+
+    for invalid in (True, 0, -1, 1.0, "1", IntegerSubclass(1)):
         with pytest.raises(ValueError, match="decision_step"):
             trajectory_evidence(0.0, step=invalid)
     for evidence in (
@@ -921,7 +919,7 @@ def test_non_finite_probability_keeps_structured_distribution_reason(
 )
 def test_summary_scientific_contract_fields_cannot_be_relabelled(field, forged):
     summary = kl.compute_trajectory_kl([trajectory_evidence(0.002)])
-    with pytest.raises(ValueError):
+    with pytest.raises((TypeError, ValueError)):
         replace(summary, **{field: forged})
 
 
@@ -964,7 +962,7 @@ def test_summary_derived_fields_must_match_decision_records(path, field, forged)
     summary = _summary_for_tamper_path(path)
     if getattr(summary, field) == forged:
         forged = None
-    with pytest.raises(ValueError):
+    with pytest.raises((TypeError, ValueError)):
         replace(summary, **{field: forged})
 
 
@@ -982,7 +980,7 @@ def test_summary_derived_fields_must_match_decision_records(path, field, forged)
 )
 def test_summary_rejects_non_finite_scientific_numbers(field, value):
     summary = kl.compute_trajectory_kl([trajectory_evidence(0.002)])
-    with pytest.raises(ValueError):
+    with pytest.raises((TypeError, ValueError)):
         replace(summary, **{field: value})
 
 
@@ -990,3 +988,107 @@ def test_summary_rejects_non_finite_scientific_numbers(field, value):
 def test_summary_to_dict_is_strict_json_safe_for_every_result_path(path):
     summary = _summary_for_tamper_path(path)
     json.dumps(summary.to_dict(), allow_nan=False)
+
+
+def test_decision_records_are_issuer_bound_and_cannot_be_replaced_or_forged():
+    summary = kl.compute_trajectory_kl([trajectory_evidence(0.002)])
+    record = summary.decision_records[0]
+
+    with pytest.raises((TypeError, ValueError)):
+        replace(record, local_kl=999.0)
+
+    forged = object.__new__(kl.DecisionKLRecord)
+    for field_name in (
+        "decision_step",
+        "schema_version",
+        "support_id",
+        "action_ids",
+        "status",
+        "local_kl",
+        "reason",
+        "direction",
+        "smoothing",
+        "log_base",
+    ):
+        object.__setattr__(forged, field_name, getattr(record, field_name))
+
+    with pytest.raises(ValueError, match="issued"):
+        forged.to_dict()
+    with pytest.raises(TypeError, match="issued"):
+        replace(summary, decision_records=(forged,))
+
+
+def test_record_and_summary_object_setattr_tampering_fails_before_serialization():
+    record_tampered = kl.compute_trajectory_kl(
+        [trajectory_evidence(0.002)]
+    )
+    object.__setattr__(record_tampered.decision_records[0], "local_kl", 999.0)
+    with pytest.raises(ValueError, match="issued"):
+        record_tampered.to_dict()
+
+    summary_tampered = kl.compute_trajectory_kl(
+        [trajectory_evidence(0.002)]
+    )
+    object.__setattr__(summary_tampered, "trajectory_kl", 999.0)
+    with pytest.raises(ValueError, match="issued"):
+        summary_tampered.to_dict()
+
+
+def test_unavailable_support_record_contract_is_bound_to_issuer_snapshot():
+    wind = [7, 3, 0, 1, 0, 0, 0, [-1, -1, -1]]
+    summary = kl.compute_trajectory_kl(
+        [
+            kl.DecisionKLEvidence(
+                decision_step=1,
+                state_before=empty_observation(artifact=wind),
+                support_identity={},
+                old_distribution={},
+                new_distribution={},
+            )
+        ]
+    )
+    record = summary.decision_records[0]
+    object.__setattr__(record, "direction", "new||old")
+
+    with pytest.raises(ValueError, match="issued"):
+        summary.to_dict()
+
+
+def test_summary_constructor_is_issuer_only():
+    with pytest.raises(TypeError, match="issued|calculator"):
+        kl.TrajectoryKLSummary()
+
+
+@pytest.mark.parametrize("location", ["value", "key"])
+def test_decision_evidence_rejects_lone_unicode_surrogates(location):
+    state_before = empty_observation()
+    if location == "value":
+        state_before["invalid_unicode"] = "\ud800"
+    else:
+        state_before["\ud800"] = "invalid_unicode"
+    support = kl.build_trusted_action_support(empty_observation())
+    probabilities = {
+        action_id: 1.0 / len(support.action_ids)
+        for action_id in support.action_ids
+    }
+
+    with pytest.raises(ValueError, match="Unicode"):
+        kl.DecisionKLEvidence(
+            decision_step=1,
+            state_before=state_before,
+            support_identity=identity(support),
+            old_distribution=probabilities,
+            new_distribution=probabilities,
+        )
+
+
+def test_trajectory_resnapshots_object_setattr_mutated_evidence():
+    evidence = trajectory_evidence(0.0)
+    object.__setattr__(
+        evidence,
+        "state_before",
+        {"camp": 0, "unsupported": object()},
+    )
+
+    with pytest.raises(TypeError, match="unsupported"):
+        kl.compute_trajectory_kl([evidence])

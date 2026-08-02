@@ -23,11 +23,10 @@ def test_both_public_api_groups_export_their_defining_objects():
 
 def test_core_boundaries_coexist_without_scalar_or_packet_bypass(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    forged_record = decision_kl.DecisionKLRecord(
-        1, "schema", "support", ("a",), "complete", 0.0
-    )
-    with pytest.raises(TypeError, match="evidence"):
-        miracle.compute_trajectory_kl([forged_record])
+    with pytest.raises(TypeError, match="issued|calculator"):
+        decision_kl.DecisionKLRecord(
+            1, "schema", "support", ("a",), "complete", 0.0
+        )
 
     forged_packet = replay_reading.ReplayPacket(
         "m", "r", "p", {"case_id": "x"}, "validation", {}, {}, {}, (), {}

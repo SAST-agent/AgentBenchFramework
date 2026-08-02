@@ -211,6 +211,7 @@ def _strict_object_bytes(payload: bytes, label: str) -> dict[str, Any]:
         )
     except (
         UnicodeDecodeError,
+        UnicodeEncodeError,
         json.JSONDecodeError,
         RecursionError,
         ValueError,

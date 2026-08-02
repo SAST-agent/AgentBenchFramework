@@ -84,7 +84,11 @@ non-JSON-shaped nested objects are rejected. For every item it regenerates Actio
 checks the supplied identity, and recomputes local KL before aggregation.
 `DecisionKLRecord` is computation output only; passing a publicly constructed
 record, mapping, uploaded scalar, `local_kl`, `reported_local_kl`, or a
-decision-change value to the trajectory API is rejected.
+decision-change value to the trajectory API is rejected. Local records are
+issuer-only objects bound to a closure-owned weak-registry snapshot; direct
+construction, copying, replacement, or field mutation cannot be reused as
+trusted aggregation evidence. Summary serialization revalidates every issued
+record, all derived aggregates, and every fixed scientific-contract field.
 
 `TrajectoryKLSummary` labels this boundary in every machine-readable output:
 `evidence_scope=synthetic_fake_only`, `authoritative_readiness=false`,

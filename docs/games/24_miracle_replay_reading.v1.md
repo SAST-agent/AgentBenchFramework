@@ -52,7 +52,8 @@ pathname; every descendant is opened atomically relative to its retained parent
 handle through `NtCreateFile(RootDirectory=...)`, with reparse-point checks and
 exact final-handle paths. Before every relative read, both the retained root and
 the current lexical root must still match the approved file identity and path.
-Every ancestor and the final component must be a real directory; symlink/reparse components,
+Every approved-root ancestor must be a real directory, and the final manifest
+or replay component must be a regular file; symlink/reparse components,
 missing files, and path replacement fail closed. Manifest-contained replay paths reject
 `..`, absolute paths, Windows drives, and ADS syntax. The approved root and
 supplied manifest path must be absolute; relative inputs are rejected rather

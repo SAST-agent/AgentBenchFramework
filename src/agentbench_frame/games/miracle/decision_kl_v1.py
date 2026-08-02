@@ -8,6 +8,7 @@ old/new probability distributions.
 from __future__ import annotations
 
 import math
+import weakref
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
@@ -58,13 +59,13 @@ def _passes_acceptance_threshold(value: float) -> bool:
 
 
 def _strict_step(value: Any) -> int:
-    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+    if type(value) is not int or value <= 0:
         raise ValueError("decision_step must be a positive strict integer")
     return value
 
 
 def _strict_nonnegative_number(value: Any, label: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if type(value) not in {int, float}:
         raise TypeError(f"{label} must be an int or float, not bool")
     number = float(value)
     if not math.isfinite(number) or number < 0.0:
@@ -81,7 +82,13 @@ def _freeze_json_value(
 ) -> Any:
     """Copy JSON-shaped input into mappings and sequences that cannot mutate."""
 
-    if value is None or type(value) in {bool, int, str}:
+    if value is None or type(value) in {bool, int}:
+        return value
+    if type(value) is str:
+        try:
+            value.encode("utf-8", errors="strict")
+        except UnicodeEncodeError as exc:
+            raise ValueError(f"{label} contains an invalid Unicode scalar") from exc
         return value
     if type(value) is float:
         if reject_non_finite and not math.isfinite(value):
@@ -99,6 +106,12 @@ def _freeze_json_value(
             for key, item in value.items():
                 if type(key) is not str:
                     raise TypeError(f"{label} contains an unsupported mapping key")
+                try:
+                    key.encode("utf-8", errors="strict")
+                except UnicodeEncodeError as exc:
+                    raise ValueError(
+                        f"{label} contains an invalid Unicode mapping key"
+                    ) from exc
                 frozen[key] = _freeze_json_value(
                     item,
                     f"{label}.{key}",
@@ -179,7 +192,7 @@ class DecisionKLEvidence:
             )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, init=False, eq=False, weakref_slot=True)
 class DecisionKLRecord:
     """One trusted local-KL result bound to a canonical ActionSupport."""
 
@@ -194,21 +207,27 @@ class DecisionKLRecord:
     smoothing: str = SMOOTHING
     log_base: str = "e"
 
+    def __new__(cls, *_args: Any, **_kwargs: Any):
+        raise TypeError("DecisionKLRecord can only be issued by the KL calculator")
+
     def __post_init__(self) -> None:
         _strict_step(self.decision_step)
-        if not isinstance(self.schema_version, str) or not self.schema_version:
+        if type(self.schema_version) is not str or not self.schema_version:
             raise ValueError("schema_version must be a non-empty string")
-        if not isinstance(self.support_id, str) or not self.support_id:
+        if type(self.support_id) is not str or not self.support_id:
             raise ValueError("support_id must be a non-empty string")
         action_ids = tuple(self.action_ids)
         if (
             not action_ids
-            or any(not isinstance(item, str) or not item for item in action_ids)
+            or any(type(item) is not str or not item for item in action_ids)
             or len(action_ids) != len(set(action_ids))
         ):
             raise ValueError("action_ids must be non-empty, unique strings")
         object.__setattr__(self, "action_ids", action_ids)
-        if self.status not in {"complete", "incomplete", "threshold_failed"}:
+        if (
+            type(self.status) is not str
+            or self.status not in {"complete", "incomplete", "threshold_failed"}
+        ):
             raise ValueError("local KL status is invalid")
         if self.status == "complete":
             object.__setattr__(
@@ -220,14 +239,28 @@ class DecisionKLRecord:
                 raise ValueError("complete local KL cannot have a failure reason")
         elif self.local_kl is not None:
             raise ValueError("failed or incomplete local KL must not expose a scalar")
+        if self.reason is not None and type(self.reason) is not str:
+            raise ValueError("local KL reason must be an exact string or null")
         if self.status == "incomplete" and self.reason not in _INCOMPLETE_REASONS:
             raise ValueError("incomplete local KL reason is invalid")
-        if self.direction != DIRECTION or self.smoothing != SMOOTHING:
+        if (
+            self.status == "threshold_failed"
+            and self.reason != "old_positive_new_zero"
+        ):
+            raise ValueError("threshold-failed local KL reason is invalid")
+        if (
+            type(self.direction) is not str
+            or type(self.smoothing) is not str
+            or self.direction != DIRECTION
+            or self.smoothing != SMOOTHING
+        ):
             raise ValueError("local KL contract identity is invalid")
-        if self.log_base != "e":
+        if type(self.log_base) is not str or self.log_base != "e":
             raise ValueError("local KL must use the natural logarithm")
 
     def to_dict(self) -> dict[str, Any]:
+        if not _is_issued_decision_record(self):
+            raise ValueError("issued KL decision record is required")
         return {
             "decision_step": self.decision_step,
             "schema_version": self.schema_version,
@@ -242,7 +275,7 @@ class DecisionKLRecord:
         }
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, init=False, eq=False, weakref_slot=True)
 class _IncompleteDecisionRecord:
     decision_step: int
     reason: str
@@ -255,9 +288,12 @@ class _IncompleteDecisionRecord:
     smoothing: str = SMOOTHING
     log_base: str = "e"
 
+    def __new__(cls, *_args: Any, **_kwargs: Any):
+        raise TypeError("incomplete KL records can only be issued by the calculator")
+
     def __post_init__(self) -> None:
         _strict_step(self.decision_step)
-        if self.reason not in _INCOMPLETE_REASONS:
+        if type(self.reason) is not str or self.reason not in _INCOMPLETE_REASONS:
             raise ValueError("incomplete decision reason is invalid")
         if (
             self.status != "incomplete"
@@ -267,8 +303,20 @@ class _IncompleteDecisionRecord:
             or self.action_ids != ()
         ):
             raise ValueError("unavailable support identity must remain unknown")
+        if (
+            type(self.status) is not str
+            or type(self.direction) is not str
+            or type(self.smoothing) is not str
+            or type(self.log_base) is not str
+            or self.direction != DIRECTION
+            or self.smoothing != SMOOTHING
+            or self.log_base != "e"
+        ):
+            raise ValueError("incomplete local KL contract identity is invalid")
 
     def to_dict(self) -> dict[str, Any]:
+        if not _is_issued_decision_record(self):
+            raise ValueError("issued KL decision record is required")
         return {
             "decision_step": self.decision_step,
             "schema_version": self.schema_version,
@@ -281,6 +329,98 @@ class _IncompleteDecisionRecord:
             "smoothing": self.smoothing,
             "log_base": self.log_base,
         }
+
+
+def _decision_record_snapshot(
+    record: DecisionKLRecord | _IncompleteDecisionRecord,
+) -> tuple[Any, ...]:
+    record.__post_init__()
+    return (
+        record.decision_step,
+        record.schema_version,
+        record.support_id,
+        record.action_ids,
+        record.status,
+        record.local_kl,
+        record.reason,
+        record.direction,
+        record.smoothing,
+        record.log_base,
+    )
+
+
+def _build_decision_record_authority():
+    registry: weakref.WeakKeyDictionary[
+        DecisionKLRecord | _IncompleteDecisionRecord, tuple[Any, ...]
+    ] = weakref.WeakKeyDictionary()
+
+    def issue_supported(
+        step: int,
+        support: ActionSupport,
+        status: str,
+        local_kl: float | None,
+        reason: str | None = None,
+    ) -> DecisionKLRecord:
+        record = object.__new__(DecisionKLRecord)
+        values = {
+            "decision_step": step,
+            "schema_version": support.schema_version,
+            "support_id": support.support_id,
+            "action_ids": support.action_ids,
+            "status": status,
+            "local_kl": local_kl,
+            "reason": reason,
+            "direction": DIRECTION,
+            "smoothing": SMOOTHING,
+            "log_base": "e",
+        }
+        for field_name, value in values.items():
+            object.__setattr__(record, field_name, value)
+        snapshot = _decision_record_snapshot(record)
+        registry[record] = snapshot
+        return record
+
+    def issue_without_support(step: int, reason: str) -> _IncompleteDecisionRecord:
+        record = object.__new__(_IncompleteDecisionRecord)
+        values = {
+            "decision_step": step,
+            "reason": reason,
+            "status": "incomplete",
+            "local_kl": None,
+            "schema_version": None,
+            "support_id": None,
+            "action_ids": (),
+            "direction": DIRECTION,
+            "smoothing": SMOOTHING,
+            "log_base": "e",
+        }
+        for field_name, value in values.items():
+            object.__setattr__(record, field_name, value)
+        snapshot = _decision_record_snapshot(record)
+        registry[record] = snapshot
+        return record
+
+    def is_issued(value: Any) -> bool:
+        if type(value) not in {DecisionKLRecord, _IncompleteDecisionRecord}:
+            return False
+        try:
+            registered = registry.get(value)
+            return (
+                registered is not None
+                and _decision_record_snapshot(value) == registered
+            )
+        except (AttributeError, TypeError, ValueError):
+            return False
+
+    return issue_supported, issue_without_support, is_issued
+
+
+(
+    _issue_supported_decision_record,
+    _issue_unsupported_decision_record,
+    _is_issued_decision_record,
+) = _build_decision_record_authority()
+del _build_decision_record_authority
 
 
 def _percentile(values: Sequence[float], fraction: float) -> float:
@@ -367,7 +507,7 @@ def _derived_trajectory_fields(
     }
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, init=False, eq=False, weakref_slot=True)
 class TrajectoryKLSummary:
     """Fake-only arithmetic-mean result plus diagnostic-only aggregates."""
 
@@ -393,13 +533,16 @@ class TrajectoryKLSummary:
     policy_binding_verified: bool = False
     aggregation: str = "arithmetic_mean"
 
+    def __new__(cls, *_args: Any, **_kwargs: Any):
+        raise TypeError("TrajectoryKLSummary can only be issued by the KL calculator")
+
     def __post_init__(self) -> None:
         records = tuple(self.decision_records)
         if any(
-            type(record) not in {DecisionKLRecord, _IncompleteDecisionRecord}
+            not _is_issued_decision_record(record)
             for record in records
         ):
-            raise TypeError("decision_records must contain trusted local records")
+            raise TypeError("decision_records must contain issued local records")
         if tuple(record.decision_step for record in records) != tuple(
             range(1, len(records) + 1)
         ):
@@ -435,6 +578,8 @@ class TrajectoryKLSummary:
         object.__setattr__(self, "decision_records", records)
 
     def to_dict(self) -> dict[str, Any]:
+        if not _is_issued_trajectory_summary(self):
+            raise ValueError("issued trajectory KL summary is required")
         return {
             "status": self.status,
             "trajectory_kl": self.trajectory_kl,
@@ -458,6 +603,104 @@ class TrajectoryKLSummary:
             "policy_binding_verified": self.policy_binding_verified,
             "aggregation": self.aggregation,
         }
+
+
+def _trajectory_summary_snapshot(summary: TrajectoryKLSummary) -> tuple[Any, ...]:
+    summary.__post_init__()
+    return (
+        summary.status,
+        summary.trajectory_kl,
+        summary.trace,
+        summary.decision_records,
+        summary.threshold_passed,
+        summary.reason,
+        summary.sum_local_kl,
+        summary.max_local_kl,
+        summary.p50_local_kl,
+        summary.p95_local_kl,
+        summary.acceptance_threshold,
+        summary.direction,
+        summary.smoothing,
+        summary.log_base,
+        summary.unit,
+        summary.evidence_scope,
+        summary.authoritative_readiness,
+        summary.rollout_source_contract,
+        summary.verified_rollout_source,
+        summary.policy_binding_verified,
+        summary.aggregation,
+    )
+
+
+def _build_trajectory_summary_authority():
+    registry: weakref.WeakKeyDictionary[TrajectoryKLSummary, tuple[Any, ...]] = (
+        weakref.WeakKeyDictionary()
+    )
+
+    def issue(
+        status: str,
+        trajectory_kl: float | None,
+        trace: tuple[float | None, ...],
+        decision_records: tuple[
+            DecisionKLRecord | _IncompleteDecisionRecord, ...
+        ],
+        threshold_passed: bool | None,
+        reason: str | None,
+        sum_local_kl: float | None,
+        max_local_kl: float | None,
+        p50_local_kl: float | None,
+        p95_local_kl: float | None,
+    ) -> TrajectoryKLSummary:
+        summary = object.__new__(TrajectoryKLSummary)
+        values = {
+            "status": status,
+            "trajectory_kl": trajectory_kl,
+            "trace": trace,
+            "decision_records": decision_records,
+            "threshold_passed": threshold_passed,
+            "reason": reason,
+            "sum_local_kl": sum_local_kl,
+            "max_local_kl": max_local_kl,
+            "p50_local_kl": p50_local_kl,
+            "p95_local_kl": p95_local_kl,
+            "acceptance_threshold": ACCEPTANCE_THRESHOLD,
+            "direction": DIRECTION,
+            "smoothing": SMOOTHING,
+            "log_base": "e",
+            "unit": UNIT,
+            "evidence_scope": "synthetic_fake_only",
+            "authoritative_readiness": False,
+            "rollout_source_contract": ROLLOUT_SOURCE,
+            "verified_rollout_source": None,
+            "policy_binding_verified": False,
+            "aggregation": "arithmetic_mean",
+        }
+        for field_name, value in values.items():
+            object.__setattr__(summary, field_name, value)
+        snapshot = _trajectory_summary_snapshot(summary)
+        registry[summary] = snapshot
+        return summary
+
+    def is_issued(value: Any) -> bool:
+        if type(value) is not TrajectoryKLSummary:
+            return False
+        try:
+            registered = registry.get(value)
+            return (
+                registered is not None
+                and _trajectory_summary_snapshot(value) == registered
+            )
+        except (AttributeError, TypeError, ValueError):
+            return False
+
+    return issue, is_issued
+
+
+(
+    _issue_trajectory_summary,
+    _is_issued_trajectory_summary,
+) = _build_trajectory_summary_authority()
+del _build_trajectory_summary_authority
 
 
 def build_trusted_action_support(observation: Mapping[str, Any]) -> ActionSupport:
@@ -572,14 +815,8 @@ def validate_distribution(
 def _incomplete_local_record(
     step: int, support: ActionSupport, reason: str
 ) -> DecisionKLRecord:
-    return DecisionKLRecord(
-        step,
-        support.schema_version,
-        support.support_id,
-        support.action_ids,
-        "incomplete",
-        None,
-        reason,
+    return _issue_supported_decision_record(
+        step, support, "incomplete", None, reason
     )
 
 
@@ -621,11 +858,9 @@ def _compute_local_kl(
         old_probability = old[action_id]
         new_probability = new[action_id]
         if old_probability > 0.0 and new_probability == 0.0:
-            return DecisionKLRecord(
+            return _issue_supported_decision_record(
                 step,
-                support.schema_version,
-                support.support_id,
-                support.action_ids,
+                support,
                 "threshold_failed",
                 None,
                 "old_positive_new_zero",
@@ -645,14 +880,7 @@ def _compute_local_kl(
             return _incomplete_local_record(
                 step, support, "local_kl_negative_beyond_roundoff"
             )
-    return DecisionKLRecord(
-        step,
-        support.schema_version,
-        support.support_id,
-        support.action_ids,
-        "complete",
-        value,
-    )
+    return _issue_supported_decision_record(step, support, "complete", value)
 
 
 def _missing_summary(
@@ -662,7 +890,7 @@ def _missing_summary(
     reason: str,
     threshold_passed: bool | None,
 ) -> TrajectoryKLSummary:
-    return TrajectoryKLSummary(
+    return _issue_trajectory_summary(
         status,
         None,
         trace,
@@ -683,21 +911,31 @@ def compute_trajectory_kl(
 
     if not isinstance(evidence, Sequence) or isinstance(evidence, (str, bytes)):
         raise TypeError("evidence must be a sequence")
-    if not evidence:
+    frozen_evidence = tuple(evidence)
+    if not frozen_evidence:
         return _missing_summary("incomplete", (), (), "empty_trajectory", None)
     records: list[DecisionKLRecord | _IncompleteDecisionRecord] = []
-    for expected_step, item in enumerate(evidence, start=1):
+    for expected_step, item in enumerate(frozen_evidence, start=1):
         if type(item) is not DecisionKLEvidence:
             raise TypeError("trajectory inputs must be trusted decision evidence")
+        item = DecisionKLEvidence(
+            decision_step=item.decision_step,
+            state_before=item.state_before,
+            support_identity=item.support_identity,
+            old_distribution=item.old_distribution,
+            new_distribution=item.new_distribution,
+        )
         if item.decision_step != expected_step:
             raise ValueError("decision_step must be strict, unique, and continuous")
         try:
             support = build_trusted_action_support(item.state_before)
         except IncompleteActionSupportError:
-            records.append(_IncompleteDecisionRecord(
-                item.decision_step,
-                "action_support_not_finitely_enumerable",
-            ))
+            records.append(
+                _issue_unsupported_decision_record(
+                    item.decision_step,
+                    "action_support_not_finitely_enumerable",
+                )
+            )
             continue
         records.append(
             _compute_local_kl(
@@ -739,7 +977,7 @@ def compute_trajectory_kl(
     total = math.fsum(finite)
     mean = total / len(finite)
     passed = _passes_acceptance_threshold(mean)
-    return TrajectoryKLSummary(
+    return _issue_trajectory_summary(
         "complete" if passed else "threshold_failed",
         mean,
         tuple(finite),

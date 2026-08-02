@@ -446,7 +446,9 @@ def test_exact_large_integer_reward_is_normalized_once_for_frame_and_terminal(
     assert packet.decision_frames[-1].reward == packet.terminal["reward"]
 
 
-@pytest.mark.parametrize("damage", ["bom", "truncated", "noncanonical", "nan"])
+@pytest.mark.parametrize(
+    "damage", ["bom", "truncated", "noncanonical", "nan", "lone_surrogate"]
+)
 def test_noncanonical_or_nonstandard_json_fails_closed(tmp_path, monkeypatch, damage):
     root, manifest_path, _, _, _, _ = artifact_fixture(tmp_path)
     payload = manifest_path.read_bytes()
@@ -456,8 +458,10 @@ def test_noncanonical_or_nonstandard_json_fails_closed(tmp_path, monkeypatch, da
         payload = payload[:-2]
     elif damage == "noncanonical":
         payload = json.dumps(json.loads(payload), indent=2).encode() + b"\n"
-    else:
+    elif damage == "nan":
         payload = payload.replace(b'"repeat":1', b'"repeat":NaN')
+    else:
+        payload = payload.replace(b'"opponent":"rank01"', b'"opponent":"\\ud800"')
     manifest_path.write_bytes(payload)
     approve(monkeypatch, hashlib.sha256(payload).hexdigest())
     with pytest.raises(ValueError, match="canonical|UTF-8|JSON"):
