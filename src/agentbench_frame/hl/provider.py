@@ -251,6 +251,7 @@ class CodexSessionProvider:
                 "sessionbudgetexceeded",
                 "session budget exceeded",
                 "rollout budget exceeded",
+                "shared rollout token budget exhausted",
             )
         )
         result.metadata["rollout_budget_exhausted"] = exhausted

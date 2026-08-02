@@ -232,6 +232,58 @@ def test_provider_classifies_native_budget_exhaustion_and_weighted_usage(tmp_pat
     assert result.usage.completion_tokens == 7
 
 
+def test_provider_classifies_real_codex_shared_rollout_budget_error(tmp_path):
+    from agentbench_frame.hl.config import HLRunConfig
+    from agentbench_frame.hl.provider import CodexSessionProvider
+
+    executable = tmp_path / "shared-budget-codex"
+    executable.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' '{\"type\":\"thread.started\",\"thread_id\":\"thread-shared-budget\"}'\n"
+        "printf '%s\\n' '{\"type\":\"item.completed\",\"item\":{\"type\":\"file_change\"}}'\n"
+        "printf '%s\\n' '{\"type\":\"error\",\"message\":\"shared rollout token budget exhausted\"}'\n"
+        "printf '%s\\n' '{\"type\":\"turn.failed\",\"error\":{\"message\":\"shared rollout token budget exhausted\"}}'\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+    run = HLRunConfig.from_mapping(
+        {
+            "game": "29_rollman",
+            "provider": {
+                "kind": "codex",
+                "executable": str(executable),
+                "transport_retry_attempts": 0,
+                "rollout_budget": {
+                    "enabled": True,
+                    "limit_tokens": 70000,
+                },
+            },
+        }
+    )
+    provider = CodexSessionProvider(
+        run.provider,
+        run_root=tmp_path / "run",
+        environ={
+            "AGENTBENCH_API_KEY": "sk-runtime-only",
+            "PATH": os.environ.get("PATH", ""),
+        },
+    )
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+
+    result = provider.invoke(
+        prompt="bounded edit",
+        workspace=workspace,
+        raw_output_path=tmp_path / "run" / "provider" / "shared-budget.jsonl",
+    )
+
+    assert result.status == "failed"
+    assert result.metadata["rollout_budget_exhausted"] is True
+    assert result.metadata["termination_reason"] == "rollout_budget_exhausted"
+    assert result.metadata["weighted_tokens"] is None
+
+
 def test_runtime_key_is_scoped_to_codex_process_and_never_logged(tmp_path):
     from agentbench_frame.hl.provider import CodexSessionProvider
 

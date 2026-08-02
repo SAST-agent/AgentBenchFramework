@@ -1,0 +1,87 @@
+schema_version: "1.0"
+run:
+  game: "29_rollman"
+  provider:
+    kind: "codex"
+    model: "gpt-5.5"
+    review_model: "gpt-5.5"
+    reasoning_effort: "xhigh"
+    env_key: "AGENTBENCH_API_KEY"
+    base_url: "https://lab.cs.tsinghua.edu.cn/ai-platform/sub2api"
+    wire_api: "responses"
+    requires_openai_auth: true
+    disable_response_storage: true
+    network_access: "enabled"
+    context_mode: "fresh"
+    expected_cli_version: "codex-cli 0.146.0-alpha.9.2"
+    rollout_budget:
+      enabled: true
+      limit_tokens: 70000
+      reminder_at_remaining_tokens: [20000, 10000, 5000]
+      sampling_token_weight: 1.0
+      prefill_token_weight: 1.0
+    timeout_seconds: 420
+    idle_timeout_seconds: 300
+  origin:
+    mode: "imported_version"
+    source_run: ".agentbench/29_rollman/runs/run-20260802-gpt55-k4-repair-v4-budget"
+    source_version: "v000000"
+    reset_session: true
+    reset_experience: false
+  curriculum:
+    mode: "weakest_failed"
+    target_order: "lowest_rank_first"
+    preserve_passed_opponents: true
+    required_human_opponents: 16
+    stagnation_patience: 16
+  iteration:
+    max_acts: null
+    candidates_per_cycle: 4
+    planner_enabled: true
+    reducer_enabled: true
+    scope_contract_required: true
+    repair_enabled: true
+    repair_top_k: 2
+    repair_rounds: 1
+    quick_screen_seeds: 1
+    finalist_count: 2
+    finalist_seeds: 3
+  selection:
+    mode: "linear_lexicographic"
+    exploration_debt_cycles: 3
+    source_size_penalty: false
+  context:
+    use_game_digest: true
+    research_state_max_bytes: 16384
+    reduction_token_threshold: 250000
+  rollback:
+    enabled: true
+    policy: "champion_on_sustained_degradation"
+    patience: 3
+    score_margin: 0.05
+  experience:
+    enabled: true
+    compress_every_acts: 5
+  measurement:
+    epsilon: 0.05
+    local_policy_kl: true
+    occupancy_shift: true
+  evaluation:
+    learning_opponent: "rank01"
+    fixed_gate_seeds: [101, 102, 103, 104]
+    certification_opponents: "all"
+    certification_seeds: [201, 202, 203, 204, 205]
+    required_human_opponents: 16
+    required_win_rate: 0.5
+    full_pool_every_iteration: false
+    reporting_panel_every_cycle: true
+    reporting_seeds_per_opponent: 1
+    max_parallel_matches: 1
+paths:
+  agentbench_root: "${AGENTBENCH_SAST_ROOT}/AgentBench"
+  official_logic_root: "${AGENTBENCH_SAST_ROOT}/PacmanLogic"
+  pacman_sdk_root: "${AGENTBENCH_SAST_ROOT}/PacmanSDK-python"
+  human_manifest: "${AGENTBENCH_SAST_ROOT}/AgentBench/top_algorithms/corpus/29_rollman_ghost_final/MANIFEST.tsv"
+  workspace: ".agentbench/29_rollman/candidate-k4-repair-v5-budget"
+  runs_root: ".agentbench/29_rollman/runs"
+  opponent_build_root: ".agentbench/29_rollman/opponents"
