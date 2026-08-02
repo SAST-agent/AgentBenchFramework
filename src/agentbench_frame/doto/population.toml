@@ -1,0 +1,26 @@
+[[policies]]
+name = "official-sample"
+source = "logic/public_Arena-Doto-AI/Arena-Doto-AI-master/client"
+origin = "public_Arena-Doto-AI"
+split = "train"
+expected_sha256 = "56807a49406cb24a135fae3c85e9d7e302422f90c9778f6c8a2fcb5815bfe792"
+leaderboard = "sample"
+enabled = true
+
+[[policies]]
+name = "doto-final"
+source = "logic/public_DOTO/DOTO-master/AI"
+origin = "public_DOTO"
+split = "validation"
+expected_sha256 = "7dee77d25950f12113205e835ca5c0e71249d2d99e8cc6206ca6d06d47f54751"
+leaderboard = "final"
+enabled = true
+
+[[policies]]
+name = "doto-3ge"
+source = "logic/public_DOTO/DOTO-master/bak/3GE"
+origin = "public_DOTO"
+split = "train"
+expected_sha256 = "4e33354143805d77f51de0467e4d575a89cc5ea1d0fd1b8ca5479f91a914c4f8"
+leaderboard = "historical"
+enabled = true

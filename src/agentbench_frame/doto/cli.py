@@ -10,12 +10,20 @@ from pathlib import Path
 from .build import build_candidate
 from .ig import compare_policies_on_trace, write_ig_artifacts
 from .match import run_match
+from .population import build_population, load_population
 from .loop import run_loop
 from .loop_config import LoopConfig
 from .replay import iter_replay, summarize_replay
 
 
 def _build(args: argparse.Namespace) -> int:
+    if args.population_manifest is not None:
+        if args.corpus_root is None:
+            raise ValueError("--corpus-root is required with --population-manifest")
+        result = build_population(load_population(args.population_manifest), args.corpus_root,
+                                  args.output_dir)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return 0 if all(row["status"] in ("ready", "disabled") for row in result["policies"]) else 1
     result = build_candidate(args.player_ai, args.output_dir)
     print(json.dumps(result.to_json(), ensure_ascii=False, indent=2))
     return 0 if result.exit_code == 0 else 1
@@ -87,7 +95,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subcommands = parser.add_subparsers(dest="cmd", required=True)
     build = subcommands.add_parser("build", help="compile a native playerAI.cpp")
-    build.add_argument("--player-ai", type=Path, required=True)
+    build_mode = build.add_mutually_exclusive_group(required=True)
+    build_mode.add_argument("--player-ai", type=Path)
+    build_mode.add_argument("--population-manifest", type=Path)
+    build.add_argument("--corpus-root", type=Path)
     build.add_argument("--output-dir", type=Path, required=True)
     build.set_defaults(func=_build)
     match = subcommands.add_parser("match", help="run one official-protocol match")

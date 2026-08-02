@@ -31,6 +31,20 @@ shell command, executable, header replacement, or multiple source files.
 Historical population policies may use complete original source directories;
 that exception applies to fixed opponents, not to the LLM-maintained candidate.
 
+Build the declared train/validation human population through the same `build`
+entry point:
+
+```bash
+uv run python -m agentbench_frame.doto build \
+  --population-manifest src/agentbench_frame/doto/population.toml \
+  --corpus-root ../AgentBench/backend_sources/corpus/23_doto \
+  --output-dir agentbench_data/population/23_doto
+```
+
+Use only policies marked `ready` in `population-build.json`. Keep
+`hash_mismatch`, `build_failed`, and disabled rows in reports; do not silently
+drop them or rewrite historical multi-file sources into the candidate format.
+
 ## Build
 
 ```bash
