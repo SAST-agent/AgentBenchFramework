@@ -255,7 +255,7 @@ git commit -m "feat(miracle): add observable Run storage and budgets"
 
 - [ ] **Step 1: Write exact metric tests**
 
-For two normal episodes where the candidate is camp 0 once and camp 1 once, assert candidate official scores are selected by seat, mean score and win rate are correct, and incomplete episodes stay in `episodes` but do not enter the measured mean. For iterations with raw `10` and evo values `10, 20, 15`, assert gains `0, 10, 5`. For points `(x,y)=(0,10),(2,20),(5,10)`, assert trapezoidal AUC is `70`. For fewer than two measured points, assert `value is None` and reason `insufficient_points`.
+For two normal episodes where the candidate is camp 0 once and camp 1 once, assert candidate official scores are selected by seat, mean score and win rate are correct, and incomplete episodes stay in `episodes` but do not enter the measured mean. For iterations with raw `10` and evo values `10, 20, 15`, assert gains `0, 10, 5`. For points `(x,y)=(0,10),(2,20),(5,10)`, assert trapezoidal AUC is `75`. For fewer than two measured points, assert `value is None` and reason `insufficient_points`.
 
 - [ ] **Step 2: Run tests and verify RED**
 
