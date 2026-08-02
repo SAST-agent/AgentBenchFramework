@@ -168,7 +168,32 @@ class RollmanEvaluator:
         quick: CandidateEvaluation,
         finalist: CandidateEvaluation,
     ) -> CandidateEvaluation:
-        matches = (*quick.matches, *finalist.matches)
+        unique_matches: dict[tuple[str, int], dict[str, Any]] = {}
+        for match in (*quick.matches, *finalist.matches):
+            key = (str(match.get("opponent")), int(match["seed"]))
+            existing = unique_matches.get(key)
+            if existing is not None:
+                comparable_fields = (
+                    "result",
+                    "rollman_score",
+                    "ghosts_score",
+                    "normalized_replay_sha256",
+                )
+                if any(
+                    field in existing
+                    and field in match
+                    and existing[field] != match[field]
+                    for field in comparable_fields
+                ):
+                    return CandidateEvaluation(
+                        status="incomplete",
+                        score=None,
+                        error="duplicate staged match has inconsistent outcome",
+                        matches=tuple(unique_matches.values()),
+                    )
+                continue
+            unique_matches[key] = dict(match)
+        matches = tuple(unique_matches.values())
         if quick.status != "complete" or finalist.status != "complete":
             return CandidateEvaluation(
                 status="incomplete",

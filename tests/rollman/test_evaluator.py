@@ -335,6 +335,39 @@ def test_staged_evaluation_uses_configured_two_plus_two_seed_split(tmp_path):
     assert [match["seed"] for match in combined.matches] == [101, 102, 103, 104]
 
 
+def test_staged_evaluation_deduplicates_recovered_finalist_matches():
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+
+    quick = CandidateEvaluation(
+        status="complete",
+        score=0.25,
+        matches=tuple(
+            {
+                "opponent": "rank15",
+                "phase": "learning",
+                "seed": seed,
+                "result": result,
+            }
+            for seed, result in (
+                (101, "loss"),
+                (102, "loss"),
+                (103, "loss"),
+                (104, "win"),
+            )
+        ),
+    )
+    finalist = CandidateEvaluation(
+        status="complete",
+        score=0.5,
+        matches=quick.matches[2:],
+    )
+
+    combined = RollmanEvaluator.combine_stages(quick, finalist)
+
+    assert len(combined.matches) == 4
+    assert combined.score == 0.25
+
+
 @pytest.mark.parametrize(
     ("quick_count", "finalist_count"),
     ((0, 2), (2, 0), (3, 2)),
