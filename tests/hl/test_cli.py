@@ -437,6 +437,125 @@ def test_pending_planner_is_recovered_from_valid_persisted_stream(tmp_path):
     assert provider.calls == [(raw, workspace)]
 
 
+def test_completed_planner_artifact_resumes_without_provider_call(tmp_path):
+    from agentbench_frame.hl.cli import _pending_planner_recovery
+
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    persisted = tmp_path / "run" / "proposals" / "iter-000001" / "branch_briefs.json"
+    persisted.parent.mkdir(parents=True)
+    persisted.write_text(
+        json.dumps(
+            [
+                {
+                    "branch_index": index,
+                    "diagnosis": f"diagnosis-{index}",
+                    "mechanism": mechanism,
+                    "activation_condition": f"condition-{index}",
+                    "preservation_contract": f"preserve-{index}",
+                    "expected_change": f"expected-{index}",
+                    "falsifier": f"falsifier-{index}",
+                }
+                for index, mechanism in enumerate(
+                    ("route", "shield", "portal", "escape")
+                )
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    recovered = _pending_planner_recovery(
+        [
+            {
+                "event_type": "proposal_cycle_started",
+                "iteration_id": "iter-000001",
+            },
+            {
+                "event_type": "planner_completed",
+                "iteration_id": "iter-000001",
+                "act_id": "act-000001-planner",
+                "branch_briefs": str(persisted),
+            },
+        ],
+        provider=object(),
+        workspace=workspace,
+    )
+
+    assert recovered.status == "completed"
+    assert recovered.metadata["recovered_from_persisted_output"] is True
+    assert (workspace / ".agentbench" / "branch_briefs.json").read_bytes() == persisted.read_bytes()
+
+
+def test_pending_repair_is_recovered_from_checkpoint_and_immutable_version(tmp_path):
+    from agentbench_frame.hl.cli import _pending_repair_recoveries
+    from agentbench_frame.hl.codebase import VersionStore
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    (workspace / "agent.py").write_text("VALUE = 1\n", encoding="utf-8")
+    store = VersionStore(workspace, tmp_path / "versions")
+    initial = store.snapshot(parent_version_id=None, act_id="act-initial")
+    (workspace / "agent.py").write_text("VALUE = 2\n", encoding="utf-8")
+    repaired = store.snapshot(
+        parent_version_id=initial.version_id,
+        act_id="act-000006-repair-b01",
+        edit_type="repair",
+    )
+    checkpoint = tmp_path / "checkpoints" / "act-000006-repair-b01.json"
+    checkpoint.parent.mkdir()
+    checkpoint.write_text(
+        json.dumps(
+            {
+                "act_id": repaired.act_id,
+                "iteration_id": "iter-000012",
+                "branch_index": 1,
+                "provider_status": "completed",
+                "raw_output_ref": str(tmp_path / "provider.jsonl"),
+            }
+        ),
+        encoding="utf-8",
+    )
+    evaluation = CandidateEvaluation(status="complete", score=1.0)
+    historical = [
+        {
+            "event_type": "proposal_cycle_started",
+            "iteration_id": "iter-000012",
+        },
+        {
+            "event_type": "checkpoint_created",
+            "iteration_id": "iter-000012",
+            "act_id": repaired.act_id,
+            "path": str(checkpoint),
+        },
+        {
+            "event_type": "version_created",
+            "version_id": repaired.version_id,
+            "act_id": repaired.act_id,
+            "content_hash": repaired.content_hash,
+        },
+        {
+            "event_type": "repair_completed",
+            "iteration_id": "iter-000012",
+            "act_id": repaired.act_id,
+            "branch_index": 1,
+            "initial_version_id": initial.version_id,
+            "repaired_version_id": repaired.version_id,
+            "status": "completed",
+        },
+    ]
+
+    recovered = _pending_repair_recoveries(
+        historical,
+        version_store=store,
+        evaluations_by_version={repaired.version_id: evaluation},
+    )
+
+    assert recovered[1].version == repaired
+    assert recovered[1].evaluation is evaluation
+    assert recovered[1].provider.metadata["recovered_from_persisted_output"] is True
+
+
 def test_interrupted_bootstrap_with_clean_file_change_is_recoverable(tmp_path):
     from agentbench_frame.hl.cli import _bootstrap_recovery_candidate
     from agentbench_frame.tracking.provider import ProviderInvocation

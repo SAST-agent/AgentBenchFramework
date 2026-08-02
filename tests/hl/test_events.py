@@ -210,6 +210,68 @@ class HLEventTests(unittest.TestCase):
             self.assertEqual(event["proposal_cycle"], 3)
             self.assertEqual(event["mean_score_margin"], -12.5)
 
+    def test_repair_events_are_strict_finalized_facts(self):
+        from agentbench_frame.hl.events import HLEventWriter, read_events
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as directory:
+            path = f"{directory}/events.jsonl"
+            writer = HLEventWriter(path, run_id="run-repair")
+            writer.write(
+                "repairs_selected",
+                iteration_id="iter-000012",
+                branch_indices=[1, 3],
+                version_ids=["v000002", "v000004"],
+            )
+            writer.write(
+                "repair_started",
+                iteration_id="iter-000012",
+                act_id="act-000006-repair-b01",
+                branch_index=1,
+                initial_version_id="v000002",
+                repair_input_path=f"{directory}/repair_input-b01.json",
+            )
+            writer.write(
+                "repair_completed",
+                iteration_id="iter-000012",
+                act_id="act-000006-repair-b01",
+                branch_index=1,
+                initial_version_id="v000002",
+                repaired_version_id="v000005",
+                status="completed",
+            )
+            writer.write(
+                "branch_representative_selected",
+                iteration_id="iter-000012",
+                branch_index=1,
+                initial_version_id="v000002",
+                repaired_version_id="v000005",
+                representative_version_id="v000005",
+                reason="repair_strictly_improved",
+            )
+
+            events = read_events(path)
+            self.assertEqual(
+                [event["event_type"] for event in events],
+                [
+                    "repairs_selected",
+                    "repair_started",
+                    "repair_completed",
+                    "branch_representative_selected",
+                ],
+            )
+            with self.assertRaisesRegex(ValueError, "unknown fields"):
+                writer.write(
+                    "repair_completed",
+                    iteration_id="iter-000012",
+                    act_id="act-000006-repair-b01",
+                    branch_index=1,
+                    initial_version_id="v000002",
+                    repaired_version_id="v000005",
+                    status="completed",
+                    invented=True,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -680,7 +680,7 @@ def test_top_two_linear_repair_keeps_four_branches_and_two_descendants(tmp_path)
     from agentbench_frame.hl.config import IterationConfig, RollbackConfig
     from agentbench_frame.hl.controller import HLController
     from agentbench_frame.hl.evaluator import CandidateEvaluation
-    from agentbench_frame.hl.events import HLEventWriter
+    from agentbench_frame.hl.events import HLEventWriter, read_events
     from agentbench_frame.hl.lineage import LineageManager
     from agentbench_frame.tracking.provider import ProviderInvocation
 
@@ -819,6 +819,17 @@ def test_top_two_linear_repair_keeps_four_branches_and_two_descendants(tmp_path)
     }
     assert result.repairs[0].representative is result.repairs[0].repaired
     assert result.repairs[1].representative is result.repairs[1].initial
+    reducer = json.loads(result.reducer_input_path.read_text(encoding="utf-8"))
+    assert len(reducer["initial_candidates"]) == 4
+    assert len(reducer["repairs"]) == 2
+    assert len(reducer["representatives"]) == 4
+    event_types = [
+        event["event_type"]
+        for event in read_events(tmp_path / "events.jsonl")
+    ]
+    assert event_types.count("repair_started") == 2
+    assert event_types.count("repair_completed") == 2
+    assert event_types.count("branch_representative_selected") == 4
 
 
 def test_failed_reducer_output_cannot_mutate_research_state(tmp_path):

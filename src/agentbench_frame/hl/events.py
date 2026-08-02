@@ -50,6 +50,10 @@ KNOWN_EVENT_TYPES = frozenset(
         "proposal_cycle_completed",
         "reporting_panel_completed",
         "bootstrap_recovered",
+        "repairs_selected",
+        "repair_started",
+        "repair_completed",
+        "branch_representative_selected",
     }
 )
 _SECRET_KEYS = frozenset({"api_key", "authorization", "access_token", "secret"})
@@ -216,6 +220,41 @@ _EVENT_FIELDS = {
         },
         set(),
     ),
+    "repairs_selected": (
+        {"iteration_id", "branch_indices", "version_ids"},
+        set(),
+    ),
+    "repair_started": (
+        {
+            "iteration_id",
+            "act_id",
+            "branch_index",
+            "initial_version_id",
+            "repair_input_path",
+        },
+        set(),
+    ),
+    "repair_completed": (
+        {
+            "iteration_id",
+            "act_id",
+            "branch_index",
+            "initial_version_id",
+            "repaired_version_id",
+            "status",
+        },
+        set(),
+    ),
+    "branch_representative_selected": (
+        {
+            "iteration_id",
+            "branch_index",
+            "initial_version_id",
+            "representative_version_id",
+            "reason",
+        },
+        {"repaired_version_id"},
+    ),
 }
 
 
@@ -249,6 +288,8 @@ def _validate_record(record: Mapping[str, Any]) -> None:
         "stage_best_version_id", "completed_target", "next_target",
         "error_type", "error_message", "rejected_version_id",
         "branch_briefs", "input_path", "output_path", "selected_version_id",
+        "initial_version_id", "repaired_version_id",
+        "representative_version_id", "repair_input_path",
     ):
         if field in record and record[field] is not None and not isinstance(record[field], str):
             raise ValueError(f"{event_type}.{field} must be a string or null")
@@ -286,6 +327,7 @@ def _validate_record(record: Mapping[str, Any]) -> None:
         "episode_local_policy_kl",
         "locked_opponents", "lost_locked_opponents",
         "version_ids", "candidate_version_ids",
+        "branch_indices",
     ):
         if field in record and not isinstance(record[field], list):
             raise ValueError(f"{event_type}.{field} must be a list")
@@ -293,6 +335,16 @@ def _validate_record(record: Mapping[str, Any]) -> None:
         record["iteration_config"], Mapping
     ):
         raise ValueError(f"{event_type}.iteration_config must be an object")
+    if "branch_indices" in record and any(
+        not isinstance(value, int) or isinstance(value, bool)
+        for value in record["branch_indices"]
+    ):
+        raise ValueError(f"{event_type}.branch_indices must contain integers")
+    for field in ("version_ids", "candidate_version_ids"):
+        if field in record and any(
+            not isinstance(value, str) or not value for value in record[field]
+        ):
+            raise ValueError(f"{event_type}.{field} must contain version ids")
 
 
 def _validate_safe(value: Any, path: str = "event") -> None:

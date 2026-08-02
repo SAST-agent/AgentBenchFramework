@@ -690,12 +690,33 @@ def _pending_planner_recovery(
     if pending is None:
         return None
     iteration_id = str(pending["iteration_id"])
-    if any(
-        event.get("event_type") == "planner_completed"
-        and str(event.get("iteration_id")) == iteration_id
-        for event in historical
-    ):
-        return None
+    completed_planner = next(
+        (
+            event
+            for event in reversed(historical)
+            if event.get("event_type") == "planner_completed"
+            and str(event.get("iteration_id")) == iteration_id
+        ),
+        None,
+    )
+    if completed_planner is not None:
+        from agentbench_frame.tracking.provider import ProviderInvocation
+
+        persisted = Path(str(completed_planner["branch_briefs"]))
+        if not persisted.is_file():
+            return None
+        load_branch_briefs(persisted, expected_count=4)
+        workspace_briefs = Path(workspace) / ".agentbench" / "branch_briefs.json"
+        workspace_briefs.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(persisted, workspace_briefs)
+        return ProviderInvocation(
+            status="completed",
+            metadata={
+                "act_id": str(completed_planner["act_id"]),
+                "iteration_id": iteration_id,
+                "recovered_from_persisted_output": True,
+            },
+        )
     failed = next(
         (
             event
@@ -727,6 +748,193 @@ def _pending_planner_recovery(
             "iteration_id": iteration_id,
         }
     )
+    return recovered
+
+
+def _pending_repair_recoveries(
+    historical: list[dict[str, Any]],
+    *,
+    version_store: Any,
+    evaluations_by_version: dict[str, CandidateEvaluation],
+) -> dict[int, Any]:
+    """Rebuild verified completed repairs from one interrupted proposal cycle."""
+
+    from agentbench_frame.hl.controller import CandidateResult
+    from agentbench_frame.tracking.provider import ProviderInvocation
+
+    completed_cycles = {
+        str(event.get("iteration_id"))
+        for event in historical
+        if event.get("event_type") == "proposal_cycle_completed"
+    }
+    pending = next(
+        (
+            event
+            for event in reversed(historical)
+            if event.get("event_type") == "proposal_cycle_started"
+            and str(event.get("iteration_id")) not in completed_cycles
+        ),
+        None,
+    )
+    if pending is None:
+        return {}
+    iteration_id = str(pending["iteration_id"])
+    versions = {
+        str(event["version_id"]): event
+        for event in historical
+        if event.get("event_type") == "version_created"
+    }
+    checkpoints = {
+        str(event["act_id"]): event
+        for event in historical
+        if event.get("event_type") == "checkpoint_created"
+        and str(event.get("iteration_id")) == iteration_id
+    }
+    recovered: dict[int, CandidateResult] = {}
+    for event in historical:
+        if (
+            event.get("event_type") != "repair_completed"
+            or str(event.get("iteration_id")) != iteration_id
+            or event.get("status") != "completed"
+        ):
+            continue
+        branch_index = int(event["branch_index"])
+        act_id = str(event["act_id"])
+        version_id = str(event["repaired_version_id"])
+        version_event = versions.get(version_id)
+        checkpoint_event = checkpoints.get(act_id)
+        evaluation = evaluations_by_version.get(version_id)
+        if version_event is None or checkpoint_event is None or evaluation is None:
+            continue
+        checkpoint_path = Path(str(checkpoint_event["path"]))
+        if not checkpoint_path.is_file():
+            continue
+        checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+        if (
+            checkpoint.get("act_id") != act_id
+            or checkpoint.get("iteration_id") != iteration_id
+            or int(checkpoint.get("branch_index", -1)) != branch_index
+            or checkpoint.get("provider_status") != "completed"
+            or version_event.get("act_id") != act_id
+        ):
+            continue
+        version = version_store.get(version_id)
+        if (
+            version.content_hash != version_event.get("content_hash")
+            or version.parent_version_id
+            != str(event["initial_version_id"])
+        ):
+            continue
+        recovered[branch_index] = CandidateResult(
+            act_id=act_id,
+            branch_index=branch_index,
+            version=version,
+            evaluation=evaluation,
+            provider=ProviderInvocation(
+                status="completed",
+                raw_output_ref=checkpoint.get("raw_output_ref"),
+                metadata={
+                    "act_id": act_id,
+                    "iteration_id": iteration_id,
+                    "recovered_from_persisted_output": True,
+                },
+            ),
+        )
+    return recovered
+
+
+def _pending_candidate_recoveries(
+    historical: list[dict[str, Any]],
+    *,
+    version_store: Any,
+    evaluations_by_version: dict[str, CandidateEvaluation],
+) -> dict[int, Any]:
+    """Rebuild completed initial siblings in an interrupted proposal cycle."""
+
+    from agentbench_frame.hl.controller import CandidateResult
+    from agentbench_frame.tracking.provider import ProviderInvocation
+
+    completed_cycles = {
+        str(event.get("iteration_id"))
+        for event in historical
+        if event.get("event_type") == "proposal_cycle_completed"
+    }
+    pending = next(
+        (
+            event
+            for event in reversed(historical)
+            if event.get("event_type") == "proposal_cycle_started"
+            and str(event.get("iteration_id")) not in completed_cycles
+        ),
+        None,
+    )
+    if pending is None:
+        return {}
+    iteration_id = str(pending["iteration_id"])
+    parent_id = str(pending["parent_version_id"])
+    acts = {
+        str(event["act_id"]): event
+        for event in historical
+        if event.get("event_type") == "act_completed"
+        and str(event.get("iteration_id")) == iteration_id
+        and event.get("status") == "completed"
+        and isinstance(event.get("branch_index"), int)
+    }
+    checkpoints = {
+        str(event["act_id"]): event
+        for event in historical
+        if event.get("event_type") == "checkpoint_created"
+        and str(event.get("iteration_id")) == iteration_id
+    }
+    recovered: dict[int, CandidateResult] = {}
+    for version_event in historical:
+        if (
+            version_event.get("event_type") != "version_created"
+            or version_event.get("edit_type") != "candidate"
+            or version_event.get("parent_version_id") != parent_id
+        ):
+            continue
+        act_id = str(version_event["act_id"])
+        act = acts.get(act_id)
+        checkpoint_event = checkpoints.get(act_id)
+        version_id = str(version_event["version_id"])
+        evaluation = evaluations_by_version.get(version_id)
+        if act is None or checkpoint_event is None or evaluation is None:
+            continue
+        branch_index = int(act["branch_index"])
+        checkpoint_path = Path(str(checkpoint_event["path"]))
+        if not checkpoint_path.is_file():
+            continue
+        checkpoint = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+        if (
+            checkpoint.get("act_id") != act_id
+            or checkpoint.get("iteration_id") != iteration_id
+            or checkpoint.get("parent_version_id") != parent_id
+            or int(checkpoint.get("branch_index", -1)) != branch_index
+            or checkpoint.get("provider_status") != "completed"
+        ):
+            continue
+        version = version_store.get(version_id)
+        if (
+            version.content_hash != version_event.get("content_hash")
+            or version.parent_version_id != parent_id
+        ):
+            continue
+        recovered[branch_index] = CandidateResult(
+            act_id=act_id,
+            branch_index=branch_index,
+            version=version,
+            evaluation=evaluation,
+            provider=ProviderInvocation(
+                status="completed",
+                raw_output_ref=checkpoint.get("raw_output_ref"),
+                metadata={
+                    "act_id": act_id,
+                    "iteration_id": iteration_id,
+                    "recovered_from_persisted_output": True,
+                },
+            ),
+        )
     return recovered
 
 
@@ -1287,6 +1495,24 @@ def _run_real(
                     else ()
                 ),
             )
+    pending_repair_recoveries = (
+        _pending_repair_recoveries(
+            historical,
+            version_store=version_store,
+            evaluations_by_version=evaluations_by_version,
+        )
+        if resume
+        else {}
+    )
+    pending_candidate_recoveries = (
+        _pending_candidate_recoveries(
+            historical,
+            version_store=version_store,
+            evaluations_by_version=evaluations_by_version,
+        )
+        if resume
+        else {}
+    )
 
     curriculum_manager: CurriculumManager | None = None
     shared_distillation_path: Path | None = None
@@ -1460,6 +1686,27 @@ def _run_real(
             locked_opponents=locked_opponents,
         )
 
+    def repair_summary_resolver(match: dict[str, Any]) -> dict[str, Any]:
+        replay = match.get("replay")
+        summary_path = (
+            None
+            if replay is None
+            else _ensure_replay_summary(
+                replay=str(replay),
+                summarizer=(
+                    bundle.files["replay_skill"].parent
+                    / "scripts"
+                    / "summarize_replay.py"
+                ),
+            )
+        )
+        return {
+            "summary": None if summary_path is None else str(summary_path),
+            "replay": replay,
+            "trace": match.get("trace"),
+            "candidate_fault": _trace_fault_summary(match.get("trace")),
+        }
+
     controller = HLController(
         workspace=workspace,
         run_root=run_dir,
@@ -1476,6 +1723,7 @@ def _run_real(
         research_state_max_bytes=(
             config.run.context.research_state_max_bytes
         ),
+        summary_resolver=repair_summary_resolver,
     )
 
     def sync_research_state() -> None:
@@ -2205,6 +2453,8 @@ def _run_real(
                         next_parent
                     ),
                     planner_recovery=pending_planner_recovery,
+                    candidate_recoveries=pending_candidate_recoveries,
+                    repair_recoveries=pending_repair_recoveries,
                 )
                 if config.run.iteration.planner_enabled
                 else controller.run_act(
@@ -2213,6 +2463,8 @@ def _run_real(
                 )
             )
             pending_planner_recovery = None
+            pending_candidate_recoveries = {}
+            pending_repair_recoveries = {}
             completed_here += 1
             stop_reason = _iteration_stop_reason(iteration_result)
             if stop_reason is not None:

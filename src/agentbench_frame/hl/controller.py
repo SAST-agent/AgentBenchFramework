@@ -645,6 +645,8 @@ class HLController:
         branch_briefs: tuple[BranchBrief, ...] | None = None,
         promote_champion: bool = True,
         parent_evaluation: CandidateEvaluation | None = None,
+        candidate_recoveries: Mapping[int, CandidateResult] | None = None,
+        repair_recoveries: Mapping[int, CandidateResult] | None = None,
     ) -> IterationResult:
         if not self._started:
             raise RuntimeError("initialize must be called before run_act")
@@ -676,6 +678,15 @@ class HLController:
         )
 
         for branch_index in range(branch_count):
+            recovered_candidate = (candidate_recoveries or {}).get(branch_index)
+            if recovered_candidate is not None:
+                if (
+                    recovered_candidate.branch_index != branch_index
+                    or recovered_candidate.version.parent_version_id != parent_id
+                ):
+                    raise ValueError("recovered candidate lineage does not match")
+                results.append(recovered_candidate)
+                continue
             act_id = f"act-{self._coding_agent_acts + 1:06d}-b{branch_index:02d}"
             results.append(
                 self._run_coding_candidate(
@@ -744,6 +755,14 @@ class HLController:
                 reverse=True,
             )
             repair_targets = eligible[: self.iteration.repair_top_k]
+            self.events.write(
+                "repairs_selected",
+                iteration_id=iteration_id,
+                branch_indices=[target.branch_index for target in repair_targets],
+                version_ids=[
+                    target.version.version_id for target in repair_targets
+                ],
+            )
             proposal_root = self.run_root / "proposals" / iteration_id
             for initial in repair_targets:
                 repair_input = build_repair_packet(
@@ -761,22 +780,52 @@ class HLController:
                     f"act-{self._coding_agent_acts + 1:06d}"
                     f"-repair-b{initial.branch_index:02d}"
                 )
-                repaired = self._run_coding_candidate(
-                    iteration_id=iteration_id,
-                    act_id=act_id,
-                    branch_index=initial.branch_index,
-                    branch_count=branch_count,
-                    parent_version_id=initial.version.version_id,
-                    phase="repair",
-                    prompt_values={
-                        "branch_brief": branch_briefs[
-                            initial.branch_index
-                        ].to_dict(),
-                        "repair_input": str(repair_input),
-                    },
-                    edit_type="repair",
-                    staged_evaluation=staged_evaluation,
-                )
+                recovered = (repair_recoveries or {}).get(initial.branch_index)
+                if recovered is not None:
+                    if recovered.branch_index != initial.branch_index:
+                        raise ValueError("recovered repair branch does not match")
+                    recovered_parent_id = recovered.version.parent_version_id
+                    if recovered_parent_id is None:
+                        raise ValueError("recovered repair requires a parent version")
+                    recovered_parent = self.version_store.get(recovered_parent_id)
+                    if recovered_parent.content_hash != initial.version.content_hash:
+                        recovered = None
+                if recovered is None:
+                    self.events.write(
+                        "repair_started",
+                        iteration_id=iteration_id,
+                        act_id=act_id,
+                        branch_index=initial.branch_index,
+                        initial_version_id=initial.version.version_id,
+                        repair_input_path=str(repair_input),
+                    )
+                    repaired = self._run_coding_candidate(
+                        iteration_id=iteration_id,
+                        act_id=act_id,
+                        branch_index=initial.branch_index,
+                        branch_count=branch_count,
+                        parent_version_id=initial.version.version_id,
+                        phase="repair",
+                        prompt_values={
+                            "branch_brief": branch_briefs[
+                                initial.branch_index
+                            ].to_dict(),
+                            "repair_input": str(repair_input),
+                        },
+                        edit_type="repair",
+                        staged_evaluation=staged_evaluation,
+                    )
+                    self.events.write(
+                        "repair_completed",
+                        iteration_id=iteration_id,
+                        act_id=act_id,
+                        branch_index=initial.branch_index,
+                        initial_version_id=initial.version.version_id,
+                        repaired_version_id=repaired.version.version_id,
+                        status=repaired.provider.status,
+                    )
+                else:
+                    repaired = recovered
                 representative = select_branch_representative(initial, repaired)
                 representatives[initial.branch_index] = representative
                 repairs.append(
@@ -787,6 +836,29 @@ class HLController:
                         representative=representative,
                         repair_input_path=repair_input,
                     )
+                )
+            repair_by_branch = {repair.branch_index: repair for repair in repairs}
+            for initial, representative in zip(results, representatives):
+                repair = repair_by_branch.get(initial.branch_index)
+                self.events.write(
+                    "branch_representative_selected",
+                    iteration_id=iteration_id,
+                    branch_index=initial.branch_index,
+                    initial_version_id=initial.version.version_id,
+                    repaired_version_id=(
+                        None
+                        if repair is None or repair.repaired is None
+                        else repair.repaired.version.version_id
+                    ),
+                    representative_version_id=representative.version.version_id,
+                    reason=(
+                        "not_repaired"
+                        if repair is None
+                        else "repair_strictly_improved"
+                        if representative.version.version_id
+                        == repair.repaired.version.version_id
+                        else "initial_retained"
+                    ),
                 )
 
         finalists: tuple[CandidateResult, ...] = ()
@@ -927,6 +999,8 @@ class HLController:
         defer_experience: bool = False,
         parent_evaluation: CandidateEvaluation | None = None,
         planner_recovery: ProviderInvocation | None = None,
+        candidate_recoveries: Mapping[int, CandidateResult] | None = None,
+        repair_recoveries: Mapping[int, CandidateResult] | None = None,
     ) -> ProposalCycleResult:
         """Run one planner, four sibling candidates, and one reducer."""
 
@@ -1030,6 +1104,8 @@ class HLController:
             branch_briefs=briefs,
             promote_champion=False,
             parent_evaluation=parent_evaluation,
+            candidate_recoveries=candidate_recoveries,
+            repair_recoveries=repair_recoveries,
         )
         finalists = iteration.finalists
         if iteration.selected not in finalists:
@@ -1051,6 +1127,18 @@ class HLController:
                     "best_candidate_version_id": (
                         iteration.selected.version.version_id
                     ),
+                    "initial_candidates": [
+                        {
+                            "branch_index": candidate.branch_index,
+                            "act_id": candidate.act_id,
+                            "version_id": candidate.version.version_id,
+                            "status": candidate.evaluation.status,
+                            "score": candidate.evaluation.score,
+                            "brief": briefs[candidate.branch_index].to_dict(),
+                            "matches": list(candidate.evaluation.matches),
+                        }
+                        for candidate in iteration.candidates
+                    ],
                     "candidates": [
                         {
                             "branch_index": candidate.branch_index,
@@ -1062,6 +1150,47 @@ class HLController:
                             "matches": list(candidate.evaluation.matches),
                         }
                         for candidate in iteration.candidates
+                    ],
+                    "repairs": [
+                        {
+                            "branch_index": repair.branch_index,
+                            "repair_input_path": str(repair.repair_input_path),
+                            "initial": {
+                                "act_id": repair.initial.act_id,
+                                "version_id": repair.initial.version.version_id,
+                                "status": repair.initial.evaluation.status,
+                                "score": repair.initial.evaluation.score,
+                                "matches": list(repair.initial.evaluation.matches),
+                            },
+                            "repaired": (
+                                None
+                                if repair.repaired is None
+                                else {
+                                    "act_id": repair.repaired.act_id,
+                                    "version_id": repair.repaired.version.version_id,
+                                    "status": repair.repaired.evaluation.status,
+                                    "score": repair.repaired.evaluation.score,
+                                    "matches": list(
+                                        repair.repaired.evaluation.matches
+                                    ),
+                                }
+                            ),
+                            "representative_version_id": (
+                                repair.representative.version.version_id
+                            ),
+                        }
+                        for repair in iteration.repairs
+                    ],
+                    "representatives": [
+                        {
+                            "branch_index": candidate.branch_index,
+                            "act_id": candidate.act_id,
+                            "version_id": candidate.version.version_id,
+                            "status": candidate.evaluation.status,
+                            "score": candidate.evaluation.score,
+                            "matches": list(candidate.evaluation.matches),
+                        }
+                        for candidate in iteration.representatives
                     ],
                 },
                 ensure_ascii=False,
