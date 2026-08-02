@@ -77,7 +77,7 @@ run:
     full_pool_every_iteration: false
     reporting_panel_every_cycle: true
     reporting_seeds_per_opponent: 1
-    max_parallel_matches: 4
+    max_parallel_matches: 1
 paths:
   agentbench_root: "${AGENTBENCH_SAST_ROOT}/AgentBench"
   official_logic_root: "${AGENTBENCH_SAST_ROOT}/PacmanLogic"
