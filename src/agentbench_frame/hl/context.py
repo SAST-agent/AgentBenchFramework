@@ -486,9 +486,13 @@ Planner 压缩边界：
         active_target: Optional[str] = None,
         locked_opponents: Sequence[str] = (),
         scope_contract_required: bool = True,
+        candidate_input_path: str | Path | None = None,
     ) -> str:
         if int(branch_brief.get("branch_index", -1)) != branch_index:
             raise ValueError("branch brief index does not match candidate branch")
+        prompt_measurements = dict(previous_measurements)
+        if candidate_input_path is not None:
+            prompt_measurements.pop("opponent_distillation_path", None)
         base = self.build_prompt(
             act_id=act_id,
             branch_index=branch_index,
@@ -496,7 +500,7 @@ Planner 压缩边界：
             parent_version_id=parent_version_id,
             workspace=workspace,
             replay_evidence=replay_evidence,
-            previous_measurements=previous_measurements,
+            previous_measurements=prompt_measurements,
             experience_path=experience_path,
             active_target=active_target,
             locked_opponents=locked_opponents,
@@ -511,6 +515,44 @@ Planner 压缩边界：
             "1. 先阅读 context manifest 指向的规则、决策空间和 Replay Skill，再阅读 workspace 中的代码。",
             "1. 先读取 compact game digest、research state、指定 evidence summary 和 workspace 代码；只有改动依赖精确规则语义时才按 manifest 定点核对权威章节，不要求每轮完整重读静态长文。",
         )
+        if candidate_input_path is not None:
+            packet = Path(candidate_input_path).resolve()
+            evidence = json.dumps(
+                replay_evidence,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            measurements = json.dumps(
+                prompt_measurements,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            base = base.replace(
+                f"- compact game digest: {Path(game_digest_path).resolve()}\n"
+                f"- explicit research state: {Path(research_state_path).resolve()}\n"
+                "- authoritative context manifest:",
+                f"- candidate input packet: {packet}\n"
+                "- authoritative context manifest:",
+                1,
+            ).replace(
+                f"- Experience Skill: {Path(experience_path).resolve()}",
+                "- Experience Skill: embedded in candidate input packet",
+                1,
+            ).replace(
+                f"上一轮测量：{measurements}\n必须核查的回放证据：{evidence}",
+                "上一轮测量与必须核查的回放证据：embedded in candidate input packet",
+                1,
+            ).replace(
+                "- 必须先读取 evidence 中的 `summary`；不得打印完整 replay、完整 trace、完整棋盘或全量事件流。",
+                "- candidate input packet 已内嵌全部有界 summary；不得再次逐项读取 summary 文件，不得打印完整 replay、完整 trace、完整棋盘或全量事件流。",
+                1,
+            ).replace(
+                "1. 先读取 compact game digest、research state、指定 evidence summary 和 workspace 代码；只有改动依赖精确规则语义时才按 manifest 定点核对权威章节，不要求每轮完整重读静态长文。",
+                "1. 第一次调用只读取 candidate input packet；随后读取 workspace 相关代码。只有改动依赖精确规则语义时才按 manifest 定点核对权威章节，不要求每轮完整重读静态长文。",
+                1,
+            )
         brief = json.dumps(
             dict(branch_brief),
             ensure_ascii=False,
@@ -537,7 +579,7 @@ Planner 压缩边界：
 {scope_contract}
 
 候选 checkpoint-first 顺序：
-- 第一次调用批量读取 game digest、research state、全部指定 summary、共享蒸馏与 Experience Skill；不要逐个读取 summary。
+- 第一次调用只读取 candidate input packet；其中已内嵌 game digest、research state、全部有界 summary、共享蒸馏与 Experience Skill，禁止再次分别读取这些文件。
 - 第二次调用用符号索引定位 `ai.py` 的入口与 brief 涉及的已有机制；第三次只读相关代码区间，不得顺序打印完整 ai.py。
 - 第四次最多读取两个定点 trace 窗口；第 6 次工具调用结束前必须已完成 `ai.py` 的首次可编译修改并写入 experience_update.json。
 - 首次修改落盘后，只允许编译、一次对象 smoke，以及为修复验证失败所必需的一次更正；不得把实现留到长推理末尾。

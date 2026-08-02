@@ -16,6 +16,8 @@ Candidates with at least one changed action continue into the existing quick scr
 
 Repair packets retain exact replay and trace paths but also embed bounded replay-summary text. Repair prompts instruct the coding model to use the packet's embedded evidence directly. This removes the need for directory traversal or path-discovery scripts and keeps the provider access guard strict.
 
+Candidate acts receive the same bounded-context treatment through one per-branch `candidate_input` artifact. It embeds the compact game digest, research state, Experience Skill, replay summaries, measurements, and shared opponent distillation while retaining exact trace paths for at most two authorized windows. The first coding-agent call reads this single artifact instead of issuing separate reads for every static input.
+
 ## Data and Events
 
 `candidate_activation_measured` records the iteration, act, branch, parent and candidate version IDs, status, decision count, changed action count, changed fraction, and per-episode summaries. A zero-change rejection uses the machine-readable error `no_parent_trace_action_change`.

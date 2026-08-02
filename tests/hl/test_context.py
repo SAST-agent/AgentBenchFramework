@@ -501,6 +501,50 @@ def test_scope_contract_ablation_logs_scope_without_enforcing_it(tmp_path):
     assert "不得修改全局 scorer" not in prompt
 
 
+def test_candidate_prompt_uses_one_prebuilt_context_packet(tmp_path):
+    from agentbench_frame.hl.context import ContextBundle, IterationContext
+
+    bundle = ContextBundle.create(
+        tmp_path / "bundle",
+        _digest_files(tmp_path / "assets"),
+    )
+    packet = tmp_path / "candidate_input-b00.json"
+    packet.write_text("{}\n", encoding="utf-8")
+    prompt = IterationContext(bundle).build_candidate_prompt(
+        act_id="act-b00",
+        branch_index=0,
+        branch_count=4,
+        parent_version_id="v000041",
+        workspace=tmp_path / "candidate",
+        game_digest_path=tmp_path / "game_digest.json",
+        research_state_path=tmp_path / "research_state.json",
+        replay_evidence=[
+            {
+                "opponent": "rank15",
+                "summary": "/matches/seed-101/summary.md",
+                "trace": "/matches/seed-101/trace.jsonl",
+            }
+        ],
+        previous_measurements={"score": 0.25},
+        experience_path=tmp_path / "experience" / "SKILL.md",
+        branch_brief={
+            "branch_index": 0,
+            "diagnosis": "level 3 round 12 capture",
+            "mechanism": "junction escape",
+            "activation_condition": "one safe exit",
+            "preservation_contract": "ordinary routing stays unchanged",
+            "expected_change": "survive",
+            "falsifier": "capture time does not improve",
+        },
+        active_target="rank15",
+        candidate_input_path=packet,
+    )
+
+    assert str(packet) in prompt
+    assert "第一次调用只读取 candidate input packet" in prompt
+    assert "逐个读取 summary" not in prompt
+
+
 def test_bootstrap_prompt_creates_interpretable_origin_without_fake_replay(tmp_path):
     from agentbench_frame.hl.context import ContextBundle, IterationContext
 

@@ -77,3 +77,21 @@
 - [x] Run all tests with the required sandbox permissions.
 - [x] Generate the current run report and verify integer iteration axes and trustworthy metrics.
 - [x] Commit the implementation without API credentials or run artifacts.
+
+### Task 5: Single-read candidate input
+
+**Files:**
+- Modify: `src/agentbench_frame/hl/proposal.py`
+- Modify: `src/agentbench_frame/hl/context.py`
+- Modify: `src/agentbench_frame/hl/cli.py`
+- Test: `tests/hl/test_proposal.py`
+- Test: `tests/hl/test_context.py`
+
+**Interfaces:**
+- Consumes: compact context files, replay summary paths, branch brief, and measurements.
+- Produces: one bounded `candidate_input-bNN.json` artifact referenced by the candidate prompt.
+
+- [x] Write failing tests for bounded inline context and the one-read prompt contract.
+- [x] Implement deterministic packet creation and CLI wiring.
+- [x] Run focused prompt/proposal/controller tests.
+- [x] Run the complete regression suite.

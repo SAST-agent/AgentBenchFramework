@@ -26,6 +26,7 @@ from agentbench_frame.hl.config import HLRunConfig
 from agentbench_frame.hl.evaluator import CandidateEvaluation
 from agentbench_frame.hl.experience import ExperienceManager
 from agentbench_frame.hl.local_config import LocalHLConfig
+from agentbench_frame.hl.proposal import write_candidate_input_packet
 
 
 _SECRET_LIKE = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}")
@@ -1789,6 +1790,23 @@ def _run_real(
                 reducer_input_path=reducer_input,
             )
         if phase == "candidate" and values.get("branch_brief") is not None:
+            candidate_input = write_candidate_input_packet(
+                output_path=(
+                    run_dir
+                    / "proposals"
+                    / values["iteration_id"]
+                    / f"candidate_input-b{values['branch_index']:02d}.json"
+                ),
+                iteration_id=values["iteration_id"],
+                branch_brief=values["branch_brief"],
+                game_digest_path=game_digest_path,
+                research_state_path=research_state_path,
+                experience_path=experience.path,
+                replay_evidence=evidence,
+                previous_measurements=previous_measurements,
+                active_target=active_target,
+                locked_opponents=tuple(locked_opponents),
+            )
             return iteration_context.build_candidate_prompt(
                 act_id=values["act_id"],
                 branch_index=values["branch_index"],
@@ -1806,6 +1824,7 @@ def _run_real(
                 scope_contract_required=(
                     config.run.iteration.scope_contract_required
                 ),
+                candidate_input_path=candidate_input,
             )
         return iteration_context.build_prompt(
             act_id=values["act_id"],

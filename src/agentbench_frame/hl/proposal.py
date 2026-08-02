@@ -9,6 +9,10 @@ from pathlib import Path
 from typing import Any, Mapping
 
 
+_INLINE_SUMMARY_LIMIT = 12_000
+_INLINE_TEXT_LIMIT = 24_000
+
+
 @dataclasses.dataclass(frozen=True)
 class BranchBrief:
     branch_index: int
@@ -21,6 +25,74 @@ class BranchBrief:
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
+
+
+def _bounded_text(path: str | Path, *, limit: int) -> str:
+    text = Path(path).read_text(encoding="utf-8")
+    if len(text) > limit:
+        return text[:limit] + "\n[summary truncated]"
+    return text
+
+
+def write_candidate_input_packet(
+    *,
+    output_path: str | Path,
+    iteration_id: str,
+    branch_brief: Mapping[str, Any],
+    game_digest_path: str | Path,
+    research_state_path: str | Path,
+    experience_path: str | Path,
+    replay_evidence: list[Mapping[str, Any]],
+    previous_measurements: Mapping[str, Any],
+    active_target: str | None,
+    locked_opponents: tuple[str, ...],
+) -> Path:
+    """Write one bounded candidate context artifact for a single first read."""
+
+    evidence = []
+    for item in replay_evidence:
+        bounded = dict(item)
+        summary = item.get("summary")
+        if isinstance(summary, str) and Path(summary).is_file():
+            bounded["summary_text"] = _bounded_text(
+                summary,
+                limit=_INLINE_SUMMARY_LIMIT,
+            )
+        evidence.append(bounded)
+    measurements = dict(previous_measurements)
+    distillation = None
+    distillation_path = measurements.get("opponent_distillation_path")
+    if isinstance(distillation_path, str) and Path(distillation_path).is_file():
+        raw = _bounded_text(distillation_path, limit=_INLINE_TEXT_LIMIT)
+        try:
+            distillation = json.loads(raw)
+        except json.JSONDecodeError:
+            distillation = raw
+    value = {
+        "schema_version": "1.0",
+        "iteration_id": iteration_id,
+        "branch_brief": dict(branch_brief),
+        "active_target": active_target,
+        "locked_opponents": list(locked_opponents),
+        "game_digest": json.loads(Path(game_digest_path).read_text(encoding="utf-8")),
+        "research_state": json.loads(
+            Path(research_state_path).read_text(encoding="utf-8")
+        ),
+        "experience_skill": _bounded_text(
+            experience_path,
+            limit=_INLINE_TEXT_LIMIT,
+        ),
+        "replay_evidence": evidence,
+        "previous_measurements": measurements,
+        "opponent_distillation": distillation,
+    }
+    destination = Path(output_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return destination
 
 
 def branch_briefs_json_schema(*, expected_count: int) -> dict[str, Any]:
