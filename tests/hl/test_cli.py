@@ -92,6 +92,36 @@ def test_opponent_distillation_is_cached_by_trace_content(tmp_path, monkeypatch)
     assert first.stat().st_size < 24 * 1024
 
 
+def test_opponent_distillation_uses_inherited_research_debt(tmp_path):
+    from agentbench_frame.hl.cli import _opponent_distillation_required
+    from agentbench_frame.hl.research_state import ResearchState
+
+    state_path = ResearchState.empty(max_bytes=16384).advance(
+        exploration_debt=3,
+    ).write(tmp_path / "research_state.json")
+
+    assert _opponent_distillation_required(
+        stagnation_count=1,
+        research_state_path=state_path,
+        research_state_max_bytes=16384,
+    ) is True
+
+
+def test_opponent_distillation_waits_when_all_stagnation_signals_are_low(tmp_path):
+    from agentbench_frame.hl.cli import _opponent_distillation_required
+    from agentbench_frame.hl.research_state import ResearchState
+
+    state_path = ResearchState.empty(max_bytes=16384).advance(
+        exploration_debt=2,
+    ).write(tmp_path / "research_state.json")
+
+    assert _opponent_distillation_required(
+        stagnation_count=2,
+        research_state_path=state_path,
+        research_state_max_bytes=16384,
+    ) is False
+
+
 def test_main_curve_measurement_only_uses_linear_selected_successor():
     from types import SimpleNamespace
 

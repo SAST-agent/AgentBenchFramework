@@ -313,17 +313,21 @@ Act 预算：
             "opponent_distillation_path"
         )
         distillation = ""
-        if stagnation_count >= 3:
-            if shared_distillation:
-                distillation = f"""
-停滞干预（连续无提升 {stagnation_count} 轮）：
+        if shared_distillation:
+            trigger_label = (
+                f"连续无提升 {stagnation_count} 轮"
+                if stagnation_count >= 3
+                else "继承研究债务达到阈值"
+            )
+            distillation = f"""
+停滞干预（{trigger_label}）：
 - 读取共享 Ghost 蒸馏：`{Path(str(shared_distillation)).resolve()}`；不得重复运行蒸馏脚本。
 - 蒸馏只含相对几何和原子 Ghost 动作统计；用 fine table + coarse backoff 构造可解释预测器。
 - 我方角色是 Rollman，不能复制 Ghost 动作；应预测 Ghost 下一步路径后选择 Rollman 动作。
 - 不得把 seed、绝对坐标、对手身份或 replay ID 写入策略；Rollman 的 KL 决策空间保持不变。
 """
-            else:
-                distillation = f"""
+        elif stagnation_count >= 3:
+            distillation = f"""
 停滞干预（连续无提升 {stagnation_count} 轮）：
 - 检验“可预测的 Ghost 行为能否支持 best response”，同时允许保留有回放证据支持的局部规则。
 - 对 evidence 中全部 trace 一次性运行 `{distillation_tool} TRACE1 TRACE2 TRACE3`。
@@ -421,7 +425,7 @@ Act 预算：
             "opponent_distillation_path"
         )
         distillation = ""
-        if stagnation_count >= 3 and shared_distillation:
+        if shared_distillation:
             distillation = f"""
 共享 Ghost 蒸馏：{Path(str(shared_distillation)).resolve()}
 先读取该坐标无关统计，再提出四个使用方式不同的 best-response 机制；不得重复运行蒸馏脚本。Rollman 只能预测 Ghost 行为后选择自身动作，不能复制 Ghost 动作。

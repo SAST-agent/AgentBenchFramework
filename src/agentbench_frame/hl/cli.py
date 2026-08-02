@@ -178,6 +178,23 @@ def _ensure_opponent_distillation(
     return destination
 
 
+def _opponent_distillation_required(
+    *,
+    stagnation_count: int,
+    research_state_path: str | Path,
+    research_state_max_bytes: int,
+) -> bool:
+    """Trigger intervention from either run-local or inherited stagnation."""
+
+    from agentbench_frame.hl.research_state import ResearchState
+
+    state = ResearchState.load_or_create(
+        research_state_path,
+        max_bytes=research_state_max_bytes,
+    )
+    return stagnation_count >= 3 or state.exploration_debt >= 3
+
+
 def _trace_fault_summary(trace: str | Path | None) -> dict[str, str] | None:
     """Return the latest bounded Rollman fault for the next coding act."""
 
@@ -1684,7 +1701,13 @@ def _run_real(
         )
         if phase == "planner":
             shared_distillation_path = None
-        if stagnation_count >= 3:
+        if _opponent_distillation_required(
+            stagnation_count=stagnation_count,
+            research_state_path=research_state_path,
+            research_state_max_bytes=(
+                config.run.context.research_state_max_bytes
+            ),
+        ):
             traces = [
                 str(item["trace"])
                 for item in evidence
