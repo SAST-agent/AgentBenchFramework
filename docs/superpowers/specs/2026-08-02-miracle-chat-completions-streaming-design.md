@@ -11,9 +11,12 @@ Make OpenAI-compatible Chat Completions streaming the default Miracle Harness tr
 ```toml
 [llm]
 stream = true
+max_context_tokens = 1000000
 ```
 
 The default is `true`. Set `stream = false` only for endpoints that do not support SSE streaming. The client never silently retries a failed streaming request as non-streaming because that could issue two billable requests for one iteration.
+
+`max_tokens` becomes optional and defaults to absent. When absent, the Harness does not send a generation-length limit. `max_context_tokens` defaults to `1_000_000` and limits reported prompt plus completion usage for accounting. Because tokenizer behavior is model-specific and the project has no tokenizer dependency, the Harness does not claim an exact pre-request token count; input size remains controlled by episode/decision-read budgets, and actual API usage is authoritative.
 
 ## Request
 
@@ -27,6 +30,8 @@ Streaming requests add:
 ```
 
 All existing fields, including `reasoning_effort`, remain unchanged. Non-streaming requests add `"stream": false` and omit `stream_options`.
+
+The request includes `max_tokens` only when the user explicitly configures it. It never sends `max_context_tokens`, which is a Harness budget rather than an OpenAI request field.
 
 ## SSE Parsing
 
@@ -67,7 +72,8 @@ The stored response additionally contains `stream=true`, `chunk_count`, `first_c
 - A complete stream whose assistant content is empty or invalid remains `assistant_content` or `proposal_json` as today.
 - Usage is charged even when later proposal parsing or strategy validation fails.
 - If the endpoint omits final usage, token counters remain zero and `usage_missing=true`; the Harness does not estimate tokens and does not invent accounting data.
-- `max_tokens` truncation remains visible through `finish_reason="length"`; streaming prevents idle gateway timeout but does not remove output limits.
+- When an endpoint or explicit `max_tokens` truncates output, `finish_reason="length"` remains visible; streaming prevents idle gateway timeout but does not remove provider-side output limits.
+- Reported `total_tokens > max_context_tokens` is preserved as a context-budget failure after charging the real usage.
 
 ## Compatibility Boundary
 
