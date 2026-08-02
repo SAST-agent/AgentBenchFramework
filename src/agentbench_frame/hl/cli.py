@@ -2331,6 +2331,7 @@ def _run_real(
                 origin = controller.initialize_imported(
                     source_run=config.run.origin.source_run,
                     source_version_id=config.run.origin.source_version,
+                    evaluate=True,
                 )
             else:
                 if provider is None:

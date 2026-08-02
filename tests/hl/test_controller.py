@@ -370,6 +370,35 @@ def test_imported_origin_is_registered_without_a_provider_call(tmp_path):
     assert origin_events[0]["version_id"] == imported.version_id
 
 
+def test_imported_origin_can_be_evaluated_before_curriculum_checks(tmp_path):
+    from agentbench_frame.hl.codebase import VersionStore
+
+    source_root = tmp_path / "source"
+    source_root.mkdir()
+    source_workspace = _workspace(source_root)
+    source_run = source_root / "run-source"
+    source_store = VersionStore(source_workspace, source_run / "versions")
+    source = source_store.snapshot(parent_version_id=None, act_id="source-act")
+    target_root = tmp_path / "target"
+    target_root.mkdir()
+    class TrackingEvaluator(FakeEvaluator):
+        def evaluate(self, version):
+            self.last_evaluation = super().evaluate(version)
+            return self.last_evaluation
+
+    evaluator = TrackingEvaluator([0.75])
+    controller = _controller(target_root, FakeProvider([]), evaluator)
+
+    imported = controller.initialize_imported(
+        source_run=source_run,
+        source_version_id=source.version_id,
+        evaluate=True,
+    )
+
+    assert evaluator.last_evaluation.score == 0.75
+    assert controller.lineage.versions[imported.version_id].status == "complete"
+
+
 def test_bootstrap_rejects_unchanged_scaffold_without_creating_origin(tmp_path):
     import pytest
 

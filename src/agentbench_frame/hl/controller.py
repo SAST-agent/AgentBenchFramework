@@ -319,6 +319,7 @@ class HLController:
         *,
         source_run: str | Path,
         source_version_id: str,
+        evaluate: bool = False,
     ) -> Version:
         """Register a verified external snapshot without a provider call."""
 
@@ -333,10 +334,14 @@ class HLController:
             source_root / "versions",
             source_version_id,
         )
-        evaluation = CandidateEvaluation(
-            status="incomplete",
-            score=None,
-            error="imported origin has not been evaluated",
+        evaluation = (
+            self.evaluator.evaluate(version)
+            if evaluate
+            else CandidateEvaluation(
+                status="incomplete",
+                score=None,
+                error="imported origin has not been evaluated",
+            )
         )
         self.lineage.record_evaluation(
             version.version_id,
@@ -348,7 +353,7 @@ class HLController:
             version,
             evaluation,
             selected=True,
-            record_evaluation=False,
+            record_evaluation=evaluate,
         )
         self.events.write(
             "candidate_selected",
@@ -363,6 +368,12 @@ class HLController:
             source_content_hash=source.content_hash,
             version_id=version.version_id,
         )
+        if evaluation.status == "complete":
+            self.events.write(
+                "champion_promoted",
+                version_id=version.version_id,
+                score=evaluation.score,
+            )
         self._started = True
         return version
 
