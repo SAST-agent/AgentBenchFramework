@@ -428,7 +428,15 @@ Act 预算：
         if shared_distillation:
             distillation = f"""
 共享 Ghost 蒸馏：{Path(str(shared_distillation)).resolve()}
-先读取该坐标无关统计，再提出四个使用方式不同的 best-response 机制；不得重复运行蒸馏脚本。Rollman 只能预测 Ghost 行为后选择自身动作，不能复制 Ghost 动作。
+先读取该坐标无关统计；不得重复运行蒸馏脚本。Rollman 只能预测 Ghost 行为后选择自身动作，不能直接复制 Ghost 动作。
+
+四分支探索职责：
+- branch 0：蒸馏预测 best response。把 fine table 与 coarse backoff 变成坐标无关 Ghost 下一步预测器，再让 Rollman 对预测动作求可解释 best response。
+- branch 1：进攻得分或完成关卡。利用预测 Ghost 运动提高采集、得分或 FINISH_LEVEL 效率，不能把目标退化为纯避险。
+- branch 2：对手得分来源反事实。从回放识别 Ghost 得分/连续捕获的可观测来源，并用 Rollman 原子动作压制该来源或复刻有效路线结构；不得记忆 seed、绝对坐标或对手身份。
+- branch 3：机制上不同的新方向。结合摘要和 research state 提出不属于前三支、且未被失败证据否定的机制。
+
+至少两支必须以推进、得分、完成关卡或压制对手得分为主目标，不能让四支都以 veto、retreat、wait 或 avoid-contact 为主要机制。Rollman 的 KL 原子决策空间保持不变。
 """
         return f"""# Rollman HL hypothesis planner {act_id}
 

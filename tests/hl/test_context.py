@@ -254,6 +254,46 @@ def test_prompt_uses_controller_supplied_distillation_from_research_debt(tmp_pat
     assert "不得重复运行蒸馏脚本" in prompt
 
 
+def test_planner_distillation_assigns_offensive_and_predictive_branch_roles(tmp_path):
+    from agentbench_frame.hl.context import ContextBundle, IterationContext
+
+    bundle = ContextBundle.create(
+        tmp_path / "bundle",
+        _static_files(tmp_path / "assets"),
+    )
+    shared = tmp_path / "shared-distillation.json"
+    shared.write_text("{}\n", encoding="utf-8")
+    context = IterationContext(bundle)
+    common = {
+        "act_id": "act-planner",
+        "iteration_id": "iter-000012",
+        "parent_version_id": "v000055",
+        "workspace": tmp_path / "candidate",
+        "game_digest_path": tmp_path / "digest.json",
+        "research_state_path": tmp_path / "research.json",
+        "replay_evidence": [{"summary": "summary.md"}],
+        "active_target": "rank15",
+    }
+
+    prompt = context.build_planner_prompt(
+        **common,
+        previous_measurements={"opponent_distillation_path": str(shared)},
+    )
+    ordinary_prompt = context.build_planner_prompt(
+        **common,
+        previous_measurements={},
+    )
+
+    assert "branch 0：蒸馏预测 best response" in prompt
+    assert "branch 1：进攻得分或完成关卡" in prompt
+    assert "branch 2：对手得分来源反事实" in prompt
+    assert "branch 3：机制上不同的新方向" in prompt
+    assert "至少两支必须以推进、得分、完成关卡或压制对手得分为主目标" in prompt
+    assert "不能直接复制 Ghost 动作" in prompt
+    assert "不得重复运行蒸馏脚本" in prompt
+    assert "branch 0：蒸馏预测 best response" not in ordinary_prompt
+
+
 def test_planner_prompt_requires_early_durable_branch_briefs(tmp_path):
     from agentbench_frame.hl.context import ContextBundle, IterationContext
 
