@@ -57,7 +57,11 @@ APPROVED_BOOTSTRAP_SHA256 = (
 # Production approvals are code-reviewed control-plane state.  Run files and
 # public APIs cannot override them.  Tests may monkeypatch them temporarily.
 CURRENT_APPROVED_HUMAN_CHAMPION_SHA256: str | None = None
-APPROVED_HUMAN_REPLAY_SKILL_SHA256: frozenset[str] = frozenset()
+APPROVED_HUMAN_REPLAY_SKILL_SHA256: frozenset[str] = frozenset(
+    {
+        "cd16e9eec4c9549a8384debad8f5e6ab8bd7865dcdc83c1cf00dfdc061657e37",
+    }
+)
 APPROVED_MATCH_PLAN_MANIFEST_SHA256: frozenset[str] = frozenset()
 APPROVED_REPLAY_EVIDENCE_MANIFEST_SHA256: frozenset[str] = frozenset()
 APPROVED_CANDIDATE_EVALUATION_PLAN_SHA256: frozenset[str] = frozenset()

@@ -161,11 +161,15 @@ def _build_bundle(tmp_path: Path, monkeypatch=None, *, role="train", replay_name
     }
 
 
-def test_production_approval_tables_are_empty_and_self_signed_assets_are_rejected(tmp_path):
+def test_production_approval_tables_are_exact_and_self_signed_assets_are_rejected(tmp_path):
     protocol = _protocol()
     bundle = _build_bundle(tmp_path)
     assert protocol.CURRENT_APPROVED_HUMAN_CHAMPION_SHA256 is None
-    assert protocol.APPROVED_HUMAN_REPLAY_SKILL_SHA256 == frozenset()
+    assert protocol.APPROVED_HUMAN_REPLAY_SKILL_SHA256 == frozenset(
+        {
+            "cd16e9eec4c9549a8384debad8f5e6ab8bd7865dcdc83c1cf00dfdc061657e37"
+        }
+    )
     assert protocol.APPROVED_MATCH_PLAN_MANIFEST_SHA256 == frozenset()
     assert protocol.APPROVED_REPLAY_EVIDENCE_MANIFEST_SHA256 == frozenset()
     with pytest.raises(protocol.IterationPreflightError, match="approved"):

@@ -131,6 +131,24 @@ from agentbench_frame.games.miracle.replay_reading_v1 import (
     preflight_replay_reading,
     render_replay_timeline,
 )
+from agentbench_frame.games.miracle.real_replay_approvals_v1 import (
+    APPROVED_REAL_JUDGE_REPLAY_MANIFESTS,
+)
+from agentbench_frame.games.miracle.real_replay_adapter_v1 import (
+    REAL_JUDGE_DECISION_FRAME_SCHEMA_VERSION,
+    REAL_JUDGE_MANIFEST_SCHEMA_VERSION,
+    REAL_JUDGE_PACKET_SCHEMA_VERSION,
+    RealJudgeDecisionFrame,
+    RealJudgeReplayCandidate,
+    RealJudgeReplayPacket,
+    RealJudgeReplayReadingContext,
+    audit_real_judge_replay_candidate,
+    canonical_real_replay_json_bytes,
+    current_adapter_identity,
+    open_real_judge_replay,
+    preflight_real_judge_replay,
+    require_authoritative_real_replay_packet,
+)
 
 __all__ = [
     "GameOutcome", "WIN", "LOSS", "DRAW", "ERROR", "VALID_RESULTS",
@@ -177,4 +195,11 @@ __all__ = [
     "validate_distribution",
     "DecisionFrame", "ReplayPacket", "ReplayReadingContext",
     "open_replay_reading", "preflight_replay_reading", "render_replay_timeline",
+    "APPROVED_REAL_JUDGE_REPLAY_MANIFESTS",
+    "REAL_JUDGE_DECISION_FRAME_SCHEMA_VERSION", "REAL_JUDGE_MANIFEST_SCHEMA_VERSION",
+    "REAL_JUDGE_PACKET_SCHEMA_VERSION", "RealJudgeDecisionFrame",
+    "RealJudgeReplayCandidate", "RealJudgeReplayPacket", "RealJudgeReplayReadingContext",
+    "audit_real_judge_replay_candidate", "canonical_real_replay_json_bytes",
+    "current_adapter_identity", "open_real_judge_replay", "preflight_real_judge_replay",
+    "require_authoritative_real_replay_packet",
 ]

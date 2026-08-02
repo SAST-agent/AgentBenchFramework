@@ -600,7 +600,7 @@ def test_replay_evidence_requires_exact_planned_case_coverage(tmp_path, monkeypa
         protocol.build_replay_evidence_manifest(match, (first_evidence, outside))
 
 
-def test_production_apis_expose_no_approval_override_and_tables_are_empty():
+def test_production_apis_expose_no_approval_override_and_control_tables_are_exact():
     protocol = _protocol()
     for name in (
         "preflight_match",
@@ -616,7 +616,11 @@ def test_production_apis_expose_no_approval_override_and_tables_are_empty():
             for parameter in inspect.signature(getattr(protocol, name)).parameters
         )
     assert protocol.CURRENT_APPROVED_HUMAN_CHAMPION_SHA256 is None
-    assert protocol.APPROVED_HUMAN_REPLAY_SKILL_SHA256 == frozenset()
+    assert protocol.APPROVED_HUMAN_REPLAY_SKILL_SHA256 == frozenset(
+        {
+            "cd16e9eec4c9549a8384debad8f5e6ab8bd7865dcdc83c1cf00dfdc061657e37"
+        }
+    )
     assert protocol.APPROVED_MATCH_PLAN_MANIFEST_SHA256 == frozenset()
     assert protocol.APPROVED_REPLAY_EVIDENCE_MANIFEST_SHA256 == frozenset()
 
