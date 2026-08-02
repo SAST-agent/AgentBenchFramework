@@ -1,129 +1,157 @@
-"""CLI（要求 1/3/4/5 的操作入口）：
-
-    python -m agentbench_frame.miracle.cli match    --agent sample --seed 11
-    python -m agentbench_frame.miracle.cli evaluate --agent sample_v2 --seed 11 --iteration 1
-    python -m agentbench_frame.miracle.cli iterate  --agents sample,sample_v2 --seed 11
-    python -m agentbench_frame.miracle.cli replay   --path <xxx.mrc>
-    python -m agentbench_frame.miracle.cli versions
-    python -m agentbench_frame.miracle.cli curves   --agent sample
-"""
+"""Miracle 核心入口：运行对战与解析回放。"""
 
 from __future__ import annotations
 
 import argparse
 import json
-import sys
+from pathlib import Path
+
+from .agent_bridge import AGENTS
 
 
 def _cmd_match(args) -> int:
-    from .agent_bridge import EndRoundAgent
-    from .iterate import AGENTS
     from .match import run_match
-    agent = AGENTS[args.agent]()
-    match = run_match(agent, EndRoundAgent(), seed=args.seed,
-                      tag=f"cli_{args.agent}_seed{args.seed}")
+
+    result = run_match(
+        AGENTS[args.agent0](),
+        AGENTS[args.agent1](),
+        seed=args.seed,
+        replay_dir=args.output_dir,
+        tag=args.tag or f"{args.agent0}_vs_{args.agent1}",
+    )
     print(json.dumps({
-        "winner": match.winner, "scores": list(match.scores),
-        "rounds": match.rounds, "terminated_by": match.terminated_by,
-        "replay": match.replay_path, "trace": match.trace_path,
+        "agent0": args.agent0,
+        "agent1": args.agent1,
+        "winner": result.winner,
+        "scores": list(result.scores),
+        "rounds": result.rounds,
+        "terminated_by": result.terminated_by,
+        "errors": list(result.errors),
+        "replay": result.replay_path,
+        "trace": result.trace_path,
     }, ensure_ascii=False, indent=2))
-    return 0
-
-
-def _cmd_evaluate(args) -> int:
-    from .iterate import run_iteration, export_run
-    ev = run_iteration(args.agent, seed=args.seed, iteration=args.iteration)
-    if args.save:
-        export_run(ev, agent_dir_name=args.agent_dir)
-    print(json.dumps({
-        "iteration": ev.iteration, "version": ev.version,
-        "score": ev.score, "winner": ev.match.winner,
-        "rounds": ev.match.rounds,
-        "ig": ev.ig.get("episode_kl") if ev.ig else None,
-        "ig_missing": ev.ig.get("missing") if ev.ig else {},
-    }, ensure_ascii=False, indent=2))
-    return 0
-
-
-def _cmd_iterate(args) -> int:
-    from .loop import run_loop
-    agents = [a.strip() for a in args.agents.split(",") if a.strip()]
-    run_loop(agents, seed=args.seed, agent_dir_name=args.agent_dir)
-    print(f"iterate 完成：{agents}，events 见 agentbench_data/events/24_miracle/iterations.jsonl")
-    return 0
+    return 0 if result.terminated_by in {"normal", "timeout"} else 1
 
 
 def _cmd_replay(args) -> int:
-    from .replay import parse_replay, summarize, save_replay_json
+    from .replay import parse_replay, save_replay_json, summarize
+
     events = parse_replay(args.path)
-    s = summarize(events)
-    print(json.dumps(s, ensure_ascii=False, indent=2))
+    print(json.dumps(summarize(events), ensure_ascii=False, indent=2))
     if args.jsonl:
-        out = args.jsonl
-        save_replay_json(events, out)
-        print(f"事件时间线已写: {out}")
+        save_replay_json(events, args.jsonl)
+        print(f"事件时间线已写: {args.jsonl}")
     return 0
 
 
-def _cmd_versions(args) -> int:
-    from .versions import list_versions
-    for v in list_versions(game=args.game):
-        print(json.dumps(v, ensure_ascii=False))
+def _cmd_ig(args) -> int:
+    from .ig import (
+        build_ig_curve,
+        compare_agents_on_trace,
+        load_episode_ig,
+        save_episode_ig,
+        save_ig_curve,
+        versions_from_episodes,
+    )
+
+    episode = compare_agents_on_trace(
+        args.trace,
+        AGENTS[args.old](),
+        AGENTS[args.new](),
+        camp=args.camp,
+        iteration=args.iteration,
+        old_version=args.old,
+        new_version=args.new,
+    )
+    episode_path = save_episode_ig(episode, args.output_dir)
+    episodes = load_episode_ig(args.output_dir)
+    curve = build_ig_curve(episodes, versions=versions_from_episodes(episodes))
+    curve_path = args.output_dir / "ig_curve.json"
+    save_ig_curve(curve, curve_path)
+    print(json.dumps({
+        "episode": str(episode_path.resolve()),
+        "curve": str(curve_path.resolve()),
+        "iteration": args.iteration,
+        "old_version": args.old,
+        "new_version": args.new,
+        "n_decisions": episode["n_decisions"],
+        "finite_kl_mean": episode["finite_kl_mean"],
+        "unchanged_ratio": episode["unchanged_ratio"],
+        "infinite_ratio": episode["infinite_ratio"],
+        "missing_ratio": episode["missing_ratio"],
+    }, ensure_ascii=False, indent=2))
     return 0
 
 
-def _cmd_curves(args) -> int:
-    from .iterate import build_curves, curves_ascii
-    curves = build_curves(agent=args.agent, game=args.game)
-    print(curves_ascii(curves))
-    if args.json:
-        with open(args.json, "w", encoding="utf-8") as f:
-            json.dump(curves, f, ensure_ascii=False, indent=2)
-        print(f"曲线 JSON 已写: {args.json}")
+def _cmd_loop(args) -> int:
+    from .loop import run_loop
+    from .loop_config import LoopConfig
+
+    config = LoopConfig.from_toml(args.config)
+    run_dir = run_loop(config, data_dir=args.data_dir)
+    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+    print(json.dumps({
+        "run_dir": str(run_dir.resolve()),
+        "run_id": summary["run_id"],
+        "status": summary["status"],
+        "score_curve": str((run_dir / "score_curve.json").resolve()),
+        "ig_curve": str((run_dir / "ig_curve.json").resolve()),
+    }, ensure_ascii=False, indent=2))
     return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="miracle", description="Miracle 对战、回放与严格 KL 状态工具")
+    sub = parser.add_subparsers(dest="cmd", required=True)
+    names = sorted(AGENTS)
+
+    match = sub.add_parser("match", help="运行一局官方逻辑对战")
+    match.add_argument("--agent0", default="sample", choices=names, help="先手 Agent")
+    match.add_argument("--agent1", default="endround", choices=names, help="后手 Agent")
+    match.add_argument("--seed", type=int, default=11)
+    match.add_argument(
+        "--output-dir", type=Path,
+        default=Path("agentbench_data") / "replays" / "24_miracle",
+        help=".mrc 与 .trace.jsonl 的统一输出目录",
+    )
+    match.add_argument("--tag", default="", help="写入文件名的简短标识")
+    match.set_defaults(func=_cmd_match)
+
+    replay = sub.add_parser("replay", help="解析官方 .mrc 回放")
+    replay.add_argument("--path", type=Path, required=True)
+    replay.add_argument("--jsonl", type=Path, help="可选的事件时间线输出路径")
+    replay.set_defaults(func=_cmd_replay)
+
+    ig = sub.add_parser("ig", help="在真实 trace 上比较新旧确定性策略")
+    ig.add_argument("--trace", type=Path, required=True, help="match 生成的 .trace.jsonl")
+    ig.add_argument("--old", required=True, choices=names, help="更新前 Agent 版本")
+    ig.add_argument("--new", required=True, choices=names, help="更新后 Agent 版本")
+    ig.add_argument("--camp", type=int, choices=(0, 1), required=True, help="trace 中待比较的阵营")
+    ig.add_argument("--iteration", type=int, required=True, help="新版本 iteration，须大于 0")
+    ig.add_argument(
+        "--output-dir", type=Path,
+        default=Path("agentbench_data") / "ig" / "24_miracle",
+        help="episode IG 与 ig_curve.json 的统一输出目录",
+    )
+    ig.set_defaults(func=_cmd_ig)
+
+    loop = sub.add_parser("loop", help="执行一次可追溯的 LLM 策略迭代 Run")
+    loop.add_argument("--config", type=Path, required=True, help="Loop TOML 配置")
+    loop.add_argument(
+        "--data-dir", type=Path,
+        help="结果根目录；默认读取 AGENTBENCH_DATA，否则使用 agentbench_data",
+    )
+    loop.set_defaults(func=_cmd_loop)
+
+    return parser
 
 
 def main(argv=None) -> int:
-    p = argparse.ArgumentParser(prog="miracle", description="Miracle 24 届迭代工具")
-    sub = p.add_subparsers(dest="cmd", required=True)
-
-    pm = sub.add_parser("match", help="跑一局对战（官方逻辑子进程）")
-    pm.add_argument("--agent", default="sample", choices=["sample", "sample_v2"])
-    pm.add_argument("--seed", type=int, default=11)
-    pm.set_defaults(func=_cmd_match)
-
-    pe = sub.add_parser("evaluate", help="单次迭代评测（含 IG 计算）")
-    pe.add_argument("--agent", default="sample_v2", choices=["sample", "sample_v2"])
-    pe.add_argument("--seed", type=int, default=11)
-    pe.add_argument("--iteration", type=int, default=1)
-    pe.add_argument("--agent-dir", default="sample")
-    pe.add_argument("--no-save", action="store_true")
-    pe.set_defaults(func=_cmd_evaluate)
-
-    pi = sub.add_parser("iterate", help="迭代编排：改策略→存版本→再评测")
-    pi.add_argument("--agents", default="sample,sample_v2")
-    pi.add_argument("--seed", type=int, default=11)
-    pi.add_argument("--agent-dir", default="sample")
-    pi.set_defaults(func=_cmd_iterate)
-
-    pr = sub.add_parser("replay", help="解析 .mrc 二进制回放")
-    pr.add_argument("--path", required=True)
-    pr.add_argument("--jsonl")
-    pr.set_defaults(func=_cmd_replay)
-
-    pv = sub.add_parser("versions", help="列出版本快照")
-    pv.add_argument("--game", default="24_miracle")
-    pv.set_defaults(func=_cmd_versions)
-
-    pc = sub.add_parser("curves", help="score/IG 曲线")
-    pc.add_argument("--agent", default="sample")
-    pc.add_argument("--game", default="24_miracle")
-    pc.add_argument("--json")
-    pc.set_defaults(func=_cmd_curves)
-
-    args = p.parse_args(argv)
+    args = build_parser().parse_args(argv)
+    if args.cmd == "ig" and args.iteration <= 0:
+        raise SystemExit("--iteration 必须大于 0")
     return args.func(args)
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

@@ -1,0 +1,23 @@
+agent = "tested_llm"
+initial_strategy = "miracle-initial-strategy.py"
+opponent = "sample"
+
+[llm]
+base_url = "https://api.openai.com"
+api_key_env = "OPENAI_API_KEY"
+model = "your-model-name"
+temperature = 0.0
+max_tokens = 8192
+timeout_seconds = 120
+
+[evaluation]
+seeds = [11]
+seats = [0, 1]
+
+[budget]
+max_iterations = 1
+max_rollouts = 4
+max_episode_reads = 1
+max_decision_reads = 500
+max_total_tokens = 20000
+max_wall_seconds = 1800
