@@ -281,6 +281,74 @@ def test_provider_does_not_retry_failed_act_after_token_usage(tmp_path, monkeypa
     assert result.usage.total_tokens == 27
 
 
+def test_provider_cools_down_next_act_after_rate_limit(tmp_path, monkeypatch):
+    """A 429 must delay the next sibling instead of burning it immediately."""
+
+    from agentbench_frame.hl.provider import CodexSessionProvider
+
+    limited = (
+        '{"type":"thread.started","thread_id":"thread-limited"}\n'
+        '{"type":"error","message":"exceeded retry limit, last status: 429 Too Many Requests"}\n'
+        '{"type":"turn.failed","error":{"message":"429 Too Many Requests"}}\n'
+    )
+    completed = (
+        '{"type":"thread.started","thread_id":"thread-after-cooldown"}\n'
+        '{"type":"turn.completed","usage":{"input_tokens":20,"output_tokens":7}}\n'
+    )
+    outputs = iter((limited, completed))
+
+    def run(command, **_kwargs):
+        output = next(outputs)
+        return subprocess.CompletedProcess(
+            command,
+            1 if output == limited else 0,
+            output,
+            "",
+        )
+
+    class Clock:
+        def __init__(self):
+            self.now = 100.0
+            self.sleeps = []
+
+        def monotonic(self):
+            return self.now
+
+        def sleep(self, seconds):
+            self.sleeps.append(seconds)
+            self.now += seconds
+
+    clock = Clock()
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr("agentbench_frame.hl.provider.time.monotonic", clock.monotonic)
+    monkeypatch.setattr("agentbench_frame.hl.provider.time.sleep", clock.sleep)
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    provider = CodexSessionProvider(
+        _provider_config(
+            transport_retry_attempts=0,
+            rate_limit_cooldown_seconds=30.0,
+        ),
+        run_root=tmp_path / "run",
+        environ={"AGENTBENCH_API_KEY": "sk-runtime-only"},
+    )
+
+    first = provider.invoke(
+        prompt="first sibling",
+        workspace=workspace,
+        raw_output_path=tmp_path / "run" / "provider" / "act-one.jsonl",
+    )
+    second = provider.invoke(
+        prompt="next sibling",
+        workspace=workspace,
+        raw_output_path=tmp_path / "run" / "provider" / "act-two.jsonl",
+    )
+
+    assert first.status == "failed"
+    assert second.status == "completed"
+    assert clock.sleeps == [30.0]
+
+
 def test_provider_rejects_tool_reads_from_another_run(tmp_path):
     from agentbench_frame.hl.provider import CodexSessionProvider
 

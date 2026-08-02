@@ -46,6 +46,7 @@ class CodexSessionProvider:
         self.environ = dict(os.environ if environ is None else environ)
         self.timeout_s = timeout_s
         self.idle_timeout_s = idle_timeout_s
+        self._rate_limit_resume_at = 0.0
         self._write_config()
 
     def _write_config(self) -> None:
@@ -159,12 +160,19 @@ class CodexSessionProvider:
         retry_outputs: list[str] = []
         max_attempts = self.config.transport_retry_attempts + 1
         for attempt_index in range(max_attempts):
+            self._respect_rate_limit_cooldown()
             result = self._invoke_once(
                 prompt=prompt,
                 workspace=workspace,
                 raw_output_path=raw_path,
                 session_id=session_id,
             )
+            if self._is_rate_limit_failure(result, raw_path):
+                result.metadata["rate_limited"] = True
+                self._rate_limit_resume_at = max(
+                    self._rate_limit_resume_at,
+                    time.monotonic() + self.config.rate_limit_cooldown_seconds,
+                )
             should_retry = (
                 attempt_index + 1 < max_attempts
                 and self._is_retryable_transport_failure(result, raw_path)
@@ -184,6 +192,33 @@ class CodexSessionProvider:
             if backoff:
                 time.sleep(backoff)
         raise AssertionError("provider retry loop must return")
+
+    def _respect_rate_limit_cooldown(self) -> None:
+        remaining = self._rate_limit_resume_at - time.monotonic()
+        if remaining > 0:
+            time.sleep(remaining)
+
+    @staticmethod
+    def _is_rate_limit_failure(
+        result: ProviderInvocation,
+        raw_output_path: str | Path,
+    ) -> bool:
+        if result.status != "failed":
+            return False
+        raw_path = Path(raw_output_path)
+        raw_output = (
+            raw_path.read_text(encoding="utf-8", errors="replace")
+            if raw_path.is_file()
+            else ""
+        )
+        diagnostic = " ".join(
+            (
+                str(result.error or ""),
+                str(result.metadata.get("stderr") or ""),
+                raw_output,
+            )
+        ).lower()
+        return "429 too many requests" in diagnostic
 
     def _invoke_once(
         self,

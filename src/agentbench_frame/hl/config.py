@@ -42,6 +42,7 @@ class ProviderConfig:
     idle_timeout_seconds: int = 360
     transport_retry_attempts: int = 3
     transport_retry_backoff_seconds: float = 2.0
+    rate_limit_cooldown_seconds: float = 60.0
 
     def __post_init__(self) -> None:
         if self.kind != "codex":
@@ -65,6 +66,10 @@ class ProviderConfig:
         if self.transport_retry_backoff_seconds < 0:
             raise ValueError(
                 "provider.transport_retry_backoff_seconds must be >= 0"
+            )
+        if self.rate_limit_cooldown_seconds < 0:
+            raise ValueError(
+                "provider.rate_limit_cooldown_seconds must be >= 0"
             )
 
 
