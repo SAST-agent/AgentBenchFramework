@@ -1,1 +1,10 @@
 __pycache__/
+.venv/
+uv.lock
+*.o
+*.out
+*.zip
+*.trace.jsonl
+*.stderr
+agentbench_data/
+AgentBenchResults/

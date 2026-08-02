@@ -23,6 +23,7 @@ def test_routes_two_factions_and_preserves_trace(tmp_path):
     assert result.winner == 0
     assert result.scores == (12.0, 7.0)
     assert result.terminated_by == "normal"
+    assert result.metadata["map_sha256"] is None
     assert result.replay_path.is_file()
     rows = [json.loads(line) for line in result.trace_path.read_text().splitlines()]
     assert {row["kind"] for row in rows} == {"observation", "action", "final"}

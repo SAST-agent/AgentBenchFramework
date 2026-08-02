@@ -11,6 +11,10 @@ import tomllib
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .decision_space import canonicalize_action
+from .process import ManagedProcess
+from .protocol import read_ai_frame, write_ai_observation
+
 
 @dataclass(frozen=True)
 class PopulationPolicy:
@@ -58,6 +62,25 @@ def source_hash(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _protocol_smoke(executable: Path, timeout: float = 2.0) -> tuple[bool, str]:
+    process = ManagedProcess.start([str(executable)], cwd=executable.parent, label="population-smoke")
+    humans = [[human_id, 10.0, 175.0, 100, 1, 0, 1, 0, 0, -1, 0]
+              for human_id in range(10)]
+    try:
+        init = {"frame": 0, "map": 0, "faction": 0}
+        frame = {"frame": 1, "humans": humans, "fireballs": [], "meteors": [],
+                 "balls": [[20, 20, -1, 0], [30, 30, -1, 1]],
+                 "scores": [0, 0], "bonus": [0, 0]}
+        write_ai_observation(process.stdin, json.dumps(init, separators=(",", ":")).encode())
+        write_ai_observation(process.stdin, json.dumps(frame, separators=(",", ":")).encode())
+        canonicalize_action(json.loads(read_ai_frame(process.stdout, timeout, "population-smoke")))
+        return True, ""
+    except Exception as exc:
+        return False, str(exc)
+    finally:
+        process.terminate()
+
+
 def build_population(policies: list[PopulationPolicy], corpus_root: Path, output_dir: Path) -> dict:
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -77,9 +100,12 @@ def build_population(policies: list[PopulationPolicy], corpus_root: Path, output
             completed = subprocess.run(["make"], cwd=target, text=True,
                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
             executable = target / "main.out"
-            status = "ready" if completed.returncode == 0 and executable.is_file() else "build_failed"
+            compiled = completed.returncode == 0 and executable.is_file()
+            smoke_ok, smoke_error = _protocol_smoke(executable) if compiled else (False, "")
+            status = "ready" if smoke_ok else "protocol_smoke_failed" if compiled else "build_failed"
             row.update(status=status, exit_code=completed.returncode, stdout=completed.stdout,
-                       stderr=completed.stderr, executable=str(executable) if status == "ready" else None)
+                       stderr=completed.stderr, protocol_smoke_error=smoke_error or None,
+                       executable=str(executable) if status == "ready" else None)
         rows.append(row)
     report = {"game": "23_doto", "policies": rows}
     temporary = output_dir / ".population-build.json.tmp"

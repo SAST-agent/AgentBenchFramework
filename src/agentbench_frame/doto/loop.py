@@ -103,7 +103,8 @@ def _evaluate(executable: Path, iteration: int, config: LoopConfig, store: DotoR
                        "winner": result.winner, "scores": list(result.scores),
                        "frames": result.frames, "terminated_by": result.terminated_by,
                        "errors": list(result.errors), "duration": result.duration,
-                       "replay": str(result.replay_path), "trace": str(result.trace_path)}
+                       "replay": str(result.replay_path), "trace": str(result.trace_path),
+                       "metadata": getattr(result, "metadata", {})}
                 store.write_json_atomic(episodes_dir / f"{episode_id}.json", row)
                 store.write_event("battle_finished", **row)
                 rows.append(row)

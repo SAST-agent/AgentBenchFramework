@@ -19,6 +19,13 @@ uv sync --extra all              # 全部
 
 ## 快速开始
 
+### DOTO benchmark harness
+
+第 23 届 DOTO 使用原版 C++ `playerAI.cpp` 接口，并提供 build、match、
+replay、严格确定性 KL/IG 与 OpenAI-compatible 多轮迭代闭环。完整命令、
+上下文内容、预算和 Results 格式见 [DOTO harness](docs/doto-harness.md)；
+正式 300 秒双边验收见 [DOTO official acceptance](docs/doto-official-acceptance.md)。
+
 ### 5 行跑一场对战
 
 ```python

@@ -218,6 +218,8 @@ def run_match(
             "test_only": test_only,
             "server_dir": str(selected_server),
             "server_main_sha256": _hash(selected_server / "main.py"),
+            "map_sha256": (_hash(selected_server / "Maps" / "0.json")
+                           if (selected_server / "Maps" / "0.json").is_file() else None),
             "agent_sha256": [_hash(path) for path in agents],
             "realtime_scale": 1.0,
         }
