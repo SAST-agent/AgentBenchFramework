@@ -93,12 +93,15 @@ class SampleAgent(MiracleAgent):
     """自写的规则策略（链路冒烟/评测基线，非强策略）：
 
     1. 能打则打：射程内优先敌方单位（hp>0），其次敌方神迹；
-    2. 法力够就补单位（Swordsman lv1，放在神迹召唤点）；
+    2. 法力够就补单位（按 ``summon_order``，放在神迹召唤点）；
     3. 还有能动的单位就向敌方神迹方向走一步；
     4. 否则 endround。
     """
 
     name = "sample"
+
+    #: 召唤优先级（容量未满且法力够的第一个类型）；v2 策略覆盖此顺序
+    summon_order = ["Archer", "Swordsman", "BlackBat"]
 
     def __init__(self, *, seed: Optional[int] = None) -> None:
         self._rng = random.Random(seed)
@@ -141,14 +144,12 @@ class SampleAgent(MiracleAgent):
             if lo <= cube_distance(pos, mpos) <= hi:
                 return self._attack(u[0], 1 - camp)  # 神迹 id == camp
 
-        # 2) 召唤：按卡组顺序选第一个容量未满且法力够的生物（卡组=Archer,Swordsman,BlackBat）
+        # 2) 召唤：按召唤优先级选第一个容量未满且法力够的生物
         players = obs.get("players", [])
         mana = players[camp][1] if len(players) > camp else 0
         capacities = players[camp][3] if len(players) > camp else []
         # capacities: [[type_index, capacity, [已召唤unit id...]], ...]
-        for ti, (type_name, _cost) in enumerate(
-            [("Archer", 2), ("Swordsman", 2), ("BlackBat", 2)]
-        ):
+        for ti, type_name in enumerate(self.summon_order):
             cap = capacities[ti] if ti < len(capacities) else None
             used = len(cap[2]) if cap else 0
             limit = cap[1] if cap else 0
@@ -202,6 +203,7 @@ class SampleAgent(MiracleAgent):
             return nxt
         return None
 
+
     @staticmethod
     def _attack(attacker: int, target: int) -> dict:
         return {
@@ -212,3 +214,15 @@ class SampleAgent(MiracleAgent):
     @staticmethod
     def _end() -> dict:
         return {"operation_type": "endround", "operation_parameters": {}}
+
+
+class SampleV2Agent(SampleAgent):
+    """迭代演示用的策略更新（v2）：召唤优先级改为 BlackBat > Archer > Swordsman。
+
+    其余（攻击/移动/被拒感知）与 v1 一致——这是**一次受控的最小策略更新**，
+    用于演示"版本对齐的 score–iteration / IG–iteration 曲线"闭环。
+    """
+
+    name = "sample_v2"
+
+    summon_order = ["BlackBat", "Archer", "Swordsman"]
