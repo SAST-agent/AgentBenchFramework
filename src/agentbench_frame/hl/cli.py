@@ -522,7 +522,9 @@ def _validate(config: LocalHLConfig) -> dict[str, Any]:
         "repair_enabled": config.run.iteration.repair_enabled,
         "repair_top_k": config.run.iteration.repair_top_k,
         "repair_rounds": config.run.iteration.repair_rounds,
+        "quick_screen_seeds": config.run.iteration.quick_screen_seeds,
         "finalist_count": config.run.iteration.finalist_count,
+        "finalist_seeds": config.run.iteration.finalist_seeds,
         "rollback_enabled": config.run.rollback.enabled,
         "rollback_patience": config.run.rollback.patience,
         "context_mode": config.run.provider.context_mode,
@@ -1426,6 +1428,10 @@ def _run_real(
         max_parallel_matches=(
             config.run.evaluation.max_parallel_matches
         ),
+        quick_screen_seed_count=(
+            config.run.iteration.quick_screen_seeds
+        ),
+        finalist_seed_count=config.run.iteration.finalist_seeds,
     )
     bundle = ContextBundle.create(
         run_dir / "context",

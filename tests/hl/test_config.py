@@ -313,7 +313,9 @@ class HLConfigTests(unittest.TestCase):
 
         self.assertEqual(config.iteration.candidates_per_cycle, 4)
         self.assertEqual(config.iteration.candidates_per_act, 4)
+        self.assertEqual(config.iteration.quick_screen_seeds, 1)
         self.assertEqual(config.iteration.finalist_count, 2)
+        self.assertEqual(config.iteration.finalist_seeds, 3)
         self.assertEqual(config.selection.mode, "linear_lexicographic")
         self.assertFalse(config.selection.source_size_penalty)
         self.assertEqual(config.context.research_state_max_bytes, 16384)

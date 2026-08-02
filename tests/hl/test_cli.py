@@ -7,6 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).parents[2]
 CONFIG = ROOT / "configs/hl/29_rollman.yaml"
 CURRICULUM_CONFIG = ROOT / "configs/hl/29_rollman-curriculum.yaml"
+REPAIR_V5_CONFIG = ROOT / "configs/hl/29_rollman-k4-repair-v5.yaml"
 
 
 def _last_json(capsys):
@@ -189,6 +190,17 @@ def test_hl_validate_reports_open_ended_k1_rollback_defaults(capsys):
     assert result["candidates_per_act"] == 1
     assert result["rollback_enabled"] is True
     assert result["human_opponents"] == 16
+
+
+def test_hl_validate_reports_staged_feedback_seed_counts(capsys, monkeypatch):
+    from agentbench_frame.hl.cli import main
+
+    monkeypatch.setenv("AGENTBENCH_SAST_ROOT", "/Users/qingle/Code/SAST")
+    assert main(["validate", "--config", str(REPAIR_V5_CONFIG)]) == 0
+    result = _last_json(capsys)
+
+    assert result["quick_screen_seeds"] == 1
+    assert result["finalist_seeds"] == 3
 
 
 def test_rollman_curriculum_config_matches_approved_experiment():
