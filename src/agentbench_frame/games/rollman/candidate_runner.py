@@ -6,6 +6,8 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import json
+import os
+import random
 import struct
 import sys
 from pathlib import Path
@@ -62,6 +64,15 @@ def main() -> int:
     parser.add_argument("--workspace", required=True)
     parser.add_argument("--sdk-root", required=True)
     args = parser.parse_args()
+
+    seed = int(os.environ["AGENTBENCH_ROLLMAN_SEED"])
+    random.seed(seed)
+    try:
+        import numpy as np
+    except ImportError:
+        pass
+    else:
+        np.random.seed(seed)
 
     workspace = Path(args.workspace).resolve()
     sdk_root = Path(args.sdk_root).resolve()

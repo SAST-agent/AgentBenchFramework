@@ -105,6 +105,30 @@ def test_same_seed_and_processes_produce_identical_normalized_replay(tmp_path):
     assert first.rollman_decisions == second.rollman_decisions
 
 
+def test_match_seed_is_injected_into_both_player_processes(tmp_path):
+    from agentbench_frame.games.rollman.match import _seed_process
+
+    original = ProcessSpec(
+        argv=(sys.executable, "agent.py"),
+        cwd=tmp_path,
+        env={"KEEP": "yes"},
+        untrusted=True,
+        read_roots=(tmp_path,),
+        denied_paths=(tmp_path / ".env",),
+    )
+
+    seeded = _seed_process(original, 1729)
+
+    assert seeded.env["KEEP"] == "yes"
+    assert seeded.env["AGENTBENCH_ROLLMAN_SEED"] == "1729"
+    assert seeded.env["PYTHONHASHSEED"] == "1729"
+    assert seeded.argv == original.argv
+    assert seeded.cwd == original.cwd
+    assert seeded.untrusted is True
+    assert seeded.read_roots == original.read_roots
+    assert seeded.denied_paths == original.denied_paths
+
+
 @pytest.mark.skipif(sys.platform != "darwin", reason="macOS sandbox integration")
 def test_untrusted_runtime_cannot_spawn_subprocess(tmp_path):
     from agentbench_frame.games.rollman.match import _start, _stop

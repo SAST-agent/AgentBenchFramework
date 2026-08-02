@@ -69,6 +69,19 @@ class ProcessSpec:
             raise ValueError("memory_limit_mb must be positive")
 
 
+def _seed_process(spec: ProcessSpec, seed: int) -> ProcessSpec:
+    """Inject one deterministic seed into a role process without widening it."""
+
+    return dataclasses.replace(
+        spec,
+        env={
+            **spec.env,
+            "AGENTBENCH_ROLLMAN_SEED": str(int(seed)),
+            "PYTHONHASHSEED": str(int(seed)),
+        },
+    )
+
+
 class DecisionStateTracker(Protocol):
     def reset(self, state: Mapping[str, Any]) -> None:
         ...
@@ -368,13 +381,12 @@ def run_match(
     replay_file.parent.mkdir(parents=True, exist_ok=True)
     trace_file.parent.mkdir(parents=True, exist_ok=True)
 
-    seeded_logic = ProcessSpec(
-        argv=logic.argv,
-        cwd=logic.cwd,
-        env={**logic.env, "AGENTBENCH_ROLLMAN_SEED": str(int(seed))},
-    )
+    seeded_logic = _seed_process(logic, seed)
     logic_process = _start(seeded_logic, "logic")
-    players = [_start(rollman, "Rollman"), _start(ghosts, "Ghosts")]
+    players = [
+        _start(_seed_process(rollman, seed), "Rollman"),
+        _start(_seed_process(ghosts, seed), "Ghosts"),
+    ]
     processes = [logic_process, *players]
     trace: list[dict[str, Any]] = []
     decisions: list[dict[str, Any]] = []

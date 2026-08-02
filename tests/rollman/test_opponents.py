@@ -1,5 +1,8 @@
 import zipfile
 import sys
+import hashlib
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -104,6 +107,59 @@ def test_unregistered_archive_hash_is_rejected(tmp_path):
             Opponent("rank01", 1, archive),
             build_root=tmp_path / "build",
         )
+
+
+def test_python_opponent_runs_through_seeded_wrapper(tmp_path, monkeypatch):
+    archive = tmp_path / "rank01.zip"
+    with zipfile.ZipFile(archive, "w") as package:
+        package.writestr("agent/main.py", "print('fixture')\n")
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    monkeypatch.setattr(
+        "agentbench_frame.games.rollman.opponents.load_profiles",
+        lambda: {
+            "rank01": {
+                "archive_sha256": digest,
+                "kind": "python",
+                "entrypoint": "agent/main.py",
+            }
+        },
+    )
+
+    prepared = prepare_opponent(
+        Opponent("rank01", 1, archive),
+        build_root=tmp_path / "build",
+    )
+
+    assert prepared.process is not None
+    assert Path(prepared.process.argv[1]).name == "seeded_agent_runner.py"
+    assert prepared.process.argv[2] == "--entrypoint"
+    assert Path(prepared.process.argv[3]).name == "main.py"
+
+
+def test_seeded_agent_runner_repeats_python_and_numpy_randomness(tmp_path):
+    from agentbench_frame.games.rollman import seeded_agent_runner
+
+    script = tmp_path / "agent.py"
+    script.write_text(
+        "import random, numpy as np\n"
+        "print(random.randint(0, 10**9), int(np.random.randint(0, 10**9)))\n",
+        encoding="utf-8",
+    )
+    environment = dict(os.environ)
+    environment["AGENTBENCH_ROLLMAN_SEED"] = "424242"
+    command = (
+        sys.executable,
+        str(Path(seeded_agent_runner.__file__)),
+        "--entrypoint",
+        str(script),
+    )
+
+    first = subprocess.run(command, env=environment, capture_output=True, text=True)
+    second = subprocess.run(command, env=environment, capture_output=True, text=True)
+
+    assert first.returncode == 0
+    assert second.returncode == 0
+    assert first.stdout == second.stdout
 
 
 @pytest.mark.integration

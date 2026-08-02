@@ -391,8 +391,14 @@ def prepare_opponent(
     kind = str(profile["kind"])
     build_command: tuple[str, ...] | None = None
     if kind == "python":
+        seeded_runner = Path(__file__).with_name("seeded_agent_runner.py").resolve()
         process = ProcessSpec(
-            argv=(python_executable, str(entrypoint)),
+            argv=(
+                python_executable,
+                str(seeded_runner),
+                "--entrypoint",
+                str(entrypoint),
+            ),
             cwd=entrypoint.parent,
             untrusted=True,
         )
