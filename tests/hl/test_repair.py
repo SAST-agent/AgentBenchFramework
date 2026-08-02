@@ -1,0 +1,152 @@
+import json
+from pathlib import Path
+
+import pytest
+
+
+def _result(*, version_id, branch_index, status="complete", margin=-100):
+    from agentbench_frame.hl.codebase import Version
+    from agentbench_frame.hl.controller import CandidateResult
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+    from agentbench_frame.tracking.provider import ProviderInvocation
+
+    version = Version(
+        version_id=version_id,
+        content_hash=f"hash-{version_id}",
+        parent_version_id="v000000",
+        act_id=f"act-{version_id}",
+        edit_type="candidate",
+        created_at="2026-08-02T00:00:00.000Z",
+        files=("ai.py",),
+    )
+    evaluation = CandidateEvaluation(
+        status=status,
+        score=0.0 if status == "complete" else None,
+        error=None if status == "complete" else status,
+        matches=(
+            {
+                "status": "complete",
+                "seed": 101,
+                "opponent": "rank15",
+                "result": "loss",
+                "rollman_score": 400 + margin,
+                "ghosts_score": 400,
+                "replay": f"/matches/{version_id}/replay.jsonl",
+                "trace": f"/matches/{version_id}/trace.jsonl",
+            },
+        )
+        if status == "complete"
+        else (),
+    )
+    return CandidateResult(
+        act_id=version.act_id,
+        branch_index=branch_index,
+        version=version,
+        evaluation=evaluation,
+        provider=ProviderInvocation(
+            status="completed" if status == "complete" else status
+        ),
+    )
+
+
+def _brief(branch_index=1):
+    from agentbench_frame.hl.proposal import BranchBrief
+
+    return BranchBrief(
+        branch_index=branch_index,
+        diagnosis="level 3 round 26 capture",
+        mechanism="bounded route recovery",
+        activation_condition="shield broke and the next edge was recently dangerous",
+        preservation_contract="ordinary portal and safety routing stays unchanged",
+        expected_change="avoid the repeated capture edge",
+        falsifier="the same-seed score margin does not improve",
+    )
+
+
+def test_repair_packet_pairs_parent_and_candidate_on_same_seed(tmp_path):
+    from agentbench_frame.hl.repair import build_repair_packet
+
+    parent = _result(version_id="v000037", branch_index=-1, margin=-195)
+    candidate = _result(version_id="v000041", branch_index=1, margin=-295)
+
+    path = build_repair_packet(
+        output_path=tmp_path / "repair.json",
+        iteration_id="iter-000012",
+        branch_brief=_brief(),
+        parent=parent,
+        candidate=candidate,
+        summary_resolver=lambda match: {
+            "summary": str(Path(match["replay"]).with_name("summary.md")),
+            "replay": match["replay"],
+            "trace": match["trace"],
+        },
+    )
+
+    value = json.loads(path.read_text(encoding="utf-8"))
+    assert value["schema_version"] == "1.0"
+    assert value["iteration_id"] == "iter-000012"
+    assert value["scope"]["activation_condition"].startswith("shield broke")
+    assert value["parent"]["version_id"] == "v000037"
+    assert value["candidate"]["version_id"] == "v000041"
+    assert value["parent"]["matches"][0]["seed"] == 101
+    assert value["candidate"]["matches"][0]["seed"] == 101
+    assert value["candidate"]["matches"][0]["summary"].endswith("summary.md")
+
+
+def test_repair_packet_rejects_feedback_without_shared_seed(tmp_path):
+    from agentbench_frame.hl.repair import build_repair_packet
+
+    parent = _result(version_id="v000037", branch_index=-1)
+    candidate = _result(version_id="v000041", branch_index=1)
+    candidate_match = dict(candidate.evaluation.matches[0], seed=102)
+    candidate = candidate.__class__(
+        act_id=candidate.act_id,
+        branch_index=candidate.branch_index,
+        version=candidate.version,
+        evaluation=candidate.evaluation.__class__(
+            status="complete",
+            score=0.0,
+            matches=(candidate_match,),
+        ),
+        provider=candidate.provider,
+    )
+
+    with pytest.raises(ValueError, match="shared seed"):
+        build_repair_packet(
+            output_path=tmp_path / "repair.json",
+            iteration_id="iter-000012",
+            branch_brief=_brief(),
+            parent=parent,
+            candidate=candidate,
+            summary_resolver=lambda match: {"summary": match["replay"]},
+        )
+
+
+def test_better_repair_becomes_branch_representative():
+    from agentbench_frame.hl.repair import select_branch_representative
+
+    initial = _result(version_id="v000041", branch_index=1, margin=-295)
+    repaired = _result(version_id="v000045", branch_index=1, margin=-150)
+
+    assert select_branch_representative(initial, repaired) is repaired
+
+
+def test_failed_or_tied_repair_cannot_erase_initial_candidate():
+    from agentbench_frame.hl.repair import select_branch_representative
+
+    initial = _result(version_id="v000041", branch_index=1, margin=-295)
+    failed = _result(version_id="v000045", branch_index=1, status="timeout")
+    tied = _result(version_id="v000046", branch_index=1, margin=-295)
+
+    assert select_branch_representative(initial, failed) is initial
+    assert select_branch_representative(initial, tied) is initial
+
+
+def test_representative_selection_rejects_cross_branch_repair():
+    from agentbench_frame.hl.repair import select_branch_representative
+
+    initial = _result(version_id="v000041", branch_index=1)
+    repaired = _result(version_id="v000045", branch_index=2)
+
+    with pytest.raises(ValueError, match="same branch"):
+        select_branch_representative(initial, repaired)
