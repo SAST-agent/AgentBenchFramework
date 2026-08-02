@@ -26,18 +26,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-DEFAULT_NU_V2 = (
-    Path(__file__).resolve().parents[2]
-    / "agentbench_data" / "reference" / "nu-v2.json"
-)
-OUT_T = (
-    Path(__file__).resolve().parents[2]
-    / "agentbench_data" / "reference" / "nu-v2-t.json"
-)
-OUT_T2 = (
-    Path(__file__).resolve().parents[2]
-    / "agentbench_data" / "reference" / "nu-v2-t2.json"
-)
+# src/agentbench_frame/hl/nu_build.py -> AgentBenchFramework/ (repo root)
+_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_NU_V2 = _ROOT / "agentbench_data" / "reference" / "nu-v2.json"
+OUT_T = _ROOT / "agentbench_data" / "reference" / "nu-v2-t.json"
+OUT_T2 = _ROOT / "agentbench_data" / "reference" / "nu-v2-t2.json"
 
 MV8 = [True] * 8  # open area: all 8 move directions legal
 
