@@ -80,6 +80,10 @@ class IterationConfig:
     candidates_per_cycle: Optional[int] = None
     planner_enabled: bool = False
     reducer_enabled: bool = False
+    scope_contract_required: bool = True
+    repair_enabled: bool = False
+    repair_top_k: int = 2
+    repair_rounds: int = 1
     quick_screen_seeds: int = 1
     finalist_count: int = 1
     finalist_seeds: int = 1
@@ -104,6 +108,15 @@ class IterationConfig:
             raise ValueError("iteration.max_acts must be null or >= 1")
         if resolved_candidates < 1:
             raise ValueError("iteration.candidates_per_cycle must be >= 1")
+        if self.repair_rounds not in {0, 1}:
+            raise ValueError("iteration.repair_rounds must be 0 or 1")
+        if self.repair_enabled:
+            if not self.planner_enabled:
+                raise ValueError("iteration repair requires planner_enabled")
+            if not 1 <= self.repair_top_k <= resolved_candidates:
+                raise ValueError(
+                    "iteration.repair_top_k must be within candidate count"
+                )
         if self.quick_screen_seeds < 1:
             raise ValueError("iteration.quick_screen_seeds must be >= 1")
         if not 1 <= self.finalist_count <= resolved_candidates:

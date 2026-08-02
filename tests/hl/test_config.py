@@ -238,6 +238,45 @@ class HLConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "finalist_count"):
             IterationConfig(candidates_per_cycle=4, finalist_count=5)
 
+    def test_repair_config_defaults_are_ablatable(self):
+        from agentbench_frame.hl.config import IterationConfig
+
+        value = IterationConfig(candidates_per_cycle=4)
+
+        self.assertTrue(value.scope_contract_required)
+        self.assertFalse(value.repair_enabled)
+        self.assertEqual(value.repair_top_k, 2)
+        self.assertEqual(value.repair_rounds, 1)
+
+    def test_enabled_repair_requires_valid_top_k(self):
+        from agentbench_frame.hl.config import IterationConfig
+
+        with self.assertRaisesRegex(ValueError, "repair_top_k"):
+            IterationConfig(
+                candidates_per_cycle=4,
+                planner_enabled=True,
+                reducer_enabled=True,
+                repair_enabled=True,
+                repair_top_k=5,
+            )
+
+    def test_enabled_repair_requires_planner(self):
+        from agentbench_frame.hl.config import IterationConfig
+
+        with self.assertRaisesRegex(ValueError, "planner"):
+            IterationConfig(
+                candidates_per_cycle=4,
+                planner_enabled=False,
+                reducer_enabled=True,
+                repair_enabled=True,
+            )
+
+    def test_repair_rounds_accepts_only_zero_or_one(self):
+        from agentbench_frame.hl.config import IterationConfig
+
+        with self.assertRaisesRegex(ValueError, "repair_rounds"):
+            IterationConfig(candidates_per_cycle=4, repair_rounds=2)
+
     def test_source_size_penalty_is_forbidden_for_linear_search(self):
         from agentbench_frame.hl.config import SelectionConfig
 

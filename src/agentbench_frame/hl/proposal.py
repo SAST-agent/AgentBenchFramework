@@ -14,6 +14,8 @@ class BranchBrief:
     branch_index: int
     diagnosis: str
     mechanism: str
+    activation_condition: str
+    preservation_contract: str
     expected_change: str
     falsifier: str
 
@@ -55,6 +57,8 @@ def load_branch_briefs(
         "branch_index",
         "diagnosis",
         "mechanism",
+        "activation_condition",
+        "preservation_contract",
         "expected_change",
         "falsifier",
     }
@@ -69,6 +73,12 @@ def load_branch_briefs(
                 branch_index=index,
                 diagnosis=_text(raw["diagnosis"], "diagnosis"),
                 mechanism=_text(raw["mechanism"], "mechanism"),
+                activation_condition=_text(
+                    raw["activation_condition"], "activation_condition"
+                ),
+                preservation_contract=_text(
+                    raw["preservation_contract"], "preservation_contract"
+                ),
                 expected_change=_text(raw["expected_change"], "expected_change"),
                 falsifier=_text(raw["falsifier"], "falsifier"),
             )

@@ -567,6 +567,8 @@ def test_k4_proposal_cycle_uses_one_parent_and_reducer_sees_all_feedback(tmp_pat
                                     "branch_index": index,
                                     "diagnosis": f"diagnosis-{index}",
                                     "mechanism": mechanism,
+                                    "activation_condition": f"condition-{index}",
+                                    "preservation_contract": f"preserve-{index}",
                                     "expected_change": f"expected-{index}",
                                     "falsifier": f"falsifier-{index}",
                                 }
@@ -696,6 +698,8 @@ def test_failed_reducer_output_cannot_mutate_research_state(tmp_path):
                                     "branch_index": index,
                                     "diagnosis": f"diagnosis-{index}",
                                     "mechanism": ("planner", "predictor", "shield", "portal")[index],
+                                    "activation_condition": f"condition-{index}",
+                                    "preservation_contract": f"preserve-{index}",
                                     "expected_change": f"expected-{index}",
                                     "falsifier": f"falsifier-{index}",
                                 }
@@ -824,6 +828,8 @@ def test_k4_cycle_reuses_valid_persisted_planner_without_second_api_call(tmp_pat
                     "branch_index": index,
                     "diagnosis": f"diagnosis-{index}",
                     "mechanism": mechanism,
+                    "activation_condition": f"condition-{index}",
+                    "preservation_contract": f"preserve-{index}",
                     "expected_change": f"expected-{index}",
                     "falsifier": f"falsifier-{index}",
                 }
@@ -903,6 +909,8 @@ def test_k4_cycle_keeps_current_parent_when_every_candidate_regresses(tmp_path):
                                         "shield timing",
                                         "junction escape",
                                     )[index],
+                                    "activation_condition": f"condition-{index}",
+                                    "preservation_contract": f"preserve-{index}",
                                     "expected_change": f"e-{index}",
                                     "falsifier": f"f-{index}",
                                 }

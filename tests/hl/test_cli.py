@@ -385,6 +385,8 @@ def test_pending_planner_is_recovered_from_valid_persisted_stream(tmp_path):
                     "branch_index": index,
                     "diagnosis": f"diagnosis-{index}",
                     "mechanism": mechanism,
+                    "activation_condition": f"condition-{index}",
+                    "preservation_contract": f"preserve-{index}",
                     "expected_change": f"expected-{index}",
                     "falsifier": f"falsifier-{index}",
                 }
