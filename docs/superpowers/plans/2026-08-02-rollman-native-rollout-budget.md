@@ -32,10 +32,10 @@
 - Produces: `RolloutBudgetConfig` nested at `ProviderConfig.rollout_budget`.
 - Produces: generated `[features.rollout_budget]` TOML and provider fingerprint.
 
-- [ ] Write tests that parse valid nested values, reject invalid limits/reminders/weights, and assert exact secret-free TOML.
-- [ ] Run the focused tests and verify failures are caused by the missing schema and TOML.
-- [ ] Implement the dataclass, strict nested parsing, validation, and TOML rendering.
-- [ ] Run the focused tests to green.
+- [x] Write tests that parse valid nested values, reject invalid limits/reminders/weights, and assert exact secret-free TOML.
+- [x] Run the focused tests and verify failures are caused by the missing schema and TOML.
+- [x] Implement the dataclass, strict nested parsing, validation, and TOML rendering.
+- [x] Run the focused tests to green.
 
 ### Task 2: Runtime Preflight and Budget Telemetry
 
@@ -50,11 +50,11 @@
 - Produces: `CodexSessionProvider.preflight() -> dict[str, object]`.
 - Produces: provider metadata keys `termination_reason`, `weighted_tokens`, `rollout_budget_limit_tokens`, and `rollout_budget_exhausted`.
 
-- [ ] Write tests using an executable fixture that reports an exact version, reads the generated feature flag, and emits `SessionBudgetExceeded` JSONL.
-- [ ] Run the focused tests and verify the new behavior is absent.
-- [ ] Implement exact-version/feature preflight, secret-free preflight persistence, termination classification, partial-stream access audit, and weighted-token derivation.
-- [ ] Invoke preflight before the first paid act and persist its result.
-- [ ] Run the focused tests to green.
+- [x] Write tests using an executable fixture that reports an exact version, reads the generated feature flag, and emits `SessionBudgetExceeded` JSONL.
+- [x] Run the focused tests and verify the new behavior is absent.
+- [x] Implement exact-version/feature preflight, secret-free preflight persistence, termination classification, partial-stream access audit, and weighted-token derivation.
+- [x] Invoke preflight before the first paid act and persist its result.
+- [x] Run the focused tests to green.
 
 ### Task 3: Safe Adoption of Budget-Terminated Candidate Code
 
@@ -66,11 +66,11 @@
 - Consumes: `ProviderInvocation.metadata["rollout_budget_exhausted"]`.
 - Produces: completed candidate invocation with `accepted_after_budget_exhaustion=true` only after a changed snapshot and complete quick screen.
 
-- [ ] Write controller tests for a changed candidate that passes quick screen, an unchanged candidate, an access violation, and a failed quick screen.
-- [ ] Run the focused tests and verify the safe-adoption case fails before implementation.
-- [ ] Implement the minimal eligibility branch without changing ordinary completion, timeout, planner, or reducer semantics.
-- [ ] Persist budget facts in checkpoint and act events.
-- [ ] Run the focused tests to green.
+- [x] Write controller tests for a changed candidate that passes quick screen, an unchanged candidate, an access violation, and a failed quick screen.
+- [x] Run the focused tests and verify the safe-adoption case fails before implementation.
+- [x] Implement the minimal eligibility branch without changing ordinary completion, timeout, planner, or reducer semantics.
+- [x] Persist budget facts in checkpoint and act events.
+- [x] Run the focused tests to green.
 
 ### Task 4: Freeze Experiment Configuration and Verify
 
@@ -82,11 +82,11 @@
 **Interfaces:**
 - Produces: the exact approved local experiment configuration.
 
-- [ ] Add a config integration test that loads the Rollman k=4 budget values.
-- [ ] Run it red, then freeze the version, native budget, and 420/120 deadlines in YAML.
-- [ ] Document the budget and safe-adoption semantics in the runbook.
-- [ ] Run provider/config/controller tests, then the entire repository suite.
-- [ ] Run provider preflight against the generated real Codex home without invoking a model.
+- [x] Add a config integration test that loads the Rollman k=4 budget values.
+- [x] Run it red, then freeze the version, native budget, and 420/120 deadlines in YAML.
+- [x] Document the budget and safe-adoption semantics in the runbook.
+- [x] Run provider/config/controller tests, then the entire repository suite.
+- [x] Run provider preflight against the generated real Codex home without invoking a model.
 
 ### Task 5: Start and Monitor the Paid k=4 Cycle
 

@@ -84,7 +84,14 @@ def parse_codex_jsonl(source: str | Iterable[str]) -> ProviderInvocation:
             usage, raw_usage = _usage(record.get("usage"))
         elif event_type in {"turn.failed", "error"}:
             status = "failed"
-            error = record.get("message") or record.get("error") or str(record)
+            raw_error = record.get("message") or record.get("error")
+            error = (
+                raw_error.get("message")
+                if isinstance(raw_error, Mapping)
+                else raw_error
+            ) or str(record)
+            if record.get("usage"):
+                usage, raw_usage = _usage(record.get("usage"))
         item = record.get("item")
         item_type = item.get("type") if isinstance(item, Mapping) else None
         if item_type in {

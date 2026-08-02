@@ -4,6 +4,8 @@ import stat
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 def _provider_config(**overrides):
     from agentbench_frame.hl.config import ProviderConfig
@@ -52,6 +54,182 @@ def test_provider_config_is_secret_free_and_excludes_key_from_agent_shells(tmp_p
     assert "AGENTBENCH_API_KEY" in config_text
     assert "CODEX_API_KEY" in config_text
     assert "sk-" not in config_text
+
+
+def test_provider_config_renders_native_rollout_budget_exactly(tmp_path):
+    from agentbench_frame.hl.config import HLRunConfig
+    from agentbench_frame.hl.provider import CodexSessionProvider
+
+    run = HLRunConfig.from_mapping(
+        {
+            "game": "29_rollman",
+            "provider": {
+                "kind": "codex",
+                "model": "gpt-5.5",
+                "rollout_budget": {
+                    "enabled": True,
+                    "limit_tokens": 70000,
+                    "reminder_at_remaining_tokens": [20000, 10000, 5000],
+                    "sampling_token_weight": 1.0,
+                    "prefill_token_weight": 1.0,
+                },
+            },
+        }
+    )
+
+    provider = CodexSessionProvider(run.provider, run_root=tmp_path)
+    config_text = provider.config_path.read_text(encoding="utf-8")
+
+    assert "[features.rollout_budget]" in config_text
+    assert "enabled = true" in config_text
+    assert "limit_tokens = 70000" in config_text
+    assert "reminder_at_remaining_tokens = [20000, 10000, 5000]" in config_text
+    assert "sampling_token_weight = 1.0" in config_text
+    assert "prefill_token_weight = 1.0" in config_text
+
+
+def test_preflight_verifies_exact_cli_and_generated_feature_config(tmp_path):
+    from agentbench_frame.hl.config import HLRunConfig
+    from agentbench_frame.hl.provider import CodexSessionProvider
+
+    executable = tmp_path / "preflight-codex"
+    executable.write_text(
+        "#!/bin/sh\n"
+        "if [ \"$1\" = \"--version\" ]; then\n"
+        "  printf '%s\\n' 'codex-cli 0.146.0-alpha.9.2'\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [ \"$1\" = \"features\" ] && [ \"$2\" = \"list\" ]; then\n"
+        "  if grep -q '^enabled = true$' \"$CODEX_HOME/config.toml\"; then\n"
+        "    printf '%s\\n' 'rollout_budget under development true'\n"
+        "  else\n"
+        "    printf '%s\\n' 'rollout_budget under development false'\n"
+        "  fi\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 9\n",
+        encoding="utf-8",
+    )
+    executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+    run = HLRunConfig.from_mapping(
+        {
+            "game": "29_rollman",
+            "provider": {
+                "kind": "codex",
+                "executable": str(executable),
+                "expected_cli_version": "codex-cli 0.146.0-alpha.9.2",
+                "rollout_budget": {
+                    "enabled": True,
+                    "limit_tokens": 70000,
+                },
+            },
+        }
+    )
+    provider = CodexSessionProvider(
+        run.provider,
+        run_root=tmp_path / "run",
+        environ={
+            "AGENTBENCH_API_KEY": "sk-runtime-only",
+            "PATH": os.environ.get("PATH", ""),
+        },
+    )
+
+    facts = provider.preflight()
+
+    assert facts["cli_version"] == "codex-cli 0.146.0-alpha.9.2"
+    assert facts["rollout_budget_enabled"] is True
+    persisted = json.loads(
+        (tmp_path / "run" / "provider-preflight.json").read_text(encoding="utf-8")
+    )
+    assert persisted == facts
+    assert "sk-runtime-only" not in json.dumps(persisted)
+
+
+def test_preflight_rejects_cli_version_drift(tmp_path):
+    from agentbench_frame.hl.config import HLRunConfig
+    from agentbench_frame.hl.provider import CodexSessionProvider
+
+    executable = tmp_path / "wrong-version-codex"
+    executable.write_text(
+        "#!/bin/sh\nprintf '%s\\n' 'codex-cli 0.999.0'\n",
+        encoding="utf-8",
+    )
+    executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+    run = HLRunConfig.from_mapping(
+        {
+            "game": "29_rollman",
+            "provider": {
+                "kind": "codex",
+                "executable": str(executable),
+                "expected_cli_version": "codex-cli 0.146.0-alpha.9.2",
+            },
+        }
+    )
+    provider = CodexSessionProvider(
+        run.provider,
+        run_root=tmp_path / "run",
+        environ={"AGENTBENCH_API_KEY": "sk-runtime-only"},
+    )
+
+    with pytest.raises(RuntimeError, match="version mismatch"):
+        provider.preflight()
+
+
+def test_provider_classifies_native_budget_exhaustion_and_weighted_usage(tmp_path):
+    from agentbench_frame.hl.config import HLRunConfig
+    from agentbench_frame.hl.provider import CodexSessionProvider
+
+    executable = tmp_path / "budget-codex"
+    executable.write_text(
+        "#!/bin/sh\n"
+        "printf '%s\\n' '{\"type\":\"thread.started\",\"thread_id\":\"thread-budget\"}'\n"
+        "printf '%s\\n' '{\"type\":\"item.completed\",\"item\":{\"type\":\"file_change\"}}'\n"
+        "printf '%s\\n' '{\"type\":\"turn.failed\",\"error\":{\"message\":\"SessionBudgetExceeded\"},\"usage\":{\"input_tokens\":20,\"cached_input_tokens\":15,\"output_tokens\":7}}'\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+    run = HLRunConfig.from_mapping(
+        {
+            "game": "29_rollman",
+            "provider": {
+                "kind": "codex",
+                "executable": str(executable),
+                "transport_retry_attempts": 0,
+                "rollout_budget": {
+                    "enabled": True,
+                    "limit_tokens": 70000,
+                    "sampling_token_weight": 1.0,
+                    "prefill_token_weight": 1.0,
+                },
+            },
+        }
+    )
+    provider = CodexSessionProvider(
+        run.provider,
+        run_root=tmp_path / "run",
+        environ={
+            "AGENTBENCH_API_KEY": "sk-runtime-only",
+            "PATH": os.environ.get("PATH", ""),
+        },
+    )
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+
+    result = provider.invoke(
+        prompt="bounded edit",
+        workspace=workspace,
+        raw_output_path=tmp_path / "run" / "provider" / "budget.jsonl",
+    )
+
+    assert result.status == "failed"
+    assert result.metadata["rollout_budget_exhausted"] is True
+    assert result.metadata["termination_reason"] == "rollout_budget_exhausted"
+    assert result.metadata["weighted_tokens"] == 12.0
+    assert result.metadata["rollout_budget_limit_tokens"] == 70000
+    assert result.usage.prompt_tokens == 20
+    assert result.usage.cached_input_tokens == 15
+    assert result.usage.completion_tokens == 7
 
 
 def test_runtime_key_is_scoped_to_codex_process_and_never_logged(tmp_path):

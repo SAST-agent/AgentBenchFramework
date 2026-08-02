@@ -1,6 +1,34 @@
 from pathlib import Path
 
 
+def test_rollman_k4_repair_config_freezes_native_budget_and_deadlines(
+    monkeypatch,
+):
+    from agentbench_frame.hl.local_config import LocalHLConfig
+
+    config_path = (
+        Path(__file__).parents[2]
+        / "configs"
+        / "hl"
+        / "29_rollman-k4-repair.yaml"
+    )
+
+    monkeypatch.setenv("AGENTBENCH_SAST_ROOT", str(Path(__file__).parents[3]))
+    config = LocalHLConfig.load(config_path)
+
+    provider = config.run.provider
+    assert provider.expected_cli_version == "codex-cli 0.146.0-alpha.9.2"
+    assert provider.timeout_seconds == 420
+    assert provider.idle_timeout_seconds == 120
+    assert provider.rollout_budget.enabled is True
+    assert provider.rollout_budget.limit_tokens == 70000
+    assert provider.rollout_budget.reminder_at_remaining_tokens == (
+        20000,
+        10000,
+        5000,
+    )
+
+
 def test_imported_source_run_resolves_from_repository_root(tmp_path):
     from agentbench_frame.hl.local_config import LocalHLConfig
 

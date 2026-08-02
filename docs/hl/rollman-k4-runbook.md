@@ -75,6 +75,20 @@ An act reads an authoritative rule section only when its hypothesis depends on
 precise semantics. Correctness does not rely on hidden provider conversation
 memory. Each prompt and model JSONL response is stored in the run.
 
+The repair configuration pins `codex-cli 0.146.0-alpha.9.2` and enables the
+native per-act rollout budget: 70,000 weighted tokens, with reminders at
+20,000, 10,000, and 5,000 tokens remaining. Weighted usage is non-cached input
+plus output; cached static context is excluded. The hard act deadline is 420
+seconds and the no-progress deadline is 120 seconds. A local preflight verifies
+the exact CLI and enabled feature before any billable request.
+
+A coding candidate stopped by the native budget can enter a quick screen only
+when its source hash changed and its provider access audit is clean. It becomes
+a completed scientific candidate only after the frozen evaluator completes a
+real compile, protocol, and match smoke. Planner and reducer artifacts never
+receive partial-result adoption. All termination, weighted-usage, and safe
+adoption facts remain in checkpoints and events.
+
 ## Selection and Rollback
 
 Every valid candidate is ranked lexicographically by target points, mean score

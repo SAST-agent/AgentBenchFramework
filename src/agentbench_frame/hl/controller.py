@@ -605,18 +605,32 @@ class HLController:
             )
             pending_path.parent.mkdir(parents=True, exist_ok=True)
             pending_path.write_bytes(experience_update.read_bytes())
+        parent_content_hash = self.version_store.get(
+            parent_version_id
+        ).content_hash
         version = self.version_store.snapshot(
             parent_version_id=parent_version_id,
             act_id=act_id,
             edit_type=edit_type,
         )
+        budget_exhausted = bool(
+            invocation.metadata.get("rollout_budget_exhausted")
+        )
+        budget_candidate_eligible = (
+            invocation.status == "failed"
+            and budget_exhausted
+            and version.content_hash != parent_content_hash
+            and not invocation.metadata.get("access_policy_violations")
+        )
+        if budget_exhausted:
+            invocation.metadata["accepted_after_budget_exhaustion"] = False
         evaluation = (
             (
                 self.evaluator.quick_screen(version)
                 if staged_evaluation
                 else self.evaluator.evaluate(version)
             )
-            if invocation.status == "completed"
+            if invocation.status == "completed" or budget_candidate_eligible
             else CandidateEvaluation(
                 status=(
                     invocation.status
@@ -626,6 +640,27 @@ class HLController:
                 score=None,
                 error=invocation.error,
             )
+        )
+        if budget_candidate_eligible:
+            if evaluation.status == "complete":
+                invocation.metadata["original_provider_status"] = invocation.status
+                invocation.metadata["original_provider_error"] = invocation.error
+                invocation.metadata["accepted_after_budget_exhaustion"] = True
+                invocation.status = "completed"
+                invocation.error = None
+            else:
+                evaluation = CandidateEvaluation(
+                    status="failed",
+                    score=None,
+                    error=(
+                        "budget-terminated candidate failed safe quick screen: "
+                        + str(evaluation.error or evaluation.status)
+                    ),
+                    matches=evaluation.matches,
+                )
+        self._refresh_checkpoint_outcome(
+            act_id=act_id,
+            invocation=invocation,
         )
         thread_id = invocation.metadata.get("thread_id")
         if thread_id:
@@ -1379,6 +1414,44 @@ class HLController:
             elapsed_time_s=invocation.elapsed_time_s,
             raw_output_ref=invocation.raw_output_ref,
             thread_id=invocation.metadata.get("thread_id"),
+            **self._provider_outcome_fields(invocation),
+        )
+
+    @staticmethod
+    def _provider_outcome_fields(
+        invocation: ProviderInvocation,
+    ) -> dict[str, Any]:
+        return {
+            key: invocation.metadata.get(key)
+            for key in (
+                "termination_reason",
+                "timeout_kind",
+                "weighted_tokens",
+                "rollout_budget_limit_tokens",
+                "rollout_budget_exhausted",
+                "accepted_after_budget_exhaustion",
+            )
+        }
+
+    def _refresh_checkpoint_outcome(
+        self,
+        *,
+        act_id: str,
+        invocation: ProviderInvocation,
+    ) -> None:
+        path = self.run_root / "checkpoints" / f"{act_id}.json"
+        record = json.loads(path.read_text(encoding="utf-8"))
+        record["provider_status"] = invocation.status
+        record.update(self._provider_outcome_fields(invocation))
+        path.write_text(
+            json.dumps(
+                record,
+                ensure_ascii=False,
+                sort_keys=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
         )
 
     def _write_checkpoint(
@@ -1407,6 +1480,7 @@ class HLController:
             ),
             "raw_output_ref": invocation.raw_output_ref,
             "usage": dataclasses.asdict(invocation.usage),
+            **self._provider_outcome_fields(invocation),
         }
         path.write_text(
             json.dumps(

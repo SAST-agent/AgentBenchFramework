@@ -13,7 +13,15 @@ run:
     disable_response_storage: true
     network_access: "enabled"
     context_mode: "fresh"
-    timeout_seconds: 600
+    expected_cli_version: "codex-cli 0.146.0-alpha.9.2"
+    rollout_budget:
+      enabled: true
+      limit_tokens: 70000
+      reminder_at_remaining_tokens: [20000, 10000, 5000]
+      sampling_token_weight: 1.0
+      prefill_token_weight: 1.0
+    timeout_seconds: 420
+    idle_timeout_seconds: 120
   origin:
     mode: "imported_version"
     source_run: ".agentbench/29_rollman/runs/run-20260802-gpt55-k4-interface-v4"

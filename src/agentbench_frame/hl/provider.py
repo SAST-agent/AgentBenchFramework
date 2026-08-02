@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import dataclasses
 import json
 import os
 import re
@@ -85,6 +86,22 @@ class CodexSessionProvider:
                     f"# credential source: {self.config.env_key} -> CODEX_API_KEY",
                 ]
             )
+        budget = self.config.rollout_budget
+        if budget.enabled:
+            lines.extend(
+                [
+                    "",
+                    "[features.rollout_budget]",
+                    "enabled = true",
+                    f"limit_tokens = {budget.limit_tokens}",
+                    (
+                        "reminder_at_remaining_tokens = "
+                        + json.dumps(list(budget.reminder_at_remaining_tokens))
+                    ),
+                    f"sampling_token_weight = {budget.sampling_token_weight}",
+                    f"prefill_token_weight = {budget.prefill_token_weight}",
+                ]
+            )
         self.config_path.write_text(
             "\n".join(line for line in lines if line is not None) + "\n",
             encoding="utf-8",
@@ -147,6 +164,109 @@ class CodexSessionProvider:
             key: ("<redacted>" if key == "CODEX_API_KEY" else value)
             for key, value in self.build_environment().items()
         }
+
+    def preflight(self) -> dict[str, object]:
+        """Verify the frozen Codex runtime without issuing a model request."""
+
+        environment = self.build_environment()
+        version = subprocess.run(
+            [self.config.executable, "--version"],
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        if version.returncode != 0:
+            raise RuntimeError(
+                "Codex preflight could not read CLI version: "
+                + (version.stderr.strip() or f"exit {version.returncode}")
+            )
+        actual_version = version.stdout.strip()
+        expected_version = self.config.expected_cli_version
+        if expected_version is not None and actual_version != expected_version:
+            raise RuntimeError(
+                "Codex CLI version mismatch: "
+                f"expected {expected_version!r}, got {actual_version!r}"
+            )
+
+        budget_enabled = False
+        if self.config.rollout_budget.enabled:
+            features = subprocess.run(
+                [self.config.executable, "features", "list"],
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            if features.returncode != 0:
+                raise RuntimeError(
+                    "Codex preflight could not inspect features: "
+                    + (features.stderr.strip() or f"exit {features.returncode}")
+                )
+            for line in features.stdout.splitlines():
+                fields = line.split()
+                if fields and fields[0] == "rollout_budget":
+                    budget_enabled = fields[-1].lower() == "true"
+                    break
+            if not budget_enabled:
+                raise RuntimeError(
+                    "Codex preflight found rollout_budget disabled in generated config"
+                )
+
+        facts: dict[str, object] = {
+            "schema_version": "1.0",
+            "cli_version": actual_version,
+            "expected_cli_version": expected_version,
+            "provider_fingerprint": self.fingerprint,
+            "rollout_budget_enabled": budget_enabled,
+            "rollout_budget": json.loads(
+                json.dumps(dataclasses.asdict(self.config.rollout_budget))
+            ),
+        }
+        target = self.run_root / "provider-preflight.json"
+        target.write_text(
+            json.dumps(facts, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return facts
+
+    def _annotate_budget(
+        self,
+        result: ProviderInvocation,
+        *,
+        raw_output: str,
+        stderr: str,
+    ) -> None:
+        budget = self.config.rollout_budget
+        if not budget.enabled:
+            return
+        diagnostic = " ".join(
+            (str(result.error or ""), stderr, raw_output)
+        ).lower()
+        exhausted = any(
+            marker in diagnostic
+            for marker in (
+                "sessionbudgetexceeded",
+                "session budget exceeded",
+                "rollout budget exceeded",
+            )
+        )
+        result.metadata["rollout_budget_exhausted"] = exhausted
+        result.metadata["rollout_budget_limit_tokens"] = budget.limit_tokens
+        if exhausted:
+            result.metadata["termination_reason"] = "rollout_budget_exhausted"
+        usage = result.usage
+        if usage.prompt_tokens is None or usage.completion_tokens is None:
+            result.metadata["weighted_tokens"] = None
+            return
+        cached = usage.cached_input_tokens or 0
+        non_cached = max(0, usage.prompt_tokens - cached)
+        result.metadata["weighted_tokens"] = (
+            non_cached * budget.prefill_token_weight
+            + usage.completion_tokens * budget.sampling_token_weight
+        )
 
     def invoke(
         self,
@@ -261,13 +381,23 @@ class CodexSessionProvider:
             else:
                 result.error = f"provider timed out after {self.timeout_s}s"
             result.raw_output_ref = str(raw_path)
+            violations = self._access_policy_violations(
+                partial,
+                workspace=workspace,
+            )
             result.metadata.update(
                 {
                     "command": command,
                     "provider_fingerprint": self.fingerprint,
                     "partial_output_persisted": True,
                     "timeout_kind": timeout_kind,
+                    "access_policy_violations": violations,
                 }
+            )
+            self._annotate_budget(
+                result,
+                raw_output=partial,
+                stderr=str(exc.stderr or ""),
             )
             return result
         raw_path = Path(raw_output_path)
@@ -303,6 +433,11 @@ class CodexSessionProvider:
             result.error = result.error or (
                 completed.stderr.strip() or f"provider exited {completed.returncode}"
             )
+        self._annotate_budget(
+            result,
+            raw_output=completed.stdout or "",
+            stderr=completed.stderr or "",
+        )
         return result
 
     def _run_command(

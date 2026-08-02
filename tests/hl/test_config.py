@@ -2,6 +2,85 @@ import unittest
 
 
 class HLConfigTests(unittest.TestCase):
+    def test_native_rollout_budget_is_strict_and_serializable(self):
+        from agentbench_frame.hl.config import HLRunConfig
+
+        config = HLRunConfig.from_mapping(
+            {
+                "game": "29_rollman",
+                "provider": {
+                    "kind": "codex",
+                    "expected_cli_version": "codex-cli 0.146.0-alpha.9.2",
+                    "rollout_budget": {
+                        "enabled": True,
+                        "limit_tokens": 70000,
+                        "reminder_at_remaining_tokens": [20000, 10000, 5000],
+                        "sampling_token_weight": 1.0,
+                        "prefill_token_weight": 1.0,
+                    },
+                },
+            }
+        )
+
+        budget = config.provider.rollout_budget
+        self.assertTrue(budget.enabled)
+        self.assertEqual(budget.limit_tokens, 70000)
+        self.assertEqual(
+            budget.reminder_at_remaining_tokens,
+            (20000, 10000, 5000),
+        )
+        self.assertEqual(
+            config.to_dict()["provider"]["rollout_budget"],
+            {
+                "enabled": True,
+                "limit_tokens": 70000,
+                "reminder_at_remaining_tokens": (20000, 10000, 5000),
+                "sampling_token_weight": 1.0,
+                "prefill_token_weight": 1.0,
+            },
+        )
+
+    def test_native_rollout_budget_rejects_ambiguous_limits_and_weights(self):
+        from agentbench_frame.hl.config import HLRunConfig
+
+        invalid_budgets = (
+            {"enabled": True, "limit_tokens": None},
+            {"enabled": True, "limit_tokens": 0},
+            {
+                "enabled": True,
+                "limit_tokens": 100,
+                "reminder_at_remaining_tokens": [100],
+            },
+            {
+                "enabled": True,
+                "limit_tokens": 100,
+                "reminder_at_remaining_tokens": [10, 20],
+            },
+            {
+                "enabled": True,
+                "limit_tokens": 100,
+                "sampling_token_weight": 0,
+            },
+            {
+                "enabled": True,
+                "limit_tokens": 100,
+                "prefill_token_weight": float("inf"),
+            },
+        )
+        for rollout_budget in invalid_budgets:
+            with self.subTest(rollout_budget=rollout_budget), self.assertRaises(
+                ValueError
+            ):
+                HLRunConfig.from_mapping(
+                    {
+                        "game": "29_rollman",
+                        "provider": {
+                            "kind": "codex",
+                            "rollout_budget": rollout_budget,
+                        },
+                    }
+                )
+
     def test_defaults_keep_open_ended_iteration_and_enable_rollback(self):
         from agentbench_frame.hl.config import HLRunConfig
 

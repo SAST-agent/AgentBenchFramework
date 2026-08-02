@@ -785,3 +785,23 @@ def test_model_bootstrap_resume_uses_provider_for_zero_cycle_recovery(
     assert calls[0]["provider_environment"] == {
         "AGENTBENCH_API_KEY": "runtime-value"
     }
+
+
+def test_provider_preflight_runs_before_paid_execution():
+    from agentbench_frame.hl.cli import _preflight_provider
+
+    class Provider:
+        def __init__(self):
+            self.calls = 0
+
+        def preflight(self):
+            self.calls += 1
+            return {"cli_version": "codex-cli test"}
+
+    provider = Provider()
+
+    facts = _preflight_provider(provider)
+
+    assert facts == {"cli_version": "codex-cli test"}
+    assert provider.calls == 1
+    assert _preflight_provider(None) is None

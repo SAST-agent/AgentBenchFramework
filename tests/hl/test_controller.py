@@ -113,6 +113,116 @@ def test_k_candidates_are_siblings_and_gate_selects_best_complete_score(tmp_path
     assert "branch=0/3" in checkpoint.read_text(encoding="utf-8")
 
 
+def test_budget_exhausted_candidate_requires_changed_safe_complete_quick_screen(
+    tmp_path,
+):
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+    from agentbench_frame.tracking.provider import ProviderInvocation
+
+    class BudgetProvider:
+        def __init__(self, edit, violations=()):
+            self.edit = edit
+            self.violations = list(violations)
+
+        def invoke(self, *, prompt, workspace, raw_output_path, session_id=None):
+            if self.edit is not None:
+                Path(workspace, "agent.py").write_text(
+                    self.edit,
+                    encoding="utf-8",
+                )
+            Path(raw_output_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(raw_output_path).write_text(
+                '{"type":"turn.failed","error":"SessionBudgetExceeded"}\n',
+                encoding="utf-8",
+            )
+            return ProviderInvocation(
+                status="failed",
+                error="SessionBudgetExceeded",
+                raw_output_ref=str(raw_output_path),
+                metadata={
+                    "rollout_budget_exhausted": True,
+                    "termination_reason": "rollout_budget_exhausted",
+                    "access_policy_violations": self.violations,
+                    "weighted_tokens": 70000.0,
+                    "rollout_budget_limit_tokens": 70000,
+                },
+            )
+
+    class CountingEvaluator:
+        def __init__(self, outcome):
+            self.outcome = outcome
+            self.calls = 0
+
+        def evaluate(self, version):
+            self.calls += 1
+            if self.outcome is None:
+                return CandidateEvaluation(
+                    status="incomplete",
+                    score=None,
+                    error="compile or smoke failed",
+                )
+            return CandidateEvaluation(status="complete", score=self.outcome)
+
+    cases = (
+        ("accepted", "VALUE = 1\n", (), 0.75, True, 1),
+        ("unchanged", None, (), 0.75, False, 0),
+        ("access-violation", "VALUE = 2\n", ("/forbidden",), 0.75, False, 0),
+        ("invalid", "VALUE = broken\n", (), None, False, 1),
+    )
+    for name, edit, violations, outcome, accepted, expected_calls in cases:
+        root = tmp_path / name
+        root.mkdir()
+        evaluator = CountingEvaluator(outcome)
+        controller = _controller(
+            root,
+            BudgetProvider(edit, violations),
+            evaluator,
+        )
+        origin = controller.initialize()
+
+        result = controller.run_act(parent_version_id=origin.version_id)
+        candidate = result.candidates[0]
+
+        assert evaluator.calls == expected_calls
+        assert candidate.evaluation.status == (
+            "complete" if accepted else "failed"
+        )
+        assert candidate.provider.status == (
+            "completed" if accepted else "failed"
+        )
+        assert candidate.provider.metadata.get(
+            "accepted_after_budget_exhaustion", False
+        ) is accepted
+        assert (
+            candidate.provider.metadata["termination_reason"]
+            == "rollout_budget_exhausted"
+        )
+        if accepted:
+            import json
+
+            from agentbench_frame.hl.events import read_events
+
+            checkpoint = json.loads(
+                (
+                    root
+                    / "checkpoints"
+                    / f"{candidate.act_id}.json"
+                ).read_text(encoding="utf-8")
+            )
+            assert checkpoint["provider_status"] == "completed"
+            assert checkpoint["termination_reason"] == "rollout_budget_exhausted"
+            assert checkpoint["weighted_tokens"] == 70000.0
+            assert checkpoint["rollout_budget_limit_tokens"] == 70000
+            assert checkpoint["accepted_after_budget_exhaustion"] is True
+            act = [
+                event
+                for event in read_events(root / "events.jsonl")
+                if event["event_type"] == "act_completed"
+            ][0]
+            assert act["termination_reason"] == "rollout_budget_exhausted"
+            assert act["accepted_after_budget_exhaustion"] is True
+
+
 def test_stream_failed_bootstrap_can_be_recovered_without_second_provider_call(
     tmp_path,
 ):

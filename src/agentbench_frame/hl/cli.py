@@ -638,6 +638,14 @@ def _provider_environment(config: LocalHLConfig) -> dict[str, str] | None:
     return {**os.environ, config.run.provider.env_key: key}
 
 
+def _preflight_provider(provider: Any | None) -> dict[str, object] | None:
+    """Verify a concrete provider runtime before any billable act."""
+
+    if provider is None:
+        return None
+    return provider.preflight()
+
+
 def _default_run_dir(config: LocalHLConfig) -> Path:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return config.paths.runs_root / f"run-{timestamp}"
@@ -1454,6 +1462,7 @@ def _run_real(
             idle_timeout_s=config.run.provider.idle_timeout_seconds,
         )
     )
+    _preflight_provider(provider)
     events_path = run_dir / "events.jsonl"
     historical = read_events(events_path)
     pending_planner_recovery = (

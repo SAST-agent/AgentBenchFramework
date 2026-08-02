@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import math
 from collections.abc import Mapping
 from typing import Any, Optional
 
@@ -25,6 +26,47 @@ def _strict_values(
 
 
 @dataclasses.dataclass(frozen=True)
+class RolloutBudgetConfig:
+    enabled: bool = False
+    limit_tokens: Optional[int] = None
+    reminder_at_remaining_tokens: tuple[int, ...] = ()
+    sampling_token_weight: float = 1.0
+    prefill_token_weight: float = 1.0
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "reminder_at_remaining_tokens",
+            tuple(self.reminder_at_remaining_tokens),
+        )
+        if self.enabled and (self.limit_tokens is None or self.limit_tokens < 1):
+            raise ValueError(
+                "provider.rollout_budget.limit_tokens must be >= 1 when enabled"
+            )
+        if self.limit_tokens is not None and self.limit_tokens < 1:
+            raise ValueError("provider.rollout_budget.limit_tokens must be >= 1")
+        reminders = self.reminder_at_remaining_tokens
+        if any(value < 1 for value in reminders):
+            raise ValueError(
+                "provider.rollout_budget reminders must be positive"
+            )
+        if self.limit_tokens is not None and any(
+            value >= self.limit_tokens for value in reminders
+        ):
+            raise ValueError(
+                "provider.rollout_budget reminders must be below limit_tokens"
+            )
+        if any(left <= right for left, right in zip(reminders, reminders[1:])):
+            raise ValueError(
+                "provider.rollout_budget reminders must be strictly descending"
+            )
+        for name in ("sampling_token_weight", "prefill_token_weight"):
+            value = getattr(self, name)
+            if not math.isfinite(value) or value <= 0:
+                raise ValueError(f"provider.rollout_budget.{name} must be finite and > 0")
+
+
+@dataclasses.dataclass(frozen=True)
 class ProviderConfig:
     kind: str = "codex"
     model: Optional[str] = None
@@ -38,6 +80,10 @@ class ProviderConfig:
     network_access: str = "enabled"
     context_mode: str = "resumable"
     executable: str = "codex"
+    expected_cli_version: Optional[str] = None
+    rollout_budget: RolloutBudgetConfig = dataclasses.field(
+        default_factory=RolloutBudgetConfig
+    )
     timeout_seconds: int = 600
     idle_timeout_seconds: int = 360
     transport_retry_attempts: int = 3
@@ -47,6 +93,8 @@ class ProviderConfig:
     def __post_init__(self) -> None:
         if self.kind != "codex":
             raise ValueError("only the codex provider is supported by this HL harness")
+        if self.expected_cli_version is not None and not self.expected_cli_version:
+            raise ValueError("provider.expected_cli_version cannot be empty")
         if not self.env_key or "=" in self.env_key:
             raise ValueError("provider.env_key must name one environment variable")
         if self.context_mode not in {"resumable", "fresh"}:
@@ -303,9 +351,19 @@ class HLRunConfig:
         values = _strict_values(cls, raw, section="run")
         if "provider" not in values:
             raise ValueError("provider is required")
-        values["provider"] = ProviderConfig(
-            **_strict_values(ProviderConfig, values["provider"], section="provider")
+        provider_values = _strict_values(
+            ProviderConfig,
+            values["provider"],
+            section="provider",
         )
+        provider_values["rollout_budget"] = RolloutBudgetConfig(
+            **_strict_values(
+                RolloutBudgetConfig,
+                provider_values.get("rollout_budget"),
+                section="provider.rollout_budget",
+            )
+        )
+        values["provider"] = ProviderConfig(**provider_values)
         for name, section_cls in (
             ("origin", OriginConfig),
             ("curriculum", CurriculumConfig),
