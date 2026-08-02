@@ -445,22 +445,24 @@ active target: {active_target or "none"}
 - bounded replay evidence: {evidence}
 {distillation}
 
-先落盘，再补读：第 4 次工具调用结束前，必须已经写出一份结构合法、含恰好四项的 `workspace/.agentbench/branch_briefs.json`；后续只能用剩余调用校验或基于新证据更新它。不要把写产物留到推理末尾。
+这是压缩假设规划，不是代码审查。禁止读取 ai.py、禁止列举 workspace、禁止运行符号搜索；候选 act 负责核对代码并实现机制。Planner 只需从框架已经筛选的摘要、研究状态和坐标无关蒸馏中提出新假设。
+
+先落盘：第 2 次工具调用结束前，必须已经写出一份结构合法、含恰好四项的 `workspace/.agentbench/branch_briefs.json`。第一次读取完成后立即完成有限推理并写文件；不得在写文件前继续浏览、长时间扩展分析或调用第三个工具。
 
 读取顺序：
 1. 第一次工具调用批量读取 game digest、research state、全部 evidence summary，以及存在时的共享 Ghost 蒸馏；不要逐个读取四个 summary。
-2. 第二次调用用符号索引定位当前 `ai.py` 的决策入口和已有机制；第三次调用只读相关代码区间，禁止顺序打印完整策略文件。
-3. 第四次调用写入 branch_briefs.json。只有产物已经落盘且诊断仍依赖精确规则语义时，才按 manifest 定点读取权威规则对应章节并更新产物。
+2. 第二次工具调用直接写入 branch_briefs.json；四项都必须引用摘要中的具体证据，并避开 research state 已否定的机制。
+3. 写出后只允许一次 JSON 结构校验，然后立即结束。禁止补读代码、规则、replay 或 trace。
 
-不要求每轮完整重读静态长文。不得读取人类对手源码、其他 run 或其他候选版本。
+不要求每轮完整重读静态长文。不得读取人类对手源码、其他 run、其他候选版本或当前候选代码。
 
 Planner 压缩边界：
 - 只能读取 evidence 的 summary；不得打开 replay 或 trace，不得对它们运行脚本或自行解析。
 - 不得打印完整 replay、完整 trace、完整 observation、完整棋盘或全量事件流。
 - diagnosis 中的 level/round/事件必须来自 summary；精确窗口由后续候选 act 使用受限工具核查。
-- 对照 research state 与当前 ai.py，四个 mechanism 必须是尚未实现、未被既有失败证据否定的实质新机制。
+- 对照 research state，四个 mechanism 必须是未被既有失败证据否定的实质新机制；由候选 act 在实现前检查当前 ai.py，若机制已存在则在同一证据目标下实现缺失的控制环节。
 
-最多 10 次工具调用。写出并校验 branch_briefs.json 后立即结束，不运行 git status/diff，不继续扩展诊断。
+最多 3 次工具调用。写出并校验 branch_briefs.json 后立即结束，不运行 git status/diff，不继续扩展诊断。
 
 基于同一份证据，提出恰好 4 个机制上不同、可证伪的 Rollman 改进方向。禁止把同一机制的阈值、权重或参数变化伪装成四种方案；禁止 grid search。允许 if/else、路径规划、搜索、状态机、有限记忆和策略代码增长。
 

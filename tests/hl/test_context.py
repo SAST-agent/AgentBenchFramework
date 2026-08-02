@@ -273,8 +273,9 @@ def test_planner_prompt_requires_early_durable_branch_briefs(tmp_path):
         active_target="rank15",
     )
 
-    assert "第 4 次工具调用结束前" in prompt
-    assert "先落盘，再补读" in prompt
+    assert "第 2 次工具调用结束前" in prompt
+    assert "禁止读取 ai.py" in prompt
+    assert "候选 act 负责核对代码" in prompt
     assert "不要逐个读取四个 summary" in prompt
 
 
