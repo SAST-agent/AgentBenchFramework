@@ -795,7 +795,95 @@ def test_provider_rejects_tool_reads_from_another_run(tmp_path):
     assert result.metadata["access_policy_violations"] == [
         str(other_run)
     ]
+    assert (
+        result.metadata["termination_reason"]
+        == "provider_access_policy_violation"
+    )
     assert result.usage.total_tokens == 27
+
+
+def test_provider_stops_stream_immediately_after_access_policy_violation(tmp_path):
+    from agentbench_frame.hl.provider import CodexSessionProvider
+
+    run_root = tmp_path / ".agentbench" / "29_rollman" / "runs" / "active"
+    workspace = tmp_path / ".agentbench" / "29_rollman" / "candidate"
+    workspace.mkdir(parents=True)
+    forbidden = tmp_path / ".agentbench" / "29_rollman" / "runs" / "old" / "events.jsonl"
+    executable = tmp_path / "tainted-stream-codex"
+    record = {
+        "type": "item.completed",
+        "item": {
+            "type": "command_execution",
+            "command": f"cat {forbidden}",
+            "status": "completed",
+        },
+    }
+    executable.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, time\n"
+        f"print(json.dumps({record!r}), flush=True)\n"
+        "time.sleep(5)\n",
+        encoding="utf-8",
+    )
+    executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+    provider = CodexSessionProvider(
+        _provider_config(executable=str(executable)),
+        run_root=run_root,
+        environ={
+            "AGENTBENCH_API_KEY": "sk-runtime-only",
+            "PATH": os.environ.get("PATH", ""),
+            "HOME": str(tmp_path),
+        },
+        timeout_s=5,
+        idle_timeout_s=2,
+    )
+
+    result = provider.invoke(
+        prompt="# Rollman scoped repair act-repair\nrepair",
+        workspace=workspace,
+        raw_output_path=run_root / "provider" / "act-tainted.jsonl",
+    )
+
+    assert result.status == "failed"
+    assert result.elapsed_time_s < 2.0
+    assert result.metadata["termination_reason"] == "provider_access_policy_violation"
+    assert str(forbidden) in result.metadata["access_policy_violations"]
+
+
+def test_provider_stops_coding_stream_at_raw_output_limit(tmp_path):
+    from agentbench_frame.hl.provider import CodexSessionProvider
+
+    executable = tmp_path / "giant-output-codex"
+    executable.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, time\n"
+        "print(json.dumps({'type':'item.completed','item':{'type':'command_execution','command':'true','status':'completed','aggregated_output':'x'*600000}}), flush=True)\n"
+        "time.sleep(5)\n",
+        encoding="utf-8",
+    )
+    executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    provider = CodexSessionProvider(
+        _provider_config(executable=str(executable)),
+        run_root=tmp_path / "run",
+        environ={
+            "AGENTBENCH_API_KEY": "sk-runtime-only",
+            "PATH": os.environ.get("PATH", ""),
+        },
+        timeout_s=5,
+        idle_timeout_s=2,
+    )
+
+    result = provider.invoke(
+        prompt="# HL iteration act-b00 — 候选 1/4\nwrite",
+        workspace=workspace,
+        raw_output_path=tmp_path / "run" / "provider" / "act-large.jsonl",
+    )
+
+    assert result.status == "failed"
+    assert result.elapsed_time_s < 2.0
+    assert result.metadata["termination_reason"] == "provider_output_limit_exceeded"
 
 
 def test_provider_allows_declared_run_artifacts_and_candidate_workspace(tmp_path):

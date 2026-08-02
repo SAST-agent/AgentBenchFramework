@@ -25,6 +25,7 @@ _TOOL_ITEM_TYPES = {
     "mcp_tool_call",
     "web_search",
 }
+_HL_RAW_OUTPUT_LIMIT_CHARS = 512 * 1024
 
 
 def _toml_string(value: str) -> str:
@@ -83,17 +84,28 @@ def _enforce_completed_tool_limit(
     *,
     pre_edit_limit: int | None,
     total_limit: int | None,
+    output_limit_chars: int | None,
 ) -> subprocess.CompletedProcess[str]:
     final_stdout = completed.stdout or ""
     final_stderr = completed.stderr or ""
-    violation = _tool_limit_violation(
-        final_stdout,
-        pre_edit_limit=pre_edit_limit,
-        total_limit=total_limit,
-    )
-    if violation is None:
+    if output_limit_chars is not None and len(final_stdout) > output_limit_chars:
+        diagnostic = (
+            "provider_output_limit_exceeded: raw stream exceeded "
+            f"{output_limit_chars} characters"
+        )
+    else:
+        violation = _tool_limit_violation(
+            final_stdout,
+            pre_edit_limit=pre_edit_limit,
+            total_limit=total_limit,
+        )
+        diagnostic = (
+            None
+            if violation is None
+            else "provider_tool_limit_exceeded: " + violation
+        )
+    if diagnostic is None:
         return completed
-    diagnostic = "provider_tool_limit_exceeded: " + violation
     final_stdout += json.dumps(
         {"type": "error", "message": diagnostic},
         ensure_ascii=False,
@@ -541,6 +553,9 @@ class CodexSessionProvider:
                 "provider access policy violation: coding agent read outside "
                 "the isolated candidate context"
             )
+            result.metadata["termination_reason"] = (
+                "provider_access_policy_violation"
+            )
         result.elapsed_time_s = time.monotonic() - started
         result.raw_output_ref = str(raw_path)
         result.metadata.update(
@@ -559,6 +574,17 @@ class CodexSessionProvider:
             result.error = result.error or (
                 completed.stderr.strip() or f"provider exited {completed.returncode}"
             )
+            diagnostic = " ".join(
+                (str(result.error or ""), str(completed.stderr or ""))
+            )
+            if "provider_tool_limit_exceeded" in diagnostic:
+                result.metadata["termination_reason"] = (
+                    "provider_tool_limit_exceeded"
+                )
+            elif "provider_output_limit_exceeded" in diagnostic:
+                result.metadata["termination_reason"] = (
+                    "provider_output_limit_exceeded"
+                )
         self._annotate_budget(
             result,
             raw_output=completed.stdout or "",
@@ -575,6 +601,12 @@ class CodexSessionProvider:
         prompt: str,
     ) -> subprocess.CompletedProcess[str]:
         pre_edit_limit, total_limit = _tool_limits(prompt)
+        bounded_hl_act = (
+            pre_edit_limit is not None or total_limit is not None
+        )
+        output_limit_chars = (
+            _HL_RAW_OUTPUT_LIMIT_CHARS if bounded_hl_act else None
+        )
         if self.idle_timeout_s is None:
             return _enforce_completed_tool_limit(
                 subprocess.run(
@@ -588,6 +620,7 @@ class CodexSessionProvider:
                 ),
                 pre_edit_limit=pre_edit_limit,
                 total_limit=total_limit,
+                output_limit_chars=output_limit_chars,
             )
 
         process = subprocess.Popen(
@@ -612,6 +645,25 @@ class CodexSessionProvider:
             if isinstance(value, bytes):
                 return value.decode("utf-8", errors="replace")
             return value
+
+        def terminate_for_limit(diagnostic: str) -> subprocess.CompletedProcess[str]:
+            process.kill()
+            final_stdout, final_stderr = process.communicate()
+            stdout_text = decoded(final_stdout) or partial_stdout
+            stderr_text = decoded(final_stderr) or partial_stderr
+            stdout_text += json.dumps(
+                {"type": "error", "message": diagnostic},
+                ensure_ascii=False,
+            ) + "\n"
+            raw_path.write_text(stdout_text, encoding="utf-8")
+            return subprocess.CompletedProcess(
+                command,
+                -9,
+                stdout_text,
+                " ".join(
+                    value for value in (stderr_text, diagnostic) if value
+                ),
+            )
 
         while True:
             now = time.monotonic()
@@ -654,33 +706,31 @@ class CodexSessionProvider:
                     partial_stdout = stdout
                     partial_stderr = stderr
                     raw_path.write_text(partial_stdout, encoding="utf-8")
+                    violations = self._access_policy_violations(
+                        partial_stdout,
+                        workspace=workspace,
+                    )
+                    if violations:
+                        return terminate_for_limit(
+                            "provider_access_policy_violation: "
+                            + ", ".join(violations)
+                        )
+                    if (
+                        output_limit_chars is not None
+                        and len(partial_stdout) > output_limit_chars
+                    ):
+                        return terminate_for_limit(
+                            "provider_output_limit_exceeded: raw stream exceeded "
+                            f"{output_limit_chars} characters"
+                        )
                     violation = _tool_limit_violation(
                         partial_stdout,
                         pre_edit_limit=pre_edit_limit,
                         total_limit=total_limit,
                     )
                     if violation is not None:
-                        process.kill()
-                        final_stdout, final_stderr = process.communicate()
-                        partial_stdout = decoded(final_stdout) or partial_stdout
-                        partial_stderr = decoded(final_stderr) or partial_stderr
-                        diagnostic = (
+                        return terminate_for_limit(
                             "provider_tool_limit_exceeded: " + violation
-                        )
-                        partial_stdout += json.dumps(
-                            {"type": "error", "message": diagnostic},
-                            ensure_ascii=False,
-                        ) + "\n"
-                        raw_path.write_text(partial_stdout, encoding="utf-8")
-                        return subprocess.CompletedProcess(
-                            command,
-                            -9,
-                            partial_stdout,
-                            " ".join(
-                                value
-                                for value in (partial_stderr, diagnostic)
-                                if value
-                            ),
                         )
                 continue
             return _enforce_completed_tool_limit(
@@ -692,6 +742,7 @@ class CodexSessionProvider:
                 ),
                 pre_edit_limit=pre_edit_limit,
                 total_limit=total_limit,
+                output_limit_chars=output_limit_chars,
             )
 
     @staticmethod
