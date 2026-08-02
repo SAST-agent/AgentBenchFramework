@@ -866,7 +866,7 @@ def _pending_repair_recoveries(
     version_store: Any,
     evaluations_by_version: dict[str, CandidateEvaluation],
 ) -> dict[int, Any]:
-    """Rebuild verified completed repairs from one interrupted proposal cycle."""
+    """Rebuild verified terminal repairs from one interrupted proposal cycle."""
 
     from agentbench_frame.hl.controller import CandidateResult
     from agentbench_frame.tracking.provider import ProviderInvocation
@@ -904,7 +904,7 @@ def _pending_repair_recoveries(
         if (
             event.get("event_type") != "repair_completed"
             or str(event.get("iteration_id")) != iteration_id
-            or event.get("status") != "completed"
+            or event.get("status") not in {"completed", "failed", "timeout"}
         ):
             continue
         branch_index = int(event["branch_index"])
@@ -923,7 +923,7 @@ def _pending_repair_recoveries(
             checkpoint.get("act_id") != act_id
             or checkpoint.get("iteration_id") != iteration_id
             or int(checkpoint.get("branch_index", -1)) != branch_index
-            or checkpoint.get("provider_status") != "completed"
+            or checkpoint.get("provider_status") != event.get("status")
             or version_event.get("act_id") != act_id
         ):
             continue
@@ -940,7 +940,7 @@ def _pending_repair_recoveries(
             version=version,
             evaluation=evaluation,
             provider=ProviderInvocation(
-                status="completed",
+                status=str(event["status"]),
                 raw_output_ref=checkpoint.get("raw_output_ref"),
                 metadata={
                     "act_id": act_id,
@@ -958,7 +958,7 @@ def _pending_candidate_recoveries(
     version_store: Any,
     evaluations_by_version: dict[str, CandidateEvaluation],
 ) -> dict[int, Any]:
-    """Rebuild completed initial siblings in an interrupted proposal cycle."""
+    """Rebuild terminal initial siblings in an interrupted proposal cycle."""
 
     from agentbench_frame.hl.controller import CandidateResult
     from agentbench_frame.tracking.provider import ProviderInvocation
@@ -986,7 +986,7 @@ def _pending_candidate_recoveries(
         for event in historical
         if event.get("event_type") == "act_completed"
         and str(event.get("iteration_id")) == iteration_id
-        and event.get("status") == "completed"
+        and event.get("status") in {"completed", "failed", "timeout"}
         and isinstance(event.get("branch_index"), int)
     }
     checkpoints = {
@@ -1020,7 +1020,7 @@ def _pending_candidate_recoveries(
             or checkpoint.get("iteration_id") != iteration_id
             or checkpoint.get("parent_version_id") != parent_id
             or int(checkpoint.get("branch_index", -1)) != branch_index
-            or checkpoint.get("provider_status") != "completed"
+            or checkpoint.get("provider_status") != act.get("status")
         ):
             continue
         version = version_store.get(version_id)
@@ -1035,7 +1035,7 @@ def _pending_candidate_recoveries(
             version=version,
             evaluation=evaluation,
             provider=ProviderInvocation(
-                status="completed",
+                status=str(act["status"]),
                 raw_output_ref=checkpoint.get("raw_output_ref"),
                 metadata={
                     "act_id": act_id,
