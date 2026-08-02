@@ -591,6 +591,48 @@ def _prepare_experience_root(
     return experience_root
 
 
+def _prepare_research_state(
+    config: LocalHLConfig,
+    *,
+    run_dir: Path,
+    resume: bool,
+) -> Path:
+    """Create or inherit the bounded semantic checkpoint for a run."""
+
+    from agentbench_frame.hl.research_state import ResearchState
+
+    destination = run_dir / "research_state.json"
+    if resume:
+        return destination
+    if (
+        config.run.origin.mode == "imported_version"
+        and not config.run.origin.reset_research_state
+    ):
+        assert config.run.origin.source_run is not None
+        source = (
+            Path(config.run.origin.source_run).resolve()
+            / "research_state.json"
+        )
+        if not source.is_file():
+            raise FileNotFoundError(
+                f"imported origin research state is missing: {source}"
+            )
+        limit = config.run.context.research_state_max_bytes
+        if source.stat().st_size > limit:
+            raise ValueError(
+                f"source research state exceeds max_bytes={limit}"
+            )
+        ResearchState.load_or_create(source, max_bytes=limit)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        return destination
+    if not destination.is_file():
+        ResearchState.empty(
+            max_bytes=config.run.context.research_state_max_bytes
+        ).write(destination)
+    return destination
+
+
 def _dry_run(
     config: LocalHLConfig,
     *,
@@ -1448,11 +1490,11 @@ def _run_real(
         bundle,
         run_dir / "context" / "game_digest.json",
     )
-    research_state_path = run_dir / "research_state.json"
-    if not resume and not research_state_path.is_file():
-        ResearchState.empty(
-            max_bytes=config.run.context.research_state_max_bytes
-        ).write(research_state_path)
+    research_state_path = _prepare_research_state(
+        config,
+        run_dir=run_dir,
+        resume=resume,
+    )
     experience = ExperienceManager(
         _prepare_experience_root(config, run_dir=run_dir, resume=resume),
         compress_every_acts=config.run.experience.compress_every_acts,

@@ -258,6 +258,106 @@ def test_hl_dry_run_needs_no_api_key_and_creates_no_provider_call(
     assert not (tmp_path / "dry-run" / "provider").exists()
 
 
+def test_imported_run_can_inherit_bounded_research_state(tmp_path):
+    from agentbench_frame.hl.cli import _prepare_research_state
+    from agentbench_frame.hl.config import OriginConfig
+    from agentbench_frame.hl.local_config import LocalHLConfig
+    from agentbench_frame.hl.research_state import ResearchState
+
+    source_run = tmp_path / "source-run"
+    source_state = ResearchState.empty(max_bytes=16384).advance(
+        stable_knowledge=("rank15 requires cross-seed protection",),
+        proposal_cycle=2,
+    )
+    source_path = source_state.write(source_run / "research_state.json")
+    base = LocalHLConfig.load(CONFIG)
+    config = dataclasses.replace(
+        base,
+        run=dataclasses.replace(
+            base.run,
+            origin=OriginConfig(
+                mode="imported_version",
+                source_run=str(source_run),
+                source_version="v000000",
+                reset_research_state=False,
+            ),
+        ),
+    )
+
+    destination = _prepare_research_state(
+        config, run_dir=tmp_path / "new-run", resume=False
+    )
+
+    assert destination.read_bytes() == source_path.read_bytes()
+    loaded = ResearchState.load_or_create(destination, max_bytes=16384)
+    assert loaded.proposal_cycle == 2
+    assert loaded.stable_knowledge == (
+        "rank15 requires cross-seed protection",
+    )
+
+
+def test_imported_research_state_fails_closed_when_missing(tmp_path):
+    from agentbench_frame.hl.cli import _prepare_research_state
+    from agentbench_frame.hl.config import OriginConfig
+    from agentbench_frame.hl.local_config import LocalHLConfig
+
+    base = LocalHLConfig.load(CONFIG)
+    config = dataclasses.replace(
+        base,
+        run=dataclasses.replace(
+            base.run,
+            origin=OriginConfig(
+                mode="imported_version",
+                source_run=str(tmp_path / "missing-run"),
+                source_version="v000000",
+                reset_research_state=False,
+            ),
+        ),
+    )
+
+    try:
+        _prepare_research_state(
+            config, run_dir=tmp_path / "new-run", resume=False
+        )
+    except FileNotFoundError as exc:
+        assert "research state is missing" in str(exc)
+    else:
+        raise AssertionError("missing imported research state was accepted")
+
+
+def test_imported_research_state_rejects_oversized_source(tmp_path):
+    from agentbench_frame.hl.cli import _prepare_research_state
+    from agentbench_frame.hl.config import ContextConfig, OriginConfig
+    from agentbench_frame.hl.local_config import LocalHLConfig
+
+    source_run = tmp_path / "source-run"
+    source_run.mkdir()
+    (source_run / "research_state.json").write_bytes(b"x" * 1025)
+    base = LocalHLConfig.load(CONFIG)
+    config = dataclasses.replace(
+        base,
+        run=dataclasses.replace(
+            base.run,
+            origin=OriginConfig(
+                mode="imported_version",
+                source_run=str(source_run),
+                source_version="v000000",
+                reset_research_state=False,
+            ),
+            context=ContextConfig(research_state_max_bytes=1024),
+        ),
+    )
+
+    try:
+        _prepare_research_state(
+            config, run_dir=tmp_path / "new-run", resume=False
+        )
+    except ValueError as exc:
+        assert "exceeds max_bytes=1024" in str(exc)
+    else:
+        raise AssertionError("oversized imported research state was accepted")
+
+
 def test_real_run_fails_before_state_change_when_api_key_is_missing(
     tmp_path, monkeypatch
 ):

@@ -247,6 +247,7 @@ class OriginConfig:
     source_version: Optional[str] = None
     reset_session: bool = True
     reset_experience: bool = True
+    reset_research_state: bool = True
 
     def __post_init__(self) -> None:
         if self.mode not in {"model_bootstrap", "imported_version"}:

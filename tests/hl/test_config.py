@@ -209,6 +209,17 @@ class HLConfigTests(unittest.TestCase):
             ):
                 HLRunConfig.from_mapping({**base, "origin": origin})
 
+    def test_imported_origin_resets_research_state_by_default(self):
+        from agentbench_frame.hl.config import OriginConfig
+
+        origin = OriginConfig(
+            mode="imported_version",
+            source_run="run-a",
+            source_version="v000001",
+        )
+
+        self.assertTrue(origin.reset_research_state)
+
     def test_weakest_failed_curriculum_requires_preservation_and_valid_bounds(self):
         from agentbench_frame.hl.config import HLRunConfig
 
