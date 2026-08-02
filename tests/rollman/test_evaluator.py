@@ -1,6 +1,8 @@
 import dataclasses
 from pathlib import Path
 
+import pytest
+
 from agentbench_frame.games.rollman.evaluator import (
     Opponent,
     RollmanEvaluator,
@@ -293,6 +295,72 @@ def test_staged_evaluation_uses_one_quick_seed_then_remaining_finalist_seeds(tmp
     assert [match["seed"] for match in combined.matches] == [101, 102, 103, 104]
     assert combined.score == 1.0
     assert calls[0][0] == 101
+
+
+def test_staged_evaluation_uses_configured_two_plus_two_seed_split(tmp_path):
+    def runner(**kwargs):
+        return _Match(
+            status="complete",
+            seed=kwargs["seed"],
+            rollman_score=1,
+            ghosts_score=0,
+            result="win",
+        )
+
+    opponent = Opponent(
+        opponent_id="rank15",
+        rank=15,
+        archive=Path("rank15.zip"),
+        process=ProcessSpec(("ghost",)),
+    )
+    evaluator = RollmanEvaluator(
+        logic=ProcessSpec(("logic",)),
+        candidate_factory=lambda version: ProcessSpec(("candidate",)),
+        learning_opponent=opponent,
+        human_pool=(opponent,),
+        fixed_gate_seeds=(101, 102, 103, 104),
+        certification_seeds=(201,),
+        artifact_root=tmp_path,
+        match_runner=runner,
+        quick_screen_seed_count=2,
+        finalist_seed_count=2,
+    )
+
+    quick = evaluator.quick_screen(_version())
+    finalist = evaluator.evaluate_finalist(_version())
+    combined = evaluator.combine_stages(quick, finalist)
+
+    assert [match["seed"] for match in quick.matches] == [101, 102]
+    assert [match["seed"] for match in finalist.matches] == [103, 104]
+    assert [match["seed"] for match in combined.matches] == [101, 102, 103, 104]
+
+
+@pytest.mark.parametrize(
+    ("quick_count", "finalist_count"),
+    ((0, 2), (2, 0), (3, 2)),
+)
+def test_staged_evaluation_rejects_invalid_seed_counts(
+    tmp_path, quick_count, finalist_count
+):
+    opponent = Opponent(
+        opponent_id="rank15",
+        rank=15,
+        archive=Path("rank15.zip"),
+        process=ProcessSpec(("ghost",)),
+    )
+
+    with pytest.raises(ValueError, match="seed count"):
+        RollmanEvaluator(
+            logic=ProcessSpec(("logic",)),
+            candidate_factory=lambda version: ProcessSpec(("candidate",)),
+            learning_opponent=opponent,
+            human_pool=(opponent,),
+            fixed_gate_seeds=(101, 102, 103, 104),
+            certification_seeds=(201,),
+            artifact_root=tmp_path,
+            quick_screen_seed_count=quick_count,
+            finalist_seed_count=finalist_count,
+        )
 
 
 def test_fixed_cases_can_run_in_parallel_but_preserve_seed_order(tmp_path):

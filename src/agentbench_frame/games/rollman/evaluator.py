@@ -79,6 +79,8 @@ class RollmanEvaluator:
         match_runner: MatchRunner = run_match,
         state_tracker_factory: TrackerFactory | None = None,
         max_parallel_matches: int = 1,
+        quick_screen_seed_count: int = 1,
+        finalist_seed_count: int | None = None,
     ) -> None:
         self.logic = logic
         self.candidate_factory = candidate_factory
@@ -93,6 +95,12 @@ class RollmanEvaluator:
         self.match_runner = match_runner
         self.state_tracker_factory = state_tracker_factory
         self.max_parallel_matches = int(max_parallel_matches)
+        self.quick_screen_seed_count = int(quick_screen_seed_count)
+        self.finalist_seed_count = (
+            len(self.fixed_gate_seeds) - self.quick_screen_seed_count
+            if finalist_seed_count is None
+            else int(finalist_seed_count)
+        )
         self.last_evaluation: CandidateEvaluation | None = None
         if learning_opponent.process is None:
             raise ValueError("learning opponent has not been prepared")
@@ -100,6 +108,17 @@ class RollmanEvaluator:
             raise ValueError("fixed_gate_seeds cannot be empty")
         if not self.certification_seeds:
             raise ValueError("certification_seeds cannot be empty")
+        if self.quick_screen_seed_count < 1:
+            raise ValueError("quick-screen seed count must be positive")
+        if finalist_seed_count is not None and self.finalist_seed_count < 1:
+            raise ValueError("finalist seed count must be positive")
+        if (
+            self.quick_screen_seed_count + self.finalist_seed_count
+            > len(self.fixed_gate_seeds)
+        ):
+            raise ValueError(
+                "staged seed counts exceed the fixed gate seed count"
+            )
         if self.timeout_s <= 0:
             raise ValueError("timeout_s must be positive")
         if self.max_parallel_matches < 1:
@@ -120,14 +139,17 @@ class RollmanEvaluator:
         return self._evaluate_cases(
             version,
             opponents=(self.learning_opponent,),
-            seeds=self.fixed_gate_seeds[:1],
+            seeds=self.fixed_gate_seeds[: self.quick_screen_seed_count],
             phase="quick_screen",
         )
 
     def evaluate_finalist(self, version: Version) -> CandidateEvaluation:
         """Evaluate a quick-screen finalist on the remaining target seeds."""
 
-        seeds = self.fixed_gate_seeds[1:]
+        start = self.quick_screen_seed_count
+        seeds = self.fixed_gate_seeds[
+            start : start + self.finalist_seed_count
+        ]
         if not seeds:
             return CandidateEvaluation(
                 status="complete",
