@@ -55,6 +55,18 @@ class AgentRunResult:
     transcript_path: Optional[str] = None     # ~/.claude/projects/<slug>/<session_id>.jsonl
 
 
+def _workspace_relative(fp: str, ws: Path) -> str:
+    """Normalize a claude tool ``file_path`` to a workspace-relative posix path.
+
+    Falls back to the raw path if it cannot be resolved inside the workspace
+    (e.g. an absolute path outside it) — still recorded, never dropped.
+    """
+    try:
+        return Path(fp).resolve().relative_to(ws).as_posix()
+    except (ValueError, OSError):
+        return str(fp)
+
+
 def _resolve_transcript_path(session_id: Optional[str]) -> Optional[str]:
     """Locate claude's transcript for a session by its globally-unique id.
 
@@ -285,9 +297,21 @@ class ClaudeCodeRunner:
                     prompt_tokens = usage.get("input_tokens")
                     completion_tokens = usage.get("output_tokens")
                     total_tokens = usage.get("total_tokens")
+                    # Fallback: the CLI may omit total_tokens but report
+                    # input+output — sum them rather than recording null.
+                    # Both missing stays None (unknown, never fake 0).
+                    if total_tokens is None and (
+                            prompt_tokens is not None
+                            or completion_tokens is not None):
+                        total_tokens = (prompt_tokens or 0) + (completion_tokens or 0)
                     session_id = evt.get("session_id")
         except _json.JSONDecodeError:
             pass
+
+        # Best-effort: which files did the CLI actually edit? Parse its streamed
+        # tool_use blocks (Edit/Write/MultiEdit/NotebookEdit). Empty on no tool
+        # calls or unparseable output — the event stream then records [].
+        files_touched = self._collect_files_touched(stdout, workspace)
 
         if proc.returncode != 0:
             reason = f"claude exited {proc.returncode}: {(stderr or '')[:500]}"
@@ -295,6 +319,7 @@ class ClaudeCodeRunner:
                 edit_type="noop",
                 error=reason,
                 failure_reason=reason,
+                files_touched=files_touched,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
                 total_tokens=total_tokens,
@@ -302,6 +327,7 @@ class ClaudeCodeRunner:
             )
         return AgentRunResult(
             edit_type=edit_type,
+            files_touched=files_touched,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
@@ -309,6 +335,47 @@ class ClaudeCodeRunner:
             session_id=session_id,
             transcript_path=_resolve_transcript_path(session_id),
         )
+
+    @staticmethod
+    def _collect_files_touched(stdout: str, workspace: Path) -> List[str]:
+        """Best-effort: collect the files the claude CLI edited.
+
+        Parses the streamed ``assistant`` events' ``tool_use`` blocks for the
+        file-editing tools (``Edit``/``Write``/``MultiEdit``/``NotebookEdit``)
+        and records each ``input.file_path`` relative to the workspace,
+        deduped, in first-use order. Empty on no tool calls or unparseable
+        output — a silent timeout/parse-failure records [] (not a fabricated
+        edit).
+        """
+        import json as _json
+        ws = workspace.resolve()
+        touched: List[str] = []
+        seen = set()
+        for line in (stdout or "").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                evt = _json.loads(line)
+            except _json.JSONDecodeError:
+                continue
+            if evt.get("type") != "assistant":
+                continue
+            content = (evt.get("message") or {}).get("content") or []
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "tool_use":
+                    continue
+                if block.get("name") not in ("Edit", "Write", "MultiEdit",
+                                             "NotebookEdit"):
+                    continue
+                fp = (block.get("input") or {}).get("file_path")
+                if not fp:
+                    continue
+                rel = _workspace_relative(fp, ws)
+                if rel not in seen:
+                    seen.add(rel)
+                    touched.append(rel)
+        return touched
 
     @staticmethod
     def _default_prompt(context: Dict[str, Any]) -> str:
@@ -355,6 +422,7 @@ class ApiCodingRunner:
         messages: List[Dict[str, Any]] = [{"role": "user", "content": prompt}]
         prompt_tok = completion_tok = total_tok = 0
         edit_applied = False
+        files_touched: List[str] = []  # str_replace targets agent.py
         failure_reason: Optional[str] = None
         turn_records: List[Dict[str, Any]] = []
         started = _time.monotonic()
@@ -429,6 +497,7 @@ class ApiCodingRunner:
                         }
                         if ok:
                             edit_applied = True
+                            files_touched = ["agent.py"]
                         else:
                             failure_reason = reason
                         wrote = True
@@ -452,12 +521,14 @@ class ApiCodingRunner:
         if edit_applied:
             return AgentRunResult(
                 edit_type=None,  # unclassified -> controller diff-classifies
+                files_touched=files_touched,
                 prompt_tokens=prompt_tok or None,
                 completion_tokens=completion_tok or None,
                 total_tokens=total_tok or None,
                 time_s=elapsed, transcript_path=transcript_path)
         return AgentRunResult(
             edit_type="noop", failure_reason=failure_reason,
+            files_touched=files_touched,
             prompt_tokens=prompt_tok or None,
             completion_tokens=completion_tok or None,
             total_tokens=total_tok or None,

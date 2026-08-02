@@ -44,6 +44,31 @@ def test_applies_str_replace(tmp_path):
     assert client.calls == 2
 
 
+def test_files_touched_recorded_on_edit(tmp_path):
+    """Fix-F: a successful str_replace records agent.py in files_touched."""
+    _seed_agent(tmp_path)
+    client = ScriptedClient([
+        LLMResponse(text="", tool_calls=[ToolCall("str_replace",
+                    {"old_string": "def step():\n    pass\n",
+                     "new_string": "def step():\n    return 1\n"})],
+                    usage=Usage(7, 2))])
+    res = ApiCodingRunner(client=client, system_prompt="S").run(
+        workspace=tmp_path, context={"prompt": "x"})
+    assert res.files_touched == ["agent.py"]
+
+
+def test_files_touched_empty_when_no_edit(tmp_path):
+    """Fix-F: a clean no-edit run records [] — never a fabricated path."""
+    _seed_agent(tmp_path)
+    client = ScriptedClient([
+        LLMResponse(text="", tool_calls=[ToolCall("read_file", {"path": "agent.py"})],
+                    usage=Usage(1, 1)),
+        LLMResponse(text="I choose not to edit.", tool_calls=[], usage=Usage(1, 1))])
+    res = ApiCodingRunner(client=client, system_prompt="S").run(
+        workspace=tmp_path, context={"prompt": "x"})
+    assert res.files_touched == []
+
+
 def test_str_replace_not_unique_not_applied(tmp_path):
     _seed_agent(tmp_path, "A = 1\nB = 1\n")  # "= 1\n" matches twice
     client = ScriptedClient([

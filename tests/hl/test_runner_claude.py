@@ -111,6 +111,53 @@ def test_usage_parsed_from_result_event(monkeypatch, tmp_path):
     assert res.time_s is not None
 
 
+def test_files_touched_parsed_from_assistant_tool_use(monkeypatch, tmp_path):
+    """Fix-F: files the claude CLI edited are parsed from its streamed
+    tool_use blocks (Edit/MultiEdit) and reported relative to the workspace."""
+    (tmp_path / "agent.py").write_text("x = 1\n", encoding="utf-8")
+    lines = "\n".join([
+        json.dumps({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "Edit",
+             "input": {"file_path": "agent.py", "old_string": "x = 1",
+                       "new_string": "x = 2"}}]}}),
+        json.dumps({"type": "assistant", "message": {"content": [
+            {"type": "tool_use", "name": "MultiEdit",
+             "input": {"file_path": "rules/escape.py"}}]}}),
+        json.dumps({"type": "result",
+                    "usage": {"input_tokens": 1, "output_tokens": 1,
+                              "total_tokens": 2}}),
+    ]) + "\n"
+    _patch_popen(monkeypatch, {}, _FakeProc(stdout=lines, returncode=0))
+    res = ClaudeCodeRunner().run(workspace=tmp_path, context={"prompt": "go"})
+    assert "agent.py" in res.files_touched
+    assert "rules/escape.py" in res.files_touched
+
+
+def test_files_touched_empty_without_tool_calls(monkeypatch, tmp_path):
+    """Fix-F: no tool_use blocks -> files_touched [] (never fabricated)."""
+    _patch_popen(monkeypatch, {}, _FakeProc(stdout="", returncode=0))
+    res = ClaudeCodeRunner().run(workspace=tmp_path, context={"prompt": "go"})
+    assert res.files_touched == []
+
+
+def test_total_tokens_fallback_from_input_plus_output(monkeypatch, tmp_path):
+    """Fix-F: when the CLI omits total_tokens but reports input+output, sum
+    them instead of recording null."""
+    result_line = json.dumps({"type": "result",
+                              "usage": {"input_tokens": 1200, "output_tokens": 90}})
+    _patch_popen(monkeypatch, {}, _FakeProc(stdout=result_line + "\n", returncode=0))
+    res = ClaudeCodeRunner().run(workspace=tmp_path, context={"prompt": "go"})
+    assert res.total_tokens == 1290
+
+
+def test_total_tokens_stays_none_when_no_usage(monkeypatch, tmp_path):
+    """Fix-F: no usage at all -> total_tokens stays None (unknown), never 0."""
+    _patch_popen(monkeypatch, {},
+                 _FakeProc(stdout='{"type":"result"}\n', returncode=0))
+    res = ClaudeCodeRunner().run(workspace=tmp_path, context={"prompt": "go"})
+    assert res.total_tokens is None
+
+
 def test_missing_binary_returns_error_result(monkeypatch, tmp_path):
     def boom(argv, **kwargs):
         raise FileNotFoundError(2, "no such file")
