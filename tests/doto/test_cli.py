@@ -46,3 +46,18 @@ def test_match_command_runs_test_server(tmp_path, capsys):
     assert exit_code == 0
     assert payload["winner"] == 0
     assert payload["metadata"]["test_only"] is True
+
+
+def test_replay_command_writes_event_jsonl(capsys, tmp_path):
+    events = tmp_path / "events.jsonl"
+
+    exit_code = main([
+        "replay",
+        "--path", str(FIXTURES / "real_short_replay.zip"),
+        "--jsonl", str(events),
+    ])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["final_scores"] == [12.0, 7.0]
+    assert events.is_file()

@@ -1,0 +1,4 @@
+interface:
+  display_name: "DOTO Replay Reader"
+  short_description: "Interpret DOTO replay frames, events, and scores"
+  default_prompt: "Use $doto-replay-reader to analyze this DOTO replay without misreading its numeric fields."

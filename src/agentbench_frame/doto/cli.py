@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .build import build_candidate
 from .match import run_match
+from .replay import iter_replay, summarize_replay
 
 
 class DotoNotImplementedError(RuntimeError):
@@ -41,6 +42,19 @@ def _match(args: argparse.Namespace) -> int:
     return 0
 
 
+def _replay(args: argparse.Namespace) -> int:
+    summary = summarize_replay(args.path)
+    if args.jsonl is not None:
+        args.jsonl.parent.mkdir(parents=True, exist_ok=True)
+        with args.jsonl.open("w", encoding="utf-8") as stream:
+            for frame in iter_replay(args.path):
+                for event in frame.events:
+                    row = {"frame": frame.frame, "type": event[0], "args": event[1:]}
+                    stream.write(json.dumps(row, ensure_ascii=False) + "\n")
+    print(json.dumps(summary.to_json(), ensure_ascii=False, indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m agentbench_frame.doto",
@@ -62,8 +76,11 @@ def build_parser() -> argparse.ArgumentParser:
     match.add_argument("--server-dir", type=Path)
     match.add_argument("--test-only", action="store_true")
     match.set_defaults(func=_match)
+    replay = subcommands.add_parser("replay", help="parse an official replay ZIP")
+    replay.add_argument("--path", type=Path, required=True)
+    replay.add_argument("--jsonl", type=Path)
+    replay.set_defaults(func=_replay)
     for name, help_text in (
-        ("replay", "parse an official replay ZIP"),
         ("ig", "compare native policies on one trace"),
         ("loop", "run the replay-driven LLM iteration loop"),
     ):
