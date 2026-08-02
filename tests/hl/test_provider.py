@@ -452,6 +452,61 @@ def test_provider_idle_timeout_persists_stream_and_identifies_deadline(tmp_path)
     assert result.elapsed_time_s < 2.0
 
 
+@pytest.mark.parametrize("idle_timeout", [2, None])
+def test_coding_provider_stops_before_edit_after_hard_tool_grace_limit(
+    tmp_path, idle_timeout
+):
+    """A coding act that only browses cannot consume its entire wall-clock act."""
+
+    from agentbench_frame.hl.provider import CodexSessionProvider
+
+    executable = tmp_path / "browse-forever-codex"
+    executable.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, time\n"
+        "print(json.dumps({'type':'thread.started','thread_id':'thread-tools'}), flush=True)\n"
+        "for index in range(30):\n"
+        " print(json.dumps({'type':'item.started','item':{'id':str(index),'type':'command_execution','command':'true'}}), flush=True)\n"
+        " print(json.dumps({'type':'item.completed','item':{'id':str(index),'type':'command_execution','command':'true','status':'completed'}}), flush=True)\n"
+        " time.sleep(0.05)\n",
+        encoding="utf-8",
+    )
+    executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    raw = tmp_path / "run" / "provider" / "act-tools.jsonl"
+    provider = CodexSessionProvider(
+        _provider_config(executable=str(executable)),
+        run_root=tmp_path / "run",
+        environ={
+            "AGENTBENCH_API_KEY": "sk-runtime-only",
+            "PATH": os.environ.get("PATH", ""),
+        },
+        timeout_s=5,
+        idle_timeout_s=idle_timeout,
+    )
+
+    result = provider.invoke(
+        prompt="# HL iteration act-b00 — 候选 1/4\nwrite a candidate",
+        workspace=workspace,
+        raw_output_path=raw,
+    )
+
+    assert result.status == "failed"
+    assert "pre-edit tool call limit 14" in str(result.error)
+    assert result.elapsed_time_s < 2.0
+    records = [
+        json.loads(line)
+        for line in raw.read_text(encoding="utf-8").splitlines()
+    ]
+    started = sum(record.get("type") == "item.started" for record in records)
+    assert started <= 16 if idle_timeout is not None else started == 30
+    assert any(
+        "provider_tool_limit_exceeded" in str(record.get("message"))
+        for record in records
+    )
+
+
 def test_provider_retries_zero_usage_transport_failure_and_preserves_attempt(
     tmp_path, monkeypatch
 ):

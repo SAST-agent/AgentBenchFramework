@@ -19,10 +19,94 @@ from agentbench_frame.tracking.providers import parse_codex_jsonl
 
 _ABSOLUTE_PATH = re.compile(r"(?<![A-Za-z0-9_])(/[^\s'\"<>|;&]+)")
 _PARENT_TRAVERSAL = re.compile(r"(^|[\s'\"=])\.\.(?:/|\s|$)")
+_TOOL_ITEM_TYPES = {
+    "command_execution",
+    "file_change",
+    "mcp_tool_call",
+    "web_search",
+}
 
 
 def _toml_string(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
+
+
+def _tool_limits(prompt: str) -> tuple[int | None, int | None]:
+    """Return hard grace limits after the tighter prompt-level soft budget."""
+
+    if prompt.startswith(("# HL bootstrap", "# HL iteration", "# Rollman scoped repair")):
+        return 14, 20
+    if prompt.startswith((
+        "# Rollman HL hypothesis planner",
+        "# Rollman HL comparative reducer",
+    )):
+        return None, 8
+    return None, None
+
+
+def _tool_limit_violation(
+    raw_output: str,
+    *,
+    pre_edit_limit: int | None,
+    total_limit: int | None,
+) -> str | None:
+    tool_calls = 0
+    pre_edit_calls = 0
+    edit_started = False
+    for line in raw_output.splitlines():
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if record.get("type") != "item.started":
+            continue
+        item = record.get("item")
+        if not isinstance(item, Mapping):
+            continue
+        item_type = str(item.get("type") or "")
+        if item_type not in _TOOL_ITEM_TYPES:
+            continue
+        tool_calls += 1
+        if item_type == "file_change":
+            edit_started = True
+        elif not edit_started:
+            pre_edit_calls += 1
+        if pre_edit_limit is not None and pre_edit_calls > pre_edit_limit:
+            return f"pre-edit tool call limit {pre_edit_limit} exceeded"
+        if total_limit is not None and tool_calls > total_limit:
+            return f"total tool call limit {total_limit} exceeded"
+    return None
+
+
+def _enforce_completed_tool_limit(
+    completed: subprocess.CompletedProcess[str],
+    *,
+    pre_edit_limit: int | None,
+    total_limit: int | None,
+) -> subprocess.CompletedProcess[str]:
+    final_stdout = completed.stdout or ""
+    final_stderr = completed.stderr or ""
+    violation = _tool_limit_violation(
+        final_stdout,
+        pre_edit_limit=pre_edit_limit,
+        total_limit=total_limit,
+    )
+    if violation is None:
+        return completed
+    diagnostic = "provider_tool_limit_exceeded: " + violation
+    final_stdout += json.dumps(
+        {"type": "error", "message": diagnostic},
+        ensure_ascii=False,
+    ) + "\n"
+    final_stderr = " ".join(
+        value for value in (final_stderr, diagnostic) if value
+    )
+    return subprocess.CompletedProcess(
+        completed.args,
+        -9,
+        final_stdout,
+        final_stderr,
+    )
 
 
 class CodexSessionProvider:
@@ -402,6 +486,7 @@ class CodexSessionProvider:
                 command=command,
                 workspace=workspace,
                 raw_output_path=raw_output_path,
+                prompt=prompt,
             )
         except subprocess.TimeoutExpired as exc:
             partial = exc.stdout or ""
@@ -487,16 +572,22 @@ class CodexSessionProvider:
         command: list[str],
         workspace: str | Path,
         raw_output_path: str | Path,
+        prompt: str,
     ) -> subprocess.CompletedProcess[str]:
+        pre_edit_limit, total_limit = _tool_limits(prompt)
         if self.idle_timeout_s is None:
-            return subprocess.run(
-                command,
-                cwd=str(workspace),
-                env=self.build_environment(),
-                capture_output=True,
-                text=True,
-                timeout=self.timeout_s,
-                check=False,
+            return _enforce_completed_tool_limit(
+                subprocess.run(
+                    command,
+                    cwd=str(workspace),
+                    env=self.build_environment(),
+                    capture_output=True,
+                    text=True,
+                    timeout=self.timeout_s,
+                    check=False,
+                ),
+                pre_edit_limit=pre_edit_limit,
+                total_limit=total_limit,
             )
 
         process = subprocess.Popen(
@@ -563,12 +654,44 @@ class CodexSessionProvider:
                     partial_stdout = stdout
                     partial_stderr = stderr
                     raw_path.write_text(partial_stdout, encoding="utf-8")
+                    violation = _tool_limit_violation(
+                        partial_stdout,
+                        pre_edit_limit=pre_edit_limit,
+                        total_limit=total_limit,
+                    )
+                    if violation is not None:
+                        process.kill()
+                        final_stdout, final_stderr = process.communicate()
+                        partial_stdout = decoded(final_stdout) or partial_stdout
+                        partial_stderr = decoded(final_stderr) or partial_stderr
+                        diagnostic = (
+                            "provider_tool_limit_exceeded: " + violation
+                        )
+                        partial_stdout += json.dumps(
+                            {"type": "error", "message": diagnostic},
+                            ensure_ascii=False,
+                        ) + "\n"
+                        raw_path.write_text(partial_stdout, encoding="utf-8")
+                        return subprocess.CompletedProcess(
+                            command,
+                            -9,
+                            partial_stdout,
+                            " ".join(
+                                value
+                                for value in (partial_stderr, diagnostic)
+                                if value
+                            ),
+                        )
                 continue
-            return subprocess.CompletedProcess(
-                command,
-                process.returncode,
-                decoded(stdout),
-                decoded(stderr),
+            return _enforce_completed_tool_limit(
+                subprocess.CompletedProcess(
+                    command,
+                    process.returncode,
+                    decoded(stdout),
+                    decoded(stderr),
+                ),
+                pre_edit_limit=pre_edit_limit,
+                total_limit=total_limit,
             )
 
     @staticmethod
