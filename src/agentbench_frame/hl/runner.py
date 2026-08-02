@@ -53,6 +53,12 @@ class AgentRunResult:
     failure_reason: Optional[str] = None      # set if the run failed (timeout/not-found/non-zero)
     session_id: Optional[str] = None          # claude session id (opaque UUID)
     transcript_path: Optional[str] = None     # ~/.claude/projects/<slug>/<session_id>.jsonl
+    final_text: Optional[str] = None          # the coding agent's final message
+                                              #   text (untruncated). Populated by
+                                              #   ApiCodingRunner/FakeRunner; used by
+                                              #   the rules_validation act, which
+                                              #   delivers its report as the final
+                                              #   message (no file write needed).
 
 
 def _workspace_relative(fp: str, ws: Path) -> str:
@@ -143,10 +149,12 @@ class FakeRunner:
     """
 
     def __init__(self, *, transform: Callable[[Path], None],
-                 edit_type: str = "noop", session_id: Optional[str] = None):
+                 edit_type: str = "noop", session_id: Optional[str] = None,
+                 final_text: Optional[str] = None):
         self._transform = transform
         self._edit_type = edit_type
         self._session_id = session_id
+        self._final_text = final_text
 
     def run(self, *, workspace: Path, context: Dict[str, Any]
             ) -> AgentRunResult:
@@ -165,6 +173,7 @@ class FakeRunner:
             time_s=0.0,
             session_id=self._session_id,
             transcript_path=_resolve_transcript_path(self._session_id),
+            final_text=self._final_text,
         )
 
     @staticmethod
@@ -424,6 +433,7 @@ class ApiCodingRunner:
         edit_applied = False
         files_touched: List[str] = []  # str_replace targets agent.py
         failure_reason: Optional[str] = None
+        last_text: Optional[str] = None  # final assistant message text (untruncated)
         turn_records: List[Dict[str, Any]] = []
         started = _time.monotonic()
         try:
@@ -439,6 +449,8 @@ class ApiCodingRunner:
                 prompt_tok += u.prompt_tokens or 0
                 completion_tok += u.completion_tokens or 0
                 total_tok += u.total_tokens or 0
+                if resp.text:
+                    last_text = resp.text
 
                 rec: Dict[str, Any] = {
                     "kind": "turn", "turn": len(turn_records) + 1,
@@ -525,14 +537,16 @@ class ApiCodingRunner:
                 prompt_tokens=prompt_tok or None,
                 completion_tokens=completion_tok or None,
                 total_tokens=total_tok or None,
-                time_s=elapsed, transcript_path=transcript_path)
+                time_s=elapsed, transcript_path=transcript_path,
+                final_text=last_text)
         return AgentRunResult(
             edit_type="noop", failure_reason=failure_reason,
             files_touched=files_touched,
             prompt_tokens=prompt_tok or None,
             completion_tokens=completion_tok or None,
             total_tokens=total_tok or None,
-            time_s=elapsed, transcript_path=transcript_path)
+            time_s=elapsed, transcript_path=transcript_path,
+            final_text=last_text)
 
     def _write_transcript(self, turn_records: List[Dict[str, Any]],
                           edit_applied: bool, failure_reason: Optional[str],

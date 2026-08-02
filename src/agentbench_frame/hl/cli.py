@@ -318,6 +318,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="max tool-use turns per act for the API runner (default 6)")
     p.add_argument("--claude-timeout", type=float, default=600.0,
                    help="per-act API runner wall-clock timeout (seconds)")
+    p.add_argument("--rules-validation", action="store_true",
+                   help="before the edit loop, run one REPLAY_SKILL validation "
+                        "act (doc Fix-D): the coding agent parses a real replay "
+                        "and reports its score_dic; the harness cross-checks the "
+                        "claim against the replay's actual r[-1] and writes a "
+                        "rules_validation event + RULES_VALIDATION.md. Needs "
+                        "--data-dir/AGENTBENCH_DATA for replay lookup.")
     return p
 
 
@@ -434,8 +441,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         evaluator_factory=eval_factory, stage_root=stage_root,
         context_builder=context_builder.build,
         curriculum=args.curriculum, promote_rank=args.promote_rank,
-        experience=experience,
+        experience=experience, data_root=data_root, game=GAME,
     )
+
+    if args.rules_validation:
+        print("[hl] rules_validation act ...", file=sys.stderr)
+        payload = ctrl.rules_validation_act(version=None)
+        print(f"[hl] rules_validation -> {payload.get('validation_status') if payload else None}",
+              file=sys.stderr)
+        # Re-seed the workspace so a stray tool call by the validation agent
+        # cannot pollute the edit loop's first snapshot.
+        _seed_codebase(initial, workspace)
 
     print(f"[hl] running {args.acts} acts against "
           f"{[o.name for o in opponents]}...", file=sys.stderr)

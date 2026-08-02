@@ -46,6 +46,24 @@ _GAME_RULES_BLURB = (
     "score. First to escape = rank 1."
 )
 
+# The full human-written rules + replay skill doc (lostspace/docs/REPLAY_SKILL.md)
+# injected verbatim so the coding agent sees the authoritative rules, not a
+# 4-line blurb (doc Fix-D). Falls back to the blurb if the file is missing.
+_RULES_DOC_RELPATH = (
+    Path(__file__).resolve().parent.parent / "lostspace" / "docs" / "REPLAY_SKILL.md"
+)
+_rules_doc_cache: Optional[str] = None
+
+
+def _load_rules_doc() -> str:
+    global _rules_doc_cache
+    if _rules_doc_cache is None:
+        try:
+            _rules_doc_cache = _RULES_DOC_RELPATH.read_text(encoding="utf-8").strip()
+        except OSError:
+            _rules_doc_cache = _GAME_RULES_BLURB
+    return _rules_doc_cache
+
 _DATA_SCHEMA_BLURB = (
     "`self.view.nodes[i].interprops` is a list of INTEGER CODES / objects "
     "(1=EscapeCapsule, 2=KeyMachine); the agent client also appends the "
@@ -151,7 +169,7 @@ class ContextBuilder:
             "- Keep the Saiblo stdio protocol intact (read 4-byte "
             "length-prefixed JSON, send the same).\n"
         )
-        lines.append(f"## Game rules\n{_GAME_RULES_BLURB}\n")
+        lines.append(f"## Game rules\n{_load_rules_doc()}\n")
         lines.append(f"## Data schema\n{_DATA_SCHEMA_BLURB}\n")
 
         history = self._history_section()

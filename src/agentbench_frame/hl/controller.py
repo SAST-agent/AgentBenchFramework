@@ -22,6 +22,7 @@ Design choices locked during planning:
 """
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Type
@@ -66,6 +67,8 @@ class HLIterationController:
         curriculum: bool = False,
         promote_rank: float = 2.0,
         experience=None,  # ExperienceStore | None (HL std 5)
+        data_root: Optional[Path] = None,  # for rules_validation replay lookup
+        game: str = "",
     ):
         self.codebase = codebase
         self.runner = runner
@@ -91,6 +94,8 @@ class HLIterationController:
         # Self-summarized experience (HL std 5): persisted lessons fed back
         # into each act's prompt. None disables the feature.
         self._experience = experience
+        self._data_root = Path(data_root) if data_root else None
+        self._game = game
         # Rolling per-act history for the code-growth nudge (HL std 4):
         # (loc of agent.py, edit_type) per act, oldest first.
         self._loc_history: List[int] = []
@@ -285,6 +290,146 @@ class HLIterationController:
         )
         self._events.flush()
         return version_after
+
+    def rules_validation_act(self, *, version: Optional[VersionHandle] = None
+                             ) -> Optional[Dict[str, Any]]:
+        """Run one REPLAY_SKILL validation act (doc Fix-D / Q2 gap 2).
+
+        The coding agent parses one real replay round, writes the meaning of
+        each field, and reports its ``score_dic`` claim; the harness then
+        INDEPENDENTLY cross-checks the claim against the replay's actual
+        ``r[-1]``. The agent's deliverable is its **final message** (no file
+        write — the harness persists it as ``artifacts/RULES_VALIDATION.md``
+        outside the workspace so it never enters a snapshot diff).
+
+        Emits only a ``rules_validation`` event (no ``version`` / ``eval`` /
+        ``policy_kl``). Returns the event payload, or None when no replay
+        could be resolved or materialized (a ``validation_status="no_replay"``
+        event is still written so the absence is visible in the stream).
+        """
+        from agentbench_frame.hl.context import _load_rules_doc
+        from agentbench_frame.hl.naming import act_name
+
+        act_id = act_name(self.run_id, 0)
+        replay = self._resolve_validation_replay(version)
+        if replay is None:
+            self._events.write(
+                "rules_validation", act_id=act_id, replay=None,
+                validation_status="no_replay", fields_checked=None,
+                mismatches=[], doc_path=None)
+            self._events.flush()
+            return None
+
+        prompt = _VALIDATION_PROMPT.format(
+            rules=_load_rules_doc(), replay=replay,
+        )
+        context: Dict[str, Any] = {
+            "act_id": act_id,
+            "prompt": prompt,
+            # read_replay/list_replays tools read from these context keys
+            "replays_dir": str(replay.parent),
+            "replays": [replay.name],
+            "transcript_dir": str(self.codebase.root.parent / "transcripts"),
+        }
+        run_result = self.runner.run(workspace=self.codebase.root, context=context)
+
+        # Harness-side verification: the agent's stated score_dic vs the
+        # replay's actual r[-1]. The agent's report is its final message; a
+        # missing/truncated message is an honest "no_score_claim", never a pass.
+        report = _parse_validation_report(run_result.final_text or "")
+        actual = _read_score_dic(replay)
+        if report.get("score_dic") is None:
+            status = "no_score_claim"
+        elif report["score_dic"] == actual:
+            status = "pass"
+        else:
+            status = "fail"
+        mismatches = report.get("mismatches") or []
+        if status == "fail":
+            mismatches.append(
+                f"score_dic claimed={report['score_dic']} actual={actual}")
+        doc_path = self._write_validation_doc(
+            run_result.final_text or "", status, replay, report)
+
+        payload = {
+            "act_id": act_id,
+            "replay": str(replay),
+            "validation_status": status,
+            "fields_checked": report.get("fields_checked"),
+            "mismatches": mismatches,
+            "doc_path": doc_path,
+        }
+        self._events.write("rules_validation", **payload)
+        self._events.flush()
+        return payload
+
+    def _resolve_validation_replay(self, version: Optional[VersionHandle]
+                                   ) -> Optional[Path]:
+        """Locate a real replay for the validation act.
+
+        Prefers an existing run's latest replay (``MatchHistoryView``); if none
+        exists yet, materializes one by running a single eval of ``version``
+        (writes replay artifacts via ``save_replays=True``) and re-looks.
+        Returns None when the replay store is unavailable (no data_root/game
+        configured) or an eval produced no replay.
+        """
+        if self._data_root is None or not self._game:
+            return None
+        replay = self._latest_replay()
+        if replay is not None:
+            return replay
+        if version is None or self._evaluator_factory is None:
+            return None
+        try:
+            self._run_eval(version)
+        except Exception:
+            return None
+        return self._latest_replay()
+
+    def _latest_replay(self) -> Optional[Path]:
+        from agentbench_frame.hl.resources import MatchHistoryView
+
+        view = MatchHistoryView(
+            data_root=self._data_root, game=self._game, agent=self.run_id)
+        rows = view.match_rows()
+        for latest in reversed(rows):
+            run_dir = self._data_root / "runs" / self._game / self.run_id \
+                / latest.get("run_id", "")
+            rel = latest.get("replay")
+            if not rel:
+                continue
+            p = run_dir / rel
+            if p.is_file():
+                return p
+        return None
+
+    def _write_validation_doc(self, final_text: str, status: str,
+                              replay: Path, report: Dict[str, Any]) -> Optional[str]:
+        """Persist the agent's validation report outside the workspace.
+
+        ``<round_root>/artifacts/RULES_VALIDATION.md`` — never inside the
+        workspace, so it cannot leak into a snapshot diff. Best-effort; a write
+        failure returns None (the event still records the verdict)."""
+        try:
+            artifacts = self.codebase.root.parent / "artifacts"
+            artifacts.mkdir(parents=True, exist_ok=True)
+            doc = artifacts / "RULES_VALIDATION.md"
+            lines = [
+                f"# RULES_VALIDATION — {self.run_id}",
+                f"- replay: {replay}",
+                f"- verdict: {status}",
+                f"- fields_checked: {report.get('fields_checked')}",
+                f"- score_dic claimed: {report.get('score_dic')}",
+                f"- mismatches: {report.get('mismatches')}",
+                "",
+                "## Agent report",
+                final_text or "(no final message)",
+                "",
+            ]
+            doc.write_text("\n".join(lines), encoding="utf-8")
+            return str(doc)
+        except OSError:
+            return None
 
     # ---- internals ----
 
@@ -484,3 +629,70 @@ class HLIterationController:
             return p.read_text(encoding="utf-8").count("\n")
         except Exception:
             return 0
+
+
+#: The rules_validation act prompt (doc Fix-D). The agent's deliverable is its
+#: FINAL MESSAGE in the exact report format below — the harness parses the
+#: ``SCORE_DIC`` line and cross-checks it against the replay's real ``r[-1]``.
+_VALIDATION_PROMPT = """\
+# REPLAY_SKILL validation act — prove you read the rules and replay format correctly
+
+This is NOT an edit act. Do NOT call `str_replace`. Do NOT modify any file.
+
+Read the authoritative rules + replay skill doc below, then parse ONE round of
+the real replay at `{replay}` (use the `read_replay` tool):
+- For a chosen round and your seat 0, write the meaning of each field in the
+  first action dict, and what you conclude the player did.
+- State the `score_dic` you read from the replay's last element and the
+  resulting ranking (sort player ids by score descending; 4 = 1st, 1 = 4th).
+
+You MAY use `read_replay` to inspect the replay. Your deliverable is your
+FINAL message, ending with exactly three lines:
+
+FIELDS_CHECKED: <int>
+SCORE_DIC: <the score_dic you read, as JSON like {{"0": 4, "1": 3, "2": 2, "3": 1}}>
+MISMATCHES: <comma-separated list, or "none">
+
+If you cannot complete the parse, say so and emit SCORE_DIC: none.
+
+--- rules + replay skill doc ---
+{rules}
+"""
+
+
+def _parse_validation_report(final_text: str) -> Dict[str, Any]:
+    """Best-effort parse of the agent's ``FIELDS_CHECKED`` / ``SCORE_DIC`` /
+    ``MISMATCHES`` report from its final message. Absent fields stay None —
+    never guessed (a missing score claim is an honest ``no_score_claim``)."""
+    import re
+
+    out: Dict[str, Any] = {"fields_checked": None, "score_dic": None,
+                           "mismatches": []}
+    m = re.search(r"FIELDS_CHECKED\s*:\s*(\d+)", final_text)
+    if m:
+        out["fields_checked"] = int(m.group(1))
+    m = re.search(r"SCORE_DIC\s*:\s*(\{[^}]*\})", final_text)
+    if m:
+        try:
+            out["score_dic"] = json.loads(m.group(1))
+        except (ValueError, TypeError):
+            out["score_dic"] = None
+    m = re.search(r"MISMATCHES\s*:\s*(.+)", final_text)
+    if m:
+        raw = m.group(1).strip()
+        out["mismatches"] = ([] if raw.lower() in ("", "none")
+                             else [s.strip() for s in raw.split(",") if s.strip()])
+    return out
+
+
+def _read_score_dic(replay_path) -> Optional[Dict[str, Any]]:
+    """Read the actual ``score_dic`` (the replay array's last element)."""
+    import json as _json
+    try:
+        data = _json.loads(Path(replay_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, list) or not data:
+        return None
+    last = data[-1]
+    return last if isinstance(last, dict) else None

@@ -19,3 +19,6 @@ _rank01_stderr.log
 
 # HL model config (real API keys) — never commit
 .env
+
+# superpowers SDD scratch
+.superpowers/

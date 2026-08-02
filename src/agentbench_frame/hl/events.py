@@ -24,6 +24,12 @@ HL event types (see the measurement contract / plan.md):
                       recorded with kl=None, never folded into a false 0.0
     occupancy_shift — state-occupancy distribution change between two versions
     budget          — learning/evaluation/total resource accounting
+    rules_validation — one REPLAY_SKILL verification act: the coding agent parses
+                      a real replay round, states each field's meaning + its
+                      score_dic claim, and the harness cross-checks the claim
+                      against the replay's actual r[-1] (validation_status =
+                      pass|fail|no_score_claim; fields_checked/mismatches are
+                      best-effort from the agent's doc)
 
 Missing values are recorded as ``None`` (unknown), never coerced to 0.
 """
@@ -48,6 +54,7 @@ KNOWN_EVENT_TYPES = frozenset({
     "policy_kl",
     "occupancy_shift",
     "budget",
+    "rules_validation",
     # Legacy framework event types are also recognized so a mixed log is
     # readable; they simply lack some HL payload fields.
     "step", "episode", "eval_result", "log", "resource", "lostspace_match",
