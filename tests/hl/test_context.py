@@ -309,7 +309,8 @@ def test_k4_role_prompts_use_digest_research_state_and_exact_branch_brief(tmp_pa
     digest = tmp_path / "game_digest.json"
     research = tmp_path / "research_state.json"
     reducer_input = tmp_path / "reducer_input.json"
-    for path in (digest, research, reducer_input):
+    repair_input = tmp_path / "repair_input.json"
+    for path in (digest, research, reducer_input, repair_input):
         path.write_text("{}\n", encoding="utf-8")
     evidence = [{"opponent": "rank15", "summary": "summary.json"}]
 
@@ -339,10 +340,22 @@ def test_k4_role_prompts_use_digest_research_state_and_exact_branch_brief(tmp_pa
             "branch_index": 2,
             "diagnosis": "round 12 entered a trap",
             "mechanism": "time-expanded escape search",
+            "activation_condition": "level 3 and next cell has one safe exit",
+            "preservation_contract": "ordinary portal and safety selection stays unchanged",
             "expected_change": "survive the junction",
             "falsifier": "capture time does not improve",
         },
         active_target="rank15",
+    )
+    repair = context.build_repair_prompt(
+        act_id="act-repair",
+        iteration_id="iter-000001",
+        branch_index=2,
+        workspace=tmp_path / "candidate",
+        game_digest_path=digest,
+        research_state_path=research,
+        repair_input_path=repair_input,
+        experience_path=tmp_path / "experience" / "SKILL.md",
     )
     reducer = context.build_reducer_prompt(
         act_id="act-reducer",
@@ -360,13 +373,65 @@ def test_k4_role_prompts_use_digest_research_state_and_exact_branch_brief(tmp_pa
     assert "恰好 4" in planner
     assert "不得打开 replay 或 trace" in planner
     assert "完整 replay" in planner
+    assert "activation_condition" in planner
+    assert "preservation_contract" in planner
     assert "time-expanded escape search" in candidate
     assert "候选 3/4" in candidate
     assert "完整重读" in candidate
+    assert "触发条件外" in candidate
+    assert "保持父代" in candidate
+    assert "不得修改全局 scorer" in candidate
+    assert str(repair_input) in repair
+    assert "错误诊断" in repair
+    assert "过宽" in repair
+    assert "不得切换到其他 branch" in repair
+    assert "最多 2 个" in repair
     assert str(reducer_input) in reducer
     assert "research_state_update.json" in reducer
     assert "不得修改" in reducer
     assert "不得先声明或访问 run 根目录" in reducer
+
+
+def test_scope_contract_ablation_logs_scope_without_enforcing_it(tmp_path):
+    from agentbench_frame.hl.context import ContextBundle, IterationContext
+
+    bundle = ContextBundle.create(
+        tmp_path / "bundle",
+        _digest_files(tmp_path / "assets"),
+    )
+    context = IterationContext(bundle)
+    digest = tmp_path / "game_digest.json"
+    research = tmp_path / "research_state.json"
+    digest.write_text("{}\n", encoding="utf-8")
+    research.write_text("{}\n", encoding="utf-8")
+
+    prompt = context.build_candidate_prompt(
+        act_id="act-b00",
+        branch_index=0,
+        branch_count=4,
+        parent_version_id="v000001",
+        workspace=tmp_path / "candidate",
+        game_digest_path=digest,
+        research_state_path=research,
+        replay_evidence=[{"opponent": "rank15", "summary": "summary.json"}],
+        previous_measurements={"score": 0.0},
+        experience_path=tmp_path / "experience" / "SKILL.md",
+        branch_brief={
+            "branch_index": 0,
+            "diagnosis": "level 3 round 12 capture",
+            "mechanism": "junction escape",
+            "activation_condition": "one safe exit",
+            "preservation_contract": "ordinary routing stays unchanged",
+            "expected_change": "survive",
+            "falsifier": "capture time does not improve",
+        },
+        active_target="rank15",
+        scope_contract_required=False,
+    )
+
+    assert "one safe exit" in prompt
+    assert "diagnostic-only" in prompt
+    assert "不得修改全局 scorer" not in prompt
 
 
 def test_bootstrap_prompt_creates_interpretable_origin_without_fake_replay(tmp_path):

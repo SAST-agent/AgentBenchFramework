@@ -400,6 +400,7 @@ Act 预算：
         replay_evidence: list[Mapping[str, Any]],
         previous_measurements: Mapping[str, Any],
         active_target: Optional[str] = None,
+        scope_contract_required: bool = True,
     ) -> str:
         evidence = json.dumps(
             replay_evidence,
@@ -452,7 +453,7 @@ Planner 压缩边界：
 
 基于同一份证据，提出恰好 4 个机制上不同、可证伪的 Rollman 改进方向。禁止把同一机制的阈值、权重或参数变化伪装成四种方案；禁止 grid search。允许 if/else、路径规划、搜索、状态机、有限记忆和策略代码增长。
 
-将严格 JSON 数组写入 workspace/.agentbench/branch_briefs.json。每项必须且只能包含：branch_index（0..3）、diagnosis、mechanism、expected_change、falsifier。diagnosis 必须引用具体回放 level/round/事件。不要修改候选策略代码。
+将严格 JSON 数组写入 workspace/.agentbench/branch_briefs.json。每项必须且只能包含：branch_index（0..3）、diagnosis、mechanism、activation_condition、preservation_contract、expected_change、falsifier。diagnosis 必须引用具体回放 level/round/事件。activation_condition 必须是可观测状态谓词；preservation_contract 必须指出触发条件外保留的父代决策路径。作用域契约状态：{"required" if scope_contract_required else "diagnostic-only"}。不要修改候选策略代码。
 """
 
     def build_candidate_prompt(
@@ -471,6 +472,7 @@ Planner 压缩边界：
         branch_brief: Mapping[str, Any],
         active_target: Optional[str] = None,
         locked_opponents: Sequence[str] = (),
+        scope_contract_required: bool = True,
     ) -> str:
         if int(branch_brief.get("branch_index", -1)) != branch_index:
             raise ValueError("branch brief index does not match candidate branch")
@@ -502,10 +504,66 @@ Planner 压缩边界：
             sort_keys=True,
             separators=(",", ":"),
         )
+        scope_contract = (
+            """
+作用域契约（required）：
+- activation_condition 必须实现为基于可观测状态的显式门控。
+- 触发条件外保持父代 action-selection 路径；preservation_contract 指定的逻辑不得改变。
+- 除非 activation_condition 为真，不得修改全局 scorer、预测器、权重或候选排序。
+"""
+            if scope_contract_required
+            else """
+作用域契约消融（diagnostic-only）：
+- 记录 activation_condition 与 preservation_contract 供分析，但本候选不强制保持父代路径。
+"""
+        )
         return base + f"""
 
 本候选的唯一结构化 branch brief：{brief}
 必须实现并检验这个机制；不得改做其他分支，也不得只调整无证据参数。
+{scope_contract}
+"""
+
+    def build_repair_prompt(
+        self,
+        *,
+        act_id: str,
+        iteration_id: str,
+        branch_index: int,
+        workspace: str | Path,
+        game_digest_path: str | Path,
+        research_state_path: str | Path,
+        repair_input_path: str | Path,
+        experience_path: str | Path,
+    ) -> str:
+        trace_window_tool = (
+            self.bundle.files["replay_skill"].parent
+            / "scripts"
+            / "inspect_trace_window.py"
+        )
+        return f"""# Rollman scoped repair {act_id}
+
+proposal cycle: {iteration_id}
+branch index: {branch_index}
+
+只读输入：
+- compact game digest: {Path(game_digest_path).resolve()}
+- current research state: {Path(research_state_path).resolve()}
+- bounded repair packet: {Path(repair_input_path).resolve()}
+- candidate workspace: {Path(workspace).resolve()}
+- Experience Skill: {Path(experience_path).resolve()}
+
+先读取 repair packet 指定的父代与候选同种子比分、回放 summary、branch brief 和运行错误。把失败归类为：错误诊断、activation_condition 过宽、或机制集成错误。只能修复同一个 branch；不得切换到其他 branch，不得参数枚举、grid search、seed/坐标/对手身份记忆。
+
+修复约束：
+1. 触发条件外保持父代 action-selection 路径和 preservation_contract。
+2. 初始候选由 Framework 作为不可变版本保留；修复失败不会覆盖它。
+3. 最多 2 个可证伪假设；trace 只能用 `{trace_window_tool} TRACE --level L --round R --radius 1` 做定点读取。
+4. 只运行一次 `python -m py_compile ai.py` 和一次真实 NumPy 对象 smoke test。
+5. 将四个字符串数组 stable_knowledge、failed_hypotheses、replay_evidence、active_questions 写入 workspace/.agentbench/experience_update.json。
+6. 验证成功后立即结束；不得继续润色、git status/diff 或第二轮重构。
+
+科研隔离边界：只能读取以上路径及 repair packet 明确列出的 summary/replay/trace；不得先声明或访问 run 根目录、其他版本、其他候选、人类源码或用户目录中的其他文件。
 """
 
     def build_reducer_prompt(

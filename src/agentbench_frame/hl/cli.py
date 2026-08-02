@@ -1397,6 +1397,20 @@ def _run_real(
                 replay_evidence=evidence,
                 previous_measurements=previous_measurements,
                 active_target=active_target,
+                scope_contract_required=(
+                    config.run.iteration.scope_contract_required
+                ),
+            )
+        if phase == "repair":
+            return iteration_context.build_repair_prompt(
+                act_id=values["act_id"],
+                iteration_id=values["iteration_id"],
+                branch_index=values["branch_index"],
+                workspace=workspace,
+                game_digest_path=game_digest_path,
+                research_state_path=research_state_path,
+                repair_input_path=Path(values["repair_input"]),
+                experience_path=experience.path,
             )
         if phase == "reducer":
             reducer_input = Path(values["reducer_input"])
@@ -1429,6 +1443,9 @@ def _run_real(
                 branch_brief=values["branch_brief"],
                 active_target=active_target,
                 locked_opponents=locked_opponents,
+                scope_contract_required=(
+                    config.run.iteration.scope_contract_required
+                ),
             )
         return iteration_context.build_prompt(
             act_id=values["act_id"],
