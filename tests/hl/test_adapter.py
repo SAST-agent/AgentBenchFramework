@@ -91,7 +91,7 @@ def test_stage_does_not_mutate_canonical_store(tmp_path):
     assert (canonical / "agent.py").read_bytes() == original  # untouched
 
 
-def test_relative_dest_resolves_to_absolute(tmp_path):
+def test_relative_dest_resolves_to_absolute(tmp_path, monkeypatch):
     """Windows CreateProcess resolves a relative argv against cwd, so a
     relative dest must be made absolute before the command string is built.
     Otherwise the candidate path nests (``.hl_codebase/stage/.hl_codebase/...``),
@@ -102,6 +102,9 @@ def test_relative_dest_resolves_to_absolute(tmp_path):
     cb = HLCodebase(root=ws, store=tmp_path / "store")
     h = cb.snapshot(parent_version_id=None)
 
+    # Isolate the relative-dest resolution from the repo-root cwd so the test
+    # never creates a stray ``./stage`` in the repository.
+    monkeypatch.chdir(tmp_path)
     staged = stage_candidate(h, store=cb.store, dest="stage")
     cmd, cwd = candidate_command(h, store=cb.store, dest="stage")
 
