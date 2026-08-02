@@ -42,6 +42,28 @@ class TestProtocol:
 
 
 class TestFullMatch:
+    def test_separate_trace_directory_is_created(self, tmp_path):
+        r = run_match(
+            EndRoundAgent(), EndRoundAgent(),
+            replay_dir=tmp_path / "replays",
+            trace_dir=tmp_path / "nested" / "traces",
+            seed=7,
+        )
+        assert r.terminated_by == "normal"
+        assert (tmp_path / "nested" / "traces").is_dir()
+
+    def test_host_error_is_not_masked_by_unbound_result(self, tmp_path, monkeypatch):
+        from agentbench_frame.miracle.host import MiracleHost
+
+        def fail_run(self, replay_path):
+            raise RuntimeError("host failed before producing a result")
+
+        monkeypatch.setattr(MiracleHost, "run", fail_run)
+        with pytest.raises(RuntimeError, match="host failed before producing a result"):
+            run_match(
+                EndRoundAgent(), EndRoundAgent(), replay_dir=tmp_path, seed=7,
+            )
+
     def test_endround_pair_hits_round_cap(self, tmp_path):
         r = run_match(
             EndRoundAgent(), EndRoundAgent(),

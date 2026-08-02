@@ -1,13 +1,10 @@
-"""回放二进制解析测试（要求 2 配套）：.mrc → 事件时间线，与 trace/操作统计交叉核对。
+""".mrc → 事件时间线，并与同局 trace 交叉核对。"""
 
-无本地 .mrc 时跳过（产物 gitignore，可由 test_smoke 重新生成）。
-"""
-
-import glob
 import json
 
 import pytest
 
+from agentbench_frame.miracle import EndRoundAgent, SampleAgent, run_match
 from agentbench_frame.miracle.replay import (
     EVENT_NAMES,
     parse_replay,
@@ -16,7 +13,14 @@ from agentbench_frame.miracle.replay import (
     summarize,
 )
 
-MRCS = sorted(glob.glob("agentbench_data/replays/24_miracle/*.mrc"))
+
+@pytest.fixture(scope="module")
+def full_match_replay(tmp_path_factory):
+    out = tmp_path_factory.mktemp("miracle-replay")
+    result = run_match(SampleAgent(), EndRoundAgent(), replay_dir=out, seed=11)
+    assert result.terminated_by == "normal"
+    assert result.errors == []
+    return result.replay_path
 
 
 def _ops_from_trace(trace_path):
@@ -30,12 +34,8 @@ def test_event_name_tables_match_official():
     assert len(EVENT_NAMES) == 19
 
 
-def test_parse_full_match_matches_trace_operations():
-    if not MRCS:
-        pytest.skip("无本地 .mrc，先跑 tests/miracle/test_smoke.py 生成")
-    # 取最长（最完整）的对局
-    mrc = max(MRCS, key=lambda p: __import__("pathlib").Path(p).stat().st_size)
-    events = parse_replay(mrc)
+def test_parse_full_match_matches_trace_operations(full_match_replay):
+    events = parse_replay(full_match_replay)
     s = summarize(events)
 
     assert s["ended"] is True
@@ -43,7 +43,7 @@ def test_parse_full_match_matches_trace_operations():
     assert s["end_round"] >= 1
 
     # 事件与 trace 操作分布对齐（官方 1 个操作 → 1 个主事件）
-    ops = _ops_from_trace(mrc + ".trace.jsonl")
+    ops = _ops_from_trace(full_match_replay + ".trace.jsonl")
     from collections import Counter
     counts = Counter(o["operation_type"] for o in ops)
     assert s["event_counts"]["Summon"] == counts["summon"]
@@ -53,11 +53,8 @@ def test_parse_full_match_matches_trace_operations():
     assert s["event_counts"]["GameStart"] == counts["init"]
 
 
-def test_game_end_and_round_span():
-    if not MRCS:
-        pytest.skip("无本地 .mrc")
-    mrc = max(MRCS, key=lambda p: __import__("pathlib").Path(p).stat().st_size)
-    events = parse_replay(mrc)
+def test_game_end_and_round_span(full_match_replay):
+    events = parse_replay(full_match_replay)
     game_ends = [e for e in events if e.type == "GameEnd"]
     assert len(game_ends) == 1
     assert game_ends[0].args[0] in (0, 1)  # winner
@@ -65,30 +62,21 @@ def test_game_end_and_round_span():
     assert max(rounds) == game_ends[0].round
 
 
-def test_no_unsync_on_full_match():
-    if not MRCS:
-        pytest.skip("无本地 .mrc")
-    mrc = max(MRCS, key=lambda p: __import__("pathlib").Path(p).stat().st_size)
-    events = parse_replay(mrc)
+def test_no_unsync_on_full_match(full_match_replay):
+    events = parse_replay(full_match_replay)
     assert not [e for e in events if e.type in ("UNSYNC", "UNKNOWN")], "存在未同步事件"
 
 
-def test_events_round_monotonic():
-    if not MRCS:
-        pytest.skip("无本地 .mrc")
-    mrc = max(MRCS, key=lambda p: __import__("pathlib").Path(p).stat().st_size)
-    events = [e for e in parse_replay(mrc) if e.round >= 0]
+def test_events_round_monotonic(full_match_replay):
+    events = [e for e in parse_replay(full_match_replay) if e.round >= 0]
     prev = -1
     for e in events:
         assert e.round >= prev
         prev = e.round
 
 
-def test_save_and_load_json_roundtrip(tmp_path):
-    if not MRCS:
-        pytest.skip("无本地 .mrc")
-    mrc = max(MRCS, key=lambda p: __import__("pathlib").Path(p).stat().st_size)
-    events = parse_replay(mrc)
+def test_save_and_load_json_roundtrip(tmp_path, full_match_replay):
+    events = parse_replay(full_match_replay)
     out = tmp_path / "events.jsonl"
     save_replay_json(events, out)
     reloaded = load_replay_json(out)

@@ -8,7 +8,7 @@ Agent 与评测机（``host.py``）的接口约定：
   ``{"map": {...}, "players": [...], "camp": int, "round": int}``。
   ``player``/``round`` 由评测机补全，Agent 不必携带。
 
-obs 关键字段（官方 ``parse`` 输出，字段含义见 ``decision_space.py``）：
+obs 关键字段（官方 ``StateSystem.parse`` 输出）：
 - ``map.units`` 每行 18 个元素：
   [id, camp, type, cost, atk, max_hp, hp, atk_range, max_move, cool_down,
    pos[x,y,z], level, flying, atk_flying, agility, holy_shield, can_atk, can_move]
@@ -30,6 +30,7 @@ __all__ = [
     "MiracleAgent",
     "EndRoundAgent",
     "SampleAgent",
+    "AGENTS",
     "DEFAULT_ARTIFACTS",
     "DEFAULT_CREATURES",
     "MIRACLE_POS",
@@ -216,13 +217,8 @@ class SampleAgent(MiracleAgent):
         return {"operation_type": "endround", "operation_parameters": {}}
 
 
-class SampleV2Agent(SampleAgent):
-    """迭代演示用的策略更新（v2）：召唤优先级改为 BlackBat > Archer > Swordsman。
-
-    其余（攻击/移动/被拒感知）与 v1 一致——这是**一次受控的最小策略更新**，
-    用于演示"版本对齐的 score–iteration / IG–iteration 曲线"闭环。
-    """
-
-    name = "sample_v2"
-
-    summon_order = ["BlackBat", "Archer", "Swordsman"]
+# CLI 的唯一 Agent 注册表。新增 Agent 子类后只需在这里注册一次。
+AGENTS = {
+    "endround": EndRoundAgent,
+    "sample": SampleAgent,
+}

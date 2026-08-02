@@ -49,6 +49,7 @@ def run_match(
     replay_dir = Path(replay_dir) if replay_dir else DEFAULT_REPLAY_DIR
     replay_dir.mkdir(parents=True, exist_ok=True)
     trace_dir = Path(trace_dir) if trace_dir else replay_dir
+    trace_dir.mkdir(parents=True, exist_ok=True)
 
     stamp = time.strftime("%Y%m%d-%H%M%S")
     tag_part = f"_{tag}" if tag else ""
@@ -58,6 +59,7 @@ def run_match(
     trace_path = str((trace_dir / f"{fname}.trace.jsonl").resolve())
 
     proc = start_logic(official, seed=seed)
+    result = None
     try:
         host = MiracleHost(
             proc,
@@ -84,5 +86,6 @@ def run_match(
             proc.wait(timeout=5)
         except Exception:
             pass
-        result.stderr_tail = stderr_tail.decode("utf-8", errors="replace")[-2000:]
+        if result is not None:
+            result.stderr_tail = stderr_tail.decode("utf-8", errors="replace")[-2000:]
     return result
