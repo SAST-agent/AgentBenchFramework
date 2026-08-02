@@ -91,6 +91,28 @@ def test_stage_does_not_mutate_canonical_store(tmp_path):
     assert (canonical / "agent.py").read_bytes() == original  # untouched
 
 
+def test_relative_dest_resolves_to_absolute(tmp_path):
+    """Windows CreateProcess resolves a relative argv against cwd, so a
+    relative dest must be made absolute before the command string is built.
+    Otherwise the candidate path nests (``.hl_codebase/stage/.hl_codebase/...``),
+    never starts, and the probe swallows the OSError as a ``None`` emission —
+    collapsing every reference point to uniform and masking ``policy_kl = 0``.
+    """
+    ws = _make_workspace(tmp_path)
+    cb = HLCodebase(root=ws, store=tmp_path / "store")
+    h = cb.snapshot(parent_version_id=None)
+
+    staged = stage_candidate(h, store=cb.store, dest="stage")
+    cmd, cwd = candidate_command(h, store=cb.store, dest="stage")
+
+    assert staged.is_absolute()
+    assert cwd.is_absolute()
+    entry = Path(cmd[1])
+    assert entry.is_absolute()
+    assert entry == staged / "agent.py"
+    assert entry.exists()  # the argv target resolves under any cwd
+
+
 def test_package_shape_stage_includes_rules(tmp_path):
     ws = tmp_path / "workspace"
     ws.mkdir()

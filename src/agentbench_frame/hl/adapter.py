@@ -35,7 +35,16 @@ def stage_candidate(
     start clean. The canonical store snapshot is read-only here.
     """
     store = Path(store)
-    dest = Path(dest)
+    # Resolve ``dest`` to an ABSOLUTE path before any staging / argv build.
+    # On Windows, ``subprocess.Popen([py, "<rel>/agent.py"], cwd="<rel>")``
+    # resolves the relative argv[1] against cwd (CreateProcess behavior), not
+    # against the launcher's cwd — so a relative ``dest`` like
+    # ``.hl_codebase/stage`` becomes ``.hl_codebase/stage/.hl_codebase/stage/...``
+    # and the candidate never starts. The probe's per-sample worker then swallows
+    # the OSError as a ``None`` emission, collapsing every reference point to
+    # uniform and masking ``policy_kl = 0`` (the CLAUDE.md Windows CreateProcess
+    # gotcha). Absolute paths resolve the same under any cwd.
+    dest = Path(dest).resolve()
     snap = store / version.content_hash
     if not snap.exists():
         raise FileNotFoundError(
