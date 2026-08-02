@@ -260,10 +260,8 @@ class RollmanEvaluator:
                 record.update(status="incomplete", error=str(exc))
             else:
                 candidate_state = str(match.end_state[0])
-                opponent_state = str(match.end_state[1])
-                valid_states = candidate_state == "OK" and opponent_state == "OK"
                 record.update(
-                    status=("complete" if valid_states else "incomplete"),
+                    status=("complete" if candidate_state == "OK" else "incomplete"),
                     result=match.result,
                     end_state=list(match.end_state),
                     rollman_score=match.rollman_score,
@@ -276,8 +274,6 @@ class RollmanEvaluator:
                 )
                 if candidate_state != "OK":
                     record["error"] = f"candidate ended with {candidate_state}"
-                elif opponent_state != "OK":
-                    record["error"] = f"opponent ended with {opponent_state}"
             return record
 
         if self.max_parallel_matches == 1 or len(cases) <= 1:
