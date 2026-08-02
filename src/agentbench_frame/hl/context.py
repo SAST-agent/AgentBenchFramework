@@ -533,6 +533,12 @@ Planner 压缩边界：
 本候选的唯一结构化 branch brief：{brief}
 必须实现并检验这个机制；不得改做其他分支，也不得只调整无证据参数。
 {scope_contract}
+
+候选 checkpoint-first 顺序：
+- 第一次调用批量读取 game digest、research state、全部指定 summary、共享蒸馏与 Experience Skill；不要逐个读取 summary。
+- 第二次调用用符号索引定位 `ai.py` 的入口与 brief 涉及的已有机制；第三次只读相关代码区间，不得顺序打印完整 ai.py。
+- 第四次最多读取两个定点 trace 窗口；第 6 次工具调用结束前必须已完成 `ai.py` 的首次可编译修改并写入 experience_update.json。
+- 首次修改落盘后，只允许编译、一次对象 smoke，以及为修复验证失败所必需的一次更正；不得把实现留到长推理末尾。
 """
 
     def build_repair_prompt(
@@ -573,6 +579,11 @@ branch index: {branch_index}
 4. 只运行一次 `python -m py_compile ai.py` 和一次真实 NumPy 对象 smoke test。
 5. 将四个字符串数组 stable_knowledge、failed_hypotheses、replay_evidence、active_questions 写入 workspace/.agentbench/experience_update.json。
 6. 验证成功后立即结束；不得继续润色、git status/diff 或第二轮重构。
+
+Repair checkpoint-first 顺序：
+- 第一次调用批量读取 repair packet 及其明确列出的 summary；第二次只读 branch 相关代码区间，不得顺序打印完整 ai.py。
+- 第三、四次最多完成两个定点 trace 窗口；第 6 次工具调用结束前必须已完成 `ai.py` 的首次可编译修复并写入 experience_update.json。
+- 首次修复落盘后，只允许编译、一次对象 smoke，以及为修复验证失败所必需的一次更正；不得把实现留到长推理末尾。
 
 科研隔离边界：只能读取以上路径及 repair packet 明确列出的 summary/replay/trace；不得先声明或访问 run 根目录、其他版本、其他候选、人类源码或用户目录中的其他文件。
 """
