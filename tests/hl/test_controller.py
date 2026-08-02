@@ -190,7 +190,14 @@ def test_policy_kl_zero_when_identical_primitives(tmp_path):
     ctrl.act(version_before=v0)
     events = read_events(tmp_path / "e.jsonl")
     kl_ev = next(e for e in events if e["event_type"] == "policy_kl")
-    assert kl_ev["local_policy_kl_trace"] == [pytest.approx(0.0, abs=1e-9)]
+    # structured trace: one ok point, real KL 0 (identical choices), nothing missing
+    assert kl_ev["local_policy_kl_trace"] == [
+        {"kl": pytest.approx(0.0, abs=1e-9), "status": "ok", "reason": None}]
+    assert kl_ev["per_sample_status"] == ["ok"]
+    assert kl_ev["n_ok"] == 1
+    assert kl_ev["n_missing"] == 0
+    assert kl_ev["missing_reasons"] == []
+    assert kl_ev["kl_mean"] == pytest.approx(0.0, abs=1e-9)
 
 
 def test_policy_kl_positive_when_versions_differ(tmp_path):
@@ -205,7 +212,32 @@ def test_policy_kl_positive_when_versions_differ(tmp_path):
     ctrl.act(version_before=v0)
     events = read_events(tmp_path / "e.jsonl")
     kl_ev = next(e for e in events if e["event_type"] == "policy_kl")
-    assert kl_ev["local_policy_kl_trace"][0] > 0
+    assert kl_ev["local_policy_kl_trace"][0]["status"] == "ok"
+    assert kl_ev["local_policy_kl_trace"][0]["kl"] > 0
+    assert kl_ev["n_ok"] == 1
+    assert kl_ev["n_missing"] == 0
+
+
+def test_policy_kl_no_emission_is_not_folded_to_zero(tmp_path):
+    """Fix-A: an unresponsive version (None emission) -> policy_kl event records
+    status ``no_emission`` with kl=None and n_missing, never a false 0.0."""
+    ctrl, v0 = _two_act_controller(
+        tmp_path,
+        runner=FakeRunner(transform=lambda w: None, edit_type="noop"),
+        eval_results=[_stub_result(0.5, "complete")],
+        probe_emissions=[[("finish",)], [None]],  # newer version silent
+    )
+    ctrl.act(version_before=v0)
+    events = read_events(tmp_path / "e.jsonl")
+    kl_ev = next(e for e in events if e["event_type"] == "policy_kl")
+    assert kl_ev["local_policy_kl_trace"] == [
+        {"kl": None, "status": "no_emission",
+         "reason": "version_new_unresponsive"}]
+    assert kl_ev["per_sample_status"] == ["no_emission"]
+    assert kl_ev["n_ok"] == 0
+    assert kl_ev["n_missing"] == 1
+    assert kl_ev["missing_reasons"] == ["version_new_unresponsive"]
+    assert kl_ev["kl_mean"] is None
 
 
 def test_incomplete_eval_keeps_score_missing(tmp_path):

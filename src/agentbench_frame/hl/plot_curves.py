@@ -121,8 +121,18 @@ def read_iteration_curves(events_path) -> CurveData:
             p.evaluation_status = e.get("evaluation_status")
         elif et == "policy_kl":
             trace = e.get("local_policy_kl_trace") or []
-            p.policy_kl_mean = _mean(list(trace))
-            p.policy_kl_n = len([t for t in trace if t is not None])
+            # Structured entries {kl, status, reason}: only status=="ok" values
+            # count (missing/out-of-support stay out of the mean). Legacy flat
+            # float entries (pre-Fix-A events.jsonl) are read as ok values.
+            kl_vals = []
+            for t in trace:
+                if isinstance(t, dict):
+                    if t.get("status") == "ok" and t.get("kl") is not None:
+                        kl_vals.append(t["kl"])
+                elif t is not None:
+                    kl_vals.append(t)
+            p.policy_kl_mean = _mean(kl_vals)
+            p.policy_kl_n = len(kl_vals)
         elif et == "version":
             p.edit_type = e.get("edit_type")
             fr = e.get("failure_reason")

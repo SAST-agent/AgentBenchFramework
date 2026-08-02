@@ -32,6 +32,8 @@ from agentbench_frame.hl.distribution import (
     epsilon_smoothed_distribution,
     policy_kl,
     local_policy_kl_trace,
+    PolicyKLPoint,
+    ok_kl_values,
     LegalActionSet,
 )
 from agentbench_frame.hl.events import HLEventWriter
@@ -225,17 +227,23 @@ class HLIterationController:
         )
 
         # 6. probe BOTH versions over ν (Q2) → policy_kl + occupancy_shift
-        kl_trace: List[float] = []
+        kl_trace: List[PolicyKLPoint] = []
         occupancy_shift: Optional[float] = None
         if version_before is not None and version_after is not None:
             kl_trace, occupancy_shift = self._measure_policy_kl(
                 version_before, version_after,
             )
+            ok_kl = ok_kl_values(kl_trace)
             self._events.write(
                 "policy_kl", act_id=act_id,
                 version_before=version_before.version_id,
                 version_after=version_after.version_id,
-                local_policy_kl_trace=kl_trace,
+                local_policy_kl_trace=[p.to_dict() for p in kl_trace],
+                per_sample_status=[p.status for p in kl_trace],
+                n_ok=len(ok_kl),
+                n_missing=sum(1 for p in kl_trace if p.status != "ok"),
+                missing_reasons=[p.reason for p in kl_trace if p.reason],
+                kl_mean=(sum(ok_kl) / len(ok_kl)) if ok_kl else None,
                 epsilon=self.epsilon,
             )
             self._events.write(
@@ -421,18 +429,21 @@ class HLIterationController:
         return abs(reached_old - reached_new) / total
 
     def _assemble_feedback(
-        self, *, ev_result, kl_trace: List[float],
+        self, *, ev_result, kl_trace: List[PolicyKLPoint],
         occupancy_shift: Optional[float], run_result, version_after,
     ) -> Dict[str, Any]:
         """Pack the previous act's outcome + behavior-change measurement for the
-        next act's prompt. All fields optional — missing stays missing."""
+        next act's prompt. All fields optional — missing stays missing.
+
+        ``kl_mean``/``n_changed``/``n_total`` derive from the ok-only trace
+        values: a ``no_emission``/``out_of_support`` point never enters a mean
+        or a changed-count denominator (Fix-A honesty)."""
         summary = getattr(ev_result, "summary", None) if ev_result else None
         summary = summary or {}
         agg = (summary.get("lostspace") or {}).get("aggregate") or {}
-        kl_mean = (sum(kl_trace) / len(kl_trace)) if kl_trace else None
-        n_changed = sum(
-            1 for k in kl_trace if k is not None and k > self.epsilon
-        )
+        ok_kl = ok_kl_values(kl_trace)
+        kl_mean = (sum(ok_kl) / len(ok_kl)) if ok_kl else None
+        n_changed = sum(1 for k in ok_kl if k > self.epsilon)
         return {
             "evaluation_status": summary.get("evaluation_status"),
             "win_rate": summary.get("win_rate"),

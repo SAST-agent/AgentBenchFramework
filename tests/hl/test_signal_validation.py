@@ -168,9 +168,10 @@ def test_behavioral_edit_registers_positive_kl(tmp_path):
                                    epsilon=0.1)
 
     assert len(trace) == 1, "expected exactly one KL entry for one decision point"
-    assert trace[0] > 0.0, (
+    assert trace[0].status == "ok", trace[0]
+    assert trace[0].kl > 0.0, (
         f"behavioral edit at a reached decision must register KL > 0; "
-        f"got {trace[0]} (eps-smoothed onehots over different legal moves "
+        f"got {trace[0].kl} (eps-smoothed onehots over different legal moves "
         f"should differ)")
 
 
@@ -206,8 +207,9 @@ def test_identical_versions_register_zero_kl(tmp_path):
                                    epsilon=0.1)
 
     assert len(trace) == 1
-    assert trace[0] == 0.0, (
-        f"identical versions must register KL = 0; got {trace[0]} "
+    assert trace[0].status == "ok", trace[0]
+    assert trace[0].kl == 0.0, (
+        f"identical versions must register KL = 0; got {trace[0].kl} "
         f"(artificial inflation would mask real edits)")
 
 

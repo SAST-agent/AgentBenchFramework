@@ -18,7 +18,10 @@ HL event types (see the measurement contract / plan.md):
     agent_act       — one coding-agent invocation lifecycle
     version         — a codebase version (snapshot/restore), content-hash keyed
     eval            — a frozen BenchmarkSpec evaluation result
-    policy_kl       — local_policy_kl_trace between two versions
+    policy_kl       — structured local_policy_kl_trace [{kl,status,reason}]
+                      + per_sample_status / n_ok / n_missing / missing_reasons /
+                      kl_mean (ok-only); a no_emission/out_of_support point is
+                      recorded with kl=None, never folded into a false 0.0
     occupancy_shift — state-occupancy distribution change between two versions
     budget          — learning/evaluation/total resource accounting
 

@@ -33,9 +33,12 @@ SMOKE_CANDIDATE = r'''
 import json, sys
 
 def read_frame():
+    # judger->AI framing is 4 ASCII decimal digits (convert_byte_str_for_ai),
+    # NOT a binary 4-byte header — a binary read blocks forever on the real
+    # probe's length prefix (probe.py:_write_frame).
     hdr = sys.stdin.buffer.read(4)
     if len(hdr) < 4: return None
-    n = int.from_bytes(hdr, "big", signed=True)
+    n = int(hdr.decode("utf-8"))
     body = sys.stdin.buffer.read(n)
     return json.loads(body.decode("utf-8"))
 
@@ -185,8 +188,12 @@ def test_e2e_two_act_iteration_full_chain(tmp_path):
     assert kl["version_after"] == v2.version_id
     assert len(kl["local_policy_kl_trace"]) == 2  # 2 reference decision points
     # both versions emit finish on both points -> KL = 0 (no behavior change)
-    for v in kl["local_policy_kl_trace"]:
-        assert v == pytest.approx(0.0, abs=1e-9)
+    for p in kl["local_policy_kl_trace"]:
+        assert p["status"] == "ok"
+        assert p["kl"] == pytest.approx(0.0, abs=1e-9)
+    assert kl["n_ok"] == 2
+    assert kl["n_missing"] == 0
+    assert kl["per_sample_status"] == ["ok", "ok"]
 
     # budget: learning scope, 2 acts, unknown tokens None (FakeRunner)
     budgets = [e for e in events if e["event_type"] == "budget"]

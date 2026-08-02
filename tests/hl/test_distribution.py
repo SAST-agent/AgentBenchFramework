@@ -12,6 +12,8 @@ from agentbench_frame.hl.distribution import (
     epsilon_smoothed_distribution,
     policy_kl,
     local_policy_kl_trace,
+    PolicyKLPoint,
+    ok_kl_values,
     LegalActionSet,
     FINISH,
 )
@@ -205,9 +207,10 @@ def test_local_policy_kl_trace_per_decision():
     trace = local_policy_kl_trace(chosen_new, chosen_old, [las, las, las], eps)
     assert len(trace) == 3
     # point 1 differs -> KL > 0 ; point 2 identical -> KL = 0 ; point 3 differs -> KL > 0
-    assert trace[0] > 0
-    assert math.isclose(trace[1], 0.0, abs_tol=1e-12)
-    assert trace[2] > 0
+    assert all(p.status == "ok" for p in trace)
+    assert trace[0].kl > 0
+    assert math.isclose(trace[1].kl, 0.0, abs_tol=1e-12)
+    assert trace[2].kl > 0
 
 
 def test_local_policy_kl_trace_handles_no_decision_point():
@@ -219,4 +222,49 @@ def test_local_policy_kl_trace_handles_no_decision_point():
     trace = local_policy_kl_trace(
         [("attack", 1)], [("attack", 1)], [las], 0.1,
     )
-    assert trace == [0.0]
+    assert trace == [PolicyKLPoint(kl=0.0, status="ok")]
+
+
+def test_local_policy_kl_trace_no_emission_not_folded_to_zero():
+    """Fix-A: a version that returned None (unresponsive) -> status
+    ``no_emission`` with kl=None, NEVER a false 0.0. This is what lets
+    events.jsonl distinguish "both chose the same action" from "both silent"."""
+    las = enumerate_legal_actions(_legal(attack=[1]), status=0, inventory={})
+    # both versions silent at the decision point -> no_emission, not 0.0
+    trace = local_policy_kl_trace([None], [None], [las], 0.1)
+    assert len(trace) == 1
+    p = trace[0]
+    assert p.status == "no_emission"
+    assert p.kl is None
+    assert p.reason == "version_new_unresponsive"
+    # old silent, new emitted -> still no_emission (old is the unresponsive one)
+    trace2 = local_policy_kl_trace([("attack", 1)], [None], [las], 0.1)
+    assert trace2[0].status == "no_emission"
+    assert trace2[0].kl is None
+    assert trace2[0].reason == "version_old_unresponsive"
+
+
+def test_local_policy_kl_trace_out_of_support_recorded():
+    """Fix-A: an emission outside A(s) -> status ``out_of_support`` with
+    kl=None and the offending version named, instead of a coerced uniform."""
+    las = enumerate_legal_actions(_legal(attack=[1]), status=0, inventory={})
+    # attack 99 is not a legal target id
+    trace = local_policy_kl_trace([("attack", 99)], [("attack", 1)], [las], 0.1)
+    assert len(trace) == 1
+    assert trace[0].status == "out_of_support"
+    assert trace[0].kl is None
+    assert trace[0].reason == "chosen_not_in_support(version_new)"
+
+
+def test_ok_kl_values_excludes_missing():
+    """Fix-A: ``ok_kl_values`` returns only real KL values; a no_emission
+    point never enters a mean or a changed-count denominator."""
+    las = enumerate_legal_actions(_legal(attack=[1]), status=0, inventory={})
+    trace = local_policy_kl_trace(
+        [("attack", 1), ("attack", 1), None],
+        [("attack", 1), ("attack", 1), None],
+        [las, las, las], 0.1,
+    )
+    ok = ok_kl_values(trace)
+    assert len(ok) == 2  # first two ok; third no_emission excluded
+    assert all(v == 0.0 for v in ok)

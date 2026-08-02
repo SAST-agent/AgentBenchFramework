@@ -245,6 +245,33 @@ def epsilon_smoothed_distribution(
     return (dist, out_of_support) if return_flag else dist
 
 
+@dataclass(frozen=True)
+class PolicyKLPoint:
+    """One per-sample policy-KL measurement, with its honesty status.
+
+    ``kl`` is only populated when ``status == "ok"`` (both versions emitted an
+    in-support primitive). Missing/unresponsive emissions and out-of-support
+    emissions are recorded explicitly with ``kl=None`` and a ``reason`` — never
+    silently folded into a false 0.0 (doc §4 honesty: missing stays missing).
+    """
+
+    kl: Optional[float]
+    status: str  # "ok" | "no_emission" | "out_of_support"
+    reason: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"kl": self.kl, "status": self.status, "reason": self.reason}
+
+
+def ok_kl_values(trace: Sequence["PolicyKLPoint"]) -> List[float]:
+    """The real (status == "ok") KL values in a trace.
+
+    Missing/out-of-support points carry ``kl=None`` and are excluded — they must
+    never enter a mean or a changed-count denominator.
+    """
+    return [p.kl for p in trace if p.status == "ok" and p.kl is not None]
+
+
 def policy_kl(p: Dict[ActionToken, float], q: Dict[ActionToken, float]) -> float:
     """KL(p || q) in nats, over p's support.
 
@@ -268,23 +295,46 @@ def local_policy_kl_trace(
     chosen_old: Sequence[Optional[ActionToken]],
     legal_sets: Sequence[LegalActionSet],
     epsilon: float,
-) -> List[float]:
-    """Per-decision policy KL between two versions, over their shared decision
-    points.
+) -> List[PolicyKLPoint]:
+    """Per-decision policy KL between two versions, as a structured trace.
+
+    Each entry carries ``{kl, status, reason}`` (doc §15: store raw traces,
+    never pre-aggregated means). The statuses are the honesty contract:
+
+    - ``ok``: both versions emitted an in-support primitive; ``kl`` is the real
+      value.
+    - ``no_emission``: a version returned ``None`` (unresponsive); ``kl=None``,
+      ``reason="version_new_unresponsive"`` / ``version_old_unresponsive"``.
+    - ``out_of_support``: an emitted primitive was not in A(s); ``kl=None``,
+      ``reason="chosen_not_in_support(version_new|old)"``.
 
     Only decision points that actually occurred (non-empty A(s)) contribute an
-    entry. If the two versions' traces have different lengths or decision-point
-    structure, the shorter common prefix is used and the mismatch is recorded by
-    the caller (occupancy_shift captures the rest). Here we zip elementwise.
-
-    Returns the raw trace ``[KL_0, KL_1, ...]`` (doc §15: store raw traces,
-    never pre-aggregated means).
+    entry. A ``no_emission`` point is KEPT (not dropped) so ``n_missing`` stays
+    visible; if the two versions' decision-point structure differs, the shorter
+    common prefix is used and the mismatch is recorded by the caller
+    (``occupancy_shift``). Here we zip elementwise.
     """
-    trace: List[float] = []
+    points: List[PolicyKLPoint] = []
     for a_new, a_old, las in zip(chosen_new, chosen_old, legal_sets):
         if len(las) == 0:
             continue  # no decision point -> no trace entry
-        p = epsilon_smoothed_distribution(a_new, las, epsilon)
-        q = epsilon_smoothed_distribution(a_old, las, epsilon)
-        trace.append(policy_kl(p, q))
-    return trace
+        if a_new is None or a_old is None:
+            missing = "new" if a_new is None else "old"
+            points.append(PolicyKLPoint(
+                kl=None, status="no_emission",
+                reason=f"version_{missing}_unresponsive",
+            ))
+            continue
+        p, oos_new = epsilon_smoothed_distribution(
+            a_new, las, epsilon, return_flag=True)
+        q, oos_old = epsilon_smoothed_distribution(
+            a_old, las, epsilon, return_flag=True)
+        if oos_new or oos_old:
+            which = "new" if oos_new else "old"
+            points.append(PolicyKLPoint(
+                kl=None, status="out_of_support",
+                reason=f"chosen_not_in_support(version_{which})",
+            ))
+            continue
+        points.append(PolicyKLPoint(kl=policy_kl(p, q), status="ok"))
+    return points

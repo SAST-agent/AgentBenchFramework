@@ -27,6 +27,8 @@ from agentbench_frame.hl.distribution import (
     epsilon_smoothed_distribution,
     policy_kl,
     local_policy_kl_trace,
+    PolicyKLPoint,
+    ok_kl_values,
     LegalActionSet,
     FINISH,
 )
@@ -65,6 +67,8 @@ __all__ = [
     "epsilon_smoothed_distribution",
     "policy_kl",
     "local_policy_kl_trace",
+    "PolicyKLPoint",
+    "ok_kl_values",
     "LegalActionSet",
     "FINISH",
     "stage_candidate",
