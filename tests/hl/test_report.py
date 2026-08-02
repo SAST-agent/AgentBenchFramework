@@ -576,3 +576,118 @@ def test_k4_report_uses_proposal_cycle_as_integer_x_and_keeps_four_branches(
     svg = outputs["curves_svg"].read_text(encoding="utf-8")
     assert "Score Margin vs HL Iteration" in svg
     assert "four rollout candidates" not in svg
+
+
+def test_repair_branch_rows_have_stage_parent_and_representative_facts():
+    from agentbench_frame.hl.report import derive_branch_rows
+
+    events = [
+        *[
+            {
+                "event_type": "version_created",
+                "version_id": f"v{index + 1}",
+                "parent_version_id": "v0",
+                "act_id": f"act-b{index}",
+                "edit_type": "candidate",
+                "evaluation_status": "complete",
+                "benchmark_score": 0.0,
+            }
+            for index in range(4)
+        ],
+        {
+            "event_type": "version_created",
+            "version_id": "v5",
+            "parent_version_id": "v2",
+            "act_id": "act-repair-b1",
+            "edit_type": "repair",
+            "evaluation_status": "complete",
+            "benchmark_score": 1.0,
+        },
+        {
+            "event_type": "version_created",
+            "version_id": "v6",
+            "parent_version_id": "v4",
+            "act_id": "act-repair-b3",
+            "edit_type": "repair",
+            "evaluation_status": "complete",
+            "benchmark_score": 0.0,
+        },
+        *[
+            {
+                "event_type": "branch_representative_selected",
+                "iteration_id": "iter-000001",
+                "branch_index": index,
+                "initial_version_id": f"v{index + 1}",
+                "repaired_version_id": (
+                    "v5" if index == 1 else "v6" if index == 3 else None
+                ),
+                "representative_version_id": (
+                    "v5" if index == 1 else f"v{index + 1}"
+                ),
+                "reason": "fixture",
+            }
+            for index in range(4)
+        ],
+        {
+            "event_type": "proposal_cycle_completed",
+            "iteration_id": "iter-000001",
+            "parent_version_id": "v0",
+            "selected_version_id": "v5",
+            "candidate_version_ids": ["v1", "v2", "v3", "v4"],
+        },
+    ]
+
+    rows = derive_branch_rows(events)
+
+    assert {(row["branch_index"], row["stage"]) for row in rows} == {
+        (0, "initial"),
+        (1, "initial"),
+        (2, "initial"),
+        (3, "initial"),
+        (1, "repair-1"),
+        (3, "repair-1"),
+    }
+    assert sum(bool(row["representative"]) for row in rows) == 4
+
+
+def test_aggregate_curve_join_keeps_one_integer_global_iteration_axis():
+    from agentbench_frame.hl.report import build_aggregate_curves
+
+    def run_events(run_id, iterations):
+        events = []
+        for iteration in iterations:
+            version_id = f"{run_id}-v{iteration}"
+            events.extend(
+                [
+                    {
+                        "run_id": run_id,
+                        "event_type": "version_created",
+                        "version_id": version_id,
+                        "act_id": f"act-{iteration}",
+                        "evaluation_status": "complete",
+                        "benchmark_score": 0.0,
+                    },
+                    {
+                        "run_id": run_id,
+                        "event_type": "candidate_selected",
+                        "iteration_id": f"iter-{iteration:06d}",
+                        "version_id": version_id,
+                        "act_id": f"act-{iteration}",
+                    },
+                ]
+            )
+        return events
+
+    source = run_events("source-run", range(12))
+    phase = run_events("repair-run", range(3))
+
+    rows = build_aggregate_curves(
+        source,
+        phase,
+        global_origin_iteration=11,
+    )
+
+    assert [row["global_iteration"] for row in rows] == list(range(14))
+    assert rows[11]["version_id"] == "source-run-v11"
+    assert rows[12]["phase_iteration"] == 1
+    assert rows[12]["source_run"] == "repair-run"

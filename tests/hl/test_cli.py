@@ -351,6 +351,39 @@ def test_resume_accepts_zero_new_model_acts(monkeypatch):
     )
 
 
+def test_aggregate_report_cli_passes_integer_origin_and_run_paths(
+    tmp_path, monkeypatch
+):
+    from agentbench_frame.hl import cli, report
+
+    calls = []
+    monkeypatch.setattr(
+        report,
+        "write_aggregate_report",
+        lambda source, phase, **values: calls.append(
+            (source, phase, values)
+        )
+        or {"aggregate_curves_csv": tmp_path / "aggregate-curves.csv"},
+    )
+
+    code = cli.main(
+        [
+            "aggregate-report",
+            "--source-run",
+            str(tmp_path / "source"),
+            "--phase-run",
+            str(tmp_path / "phase"),
+            "--origin-iteration",
+            "11",
+        ]
+    )
+
+    assert code == 0
+    assert calls[0][0] == (tmp_path / "source").resolve()
+    assert calls[0][1] == (tmp_path / "phase").resolve()
+    assert calls[0][2]["global_origin_iteration"] == 11
+
+
 def test_unbounded_loop_stops_on_provider_or_evaluation_failure():
     from types import SimpleNamespace
     from agentbench_frame.hl.cli import _iteration_stop_reason

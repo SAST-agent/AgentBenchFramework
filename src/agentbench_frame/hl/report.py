@@ -38,12 +38,22 @@ BRANCH_FIELDS = (
     "iteration",
     "iteration_id",
     "branch_index",
+    "stage",
     "version_id",
+    "parent_version_id",
+    "representative",
     "selected",
     "evaluation_status",
     "target_win_rate",
     "mean_score_margin",
     "mean_local_policy_kl",
+)
+
+AGGREGATE_FIELDS = (
+    "global_iteration",
+    "phase_iteration",
+    "source_run",
+    *CURVE_FIELDS,
 )
 
 CURRICULUM_FIELDS = (
@@ -369,6 +379,11 @@ def derive_branch_rows(
         for event in records
         if event.get("event_type") == "policy_kl_measured"
     }
+    representative_facts = {
+        (str(event["iteration_id"]), int(event["branch_index"])): event
+        for event in records
+        if event.get("event_type") == "branch_representative_selected"
+    }
     rows: list[dict[str, Any]] = []
     for fallback, event in enumerate(
         record
@@ -381,24 +396,115 @@ def derive_branch_rows(
             event.get("candidate_version_ids", ())
         ):
             version_id = str(raw_version_id)
-            version = versions.get(version_id, {})
-            evaluation = evaluations.get(version_id, {})
-            matches = evaluation.get("matches")
-            rows.append(
-                {
+            fact = representative_facts.get(
+                (str(event.get("iteration_id")), branch_index), {}
+            )
+
+            def append_stage(stage: str, stage_version_id: str) -> None:
+                version = versions.get(stage_version_id, {})
+                evaluation = evaluations.get(stage_version_id, {})
+                matches = evaluation.get("matches")
+                rows.append({
                     "iteration": iteration,
                     "iteration_id": event.get("iteration_id"),
                     "branch_index": branch_index,
-                    "version_id": version_id,
-                    "selected": version_id == selected_id,
+                    "stage": stage,
+                    "version_id": stage_version_id,
+                    "parent_version_id": version.get("parent_version_id"),
+                    "representative": (
+                        str(fact.get("representative_version_id"))
+                        == stage_version_id
+                        if fact
+                        else stage == "initial"
+                    ),
+                    "selected": stage_version_id == selected_id,
                     "evaluation_status": evaluation.get(
                         "status", version.get("evaluation_status")
                     ),
                     "target_win_rate": _win_rate(evaluation),
                     "mean_score_margin": _score_margin(matches),
-                    "mean_local_policy_kl": _mean(policy_kl.get(version_id)),
-                }
-            )
+                    "mean_local_policy_kl": _mean(
+                        policy_kl.get(stage_version_id)
+                    ),
+                })
+
+            append_stage("initial", version_id)
+            repaired_version_id = fact.get("repaired_version_id")
+            if repaired_version_id is not None:
+                append_stage("repair-1", str(repaired_version_id))
+    return rows
+
+
+def _load_run_events(
+    source: str | Path | Iterable[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], str]:
+    if isinstance(source, (str, Path)):
+        from agentbench_frame.hl.events import read_events
+
+        path = Path(source).resolve()
+        events_path = path / "events.jsonl" if path.is_dir() else path
+        return read_events(events_path), (
+            path.name if path.is_dir() else path.parent.name
+        )
+    records = [dict(event) for event in source]
+    run_id = next(
+        (
+            str(event["run_id"])
+            for event in records
+            if event.get("run_id") is not None
+        ),
+        "events",
+    )
+    return records, run_id
+
+
+def build_aggregate_curves(
+    source_run: str | Path | Iterable[Mapping[str, Any]],
+    phase_run: str | Path | Iterable[Mapping[str, Any]],
+    *,
+    global_origin_iteration: int,
+) -> list[dict[str, Any]]:
+    """Join a source run and imported-origin phase on one integer axis."""
+
+    if global_origin_iteration < 0:
+        raise ValueError("global_origin_iteration must be non-negative")
+    source_events, source_label = _load_run_events(source_run)
+    phase_events, phase_label = _load_run_events(phase_run)
+    source_rows = [
+        row
+        for row in derive_curve_rows(source_events)
+        if int(row["iteration"]) <= global_origin_iteration
+    ]
+    if not any(
+        int(row["iteration"]) == global_origin_iteration
+        for row in source_rows
+    ):
+        raise ValueError("source run does not contain the global origin iteration")
+    rows = [
+        {
+            **row,
+            "global_iteration": int(row["iteration"]),
+            "phase_iteration": None,
+            "source_run": source_label,
+        }
+        for row in source_rows
+    ]
+    for row in derive_curve_rows(phase_events):
+        phase_iteration = int(row["iteration"])
+        if phase_iteration == 0:
+            continue
+        rows.append(
+            {
+                **row,
+                "iteration": global_origin_iteration + phase_iteration,
+                "global_iteration": global_origin_iteration + phase_iteration,
+                "phase_iteration": phase_iteration,
+                "source_run": phase_label,
+            }
+        )
+    rows.sort(key=lambda row: int(row["global_iteration"]))
+    if len({int(row["global_iteration"]) for row in rows}) != len(rows):
+        raise ValueError("aggregate curve contains duplicate global iterations")
     return rows
 
 
@@ -574,4 +680,32 @@ def write_hl_report(
         "branches_csv": branches_csv,
         "curves_png": png,
         "curves_svg": svg,
+    }
+
+
+def write_aggregate_report(
+    source_run: str | Path | Iterable[Mapping[str, Any]],
+    phase_run: str | Path | Iterable[Mapping[str, Any]],
+    *,
+    global_origin_iteration: int,
+    output_dir: str | Path,
+) -> dict[str, Path]:
+    """Write the joined four-panel curve in CSV, PNG, and SVG formats."""
+
+    output = Path(output_dir)
+    output.mkdir(parents=True, exist_ok=True)
+    rows = build_aggregate_curves(
+        source_run,
+        phase_run,
+        global_origin_iteration=global_origin_iteration,
+    )
+    csv_path = output / "aggregate-curves.csv"
+    png = output / "aggregate-curves.png"
+    svg = output / "aggregate-curves.svg"
+    _write_csv(csv_path, rows, AGGREGATE_FIELDS)
+    _plot(rows, [], png, svg)
+    return {
+        "aggregate_curves_csv": csv_path,
+        "aggregate_curves_png": png,
+        "aggregate_curves_svg": svg,
     }

@@ -3032,6 +3032,24 @@ def _cmd_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_aggregate_report(args: argparse.Namespace) -> int:
+    from agentbench_frame.hl.report import write_aggregate_report
+
+    phase_run = Path(args.phase_run).resolve()
+    outputs = write_aggregate_report(
+        Path(args.source_run).resolve(),
+        phase_run,
+        global_origin_iteration=args.origin_iteration,
+        output_dir=(
+            Path(args.output_dir).resolve()
+            if args.output_dir
+            else phase_run / "report"
+        ),
+    )
+    _json({key: str(value) for key, value in outputs.items()})
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="agentbench hl")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -3061,6 +3079,12 @@ def main(argv: list[str] | None = None) -> int:
     report = sub.add_parser("report")
     report.add_argument("--run-dir", required=True)
     report.set_defaults(handler=_cmd_report)
+    aggregate = sub.add_parser("aggregate-report")
+    aggregate.add_argument("--source-run", required=True)
+    aggregate.add_argument("--phase-run", required=True)
+    aggregate.add_argument("--origin-iteration", required=True, type=int)
+    aggregate.add_argument("--output-dir")
+    aggregate.set_defaults(handler=_cmd_aggregate_report)
     args = parser.parse_args(argv)
     if getattr(args, "acts", None) is not None:
         minimum = 0
