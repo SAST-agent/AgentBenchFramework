@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from .build import build_candidate
+from .ig import compare_policies_on_trace, write_ig_artifacts
 from .match import run_match
 from .replay import iter_replay, summarize_replay
 
@@ -55,6 +56,28 @@ def _replay(args: argparse.Namespace) -> int:
     return 0
 
 
+def _ig(args: argparse.Namespace) -> int:
+    row = compare_policies_on_trace(
+        args.trace, args.old, args.new,
+        faction=args.faction,
+        iteration=args.iteration,
+        old_version=args.old_version,
+        new_version=args.new_version,
+        timeout=args.timeout,
+    )
+    paths = write_ig_artifacts(row, args.output_dir)
+    result = {
+        "episode_id": row["episode_id"],
+        "unchanged_ratio": row["unchanged_ratio"],
+        "infinite_ratio": row["infinite_ratio"],
+        "missing_ratio": row["missing_ratio"],
+        "finite_kl_mean": row["finite_kl_mean"],
+        "artifacts": {name: str(path) for name, path in paths.items()},
+    }
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m agentbench_frame.doto",
@@ -80,12 +103,19 @@ def build_parser() -> argparse.ArgumentParser:
     replay.add_argument("--path", type=Path, required=True)
     replay.add_argument("--jsonl", type=Path)
     replay.set_defaults(func=_replay)
-    for name, help_text in (
-        ("ig", "compare native policies on one trace"),
-        ("loop", "run the replay-driven LLM iteration loop"),
-    ):
-        command = subcommands.add_parser(name, help=help_text)
-        command.set_defaults(func=_pending)
+    ig = subcommands.add_parser("ig", help="compare native policies on one trace")
+    ig.add_argument("--trace", type=Path, required=True)
+    ig.add_argument("--old", type=Path, required=True)
+    ig.add_argument("--new", type=Path, required=True)
+    ig.add_argument("--faction", type=int, choices=(0, 1), required=True)
+    ig.add_argument("--iteration", type=int, required=True)
+    ig.add_argument("--old-version", required=True)
+    ig.add_argument("--new-version", required=True)
+    ig.add_argument("--output-dir", type=Path, required=True)
+    ig.add_argument("--timeout", type=float, default=1.0)
+    ig.set_defaults(func=_ig)
+    loop = subcommands.add_parser("loop", help="run the replay-driven LLM iteration loop")
+    loop.set_defaults(func=_pending)
     return parser
 
 
