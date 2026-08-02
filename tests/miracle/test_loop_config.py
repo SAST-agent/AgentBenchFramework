@@ -46,9 +46,11 @@ def test_loads_minimal_loop_config(tmp_path):
     assert cfg.evaluation.seats == (0,)
     assert cfg.budget.max_iterations == 1
     assert cfg.llm.temperature == 0.0
-    assert cfg.llm.max_tokens == 8192
+    assert cfg.llm.max_tokens is None
     assert cfg.llm.timeout_seconds == 120.0
     assert cfg.llm.reasoning_effort == "low"
+    assert cfg.llm.stream is True
+    assert cfg.llm.max_context_tokens == 1_000_000
 
 
 @pytest.mark.parametrize(
@@ -80,3 +82,18 @@ def test_rejects_missing_initial_strategy(tmp_path):
 
     with pytest.raises(ValueError, match="initial_strategy"):
         LoopConfig.from_toml(path)
+
+
+def test_allows_explicit_nonstreaming_and_generation_limit(tmp_path):
+    path = _write_config(tmp_path)
+    text = path.read_text(encoding="utf-8").replace(
+        'reasoning_effort = "low"',
+        'reasoning_effort = "low"\nstream = false\nmax_tokens = 1234\nmax_context_tokens = 2000000',
+    )
+    path.write_text(text, encoding="utf-8")
+
+    cfg = LoopConfig.from_toml(path)
+
+    assert cfg.llm.stream is False
+    assert cfg.llm.max_tokens == 1234
+    assert cfg.llm.max_context_tokens == 2_000_000

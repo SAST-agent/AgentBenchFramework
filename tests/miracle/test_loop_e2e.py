@@ -64,6 +64,7 @@ opponent = "endround"
 base_url = "{base_url}"
 api_key_env = "MIRACLE_E2E_KEY"
 model = "mock"
+stream = false
 [evaluation]
 seeds = [11]
 seats = [0]

@@ -207,6 +207,8 @@ def run_loop(
                 "temperature": config.llm.temperature,
                 "max_tokens": config.llm.max_tokens,
                 "reasoning_effort": config.llm.reasoning_effort,
+                "stream": config.llm.stream,
+                "max_context_tokens": config.llm.max_context_tokens,
             })
             store.write_event("llm_request_started", iteration=index, model=config.llm.model)
             proposal = client.propose_strategy(messages)
@@ -222,6 +224,10 @@ def run_loop(
             })
             ledger.charge_api_time(proposal.latency_seconds)
             ledger.charge_usage(proposal.usage)
+            ledger.charge_context(
+                proposal.usage.get("total_tokens", 0),
+                config.llm.max_context_tokens,
+            )
             store.write_event(
                 "llm_request_finished", iteration=index,
                 latency_seconds=proposal.latency_seconds, usage=proposal.usage,
@@ -232,11 +238,19 @@ def run_loop(
             validate_candidate(candidate)
         except (LLMRequestError, StrategyValidationError, BudgetExceeded) as exc:
             stage = getattr(exc, "stage", getattr(exc, "dimension", "unknown"))
+            raw = getattr(exc, "raw_response", None)
             if isinstance(exc, LLMRequestError):
                 ledger.charge_api_time(exc.latency_seconds)
                 ledger.charge_usage(exc.usage)
+                try:
+                    ledger.charge_context(
+                        exc.usage.get("total_tokens", 0),
+                        config.llm.max_context_tokens,
+                    )
+                except BudgetExceeded as context_exc:
+                    exc = context_exc
+                    stage = context_exc.dimension
             failure_counts[stage] += 1
-            raw = getattr(exc, "raw_response", None)
             if raw is not None and not (iteration_dir / "llm_response.json").exists():
                 store.write_json_atomic(iteration_dir / "llm_response.json", {
                     "raw_response": raw, "error": str(exc), "stage": stage,

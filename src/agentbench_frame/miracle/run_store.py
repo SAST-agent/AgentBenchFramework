@@ -63,6 +63,10 @@ class BudgetLedger:
         self.total_tokens = total
         self.check()
 
+    def charge_context(self, total_tokens: int, limit: int) -> None:
+        self._ensure("context_tokens", int(total_tokens), int(limit))
+        self.check()
+
     def charge_api_time(self, seconds: float) -> None:
         self.api_seconds += max(0.0, float(seconds))
         self.check()

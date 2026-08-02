@@ -145,6 +145,11 @@ diff、命令或只包含方法片段的代码。Harness 自己保存、加载�
 对于会把输出预算用于隐藏推理的兼容模型，可在 `[llm]` 设置
 `reasoning_effort = "low"`；不支持该字段的服务应省略。
 
+Chat Completions 默认使用 SSE 流式传输，以避免长推理期间的 60 秒空闲网关超时。只有
+不支持流式的服务才设置 `stream = false`。`max_tokens` 默认不发送；若确实需要限制单次
+生成才显式配置。`max_context_tokens` 默认 1000000，并按 API 返回的真实 prompt +
+completion usage 检查；Harness 不用字符数冒充 token 数。
+
 Run 是一次完整测评；iteration 是一次策略更新尝试；episode 是一局完整对战；round 是游戏内
 回合。无效代码、API 错误、超时、性能倒退都保留，不从曲线中删除。
 

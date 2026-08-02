@@ -7,10 +7,11 @@ base_url = "https://api.openai.com"
 api_key_env = "OPENAI_API_KEY"
 model = "your-model-name"
 temperature = 0.0
-max_tokens = 8192
 timeout_seconds = 120
 # 可选；支持推理强度的 OpenAI-compatible 模型可设 low/medium/high
 reasoning_effort = "low"
+stream = true
+max_context_tokens = 1000000
 
 [evaluation]
 seeds = [11]

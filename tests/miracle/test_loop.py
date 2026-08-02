@@ -44,6 +44,16 @@ max_wall_seconds = 60
     return LoopConfig.from_toml(path)
 
 
+def _config_with_context_limit(tmp_path, limit):
+    config = _config(tmp_path)
+    path = tmp_path / "loop.toml"
+    text = path.read_text(encoding="utf-8").replace(
+        'model = "mock"', f'model = "mock"\nmax_context_tokens = {limit}',
+    ).replace("max_total_tokens = 100", "max_total_tokens = 1000")
+    path.write_text(text, encoding="utf-8")
+    return LoopConfig.from_toml(path)
+
+
 def _trace_row(obs):
     return {"seq": 1, "kind": "from_logic", "payload": {
         "listen": [obs["camp"]], "content": ["000000" + json.dumps(obs)],
@@ -158,3 +168,26 @@ def test_later_iteration_can_continue_after_failed_update(tmp_path):
 
     second = json.loads((run_dir / "iterations/iteration-0002/iteration.json").read_text())
     assert second["status"] == "accepted"
+
+
+class ContextHeavyClient(FakeClient):
+    def propose_strategy(self, messages):
+        proposal = super().propose_strategy(messages)
+        return StrategyProposal(
+            proposal.analysis, proposal.strategy_code,
+            {"prompt_tokens": 60, "completion_tokens": 41, "total_tokens": 101},
+            proposal.request_body, proposal.raw_response, proposal.latency_seconds,
+        )
+
+
+def test_context_limit_preserves_real_usage_and_rejects_candidate(tmp_path):
+    run_dir = run_loop(
+        _config_with_context_limit(tmp_path, 100), client=ContextHeavyClient(),
+        match_runner=_fake_match, data_dir=tmp_path / "results", run_id="context-run",
+    )
+
+    iteration = json.loads((run_dir / "iterations/iteration-0001/iteration.json").read_text())
+    summary = json.loads((run_dir / "summary.json").read_text())
+    assert iteration["status"] == "failed"
+    assert iteration["failure_stage"] == "context_tokens"
+    assert summary["total_tokens"] == 101
