@@ -110,3 +110,36 @@ def test_reducer_update_rejects_framework_owned_fields(tmp_path):
             official_champion_version_id="v000000",
             exploration_debt=0,
         )
+
+
+def test_framework_comparisons_prepend_exact_margin_evidence():
+    from agentbench_frame.hl.research_state import (
+        ResearchState,
+        prepend_framework_comparisons,
+    )
+
+    current = ResearchState.empty(max_bytes=4096).advance(
+        recent_comparisons=({"version": "v-old", "summary": "older"},),
+    )
+    advanced = prepend_framework_comparisons(
+        current,
+        (
+            {
+                "version_id": "v000073",
+                "branch_index": 2,
+                "opponent": "rank15",
+                "seed": 102,
+                "margin_delta": 380.0,
+            },
+        ),
+    )
+
+    assert advanced.recent_comparisons[0] == {
+        "source": "framework_positive_margin_delta",
+        "version_id": "v000073",
+        "branch_index": 2,
+        "opponent": "rank15",
+        "seed": 102,
+        "margin_delta": 380.0,
+    }
+    assert advanced.recent_comparisons[1]["version"] == "v-old"

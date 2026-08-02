@@ -1049,6 +1049,10 @@ def test_top_two_linear_repair_keeps_four_branches_and_two_descendants(tmp_path)
 
     workspace = _workspace(tmp_path)
     provider = RepairProvider()
+    from agentbench_frame.hl.research_state import ResearchState
+
+    research_state_path = tmp_path / "research_state.json"
+    ResearchState.empty(max_bytes=4096).write(research_state_path)
     controller = HLController(
         workspace=workspace,
         run_root=tmp_path,
@@ -1073,6 +1077,8 @@ def test_top_two_linear_repair_keeps_four_branches_and_two_descendants(tmp_path)
             "replay": match.get("replay"),
             "trace": match.get("trace"),
         },
+        research_state_path=research_state_path,
+        research_state_max_bytes=4096,
     )
     origin = controller.initialize(evaluate=True)
     parent_evaluation = controller.evaluator.evaluate(origin)
@@ -1098,6 +1104,26 @@ def test_top_two_linear_repair_keeps_four_branches_and_two_descendants(tmp_path)
     assert len(reducer["initial_candidates"]) == 4
     assert len(reducer["repairs"]) == 2
     assert len(reducer["representatives"]) == 4
+    assert reducer["parent_evaluation"]["version_id"] == origin.version_id
+    assert reducer["parent_evaluation"]["matches"][0]["seed"] == 101
+    assert reducer["positive_margin_deltas"][0] == {
+        "branch_index": 1,
+        "candidate_margin": 60.0,
+        "candidate_result": "win",
+        "ghosts_score_delta": 0.0,
+        "margin_delta": 60.0,
+        "opponent": "rank15",
+        "parent_margin": 0.0,
+        "parent_result": "loss",
+        "rollman_score_delta": 60.0,
+        "seed": 101,
+        "version_id": result.repairs[0].repaired.version.version_id,
+    }
+    state = ResearchState.load_or_create(research_state_path, max_bytes=4096)
+    assert state.recent_comparisons[0]["source"] == (
+        "framework_positive_margin_delta"
+    )
+    assert state.recent_comparisons[0]["margin_delta"] == 60.0
     event_types = [
         event["event_type"]
         for event in read_events(tmp_path / "events.jsonl")

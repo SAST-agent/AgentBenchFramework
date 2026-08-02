@@ -666,6 +666,8 @@ selected search parent: {selected_version_id}
 
 比较四个机制的实际比赛反馈。Framework 记录的分数、回放和测量高于模型推断；不得把没有证据的解释写成稳定知识。策略膨胀和局部 if/else 不构成失败理由。不得修改候选代码、版本指针、对手课程或认证结论。
 
+reducer input 中的 `positive_margin_deltas` 是 Framework 按同一对手、同一 seed 计算的候选相对父版本分差增益。必须在 recent_comparisons 中保留其中最强的条件性改进及精确 margin_delta，并在 open_questions 中提出区分“改进场景”和“退化场景”的可观察状态谓词。seed 只能作为复现实验证据，不得按 seed、固定坐标或回放帧号设计策略。
+
 将严格 JSON 对象写入 workspace/.agentbench/research_state_update.json，必须且只能包含四个数组字段：stable_knowledge、failed_hypotheses、open_questions、recent_comparisons。前三项只能包含非空字符串；recent_comparisons 每项为简短对象。不得修改 proposal_cycle、search_parent、official_champion、active_target、locked_opponents 或 exploration_debt，这些字段由 Framework 根据事实维护。
 最多 6 次工具调用；读取 reducer input 与 research state、写出并校验 JSON 后立即结束，不运行 git status/diff 或额外分析。
 必须直接使用上面列出的精确文件路径；不得先声明或访问 run 根目录、这些文件的父目录，也不得通过父目录拼接路径。

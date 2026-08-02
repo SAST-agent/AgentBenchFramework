@@ -495,6 +495,9 @@ def test_k4_role_prompts_use_digest_research_state_and_exact_branch_brief(tmp_pa
     assert "不得把 run 根目录或父目录保存为变量" in repair
     assert str(reducer_input) in reducer
     assert "research_state_update.json" in reducer
+    assert "positive_margin_deltas" in reducer
+    assert "可观察状态谓词" in reducer
+    assert "不得按 seed" in reducer
     assert "不得修改" in reducer
     assert "不得先声明或访问 run 根目录" in reducer
 

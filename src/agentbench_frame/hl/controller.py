@@ -25,7 +25,11 @@ from agentbench_frame.hl.repair import (
     build_repair_packet,
     select_branch_representative,
 )
-from agentbench_frame.hl.research_state import ResearchState, apply_reducer_update
+from agentbench_frame.hl.research_state import (
+    ResearchState,
+    apply_reducer_update,
+    prepend_framework_comparisons,
+)
 from agentbench_frame.hl.selection import (
     CandidateDiagnostics,
     select_linear_successor,
@@ -71,6 +75,75 @@ class ProposalCycleResult:
     rollback: Optional[ParentDecision]
     repairs: tuple[RepairSelection, ...] = ()
     representatives: tuple[CandidateResult, ...] = ()
+
+
+def _positive_margin_deltas(
+    parent_evaluation: CandidateEvaluation | None,
+    representatives: tuple[CandidateResult, ...],
+    *,
+    limit: int = 8,
+) -> list[dict[str, Any]]:
+    """Return the strongest same-opponent, same-seed gains over the parent."""
+
+    if parent_evaluation is None:
+        return []
+
+    def margin(match: Mapping[str, Any]) -> float | None:
+        rollman = match.get("rollman_score")
+        ghosts = match.get("ghosts_score")
+        if not isinstance(rollman, (int, float)) or not isinstance(
+            ghosts, (int, float)
+        ):
+            return None
+        return float(rollman) - float(ghosts)
+
+    parent_by_match: dict[tuple[Any, Any], Mapping[str, Any]] = {}
+    for match in parent_evaluation.matches:
+        if match.get("status") == "complete" and margin(match) is not None:
+            parent_by_match[(match.get("opponent"), match.get("seed"))] = match
+
+    improvements: list[dict[str, Any]] = []
+    for representative in representatives:
+        for match in representative.evaluation.matches:
+            parent = parent_by_match.get(
+                (match.get("opponent"), match.get("seed"))
+            )
+            candidate_margin = margin(match)
+            parent_margin = None if parent is None else margin(parent)
+            if (
+                match.get("status") != "complete"
+                or parent is None
+                or candidate_margin is None
+                or parent_margin is None
+                or candidate_margin <= parent_margin
+            ):
+                continue
+            improvements.append(
+                {
+                    "version_id": representative.version.version_id,
+                    "branch_index": representative.branch_index,
+                    "opponent": match.get("opponent"),
+                    "seed": match.get("seed"),
+                    "parent_result": parent.get("result"),
+                    "candidate_result": match.get("result"),
+                    "parent_margin": parent_margin,
+                    "candidate_margin": candidate_margin,
+                    "margin_delta": candidate_margin - parent_margin,
+                    "rollman_score_delta": float(match["rollman_score"])
+                    - float(parent["rollman_score"]),
+                    "ghosts_score_delta": float(match["ghosts_score"])
+                    - float(parent["ghosts_score"]),
+                }
+            )
+    return sorted(
+        improvements,
+        key=lambda row: (
+            -row["margin_delta"],
+            row["branch_index"],
+            str(row["opponent"]),
+            str(row["seed"]),
+        ),
+    )[:limit]
 
 
 class HLController:
@@ -1286,6 +1359,10 @@ class HLController:
             version_ids=[candidate.version.version_id for candidate in finalists],
         )
 
+        positive_margin_deltas = _positive_margin_deltas(
+            parent_evaluation,
+            iteration.representatives,
+        )
         reducer_input = proposal_root / "reducer_input.json"
         reducer_input.write_text(
             json.dumps(
@@ -1297,6 +1374,17 @@ class HLController:
                     "best_candidate_version_id": (
                         iteration.selected.version.version_id
                     ),
+                    "parent_evaluation": (
+                        None
+                        if parent_evaluation is None
+                        else {
+                            "version_id": parent_id,
+                            "status": parent_evaluation.status,
+                            "score": parent_evaluation.score,
+                            "matches": list(parent_evaluation.matches),
+                        }
+                    ),
+                    "positive_margin_deltas": positive_margin_deltas,
                     "initial_candidates": [
                         {
                             "branch_index": candidate.branch_index,
@@ -1435,6 +1523,10 @@ class HLController:
                         self.lineage.champion_version_id
                     ),
                     exploration_debt=current_state.exploration_debt + 1,
+                )
+                next_state = prepend_framework_comparisons(
+                    next_state,
+                    positive_margin_deltas,
                 )
                 next_state.write(self.research_state_path)
         self.events.write(

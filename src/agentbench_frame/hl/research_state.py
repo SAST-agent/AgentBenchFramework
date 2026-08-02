@@ -184,3 +184,31 @@ def apply_reducer_update(
         recent_comparisons=tuple(dict(item) for item in comparisons),
         exploration_debt=exploration_debt,
     )
+
+
+def prepend_framework_comparisons(
+    current: ResearchState,
+    comparisons: tuple[Mapping[str, Any], ...] | list[Mapping[str, Any]],
+) -> ResearchState:
+    """Keep exact framework measurements ahead of model-authored summaries."""
+
+    framework_rows = [
+        {"source": "framework_positive_margin_delta", **dict(comparison)}
+        for comparison in comparisons
+    ]
+    if not framework_rows:
+        return current
+    existing = [
+        dict(comparison)
+        for comparison in current.recent_comparisons
+        if comparison.get("source") != "framework_positive_margin_delta"
+    ]
+    rows = [*framework_rows, *existing]
+    while rows:
+        try:
+            return current.advance(recent_comparisons=tuple(rows))
+        except ValueError as error:
+            if "exceeds max_bytes" not in str(error):
+                raise
+            rows.pop()
+    return current
