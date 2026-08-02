@@ -254,6 +254,30 @@ def test_prompt_uses_controller_supplied_distillation_from_research_debt(tmp_pat
     assert "不得重复运行蒸馏脚本" in prompt
 
 
+def test_planner_prompt_requires_early_durable_branch_briefs(tmp_path):
+    from agentbench_frame.hl.context import ContextBundle, IterationContext
+
+    bundle = ContextBundle.create(
+        tmp_path / "bundle",
+        _static_files(tmp_path / "assets"),
+    )
+    prompt = IterationContext(bundle).build_planner_prompt(
+        act_id="act-planner",
+        iteration_id="iter-000002",
+        parent_version_id="v000000",
+        workspace=tmp_path / "candidate",
+        game_digest_path=tmp_path / "digest.json",
+        research_state_path=tmp_path / "research.json",
+        replay_evidence=[{"summary": "summary.md"}],
+        previous_measurements={},
+        active_target="rank15",
+    )
+
+    assert "第 4 次工具调用结束前" in prompt
+    assert "先落盘，再补读" in prompt
+    assert "不要逐个读取四个 summary" in prompt
+
+
 def test_curriculum_prompt_names_target_and_locked_pool(tmp_path):
     from agentbench_frame.hl.context import ContextBundle, IterationContext
 
