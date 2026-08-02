@@ -145,6 +145,42 @@ MediaPlayer seat0) 额外确认了 **胜率 0 的实证根因** — 之前只是
 `test_move` 的钥匙导航。修复框架后 (flag-honest + MediaPlayer + --save-traces),
 agent 仍因 (2) 不收集钥匙 — 下一轮 HL act 的明确目标: 恢复钥匙导航。
 
+**结论**: 框架测量管线 (R1–R5) 与对局 harness 都无阻塞 bug。胜率 0 的两层根因
+都在 **deepseek 的编辑本身**: (1) 采纳文档的 `False` 逃生 flag; (2) 改坏
+`test_move` 的钥匙导航。修复框架后 (flag-honest + MediaPlayer + --save-traces),
+agent 仍因 (2) 不收集钥匙 — 下一轮 HL act 的明确目标: 恢复钥匙导航。
+
+## 8. 2026-08-02 胜利路径打通 (BFS 导航重写, 实证胜率 >0)
+
+恢复 seed 的 spawn-key 吸引环后 **验证失败** — 逐帧 trace 显示 v1/v2/v3 与
+workspace **连 pristine seed 都走同一条 5 步路径到电梯 (1,3,2) 后卡死**:
+`elevator_beside` 的 same-cell 分支让 `get_neighbors` 包含当前格, value-field
+取 max 会选中自己 (局部峰), 发 `move 到自己格` 被拒 → 0 钥匙 0 逃生, 胜率恒 0
+**(seed 自身从未收集过钥匙, "已验证能走角" 前提为假)**。
+
+重写 workspace `test_move` 为 **BFS 寻路**, 逐层实证根因:
+
+1. **候选硬编码 Map 错 ~135/147 格** (幻边 + 幻墙) — BFS 一步踩幻边被拒卡死。
+   解法: 从真实 `mapconf2.map` 解析出 **REAL_EDGES** (undirected usable edges
+   + ELEVATOR cross-layer, 110 节点) 内嵌 agent, 导航只走 REAL_EDGES。真实对局
+   验证: 收集全部 4 钥匙 (key@10/21/30) 并走到逃生舱 (3,3,0)。
+2. **view_box Materials 成功分支读 `root["tools"]`** — 服务端 Materials 回复是
+   裸 `respond_action` (无 tools, GameController solve), 首次踩到物资点即 KeyError
+   崩溃 (runError 风暴)。已改为防御性解析。
+3. **攻击用 stale 缓存位置** — 敌人离开视野后缓存 pos 不更新, 对空格攻击永停
+   (roundbegin `attack=[]` 但 agent 仍打 [1,3,1]/[5,3,2])。改为只信真实
+   `attack` mask + 真实邻居 (`_mask_neighbors`) + 攻击连续 4 轮后强制脱战。
+4. **逃生等待期不发 finish** — `WaitForEsacape`(status=4) 时 `start_turn` 跳过
+   play, 不发任何动作 → 逻辑 TLE → status=5 Error 判负。改为 status=4 时
+   `end_turn()` 发 finish, 3 轮倒计时自然逃出。
+
+**实证结果** (`--save-traces`, MediaPlayer seat0):
+- vs rank10: **2/3 首名胜** (`escaped=True`, score `{'0':4}`); 1 场早期被杀。
+- vs rank6: 2/3 逃出 (收集 4 钥匙 + 逃生), 对手先逃拿第 2 (escape 偏慢, 非阻塞)。
+- 逃生后进程退出被 harness 记为 post-win ai_error (无害噪音)。
+
+从"0 钥匙 0 逃生尝试"到"稳定收集 4 钥匙 + 逃出生天", 胜率恒 0 根因已消除。
+
 *附: 关键文件*
 - `src/agentbench_frame/hl/distribution.py` — `normalize_emitted` / `tracked_pos_from_transcript`
 - `src/agentbench_frame/hl/controller.py` — `_measure_policy_kl` (normalize 锚点修复)
@@ -153,3 +189,5 @@ agent 仍因 (2) 不收集钥匙 — 下一轮 HL act 的明确目标: 恢复钥
 - 历史: r1–r7 事件在 `.hl_codebase/hl-deepseek-r{1..7}/events.jsonl`
 - 验证产物: `agentbench_data/verify/seat0-{mediaplayer,signfix,weight}.{json,trace.jsonl}`,
   `recorder-out.json`
+- 胜利路径产物: `.hl_codebase/hl-deepseek-r8/workspace/agent.py` (BFS+REAL_EDGES),
+  `agentbench_data/runs/25_lostspace/workspace-{realedges,win}/` 真对局
