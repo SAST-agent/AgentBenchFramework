@@ -206,6 +206,7 @@ def run_loop(
                 "base_url": config.llm.base_url,
                 "temperature": config.llm.temperature,
                 "max_tokens": config.llm.max_tokens,
+                "reasoning_effort": config.llm.reasoning_effort,
             })
             store.write_event("llm_request_started", iteration=index, model=config.llm.model)
             proposal = client.propose_strategy(messages)
@@ -231,6 +232,9 @@ def run_loop(
             validate_candidate(candidate)
         except (LLMRequestError, StrategyValidationError, BudgetExceeded) as exc:
             stage = getattr(exc, "stage", getattr(exc, "dimension", "unknown"))
+            if isinstance(exc, LLMRequestError):
+                ledger.charge_api_time(exc.latency_seconds)
+                ledger.charge_usage(exc.usage)
             failure_counts[stage] += 1
             raw = getattr(exc, "raw_response", None)
             if raw is not None and not (iteration_dir / "llm_response.json").exists():

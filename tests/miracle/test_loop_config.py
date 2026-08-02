@@ -18,6 +18,7 @@ opponent = "{opponent}"
 base_url = "http://127.0.0.1:8123"
 api_key_env = "TEST_LLM_KEY"
 model = "mock-model"
+reasoning_effort = "low"
 
 [evaluation]
 seeds = [11]
@@ -47,6 +48,7 @@ def test_loads_minimal_loop_config(tmp_path):
     assert cfg.llm.temperature == 0.0
     assert cfg.llm.max_tokens == 8192
     assert cfg.llm.timeout_seconds == 120.0
+    assert cfg.llm.reasoning_effort == "low"
 
 
 @pytest.mark.parametrize(

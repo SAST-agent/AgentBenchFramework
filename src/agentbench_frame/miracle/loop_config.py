@@ -17,6 +17,7 @@ class LLMConfig:
     temperature: float = 0.0
     max_tokens: int = 8192
     timeout_seconds: float = 120.0
+    reasoning_effort: str | None = None
 
 
 @dataclass(frozen=True)
@@ -69,11 +70,17 @@ class LoopConfig:
             temperature=float(llm_raw.get("temperature", 0.0)),
             max_tokens=int(llm_raw.get("max_tokens", 8192)),
             timeout_seconds=float(llm_raw.get("timeout_seconds", 120.0)),
+            reasoning_effort=(
+                str(llm_raw["reasoning_effort"]).strip()
+                if llm_raw.get("reasoning_effort") is not None else None
+            ),
         )
         if not llm.base_url or not llm.model:
             raise ValueError("llm.base_url and llm.model must be nonempty")
         if llm.max_tokens <= 0 or llm.timeout_seconds <= 0:
             raise ValueError("llm.max_tokens and llm.timeout_seconds must be positive")
+        if llm.reasoning_effort not in (None, "low", "medium", "high"):
+            raise ValueError("llm.reasoning_effort must be low, medium, or high")
 
         eval_raw = raw.get("evaluation", {})
         evaluation = EvaluationConfig(

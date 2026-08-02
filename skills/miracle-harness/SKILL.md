@@ -142,6 +142,9 @@ diff、命令或只包含方法片段的代码。Harness 自己保存、加载�
 - `max_total_tokens`：API 返回 usage 的累计 token 上限；
 - `max_wall_seconds`：整个 Run 的累计墙钟时间上限。
 
+对于会把输出预算用于隐藏推理的兼容模型，可在 `[llm]` 设置
+`reasoning_effort = "low"`；不支持该字段的服务应省略。
+
 Run 是一次完整测评；iteration 是一次策略更新尝试；episode 是一局完整对战；round 是游戏内
 回合。无效代码、API 错误、超时、性能倒退都保留，不从曲线中删除。
 

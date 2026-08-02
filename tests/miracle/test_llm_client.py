@@ -49,7 +49,10 @@ def _response(content):
 
 
 def _config(base_url):
-    return LLMConfig(base_url, "TEST_LLM_KEY", "mock-model", max_tokens=123)
+    return LLMConfig(
+        base_url, "TEST_LLM_KEY", "mock-model",
+        max_tokens=123, reasoning_effort="low",
+    )
 
 
 def test_calls_chat_completions_and_parses_complete_source(monkeypatch):
@@ -62,8 +65,10 @@ def test_calls_chat_completions_and_parses_complete_source(monkeypatch):
 
     assert captured["path"] == "/v1/chat/completions"
     assert captured["headers"]["Authorization"] == "Bearer secret-token"
+    assert captured["headers"]["User-Agent"] == "AgentBenchFramework/0.1"
     assert captured["body"]["model"] == "mock-model"
     assert captured["body"]["max_tokens"] == 123
+    assert captured["body"]["reasoning_effort"] == "low"
     assert proposal.strategy_code == "class CandidateAgent: pass"
     assert proposal.usage["total_tokens"] == 30
     assert proposal.normalized_fence is False
@@ -85,6 +90,8 @@ def test_malformed_proposal_has_stage_and_raw_response():
 
     assert raised.value.stage == "proposal_json"
     assert raised.value.raw_response == response
+    assert raised.value.usage["total_tokens"] == 30
+    assert raised.value.latency_seconds >= 0
 
 
 def test_http_error_never_exposes_api_key(monkeypatch):
