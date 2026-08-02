@@ -97,6 +97,7 @@ def test_run_loop_saves_baseline_candidate_curves_and_usage(tmp_path):
     assert (run_dir / "iterations/iteration-0000/strategy.py").exists()
     assert (run_dir / "iterations/iteration-0001/candidate.py").exists()
     assert (run_dir / "iterations/iteration-0001/strategy.py").exists()
+    assert (run_dir / "iterations/iteration-0001/llm_request.json").exists()
     score_curve = json.loads((run_dir / "score_curve.json").read_text())
     ig_curve = json.loads((run_dir / "ig_curve.json").read_text())
     summary = json.loads((run_dir / "summary.json").read_text())
@@ -107,6 +108,8 @@ def test_run_loop_saves_baseline_candidate_curves_and_usage(tmp_path):
     assert ig_curve["points"][1]["status"] == "measured"
     assert summary["total_tokens"] == 20
     assert summary["final_gain"] == 9.0
+    events = (run_dir / "events.jsonl").read_text()
+    assert "llm_request_started" in events and "llm_request_finished" in events
 
 
 class InvalidSourceClient(FakeClient):

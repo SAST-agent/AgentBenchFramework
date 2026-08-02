@@ -200,9 +200,15 @@ def run_loop(
             messages = build_messages(
                 accepted_source, _skills(store), evidence, iterations[-1], ledger.snapshot(),
             )
+            store.write_json_atomic(iteration_dir / "llm_request.json", {
+                "messages": messages,
+                "model": config.llm.model,
+                "base_url": config.llm.base_url,
+                "temperature": config.llm.temperature,
+                "max_tokens": config.llm.max_tokens,
+            })
+            store.write_event("llm_request_started", iteration=index, model=config.llm.model)
             proposal = client.propose_strategy(messages)
-            ledger.charge_api_time(proposal.latency_seconds)
-            ledger.charge_usage(proposal.usage)
             store.write_json_atomic(iteration_dir / "llm_request.json", {
                 "messages": messages, "request_body": proposal.request_body,
             })
@@ -213,6 +219,12 @@ def run_loop(
                 "latency_seconds": proposal.latency_seconds,
                 "normalized_fence": proposal.normalized_fence,
             })
+            ledger.charge_api_time(proposal.latency_seconds)
+            ledger.charge_usage(proposal.usage)
+            store.write_event(
+                "llm_request_finished", iteration=index,
+                latency_seconds=proposal.latency_seconds, usage=proposal.usage,
+            )
             candidate_path = iteration_dir / "candidate.py"
             save_source(candidate_path, proposal.strategy_code)
             candidate = load_candidate(candidate_path, f"candidate_validation_{index}")

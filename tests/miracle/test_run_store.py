@@ -46,11 +46,17 @@ def test_creates_results_compatible_run_and_copies_skills(tmp_path):
     assert not (store.run_dir / "summary.json").exists()
 
     store.write_event("iteration_started", iteration=0)
-    store.finish({"status": "complete", "total_tokens": 0})
+    store.finish({"status": "complete", "total_tokens": 0,
+                  "total_steps": 3, "total_episodes": 1, "win_rate": 0.0})
 
     event = json.loads((store.run_dir / "events.jsonl").read_text().splitlines()[0])
     assert event["event"] == "iteration_started"
-    assert json.loads((store.run_dir / "summary.json").read_text())["status"] == "complete"
+    summary = json.loads((store.run_dir / "summary.json").read_text())
+    assert summary["status"] == "complete"
+    assert "wall_hours" in summary
+    final_meta = tomllib.loads((store.run_dir / "run.toml").read_text(encoding="utf-8"))
+    assert final_meta["run"]["total_steps"] == 3
+    assert final_meta["run"]["total_episodes"] == 1
     assert not list(store.run_dir.rglob("*.tmp"))
 
 

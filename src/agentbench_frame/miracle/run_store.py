@@ -91,6 +91,7 @@ class MiracleRunStore:
         self.run_id = run_id
         self.config = config
         self.created = created
+        self.started_at = time.time()
         self.events_path = run_dir / "events.jsonl"
 
     @classmethod
@@ -139,7 +140,7 @@ class MiracleRunStore:
                 target / f"{name}.SKILL.md",
             )
 
-    def _write_run_toml(self) -> None:
+    def _write_run_toml(self, summary: dict | None = None) -> None:
         cfg = self.config.public_dict()
         lines = [
             "[run]",
@@ -149,6 +150,7 @@ class MiracleRunStore:
             'type = "rule_iter"',
             f'created = "{self.created}"',
             f'git_commit = "{self._git_commit()}"',
+            f"started_at = {self.started_at}",
             "",
             "[config]",
             f'opponent = "{self.config.opponent}"',
@@ -156,6 +158,12 @@ class MiracleRunStore:
             f"max_iterations = {self.config.budget.max_iterations}",
             f"max_rollouts = {self.config.budget.max_rollouts}",
         ]
+        if summary is not None:
+            lines[8:8] = [
+                f"finished_at = {time.time()}",
+                f"total_steps = {int(summary.get('total_steps', 0))}",
+                f"total_episodes = {int(summary.get('total_episodes', 0))}",
+            ]
         self._write_text_atomic(self.run_dir / "run.toml", "\n".join(lines) + "\n")
         self.write_json_atomic(self.run_dir / "config.json", cfg)
 
@@ -186,6 +194,7 @@ class MiracleRunStore:
         temporary.replace(path)
 
     def finish(self, summary: dict) -> None:
+        wall_seconds = float(summary.get("wall_seconds", time.time() - self.started_at))
         complete = {
             "run_id": self.run_id,
             "game": "24_miracle",
@@ -193,7 +202,9 @@ class MiracleRunStore:
             "run_type": "rule_iter",
             "created": self.created,
             "git_commit": self._git_commit(),
+            "wall_hours": round(wall_seconds / 3600, 6),
             **summary,
         }
         self.write_json_atomic(self.run_dir / "summary.json", complete)
+        self._write_run_toml(complete)
         self.write_event("run_finished", status=complete.get("status", "complete"))

@@ -21,16 +21,18 @@ description: 读取 Miracle（24 届）对战回放：trace.jsonl 逐帧格式�
 - 回合制，`MAX_ROUND=100`；每回合 mana +1（上限 12），回合开始重置 `can_move/can_atk`。
 - 生物：召唤（需 mana、容量、召唤点）→ 移动（≤max_move）→ 攻击（射程内）→ `endround`。
 - 地图上有 4 个固定驻扎点（Barrack），占领后该方多 3 个召唤点。
-- 固定障碍：`Abyss`（39 格，地面单位不可过、飞行可过）、2 个 Miracle 障碍、地图边界 `MAPBORDER`（66 格）。**这些不在 obs 里**，见 `decision_space.py` 常量。
+- 固定障碍：`Abyss`（地面单位不可过、飞行可过）、Miracle 障碍和地图边界；这些不在 obs 里。
 
-## 2. 胜负与计分（终局帧 state=3 的 `content`）
+## 2. 胜负与计分
 
-官方终局消息形如：`{"map": {...}, "players": [...], "round": N, "result": {...}}`。
+trace 的官方终局帧是 `from_logic`、`state=-1`，比分位于
+`json.loads(payload["end_info"])` 的 `"0"`/`"1"`。`.mrc` 中对应一条
+`GameEnd` 事件，其第一个参数是 winner。
 
 - `score` 30000 = 该方神迹被毁或一方全灭（**30000 是"胜/负"标记，不是真实分数**）。
 - 正常打完：`score = 神迹剩余 HP`（可能一胜一负）。
 - `winner`：分数高者；**平局时后手（camp1）+1 分**。
-- 终止条件分类见 `decision_space.termination_reason`：`max_round` / `miracle_destroyed` / `ai_timeout` / `abnormal`。
+- 正常终局包括达到回合上限或神迹被毁；超时/异常还要结合对战结果的 `terminated_by` 和 `errors`。
 
 > 常见误读②：看到 score=30000 会以为"拿了 30000 分"——它是胜负标记。
 
@@ -43,21 +45,37 @@ description: 读取 Miracle（24 届）对战回放：trace.jsonl 逐帧格式�
 | kind | state | 含义 |
 |---|---|---|
 | `init` | - | 对局开始 |
-| `from_logic` | 0 | 官方请求选卡（`content` 为 JSON 字符串） |
+| `from_logic` | 0 | 计时/长度通知，没有 `content`，分析局面时跳过 |
 | `to_logic` | - | Agent → 官方操作（`content` 是 JSON 字符串，即官方操作 dict） |
-| `from_logic` | 1 | 官方返回玩家列表消息 |
-| `from_logic` | 2 | **回合消息**：`content[0]` = 长度前缀 + obs JSON |
-| `from_logic` | 3 | **终局帧**：完整 obs + result |
+| `from_logic` | 1、2 | camp0/camp1 选卡请求，解码后为 `{"camp": 0/1}` |
+| `from_logic` | ≥3 | 局面消息序号；同一 state 可出现多次，实际回合读解码后的 `round` |
+| `from_logic` | -1 | 终局，`payload.end_info` 是比分 JSON 字符串 |
 
 `summary` 是 `payload` 的快捷视图（同内容）；`content` 里每个元素是 `NNNNNN{...}` 形式——**前 6 位是长度前缀**，后面才是 JSON。
 
 > 常见误读③：直接 `json.loads(content[0])` 会失败——先去掉前 6 位长度前缀。
+> 常见误读：外层 `state` 不是游戏回合号；必须读取内层 obs 的 `round`。
+
+### 快速筛选局面帧
+
+```python
+import json
+
+for line in open(trace_path, encoding="utf-8"):
+    row = json.loads(line)
+    content = row.get("payload", {}).get("content")
+    if row.get("kind") != "from_logic" or not content:
+        continue
+    message = json.loads(content[0][6:])
+    if "map" in message:
+        print(message["round"], message["camp"], message["map"]["miracles"])
+```
 
 ## 4. Obs 字段与数字含义
 
 obs JSON：`{"map": {"units": [[18 字段],...], "miracles": [hp0,hp1], "barracks": [4 个 camp]}, "players": [[5 字段],...], "round": N, "camp": 0/1}`。
 
-**units[i] 18 字段**（索引见 `decision_space.UNIT`）：
+**units[i] 18 字段**：
 
 | 索引 | 含义 |
 |---|---|
@@ -72,11 +90,11 @@ obs JSON：`{"map": {"units": [[18 字段],...], "miracles": [hp0,hp1], "barrack
 | 11-15 | `LEVEL`/`FLYING`/`ATK_FLYING`/`AGILITY`/`HOLY_SHIELD` |
 | 16 `CAN_ATK` / 17 `CAN_MOVE` | **本回合是否可行动**（0=已行动/刚召唤/冷却） |
 
-**players[camp] 5 字段**（`decision_space.PLAYER`）：`[artifacts, mana, max_mana, capacities, newly_summoned]`；`capacities = [[卡组序号, 上限, [已召唤 id]], ...]`。
+**players[camp] 5 字段**：`[artifacts, mana, max_mana, capacities, newly_summoned]`；`capacities = [[卡组序号, 上限, [已召唤 id]], ...]`。
 
 > 常见误读④：`CAN_MOVE=0` 不是"坏单位"，是新召唤或本回合已行动；下一回合开始自动恢复。
 > 常见误读⑤：`TYPE` 是全局编号，不是卡组顺序（Archer 永远是 0）。
-> 常见误读⑥：obs 里没有障碍/边界信息；判断移动合法性要用 `decision_space` 的 `MAPBORDER/ABYSS/MIRACLE_OBSTACLES`。
+> 常见误读⑥：obs 里没有障碍和边界表；不能只看 obs 坐标推断所有移动是否合法。
 
 ## 5. 操作格式（to_logic 的 content）
 
@@ -96,16 +114,51 @@ obs JSON：`{"map": {"units": [[18 字段],...], "miracles": [hp0,hp1], "barrack
 3. `content` 前 6 位是长度前缀，先切掉再 `json.loads`。
 4. `CAN_MOVE/CAN_ATK=0` 是"本回合已行动/刚召唤"，非故障。
 5. `TYPE` 是全局编号（Archer=0…FrostDragon=6）。
-6. 障碍/边界不在 obs 里，看 `decision_space` 常量。
+6. 障碍/边界表不在 obs 里，最终合法性以官方逻辑是否推进局面为准。
 7. `attack target=camp` 是打神迹。
 8. 平局后手 +1 分（winner 判定）。
 9. 飞行单位可与地面单位同格（官方 `get_unit_at` 按 flying 过滤）。
 10. 新召唤单位**当回合不能行动**（can_move/can_atk=0），下一回合才行。
 
-## 7. 解析工作流（验证回放自洽）
+## 7. `.mrc` 事件与 args 含义
+
+运行：
+
+```bash
+uv run python -m agentbench_frame.miracle replay --path <match.mrc> --jsonl <events.jsonl>
+```
+
+每行是 `{"round": N, "type": 事件名, "args": [...]}`。主要事件参数：
+
+| type | args |
+|---|---|
+| `TurnStart` / `TurnEnd` | `[camp]` |
+| `GameStart` | `[camp, artifact_code, creature1_code, creature2_code, creature3_code]` |
+| `Summon` | `[creature_code, level, x, y]` |
+| `Spawn` | `[creature_code, level, x, y, unit_id]` |
+| `Move` | `[unit_id, dest_x, dest_y]` |
+| `Leave` / `Arrive` | `[unit_id, x, y]` |
+| `Attack` / `Attacking` / `Attacked` | `[attacker_id, target_id]` |
+| `Damage` | `[target_id, source_id, damage, damage_type]` |
+| `Death` | `[unit_id]` |
+| `Heal` | `[target_id, source_id, heal]` |
+| `ActivateArtifact` | `[camp, artifact_code, target...]` |
+| `BuffAdd` / `BuffRemove` | `[unit_id, buff_type]` |
+| `GameEnd` | `[winner]` |
+| `END` | `[]`，文件结束标记 |
+
+`creature_code`、`artifact_code` 使用“基础编号 + 10×camp”：个位是类型编号，十位是阵营。
+生物基础编号：Swordsman=1、Archer=2、BlackBat=3、Priest=4、VolcanoDragon=5、
+FrostDragon=6、Inferno=7。神器基础编号：HolyLight=1、SalamanderShield=2、
+InfernoFlame=3、WindBlessing=4。
+
+`damage_type`：Attack=1、AttackBack=2、VolcanoDragonSplash=3、InfernoFlameActivate=4。
+`buff_type`：BaseBuff=0、PriestAtkBuff=1、HolyShield=2、HolyLightAtkBuff=3、
+SalamanderShieldBuff=4。
+
+## 8. 解析工作流（验证回放自洽）
 
 1. 取 `*.mrc.trace.jsonl`，逐行解析。
-2. 收集：开局选卡（state=0 的 to_logic）、每回合 obs（state=2 from_logic）、双方操作序列（to_logic）、终局（state=3）。
-3. 用 `decision_space.action_mask(obs, camp)` 核对每个操作是否在合法集合内；官方接受与否以 `Parser.check_legality` 为准。
-4. 用 `ig.py` 可对逐决策点做新旧策略 KL（要求 4 口径）。
-5. 对照终局 `result` 与 `termination_reason` 验证终止分类。
+2. 收集：双方 `to_logic` 的 `init` 选卡、所有含 `map` 的 `from_logic` obs、双方操作序列、`state=-1` 终局比分。
+3. 将每条 `to_logic` 操作与其前后的 obs 对齐；局面未推进通常表示操作被拒绝。
+4. 对照 `state=-1` 的 `end_info`、`.mrc` 的 `GameEnd` 和 CLI 的 MatchResult 验证胜负一致。
