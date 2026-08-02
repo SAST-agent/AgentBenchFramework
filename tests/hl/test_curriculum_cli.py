@@ -168,6 +168,43 @@ def test_resume_parent_rolls_back_after_gate_reaches_rollback_patience():
     assert parent == "v000000"
 
 
+def test_resume_parent_uses_stage_best_when_interrupted_head_is_incomplete():
+    from types import SimpleNamespace
+
+    from agentbench_frame.hl.cli import _curriculum_resume_parent
+
+    state = SimpleNamespace(
+        stage_origin_version_id="v000000",
+        stage_best_version_id="v000000",
+    )
+
+    parent = _curriculum_resume_parent(
+        [
+            {
+                "event_type": "curriculum_gate_completed",
+                "version_id": "v000000",
+                "status": "complete",
+                "score": 0.25,
+            },
+            {
+                "event_type": "version_created",
+                "version_id": "v000013",
+                "parent_version_id": "v000000",
+            },
+            {
+                "event_type": "evaluation_completed",
+                "version_id": "v000013",
+                "status": "timeout",
+                "benchmark_score": None,
+            },
+        ],
+        state=state,
+        lineage_head_version_id="v000013",
+    )
+
+    assert parent == "v000000"
+
+
 def test_replay_summary_is_generated_once_and_reused(tmp_path):
     from agentbench_frame.hl.cli import _ensure_replay_summary
 

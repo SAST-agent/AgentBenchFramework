@@ -1210,6 +1210,20 @@ def _curriculum_resume_parent(
             >= rollback_patience
         ):
             return str(state.stage_best_version_id)
+    head_evaluation = next(
+        (
+            event
+            for event in reversed(events)
+            if event.get("event_type") == "evaluation_completed"
+            and str(event.get("version_id")) == lineage_head_version_id
+        ),
+        None,
+    )
+    if (
+        head_evaluation is not None
+        and head_evaluation.get("status") != "complete"
+    ):
+        return str(state.stage_best_version_id)
     return lineage_head_version_id
 
 
