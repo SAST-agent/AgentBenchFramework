@@ -428,14 +428,21 @@ class HLController:
             event.get("event_type") == "act_completed"
             for event in historical_events
         )
-        selected_iterations = {
-            str(event.get("iteration_id"))
-            for event in historical_events
-            if event.get("event_type")
-            in {"candidate_selected", "search_parent_selected"}
-            and event.get("iteration_id") != "iter-000000"
-        }
-        self._iteration_count = len(selected_iterations)
+        if self.iteration.planner_enabled and self.iteration.reducer_enabled:
+            completed_iterations = {
+                str(event.get("iteration_id"))
+                for event in historical_events
+                if event.get("event_type") == "proposal_cycle_completed"
+            }
+        else:
+            completed_iterations = {
+                str(event.get("iteration_id"))
+                for event in historical_events
+                if event.get("event_type")
+                in {"candidate_selected", "search_parent_selected"}
+                and event.get("iteration_id") != "iter-000000"
+            }
+        self._iteration_count = len(completed_iterations)
         self._started = True
         self.events.write(
             "run_resumed",

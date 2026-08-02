@@ -1490,6 +1490,45 @@ def test_resume_restores_act_counter_and_parent_session(tmp_path):
     assert provider.calls[0]["session_id"] == "thread-1"
 
 
+def test_proposal_resume_counts_only_completed_cycles(tmp_path):
+    from agentbench_frame.hl.codebase import VersionStore
+    from agentbench_frame.hl.config import IterationConfig, RollbackConfig
+    from agentbench_frame.hl.controller import HLController
+    from agentbench_frame.hl.events import HLEventWriter, read_events
+    from agentbench_frame.hl.lineage import LineageManager
+
+    first = _controller(tmp_path, FakeProvider([]), FakeEvaluator([0.25]))
+    origin = first.initialize()
+    first.events.write(
+        "search_parent_selected",
+        iteration_id="iter-000001",
+        act_id="act-000001-b00",
+        version_id=origin.version_id,
+    )
+    history = read_events(tmp_path / "events.jsonl")
+
+    resumed = HLController(
+        workspace=first.workspace,
+        run_root=tmp_path,
+        provider=FakeProvider([]),
+        evaluator=FakeEvaluator([]),
+        version_store=VersionStore(first.workspace, tmp_path / "versions"),
+        lineage=LineageManager.from_events(history),
+        events=HLEventWriter(tmp_path / "events.jsonl", run_id="run-test"),
+        iteration=IterationConfig(
+            candidates_per_cycle=4,
+            planner_enabled=True,
+            reducer_enabled=True,
+        ),
+        rollback=RollbackConfig(),
+        prompt_factory=lambda **values: values["act_id"],
+    )
+
+    resumed.resume(history)
+
+    assert resumed.summary()["iterations"] == 0
+
+
 def test_resume_rebuilds_elo_from_finalized_match_events(tmp_path):
     from agentbench_frame.hl.evaluator import CandidateEvaluation
     from agentbench_frame.hl.events import HLEventWriter, read_events
