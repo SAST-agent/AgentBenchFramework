@@ -32,6 +32,7 @@ from agentbench_frame.hl.codebase import HLCodebase, VersionHandle
 from agentbench_frame.hl.distribution import (
     enumerate_legal_actions,
     epsilon_smoothed_distribution,
+    normalize_emitted,
     policy_kl,
     local_policy_kl_trace,
     PolicyKLPoint,
@@ -572,15 +573,22 @@ class HLIterationController:
         emitted_old = self._probe_version(version_before)
         emitted_new = self._probe_version(version_after)
 
-        # Align by sample index; only non-None pairs contribute.
+        # Align by sample index; only non-None pairs contribute. Normalize each
+        # emitted primitive to the A(s) token form (move/detect/attack/Transport
+        # arrive with coordinates, A(s) codes direction indices / bare ids) so
+        # real behavioral flips register as policy_kl instead of collapsing to
+        # out_of_support.
         chosen_old: List = []
         chosen_new: List = []
         aligned_legal: List[LegalActionSet] = []
         for i, (a, b, las) in enumerate(zip(emitted_old, emitted_new, legal_sets)):
             if len(las) == 0:
                 continue
-            chosen_old.append(a.primitive if a else None)
-            chosen_new.append(b.primitive if b else None)
+            pos = (self.reference.samples[i].observation or {}).get("pos")
+            chosen_old.append(
+                normalize_emitted(a.primitive, pos=pos) if a else None)
+            chosen_new.append(
+                normalize_emitted(b.primitive, pos=pos) if b else None)
             aligned_legal.append(las)
 
         trace = local_policy_kl_trace(

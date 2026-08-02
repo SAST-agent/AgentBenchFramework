@@ -268,3 +268,26 @@ def test_ok_kl_values_excludes_missing():
     ok = ok_kl_values(trace)
     assert len(ok) == 2  # first two ok; third no_emission excluded
     assert all(v == 0.0 for v in ok)
+
+
+def test_normalize_emitted_maps_move_coordinate_to_direction():
+    """A wire-format ('move', [x,y,z]) target that matches pos + DIRECTION_SEQ
+    maps to the A(s) ('move', direction_index) token."""
+    from agentbench_frame.hl.distribution import normalize_emitted
+    # pos [0,0,1]; DIRECTION_SEQ[0] == (0,1,0) -> target [0,1,1]
+    assert normalize_emitted(("move", [0, 1, 1]), pos=[0, 0, 1]) == ("move", 0)
+    assert normalize_emitted(("detect", [0, 1, 1]), pos=[0, 0, 1]) == \
+        ("detect", ("dir", 0))
+    # unmatchable target stays verbatim (will be out-of-support, honestly)
+    assert normalize_emitted(("move", [5, 5, 5]), pos=[0, 0, 1]) == \
+        ("move", [5, 5, 5])
+
+
+def test_normalize_emitted_attack_drops_coordinate():
+    from agentbench_frame.hl.distribution import normalize_emitted
+    assert normalize_emitted(("attack", [1, 1, 1], 2), pos=[0, 0, 1]) == \
+        ("attack", 2)
+    # parameterless primitives are unchanged
+    assert normalize_emitted(("interact", "Box"), pos=[0, 0, 1]) == \
+        ("interact", "Box")
+    assert normalize_emitted(None, pos=[0, 0, 1]) is None

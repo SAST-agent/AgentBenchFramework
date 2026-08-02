@@ -75,21 +75,29 @@ def _sample(o: dict, legal: dict, inventory: dict) -> dict:
 
 #: Hand-authored decision points whose A(s) makes the v1 candidate's first
 #: emitted action IN-SUPPORT, so policy_kl is actually measurable there.
+#:
+#: ``pos`` is [0,0,1] (seat-0 spawn) because the probe replays a 2-frame
+#: transcript (id + roundbegin) and the candidate's ``start_turn`` ignores the
+#: roundbegin ``pos`` — its tracked position stays at the spawn set by the id
+#: frame. So the candidate computes moves FROM [0,0,1]; making the ν state
+#: also [0,0,1] lets move-coordinate normalization (``normalize_emitted``)
+#: map the emitted target back to the A(s) direction index.
+SPAWN = [0, 0, 1]
 EXTRA_SAMPLES = [
     # injured with a Kit -> v1 emits `tool Kit` (legal when Kit > 0)
-    _sample(_obs(16, 100, [0, 1], [2, 2, 1], kit=2),
+    _sample(_obs(16, 100, [0, 1], SPAWN, kit=2),
             {"attack": [], "move": MV8, "detect": True, "interprops": []},
             _inv(kit=2)),
     # a dead player dropped a Box at the tile -> v1 emits `interact Box` (legal)
-    _sample(_obs(18, 200, [0, 1], [1, 1, 1]),
+    _sample(_obs(18, 200, [0, 1], SPAWN),
             {"attack": [], "move": MV8, "detect": True, "interprops": ["Box"]},
             _inv()),
     # critical HP with a single Kit -> `tool Kit`
-    _sample(_obs(25, 70, [0, 1, 2], [4, 4, 1], kit=1),
+    _sample(_obs(25, 70, [0, 1, 2], SPAWN, kit=1),
             {"attack": [], "move": MV8, "detect": True, "interprops": []},
             _inv(kit=1)),
     # Box + Materials both at the tile -> v1 still tries `interact Box` first
-    _sample(_obs(27, 200, [0, 1, 2], [3, 2, 1], sticky=1),
+    _sample(_obs(27, 200, [0, 1, 2], SPAWN, sticky=1),
             {"attack": [], "move": MV8, "detect": True,
              "interprops": ["Box", "Materials"]},
             _inv(sticky=1)),

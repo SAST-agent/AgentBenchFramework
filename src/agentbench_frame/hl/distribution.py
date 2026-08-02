@@ -121,6 +121,47 @@ def _state_id(tokens: Tuple[ActionToken, ...]) -> str:
     return h[:16]
 
 
+def normalize_emitted(primitive: Optional[ActionToken], *, pos=None) -> Optional[ActionToken]:
+    """Map a candidate's wire-format primitive to the A(s) token form.
+
+    The real candidate emits parameterized actions with COORDINATES
+    (``("move", [x,y,z])``, ``("detect", [x,y,z])``, ``("tool","Transport",
+    [x,y,z])``, ``("attack", [x,y,z], player_id)``) while A(s) codes them as
+    direction indices / bare ids. Without normalization those emissions can
+    never match A(s) and collapse to ``out_of_support`` — the reason policy_kl
+    stayed 0 even for real behavioral flips. Best-effort: a coordinate that
+    matches a legal neighbor direction (from ``pos`` + ``DIRECTION_SEQ``) maps
+    to the A(s) token; an unmatchable primitive is returned unchanged and
+    will be recorded out-of-support (honest).
+    """
+    if not isinstance(primitive, (tuple, list)) or not primitive:
+        return primitive
+    name = primitive[0]
+    target = primitive[1] if len(primitive) >= 2 else None
+    if name in ("move", "detect") and isinstance(target, (list, tuple)) \
+            and len(target) == 3 and pos and len(pos) >= 3:
+        t = tuple(target)
+        for d, delta in enumerate(DIRECTION_SEQ):
+            if tuple(pos[i] + delta[i] for i in range(3)) == t:
+                if name == "move":
+                    return ("move", d)
+                return ("detect", ("dir", d))
+    if name == "tool" and len(primitive) == 3 \
+            and isinstance(primitive[2], (list, tuple)) and len(primitive[2]) == 3 \
+            and pos and len(pos) >= 3:
+        t = tuple(primitive[2])
+        for d, delta in enumerate(DIRECTION_SEQ):
+            if tuple(pos[i] + delta[i] for i in range(3)) == t:
+                return ("tool", "Transport", ("dir", d))
+    if name == "attack" and len(primitive) >= 3:
+        # A(s) codes attack as ("attack", target_id); drop the coordinate.
+        try:
+            return ("attack", int(primitive[-1]))
+        except (TypeError, ValueError):
+            pass
+    return primitive
+
+
 def enumerate_legal_actions(
     legal: Dict[str, Any],
     *,
