@@ -345,6 +345,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="model key from .env MODELS= to run (default: first in MODELS)")
     p.add_argument("--max-turns", type=int, default=6,
                    help="max tool-use turns per act for the API runner (default 6)")
+    p.add_argument("--max-tokens", type=int, default=8192,
+                   help="max output tokens per API turn (raise if the model "
+                        "hits the cap before emitting its str_replace edit)")
     p.add_argument("--claude-timeout", type=float, default=600.0,
                    help="per-act API runner wall-clock timeout (seconds)")
     p.add_argument("--rules-validation", action="store_true",
@@ -489,6 +492,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         client=build_client(entry),
         system_prompt=_system_prompt(),
         max_turns=args.max_turns,
+        max_tokens=args.max_tokens,
         timeout=args.claude_timeout,
     )
     eval_factory = _evaluator_factory(
