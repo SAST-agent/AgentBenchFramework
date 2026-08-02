@@ -41,6 +41,7 @@ class CandidateResult:
     evaluation: CandidateEvaluation
     provider: ProviderInvocation
     pending_experience_path: Optional[Path] = None
+    activation: Optional[Mapping[str, Any]] = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -97,6 +98,7 @@ class HLController:
         summary_resolver: (
             Callable[[Mapping[str, Any]], Mapping[str, Any]] | None
         ) = None,
+        activation_probe: Callable[..., Mapping[str, Any]] | None = None,
     ) -> None:
         self.workspace = Path(workspace)
         self.run_root = Path(run_root)
@@ -123,6 +125,7 @@ class HLController:
                 if match.get(key) is not None
             }
         )
+        self.activation_probe = activation_probe
         self._iteration_count = 0
         self._coding_agent_acts = 0
         self._sessions: dict[str, str] = {}
@@ -576,6 +579,7 @@ class HLController:
         prompt_values: dict[str, Any],
         edit_type: str,
         staged_evaluation: bool,
+        parent_evaluation: CandidateEvaluation | None = None,
         session_id: str | None = None,
     ) -> CandidateResult:
         """Invoke, snapshot, quick-screen, and register one immutable edit."""
@@ -641,21 +645,86 @@ class HLController:
         )
         if budget_exhausted:
             invocation.metadata["accepted_after_budget_exhaustion"] = False
+        provider_eligible = (
+            invocation.status == "completed" or budget_candidate_eligible
+        )
+        activation: dict[str, Any] | None = None
+        activation_error: str | None = None
+        if (
+            provider_eligible
+            and staged_evaluation
+            and self.activation_probe is not None
+            and parent_evaluation is not None
+            and parent_evaluation.status == "complete"
+        ):
+            try:
+                measured = dict(
+                    self.activation_probe(
+                        new_version=version,
+                        old_version=self.version_store.get(parent_version_id),
+                        version_store=self.version_store,
+                        parent_evaluation=parent_evaluation,
+                    )
+                )
+                decision_count = int(measured["decision_count"])
+                changed_action_count = int(measured["changed_action_count"])
+                if (
+                    decision_count < 1
+                    or changed_action_count < 0
+                    or changed_action_count > decision_count
+                ):
+                    raise ValueError("invalid activation probe counts")
+                activation = {
+                    **measured,
+                    "status": "complete",
+                    "decision_count": decision_count,
+                    "changed_action_count": changed_action_count,
+                    "changed_fraction": changed_action_count / decision_count,
+                    "episodes": list(measured.get("episodes", ())),
+                }
+                if changed_action_count == 0:
+                    activation_error = "no_parent_trace_action_change"
+            except Exception as error:
+                message = " ".join(str(error).split()) or error.__class__.__name__
+                activation_error = f"activation_probe_failed: {message}"
+                activation = {
+                    "status": "failed",
+                    "decision_count": 0,
+                    "changed_action_count": 0,
+                    "changed_fraction": 0.0,
+                    "episodes": [],
+                    "error": message,
+                }
+            self.events.write(
+                "candidate_activation_measured",
+                iteration_id=iteration_id,
+                act_id=act_id,
+                branch_index=branch_index,
+                version_id=version.version_id,
+                parent_version_id=parent_version_id,
+                status=str(activation["status"]),
+                decision_count=int(activation["decision_count"]),
+                changed_action_count=int(activation["changed_action_count"]),
+                changed_fraction=float(activation["changed_fraction"]),
+                episodes=list(activation["episodes"]),
+                error=activation.get("error"),
+            )
         evaluation = (
             (
                 self.evaluator.quick_screen(version)
                 if staged_evaluation
                 else self.evaluator.evaluate(version)
             )
-            if invocation.status == "completed" or budget_candidate_eligible
+            if provider_eligible and activation_error is None
             else CandidateEvaluation(
                 status=(
                     invocation.status
-                    if invocation.status in {"failed", "timeout"}
+                    if not provider_eligible
+                    and invocation.status in {"failed", "timeout"}
                     else "failed"
                 ),
                 score=None,
-                error=invocation.error,
+                error=activation_error or invocation.error,
             )
         )
         if budget_candidate_eligible:
@@ -695,6 +764,7 @@ class HLController:
             evaluation=evaluation,
             provider=invocation,
             pending_experience_path=pending_path,
+            activation=activation,
         )
         self._write_act_event(iteration_id, result)
         self._write_version_event(version, evaluation, selected=False)
@@ -768,6 +838,7 @@ class HLController:
                     },
                     edit_type="candidate",
                     staged_evaluation=staged_evaluation,
+                    parent_evaluation=parent_evaluation,
                     session_id=(
                         self._sessions.get(parent_id) if branch_count == 1 else None
                     ),
@@ -877,6 +948,7 @@ class HLController:
                         },
                         edit_type="repair",
                         staged_evaluation=staged_evaluation,
+                        parent_evaluation=initial.evaluation,
                     )
                     self.events.write(
                         "repair_completed",

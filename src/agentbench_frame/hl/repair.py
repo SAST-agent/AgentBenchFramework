@@ -11,6 +11,9 @@ from typing import TYPE_CHECKING, Any
 from agentbench_frame.hl.proposal import BranchBrief
 from agentbench_frame.hl.selection import CandidateDiagnostics
 
+
+_SUMMARY_TEXT_LIMIT = 12_000
+
 if TYPE_CHECKING:
     from agentbench_frame.hl.controller import CandidateResult
 
@@ -61,6 +64,12 @@ def _bounded_match(
     for key in ("summary", "replay", "trace"):
         if key in resolved:
             value[key] = resolved[key]
+    summary = resolved.get("summary")
+    if isinstance(summary, str) and Path(summary).is_file():
+        text = Path(summary).read_text(encoding="utf-8")
+        if len(text) > _SUMMARY_TEXT_LIMIT:
+            text = text[:_SUMMARY_TEXT_LIMIT] + "\n[summary truncated]"
+        value["summary_text"] = text
     return value
 
 
@@ -75,6 +84,9 @@ def _result_packet(
         "status": result.evaluation.status,
         "score": result.evaluation.score,
         "error": result.evaluation.error,
+        "activation": (
+            None if result.activation is None else dict(result.activation)
+        ),
         "matches": [
             _bounded_match(matches[seed], summary_resolver) for seed in shared_seeds
         ],

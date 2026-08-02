@@ -1841,6 +1841,18 @@ def _run_real(
             "candidate_fault": _trace_fault_summary(match.get("trace")),
         }
 
+    activation_seeds = tuple(
+        config.run.evaluation.fixed_gate_seeds[
+            : config.run.iteration.quick_screen_seeds
+        ]
+    )
+
+    def activation_probe(**values: Any) -> dict[str, Any]:
+        return measurement_runner.measure_activation(
+            **values,
+            seeds=activation_seeds or None,
+        )
+
     controller = HLController(
         workspace=workspace,
         run_root=run_dir,
@@ -1858,6 +1870,7 @@ def _run_real(
             config.run.context.research_state_max_bytes
         ),
         summary_resolver=repair_summary_resolver,
+        activation_probe=activation_probe,
     )
 
     def sync_research_state() -> None:

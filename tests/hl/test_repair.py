@@ -69,6 +69,11 @@ def test_repair_packet_pairs_parent_and_candidate_on_same_seed(tmp_path):
     parent = _result(version_id="v000037", branch_index=-1, margin=-195)
     candidate = _result(version_id="v000041", branch_index=1, margin=-295)
 
+    parent_summary = tmp_path / "parent-summary.md"
+    candidate_summary = tmp_path / "candidate-summary.md"
+    parent_summary.write_text("parent evidence", encoding="utf-8")
+    candidate_summary.write_text("candidate evidence", encoding="utf-8")
+
     path = build_repair_packet(
         output_path=tmp_path / "repair.json",
         iteration_id="iter-000012",
@@ -76,7 +81,9 @@ def test_repair_packet_pairs_parent_and_candidate_on_same_seed(tmp_path):
         parent=parent,
         candidate=candidate,
         summary_resolver=lambda match: {
-            "summary": str(Path(match["replay"]).with_name("summary.md")),
+            "summary": str(
+                parent_summary if "v000037" in match["replay"] else candidate_summary
+            ),
             "replay": match["replay"],
             "trace": match["trace"],
         },
@@ -91,6 +98,56 @@ def test_repair_packet_pairs_parent_and_candidate_on_same_seed(tmp_path):
     assert value["parent"]["matches"][0]["seed"] == 101
     assert value["candidate"]["matches"][0]["seed"] == 101
     assert value["candidate"]["matches"][0]["summary"].endswith("summary.md")
+    assert value["parent"]["matches"][0]["summary_text"] == "parent evidence"
+    assert value["candidate"]["matches"][0]["summary_text"] == "candidate evidence"
+
+
+def test_repair_packet_bounds_inline_summary_text(tmp_path):
+    from agentbench_frame.hl.repair import build_repair_packet
+
+    summary = tmp_path / "summary.md"
+    summary.write_text("x" * 13000, encoding="utf-8")
+    path = build_repair_packet(
+        output_path=tmp_path / "repair.json",
+        iteration_id="iter-000012",
+        branch_brief=_brief(),
+        parent=_result(version_id="v000037", branch_index=-1),
+        candidate=_result(version_id="v000041", branch_index=1),
+        summary_resolver=lambda match: {"summary": str(summary)},
+    )
+
+    value = json.loads(path.read_text(encoding="utf-8"))
+    text = value["candidate"]["matches"][0]["summary_text"]
+    assert len(text) <= 12032
+    assert text.endswith("[summary truncated]")
+
+
+def test_repair_packet_includes_candidate_activation_evidence(tmp_path):
+    from dataclasses import replace
+
+    from agentbench_frame.hl.repair import build_repair_packet
+
+    candidate = replace(
+        _result(version_id="v000041", branch_index=1),
+        activation={
+            "status": "complete",
+            "decision_count": 100,
+            "changed_action_count": 3,
+            "changed_fraction": 0.03,
+            "episodes": [],
+        },
+    )
+    path = build_repair_packet(
+        output_path=tmp_path / "repair.json",
+        iteration_id="iter-000012",
+        branch_brief=_brief(),
+        parent=_result(version_id="v000037", branch_index=-1),
+        candidate=candidate,
+        summary_resolver=lambda match: {},
+    )
+
+    value = json.loads(path.read_text(encoding="utf-8"))
+    assert value["candidate"]["activation"]["changed_action_count"] == 3
 
 
 def test_repair_packet_rejects_feedback_without_shared_seed(tmp_path):

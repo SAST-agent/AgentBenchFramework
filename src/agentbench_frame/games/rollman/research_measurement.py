@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
@@ -84,6 +85,24 @@ class RollmanMeasurementRunner:
             for item in manifest["episodes"]
         ]
 
+    def _cached_probe(
+        self,
+        *,
+        workspace: Path,
+        states: Sequence[Mapping[str, Any]],
+        artifact_path: Path,
+    ) -> tuple[dict[str, Any], ...]:
+        if artifact_path.is_file():
+            value = json.loads(artifact_path.read_text(encoding="utf-8"))
+            if isinstance(value, list):
+                return tuple(dict(item) for item in value)
+        return self.probe_runner(
+            workspace=workspace,
+            sdk_root=self.sdk_root,
+            states=states,
+            artifact_path=artifact_path,
+        )
+
     def measure(
         self,
         *,
@@ -165,6 +184,89 @@ class RollmanMeasurementRunner:
         result["episode_local_policy_kl"] = episode_values
         result["reference_manifest"] = str(self.manifest_path)
         return result
+
+    def measure_activation(
+        self,
+        *,
+        new_version: Version,
+        old_version: Version,
+        version_store: VersionStore,
+        parent_evaluation: CandidateEvaluation,
+        seeds: Sequence[int] | None = None,
+    ) -> dict[str, Any]:
+        """Compare exact actions on the parent's ordered learning trajectories."""
+
+        if parent_evaluation.status != "complete":
+            raise ValueError("activation probe requires a complete parent evaluation")
+        new_workspace = version_store.objects / new_version.content_hash
+        old_workspace = version_store.objects / old_version.content_hash
+        episodes: list[dict[str, Any]] = []
+        decision_count = 0
+        changed_action_count = 0
+        requested_seeds = None if seeds is None else {int(seed) for seed in seeds}
+        for episode_index, match in enumerate(parent_evaluation.matches):
+            if match.get("status", "complete") != "complete":
+                continue
+            if (
+                requested_seeds is not None
+                and match.get("seed") not in requested_seeds
+            ):
+                continue
+            decisions = load_trace_decisions(str(match["trace"]))
+            states = [decision["state"] for decision in decisions]
+            state_digest = hashlib.sha256(
+                json.dumps(
+                    states,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()[:20]
+            old_probe = self._cached_probe(
+                workspace=old_workspace,
+                states=states,
+                artifact_path=(
+                    self.probe_root
+                    / f"activation-parent-{old_version.content_hash[:16]}-{state_digest}.json"
+                ),
+            )
+            new_probe = self._cached_probe(
+                workspace=new_workspace,
+                states=states,
+                artifact_path=(
+                    self.probe_root
+                    / f"activation-candidate-{new_version.content_hash[:16]}-{state_digest}.json"
+                ),
+            )
+            if len(old_probe) != len(new_probe) or len(old_probe) != len(states):
+                raise ValueError("activation probe decision counts do not align")
+            changed = [
+                index
+                for index, (old, new) in enumerate(zip(old_probe, new_probe))
+                if int(old["action"]) != int(new["action"])
+            ]
+            decision_count += len(states)
+            changed_action_count += len(changed)
+            episodes.append(
+                {
+                    "episode_index": episode_index,
+                    "opponent": match.get("opponent"),
+                    "seed": match.get("seed"),
+                    "decision_count": len(states),
+                    "changed_action_count": len(changed),
+                    "changed_fraction": len(changed) / len(states),
+                    "changed_reference_indices": changed[:64],
+                }
+            )
+        if decision_count < 1:
+            raise ValueError("parent evaluation contains no activation states")
+        return {
+            "status": "complete",
+            "decision_count": decision_count,
+            "changed_action_count": changed_action_count,
+            "changed_fraction": changed_action_count / decision_count,
+            "episodes": episodes,
+        }
 
     @staticmethod
     def _occupancy_ids(evaluation: CandidateEvaluation) -> list[str]:

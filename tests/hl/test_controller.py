@@ -61,7 +61,17 @@ class FakeEvaluator:
         return CandidateEvaluation(status="complete", score=value)
 
 
-def _controller(tmp_path, provider, evaluator, *, k=1, patience=3, experience=None):
+def _controller(
+    tmp_path,
+    provider,
+    evaluator,
+    *,
+    k=1,
+    patience=3,
+    experience=None,
+    activation_probe=None,
+    staged=False,
+):
     from agentbench_frame.hl.codebase import VersionStore
     from agentbench_frame.hl.config import IterationConfig, RollbackConfig
     from agentbench_frame.hl.controller import HLController
@@ -80,14 +90,140 @@ def _controller(tmp_path, provider, evaluator, *, k=1, patience=3, experience=No
         version_store=versions,
         lineage=lineage,
         events=writer,
-        iteration=IterationConfig(max_acts=None, candidates_per_act=k),
+        iteration=IterationConfig(
+            max_acts=None,
+            candidates_per_act=k,
+            planner_enabled=staged,
+            finalist_count=1,
+        ),
         rollback=RollbackConfig(patience=patience),
         prompt_factory=lambda **values: (
             f"act={values['act_id']} branch={values['branch_index']}/{values['branch_count']}"
         ),
         experience_manager=experience,
+        activation_probe=activation_probe,
     )
     return controller
+
+
+def test_activation_probe_skips_paid_screen_when_parent_trace_actions_do_not_change(
+    tmp_path,
+):
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+    from agentbench_frame.hl.events import read_events
+    from agentbench_frame.hl.proposal import BranchBrief
+
+    class StagedEvaluator:
+        def __init__(self):
+            self.quick_calls = 0
+
+        def quick_screen(self, version):
+            self.quick_calls += 1
+            return CandidateEvaluation(status="complete", score=0.5)
+
+        def evaluate_finalist(self, version):
+            return CandidateEvaluation(status="complete", score=0.5)
+
+        def combine_stages(self, quick, finalist):
+            return quick
+
+    evaluator = StagedEvaluator()
+    controller = _controller(
+        tmp_path,
+        FakeProvider(["VALUE = 1\n"]),
+        evaluator,
+        activation_probe=lambda **kwargs: {
+            "status": "complete",
+            "decision_count": 12,
+            "changed_action_count": 0,
+            "changed_fraction": 0.0,
+            "episodes": [],
+        },
+        staged=True,
+    )
+    origin = controller.initialize()
+    parent_evaluation = CandidateEvaluation(status="complete", score=0.25)
+    brief = BranchBrief(
+        branch_index=0,
+        diagnosis="candidate must alter a failed decision",
+        mechanism="one bounded action rule",
+        activation_condition="visible danger",
+        preservation_contract="other states stay unchanged",
+        expected_change="one action changes",
+        falsifier="zero action changes",
+    )
+
+    result = controller.run_act(
+        parent_version_id=origin.version_id,
+        parent_evaluation=parent_evaluation,
+        branch_briefs=(brief,),
+    )
+
+    assert evaluator.quick_calls == 0
+    assert result.candidates[0].evaluation.status == "failed"
+    assert result.candidates[0].evaluation.error == "no_parent_trace_action_change"
+    assert result.candidates[0].activation["changed_action_count"] == 0
+    event = next(
+        event
+        for event in read_events(tmp_path / "events.jsonl")
+        if event["event_type"] == "candidate_activation_measured"
+    )
+    assert event["decision_count"] == 12
+    assert event["changed_action_count"] == 0
+
+
+def test_activation_probe_allows_changed_candidate_to_reach_paid_screen(tmp_path):
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+    from agentbench_frame.hl.proposal import BranchBrief
+
+    class StagedEvaluator:
+        def __init__(self):
+            self.quick_calls = 0
+
+        def quick_screen(self, version):
+            self.quick_calls += 1
+            return CandidateEvaluation(status="complete", score=0.5)
+
+        def evaluate_finalist(self, version):
+            return CandidateEvaluation(status="complete", score=0.5)
+
+        def combine_stages(self, quick, finalist):
+            return quick
+
+    evaluator = StagedEvaluator()
+    controller = _controller(
+        tmp_path,
+        FakeProvider(["VALUE = 1\n"]),
+        evaluator,
+        activation_probe=lambda **kwargs: {
+            "status": "complete",
+            "decision_count": 12,
+            "changed_action_count": 2,
+            "changed_fraction": 2 / 12,
+            "episodes": [{"episode_index": 0, "changed_action_count": 2}],
+        },
+        staged=True,
+    )
+    origin = controller.initialize()
+    brief = BranchBrief(
+        branch_index=0,
+        diagnosis="candidate must alter a failed decision",
+        mechanism="one bounded action rule",
+        activation_condition="visible danger",
+        preservation_contract="other states stay unchanged",
+        expected_change="one action changes",
+        falsifier="zero action changes",
+    )
+
+    result = controller.run_act(
+        parent_version_id=origin.version_id,
+        parent_evaluation=CandidateEvaluation(status="complete", score=0.25),
+        branch_briefs=(brief,),
+    )
+
+    assert evaluator.quick_calls == 1
+    assert result.candidates[0].evaluation.status == "complete"
+    assert result.candidates[0].activation["changed_action_count"] == 2
 
 
 def test_k_candidates_are_siblings_and_gate_selects_best_complete_score(tmp_path):

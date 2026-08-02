@@ -54,6 +54,7 @@ KNOWN_EVENT_TYPES = frozenset(
         "repair_started",
         "repair_completed",
         "branch_representative_selected",
+        "candidate_activation_measured",
     }
 )
 _SECRET_KEYS = frozenset({"api_key", "authorization", "access_token", "secret"})
@@ -274,6 +275,21 @@ _EVENT_FIELDS = {
         },
         {"repaired_version_id"},
     ),
+    "candidate_activation_measured": (
+        {
+            "iteration_id",
+            "act_id",
+            "branch_index",
+            "version_id",
+            "parent_version_id",
+            "status",
+            "decision_count",
+            "changed_action_count",
+            "changed_fraction",
+            "episodes",
+        },
+        {"error"},
+    ),
 }
 
 
@@ -309,6 +325,7 @@ def _validate_record(record: Mapping[str, Any]) -> None:
         "branch_briefs", "input_path", "output_path", "selected_version_id",
         "initial_version_id", "repaired_version_id",
         "representative_version_id", "repair_input_path",
+        "error",
     ):
         if field in record and record[field] is not None and not isinstance(record[field], str):
             raise ValueError(f"{event_type}.{field} must be a string or null")
@@ -322,6 +339,7 @@ def _validate_record(record: Mapping[str, Any]) -> None:
         "active_target_rank", "stagnation_count",
         "accepted_updates",
         "candidate_count",
+        "decision_count", "changed_action_count",
     ):
         value = record.get(field)
         if value is not None and (not isinstance(value, int) or isinstance(value, bool)):
@@ -330,6 +348,7 @@ def _validate_record(record: Mapping[str, Any]) -> None:
         "benchmark_score", "score", "epsilon", "occupancy_shift",
         "rating_before", "rating", "opponent_rating", "elapsed_time_s",
         "stage_best_score",
+        "changed_fraction",
     ):
         value = record.get(field)
         if value is not None and (
@@ -347,6 +366,7 @@ def _validate_record(record: Mapping[str, Any]) -> None:
         "locked_opponents", "lost_locked_opponents",
         "version_ids", "candidate_version_ids",
         "branch_indices",
+        "episodes",
     ):
         if field in record and not isinstance(record[field], list):
             raise ValueError(f"{event_type}.{field} must be a list")

@@ -584,7 +584,7 @@ branch index: {branch_index}
 6. 验证成功后立即结束；不得继续润色、git status/diff 或第二轮重构。
 
 Repair checkpoint-first 顺序：
-- 第一次调用批量读取 repair packet 及其明确列出的 summary；第二次只读 branch 相关代码区间，不得顺序打印完整 ai.py。
+- repair packet 已内嵌有界 `summary_text`；第一次调用只批量读取这个 packet、game digest、research state 和 Experience Skill 四个精确路径，不得扫描目录或自行发现 summary。第二次只读 branch 相关代码区间，不得顺序打印完整 ai.py。
 - 第三、四次最多完成两个定点 trace 窗口；第 6 次工具调用结束前必须已完成 `ai.py` 的首次可编译修复并写入 experience_update.json。
 - 首次修复落盘后，只允许编译、一次对象 smoke，以及为修复验证失败所必需的一次更正；不得把实现留到长推理末尾。
 - 命令必须直接引用白名单中的完整文件路径；不得把 run 根目录或父目录保存为变量后再拼接，也不得列举这些目录。
