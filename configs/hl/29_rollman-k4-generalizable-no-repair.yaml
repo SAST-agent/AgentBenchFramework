@@ -16,7 +16,7 @@ run:
     expected_cli_version: "codex-cli 0.146.0-alpha.9.2"
     rollout_budget:
       enabled: true
-      limit_tokens: 90000
+      limit_tokens: 70000
       reminder_at_remaining_tokens: [20000, 10000, 5000]
       sampling_token_weight: 1.0
       prefill_token_weight: 1.0
