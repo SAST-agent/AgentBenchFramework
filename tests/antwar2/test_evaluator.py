@@ -122,6 +122,44 @@ def test_transport_failure_is_fault_record_not_strategy_loss(tmp_path):
     assert "closed early" in result.matches[0]["faults"][0]
 
 
+def test_reporting_panel_uses_requested_prefix_of_frozen_seeds(tmp_path):
+    from agentbench_frame.games.antwar2.evaluator import (
+        AntWar2Evaluator,
+        AntWarOpponent,
+    )
+    from agentbench_frame.games.antwar2.match import ProcessSpec
+
+    calls = []
+
+    def runner(**kwargs):
+        calls.append((kwargs["candidate_role"], kwargs["seed"]))
+        return _Artifacts(
+            _record(
+                role=kwargs["candidate_role"],
+                seed=kwargs["seed"],
+                result="win",
+            )
+        )
+
+    process = ProcessSpec((sys.executable, "main.py"), tmp_path)
+    opponent = AntWarOpponent("rank01", 1, tmp_path / "rank01.zip", process)
+    evaluator = AntWar2Evaluator(
+        game=ProcessSpec(("game",), tmp_path),
+        candidate_factory=lambda _version: process,
+        learning_opponents=(opponent,),
+        human_pool=(opponent,),
+        fixed_gate_seeds=(7,),
+        certification_seeds=(11, 12, 13),
+        artifact_root=tmp_path / "runs",
+        match_runner=runner,
+    )
+
+    result = evaluator.evaluate_reporting_panel(_version(), seed_count=1)
+
+    assert result.status == "complete"
+    assert calls == [("P0", 11), ("P1", 11)]
+
+
 def test_human_manifest_maps_only_packages_with_main_entry_as_runnable():
     from agentbench_frame.games.antwar2.evaluator import load_human_pool
 

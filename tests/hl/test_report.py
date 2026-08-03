@@ -135,6 +135,7 @@ def test_generic_profile_report_uses_behavior_event_and_candidate_margin():
     assert rows[1]["mean_score_margin"] == 5.0
     assert rows[1]["fault_free_mean_score_margin"] == 5.0
     assert rows[1]["full_pool_win_rate"] == 0.5
+    assert rows[1]["population_win_rate"] == 0.5
     assert rows[1]["population_elo"] == rows[1]["rollman_elo"]
 
 
@@ -310,7 +311,7 @@ def test_report_writes_csv_and_three_panel_raster_and_vector_plots(tmp_path):
     svg = outputs["curves_svg"].read_text(encoding="utf-8")
     assert "Information Gain vs HL Iteration" in svg
     assert "Elo vs HL Iteration" in svg
-    assert "Full-pool Win Rate vs HL Iteration" in svg
+    assert "Population Win Rate vs HL Iteration" in svg
     assert "Occupancy shift" not in svg
     assert "Model budget" not in svg
     with outputs["curves_csv"].open(newline="", encoding="utf-8") as handle:
@@ -767,7 +768,7 @@ def test_k4_report_uses_proposal_cycle_as_integer_x_and_keeps_four_branches(
     svg = outputs["curves_svg"].read_text(encoding="utf-8")
     assert "Score Margin vs HL Iteration" in svg
     assert "fixed-population Elo" in svg
-    assert "fixed-pool win rate" in svg
+    assert "valid fixed-population win rate" in svg
     assert "fixed-panel mean margin" in svg
     assert "fault-free Elo" not in svg
     assert "opponent fault rate" not in svg

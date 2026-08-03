@@ -126,3 +126,23 @@ def test_reporting_panel_payload_uses_generic_dense_margin():
     assert payload["version_id"] == "v17"
     assert payload["score"] == 0.5
     assert payload["mean_score_margin"] == 5.0
+
+
+def test_reporting_evaluation_prefers_profile_evaluator_subset():
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+    from agentbench_frame.hl.profile_runner import _reporting_evaluation
+
+    calls = []
+
+    class Evaluator:
+        def evaluate_reporting_panel(self, version, *, seed_count):
+            calls.append((version, seed_count))
+            return CandidateEvaluation(status="complete", score=0.75, matches=())
+
+        def certify(self, _version):
+            raise AssertionError("full certification must not be used for reporting")
+
+    result = _reporting_evaluation(Evaluator(), "v1", seed_count=1)
+
+    assert result.score == 0.75
+    assert calls == [("v1", 1)]

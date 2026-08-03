@@ -21,6 +21,7 @@ CURVE_FIELDS = (
     "best_score_so_far",
     "win_rate",
     "population_elo",
+    "population_win_rate",
     "rollman_elo",
     "mean_local_policy_kl",
     "occupancy_shift",
@@ -379,6 +380,9 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
             else certification.get("matches")
         )
         fault_free = _fault_free_panel_metrics(panel_matches)
+        population_win_rate = fault_free["fault_free_conditional_win_rate"]
+        if population_win_rate is None and panel_matches:
+            population_win_rate = _win_rate({"matches": panel_matches})
         kl_trace = policy_kl.get(version_id, [])
         fixed_pool_elo = (
             _fixed_pool_elo(panel.get("matches"))
@@ -412,6 +416,7 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
                 "best_score_so_far": best,
                 "win_rate": win_rate,
                 "population_elo": fixed_pool_elo,
+                "population_win_rate": population_win_rate,
                 "rollman_elo": fixed_pool_elo,
                 "mean_local_policy_kl": (
                     0.0
@@ -709,11 +714,11 @@ def _plot(
 
     line(
         axes[2],
-        "full_pool_win_rate",
-        "fixed-pool win rate",
+        "population_win_rate",
+        "valid fixed-population win rate",
         color="#00897b",
     )
-    axes[2].set_title("Full-pool Win Rate vs HL Iteration")
+    axes[2].set_title("Population Win Rate vs HL Iteration")
     axes[2].set_ylabel("win rate")
     axes[2].set_ylim(-0.02, 1.02)
     axes[2].legend()

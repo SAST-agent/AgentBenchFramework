@@ -390,6 +390,24 @@ def _reporting_panel_payload(
     }
 
 
+def _reporting_evaluation(
+    evaluator: Any,
+    version: Any,
+    *,
+    seed_count: int,
+) -> CandidateEvaluation:
+    method = getattr(evaluator, "evaluate_reporting_panel", None)
+    if callable(method):
+        try:
+            return method(version, seed_count=seed_count)
+        except TypeError as exc:
+            if "seed_count" not in str(exc):
+                raise
+            seeds = tuple(evaluator.certification_seeds[:seed_count])
+            return method(version, seeds=seeds)
+    return evaluator.certify(version)
+
+
 def run_profile(
     config: LocalHLConfig,
     *,
@@ -682,11 +700,7 @@ def run_profile(
         for event in historical
     )
     needs_origin_certification = (
-        (not resume and config.run.origin.mode == "imported_version")
-        or (
-            config.run.evaluation.reporting_panel_every_cycle
-            and not origin_panel_exists
-        )
+        not resume and config.run.origin.mode == "imported_version"
     )
     if needs_origin_certification:
         certification = bindings.evaluator.certify(origin_version)
@@ -710,16 +724,6 @@ def run_profile(
             required_human_opponents=config.run.evaluation.required_human_opponents,
             matches=list(certification.matches),
         )
-        if config.run.evaluation.reporting_panel_every_cycle:
-            writer.write(
-                "reporting_panel_completed",
-                **_reporting_panel_payload(
-                    certification,
-                    iteration_id="iter-000000",
-                    proposal_cycle=0,
-                    version_id=origin_version.version_id,
-                ),
-            )
         certified = (
             certification.status == "complete"
             and best_passing >= config.run.evaluation.required_human_opponents
@@ -731,6 +735,36 @@ def run_profile(
                 version_id=origin_version.version_id,
                 passing_human_opponents=best_passing,
             )
+    if (
+        config.run.evaluation.reporting_panel_every_cycle
+        and not origin_panel_exists
+    ):
+        reporting = (
+            certification
+            if needs_origin_certification
+            else _reporting_evaluation(
+                bindings.evaluator,
+                origin_version,
+                seed_count=(
+                    config.run.evaluation.reporting_seeds_per_opponent
+                ),
+            )
+        )
+        controller.record_matches(
+            version=origin_version,
+            act_id=origin_version.act_id,
+            phase="reporting",
+            matches=reporting.matches,
+        )
+        writer.write(
+            "reporting_panel_completed",
+            **_reporting_panel_payload(
+                reporting,
+                iteration_id="iter-000000",
+                proposal_cycle=0,
+                version_id=origin_version.version_id,
+            ),
+        )
     while not certified and (acts is None or cycles_this_invocation < acts):
         if controller.reached_iteration_limit():
             break
@@ -786,10 +820,10 @@ def run_profile(
 
         should_certify = (
             config.run.evaluation.full_pool_every_iteration
-            or config.run.evaluation.reporting_panel_every_cycle
             or improved
             or completed_cycles == 1
         )
+        certification = None
         if should_certify:
             certification = bindings.evaluator.certify(selected_version)
             controller.record_matches(
@@ -812,16 +846,6 @@ def run_profile(
                 required_human_opponents=config.run.evaluation.required_human_opponents,
                 matches=list(certification.matches),
             )
-            if config.run.evaluation.reporting_panel_every_cycle:
-                writer.write(
-                    "reporting_panel_completed",
-                    **_reporting_panel_payload(
-                        certification,
-                        iteration_id=cycle.iteration_id,
-                        proposal_cycle=completed_cycles,
-                        version_id=selected_id,
-                    ),
-                )
             if passing > best_passing:
                 best_passing = passing
                 best_version = selected_version
@@ -838,6 +862,34 @@ def run_profile(
                     version_id=selected_id,
                     passing_human_opponents=passing,
                 )
+        if config.run.evaluation.reporting_panel_every_cycle:
+            reporting = (
+                certification
+                if certification is not None
+                else _reporting_evaluation(
+                    bindings.evaluator,
+                    selected_version,
+                    seed_count=(
+                        config.run.evaluation.reporting_seeds_per_opponent
+                    ),
+                )
+            )
+            if certification is None:
+                controller.record_matches(
+                    version=selected_version,
+                    act_id=selected_version.act_id,
+                    phase="reporting",
+                    matches=reporting.matches,
+                )
+            writer.write(
+                "reporting_panel_completed",
+                **_reporting_panel_payload(
+                    reporting,
+                    iteration_id=cycle.iteration_id,
+                    proposal_cycle=completed_cycles,
+                    version_id=selected_id,
+                ),
+            )
 
         if (
             not certified

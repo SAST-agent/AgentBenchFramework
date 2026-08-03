@@ -218,6 +218,24 @@ class AntWar2Evaluator:
             phase="certification",
         )
 
+    def evaluate_reporting_panel(
+        self,
+        version: Version,
+        *,
+        seed_count: int = 1,
+    ) -> CandidateEvaluation:
+        if not 1 <= seed_count <= len(self.certification_seeds):
+            raise ValueError("reporting seed_count is outside certification seeds")
+        opponents = tuple(item for item in self.human_pool if item.process is not None)
+        if not opponents:
+            raise ValueError("human pool contains no runnable opponents")
+        return self._evaluate_cases(
+            version,
+            opponents=opponents,
+            seeds=self.certification_seeds[:seed_count],
+            phase="reporting",
+        )
+
     def set_learning_opponent(self, opponent: AntWarOpponent) -> None:
         if opponent.process is None:
             raise ValueError("learning opponent has no runnable main.py")
