@@ -41,6 +41,7 @@ KNOWN_EVENT_TYPES = frozenset(
         "rollback_selected",
         "experience_updated",
         "experience_rebuilt",
+        "experience_cycle_consolidated",
         "checkpoint_created",
         "run_completed",
         "proposal_cycle_started",
@@ -194,6 +195,16 @@ _EVENT_FIELDS = {
         {"rejected_version_id", "accepted_updates", "experience_path"},
         set(),
     ),
+    "experience_cycle_consolidated": (
+        {
+            "iteration_id",
+            "selected_version_id",
+            "record_count",
+            "experience_path",
+            "ledger_path",
+        },
+        set(),
+    ),
     "checkpoint_created": ({"act_id", "iteration_id", "path", "parent_version_id"}, {"thread_id"}),
     "run_completed": ({"reason", "version_id"}, {"passing_human_opponents"}),
     "proposal_cycle_started": (
@@ -325,7 +336,7 @@ def _validate_record(record: Mapping[str, Any]) -> None:
         "branch_briefs", "input_path", "output_path", "selected_version_id",
         "initial_version_id", "repaired_version_id",
         "representative_version_id", "repair_input_path",
-        "error",
+        "error", "ledger_path",
     ):
         if field in record and record[field] is not None and not isinstance(record[field], str):
             raise ValueError(f"{event_type}.{field} must be a string or null")
@@ -339,7 +350,7 @@ def _validate_record(record: Mapping[str, Any]) -> None:
         "active_target_rank", "stagnation_count",
         "accepted_updates",
         "candidate_count",
-        "decision_count", "changed_action_count",
+        "decision_count", "changed_action_count", "record_count",
     ):
         value = record.get(field)
         if value is not None and (not isinstance(value, int) or isinstance(value, bool)):

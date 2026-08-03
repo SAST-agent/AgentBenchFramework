@@ -821,6 +821,8 @@ def test_k4_proposal_cycle_uses_one_parent_and_reducer_sees_all_feedback(tmp_pat
     from agentbench_frame.hl.config import IterationConfig, RollbackConfig
     from agentbench_frame.hl.controller import HLController
     from agentbench_frame.hl.events import HLEventWriter
+    from agentbench_frame.hl.experience import ExperienceManager
+    from agentbench_frame.hl.experience_ledger import ExperienceLedger
     from agentbench_frame.hl.lineage import LineageManager
     from agentbench_frame.tracking.provider import ProviderInvocation, ProviderUsage
 
@@ -888,6 +890,7 @@ def test_k4_proposal_cycle_uses_one_parent_and_reducer_sees_all_feedback(tmp_pat
 
     workspace = _workspace(tmp_path)
     provider = ProposalProvider()
+    experience = ExperienceManager(tmp_path / "experience")
     research_state_path = tmp_path / "research_state.json"
     from agentbench_frame.hl.research_state import ResearchState
 
@@ -914,6 +917,7 @@ def test_k4_proposal_cycle_uses_one_parent_and_reducer_sees_all_feedback(tmp_pat
             f"phase={values['phase']} branch={values.get('branch_index')} "
             f"brief={values.get('branch_brief')} input={values.get('reducer_input')}"
         ),
+        experience_manager=experience,
         research_state_path=research_state_path,
         research_state_max_bytes=4096,
     )
@@ -946,6 +950,15 @@ def test_k4_proposal_cycle_uses_one_parent_and_reducer_sees_all_feedback(tmp_pat
     assert research.official_champion_version_id == origin.version_id
     assert research.active_target == "rank15"
     assert research.recent_comparisons[0]["selected_branch"] == 1
+    records = ExperienceLedger(tmp_path / "experience" / "ledger.jsonl").load()
+    assert {record.branch_index for record in records} == {0, 1, 2, 3}
+    assert {
+        record.candidate_version_id for record in records
+    } == {
+        candidate.version.version_id for candidate in result.representatives
+    }
+    skill = experience.path.read_text(encoding="utf-8")
+    assert result.search_parent_version_id in skill
 
 
 def test_top_two_linear_repair_keeps_four_branches_and_two_descendants(tmp_path):

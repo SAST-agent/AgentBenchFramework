@@ -14,6 +14,7 @@ from agentbench_frame.hl.config import IterationConfig, RollbackConfig
 from agentbench_frame.hl.evaluator import CandidateEvaluation
 from agentbench_frame.hl.events import HLEventWriter
 from agentbench_frame.hl.experience import ExperienceManager
+from agentbench_frame.hl.experience_ledger import derive_experience_record
 from agentbench_frame.hl.lineage import LineageManager, ParentDecision
 from agentbench_frame.hl.proposal import (
     BranchBrief,
@@ -1546,12 +1547,15 @@ class HLController:
                 candidate.version.version_id for candidate in iteration.candidates
             ],
         )
-        if (
-            not defer_experience
-            and iteration.search_parent_version_id
-            == iteration.selected.version.version_id
-        ):
-            self.commit_experience(iteration.selected)
+        if not defer_experience:
+            self.consolidate_experience_cycle(
+                iteration_id=iteration_id,
+                parent_version_id=parent_id,
+                parent_evaluation=parent_evaluation,
+                representatives=iteration.representatives,
+                branch_briefs=briefs,
+                selected_version_id=iteration.search_parent_version_id,
+            )
         return ProposalCycleResult(
             iteration_id=iteration_id,
             parent_version_id=parent_id,
@@ -1579,6 +1583,65 @@ class HLController:
             act_id=candidate.act_id,
             version_id=candidate.version.version_id,
             experience_path=str(path),
+        )
+        return path
+
+    def consolidate_experience_cycle(
+        self,
+        *,
+        iteration_id: str,
+        parent_version_id: str,
+        parent_evaluation: CandidateEvaluation | None,
+        representatives: tuple[CandidateResult, ...],
+        branch_briefs: tuple[BranchBrief, ...],
+        selected_version_id: str,
+    ) -> Path | None:
+        """Persist all measured branch outcomes, then regenerate the Skill."""
+
+        if self.experience_manager is None:
+            return None
+        parent_matches = (
+            () if parent_evaluation is None else parent_evaluation.matches
+        )
+        records = tuple(
+            derive_experience_record(
+                iteration_id=iteration_id,
+                act_id=candidate.act_id,
+                branch_index=candidate.branch_index,
+                parent_version_id=parent_version_id,
+                candidate_version_id=candidate.version.version_id,
+                selected=(candidate.version.version_id == selected_version_id),
+                brief=branch_briefs[candidate.branch_index].to_dict(),
+                parent_matches=parent_matches,
+                candidate_matches=candidate.evaluation.matches,
+                activation=candidate.activation,
+            )
+            for candidate in representatives
+        )
+        selected_notes = []
+        for candidate in representatives:
+            if (
+                candidate.version.version_id != selected_version_id
+                or candidate.pending_experience_path is None
+            ):
+                continue
+            selected_notes.append(
+                self.experience_manager.read_file(
+                    candidate.pending_experience_path
+                )
+            )
+        path = self.experience_manager.consolidate_cycle(
+            iteration_id,
+            records=records,
+            notes=tuple(selected_notes),
+        )
+        self.events.write(
+            "experience_cycle_consolidated",
+            iteration_id=iteration_id,
+            selected_version_id=selected_version_id,
+            record_count=len(records),
+            experience_path=str(path),
+            ledger_path=str(self.experience_manager.ledger.path),
         )
         return path
 
