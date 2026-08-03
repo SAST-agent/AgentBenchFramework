@@ -2508,6 +2508,9 @@ def _run_real(
                 if origin_id is None:
                     raise ValueError("pre-curriculum resume has no origin")
                 origin = version_store.get(origin_id)
+                evaluator.last_evaluation = evaluations_by_version.get(
+                    origin_id
+                )
                 if (
                     controller.lineage.versions[origin_id].status
                     != "complete"
