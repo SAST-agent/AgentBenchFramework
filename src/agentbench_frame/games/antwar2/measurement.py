@@ -88,11 +88,25 @@ def compare_probe_outputs(
     }
     if set(parent_by_id) != set(candidate_by_id):
         raise ValueError("parent and candidate probes use different frozen states")
+    ordered_state_ids = sorted(parent_by_id)
+    example_count = min(16, len(ordered_state_ids))
+    if example_count == len(ordered_state_ids):
+        example_ids = set(ordered_state_ids)
+    elif example_count <= 1:
+        example_ids = {ordered_state_ids[0]} if ordered_state_ids else set()
+    else:
+        example_ids = {
+            ordered_state_ids[
+                round(offset * (len(ordered_state_ids) - 1) / (example_count - 1))
+            ]
+            for offset in range(example_count)
+        }
     values: list[float] = []
     changed = 0
     changed_examples: list[dict[str, Any]] = []
+    state_examples: list[dict[str, Any]] = []
     role_values: dict[str, list[float]] = {}
-    for state_id in sorted(parent_by_id):
+    for state_id in ordered_state_ids:
         parent_case = parent_by_id[state_id]
         candidate_case = candidate_by_id[state_id]
         parent_steps = parent_case.get("steps")
@@ -101,6 +115,20 @@ def compare_probe_outputs(
             raise ValueError("probe case steps must be lists")
         count = max(1, len(parent_steps), len(candidate_steps))
         role = state_id.rsplit(":", 1)[-1]
+        if state_id in example_ids:
+            public_summary = parent_case.get("public_summary")
+            if not isinstance(public_summary, Mapping):
+                public_summary = {}
+            parent_selected, _ = _step(parent_case, 0)
+            candidate_selected, _ = _step(candidate_case, 0)
+            state_examples.append(
+                {
+                    "state_id": state_id,
+                    "public_summary": dict(public_summary),
+                    "parent_selected": list(parent_selected),
+                    "candidate_selected": list(candidate_selected),
+                }
+            )
         for index in range(count):
             parent_selected, parent_support = _step(parent_case, index)
             candidate_selected, candidate_support = _step(candidate_case, index)
@@ -149,6 +177,7 @@ def compare_probe_outputs(
                 for role, items in sorted(role_values.items())
             },
             "changed_examples": changed_examples,
+            "state_examples": state_examples,
         },
     )
 

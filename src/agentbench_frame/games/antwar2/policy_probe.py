@@ -208,6 +208,63 @@ def _main(request_path: Path, output_path: Path) -> None:
                 support.add(atom(operation))
         return [list(item) for item in sorted(support)]
 
+    def public_summary(
+        *,
+        round_index: int,
+        data: dict[str, Any],
+        tower_snapshot: list[dict[str, Any]],
+        player: int,
+        role: str,
+    ) -> dict[str, Any]:
+        enemy = 1 - player
+        coins = [int(value) for value in data["coins"]]
+        camps = [int(value) for value in data["camps"]]
+        generation = [int(value) for value in data.get("speedLv", (0, 0))]
+        ant_level = [int(value) for value in data.get("anthpLv", (0, 0))]
+        cooldowns = [
+            [int(value) for value in row]
+            for row in data.get("weaponCooldowns", ((0, 0, 0, 0),) * 2)
+        ]
+        return {
+            "round_index": int(round_index),
+            "role": role,
+            "coins": {"self": coins[player], "enemy": coins[enemy]},
+            "camp_hp": {"self": camps[player], "enemy": camps[enemy]},
+            "generation_level": {
+                "self": generation[player],
+                "enemy": generation[enemy],
+            },
+            "ant_level": {
+                "self": ant_level[player],
+                "enemy": ant_level[enemy],
+            },
+            "tower_count": {
+                "self": sum(
+                    int(item.get("player", -1)) == player
+                    for item in tower_snapshot
+                ),
+                "enemy": sum(
+                    int(item.get("player", -1)) == enemy
+                    for item in tower_snapshot
+                ),
+            },
+            "ant_count": {
+                "self": sum(
+                    int(item.get("player", -1)) == player
+                    for item in data.get("ants", [])
+                ),
+                "enemy": sum(
+                    int(item.get("player", -1)) == enemy
+                    for item in data.get("ants", [])
+                ),
+            },
+            "weapon_cooldowns": {
+                "self": cooldowns[player],
+                "enemy": cooldowns[enemy],
+            },
+            "active_effect_count": len(data.get("activeEffects", [])),
+        }
+
     spec = importlib.util.spec_from_file_location("ai", candidate_root / "ai.py")
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load {candidate_root / 'ai.py'}")
@@ -265,6 +322,13 @@ def _main(request_path: Path, output_path: Path) -> None:
                     "replay": str(replay_path),
                     "round": index + 1,
                     "role": role,
+                    "public_summary": public_summary(
+                        round_index=index + 1,
+                        data=state_data,
+                        tower_snapshot=tower_snapshots[index],
+                        player=player,
+                        role=role,
+                    ),
                     "steps": steps,
                     "terminal_support": terminal_support,
                 }

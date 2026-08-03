@@ -1,11 +1,16 @@
 import math
 
 
-def _case(*steps, terminal_support=None):
+def _case(*steps, terminal_support=None, public_summary=None, state_id="replay-a:0:P0"):
     return {
-        "state_id": "replay-a:0:P0",
+        "state_id": state_id,
         "steps": list(steps),
         "terminal_support": terminal_support or [[0, -1, -1], [11, 4, 5]],
+        "public_summary": public_summary or {
+            "round_index": 1,
+            "role": "P0",
+            "coins": {"self": 50, "enemy": 50},
+        },
     }
 
 
@@ -27,6 +32,18 @@ def test_identical_deterministic_atomic_policies_have_zero_kl():
     assert result.decision_count == 1
     assert result.changed_action_count == 0
     assert result.details["mean_kl_nats_per_decision"] == 0.0
+    assert result.details["state_examples"] == [
+        {
+            "state_id": "replay-a:0:P0",
+            "public_summary": {
+                "round_index": 1,
+                "role": "P0",
+                "coins": {"self": 50, "enemy": 50},
+            },
+            "parent_selected": [11, 4, 5],
+            "candidate_selected": [11, 4, 5],
+        }
+    ]
 
 
 def test_different_atomic_actions_have_positive_epsilon_smoothed_kl():
