@@ -175,6 +175,27 @@ def test_historical_evaluation_preserves_and_backfills_failure_classification():
     )
 
 
+def test_behavior_comparison_payload_serializes_immutable_details():
+    from agentbench_frame.hl.game_profile import BehaviorComparison
+    from agentbench_frame.hl.profile_runner import _behavior_comparison_payload
+
+    payload = _behavior_comparison_payload(
+        BehaviorComparison(
+            status="complete",
+            decision_count=16,
+            changed_action_count=4,
+            details={"role_mean_kl": {"P0": 0.25}},
+        )
+    )
+
+    assert payload == {
+        "status": "complete",
+        "decision_count": 16,
+        "changed_action_count": 4,
+        "details": {"role_mean_kl": {"P0": 0.25}},
+    }
+
+
 def test_resume_progress_reconstructs_best_archive_and_stagnation():
     from agentbench_frame.hl.profile_runner import _resume_progress
 

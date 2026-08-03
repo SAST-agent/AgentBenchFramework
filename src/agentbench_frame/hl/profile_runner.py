@@ -35,6 +35,17 @@ def _json_native(value: Any) -> Any:
     return json.loads(json.dumps(value, ensure_ascii=False, sort_keys=True))
 
 
+def _behavior_comparison_payload(comparison: Any) -> dict[str, Any]:
+    return _json_native(
+        {
+            "status": comparison.status,
+            "decision_count": comparison.decision_count,
+            "changed_action_count": comparison.changed_action_count,
+            "details": dict(comparison.details),
+        }
+    )
+
+
 def frozen_config(config: LocalHLConfig) -> dict[str, Any]:
     return _json_native(
         {
@@ -745,7 +756,7 @@ def run_profile(
             references=_references(parent),
             epsilon=config.run.measurement.epsilon,
         )
-        return dataclasses.asdict(comparison)
+        return _behavior_comparison_payload(comparison)
 
     controller = HLController(
         workspace=workspace,
