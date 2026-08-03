@@ -1,0 +1,4 @@
+interface:
+  display_name: "AntWar2 Replay Analyst"
+  short_description: "Translate AntWar2 replays into atomic causal evidence"
+  default_prompt: "Use $antwar2-replay to diagnose an AntWar2 live-match replay from public state and accepted operations."

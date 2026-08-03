@@ -1,0 +1,49 @@
+schema_version: "1.0"
+policy_interface:
+  input_type: SDK.backend.state.BackendState
+  object_fields:
+    - round_index
+    - towers
+    - ants
+    - coins
+    - camps
+    - speed_level
+    - ant_hp_level
+    - weapon_cooldowns
+    - active_effects
+  canonical_normalization: BackendState public SDK state
+  normalized_state_mapping: {}
+roles:
+  P0:
+    role_id: 0
+    output_shape: ordered list[Operation]
+    actions:
+      - {name: HOLD, code: null, arguments: []}
+      - {name: BUILD_TOWER, code: 11, arguments: [x, y]}
+      - {name: UPGRADE_TOWER, code: 12, arguments: [tower_id, target_type]}
+      - {name: DOWNGRADE_TOWER, code: 13, arguments: [tower_id]}
+      - {name: USE_LIGHTNING_STORM, code: 21, arguments: [x, y]}
+      - {name: USE_EMP_BLASTER, code: 22, arguments: [x, y]}
+      - {name: USE_DEFLECTOR, code: 23, arguments: [x, y]}
+      - {name: USE_EMERGENCY_EVASION, code: 24, arguments: [x, y]}
+      - {name: UPGRADE_GENERATION_SPEED, code: 31, arguments: []}
+      - {name: UPGRADE_GENERATED_ANT, code: 32, arguments: []}
+  P1:
+    role_id: 1
+    output_shape: ordered list[Operation]
+    actions:
+      - {name: HOLD, code: null, arguments: []}
+      - {name: BUILD_TOWER, code: 11, arguments: [x, y]}
+      - {name: UPGRADE_TOWER, code: 12, arguments: [tower_id, target_type]}
+      - {name: DOWNGRADE_TOWER, code: 13, arguments: [tower_id]}
+      - {name: USE_LIGHTNING_STORM, code: 21, arguments: [x, y]}
+      - {name: USE_EMP_BLASTER, code: 22, arguments: [x, y]}
+      - {name: USE_DEFLECTOR, code: 23, arguments: [x, y]}
+      - {name: USE_EMERGENCY_EVASION, code: 24, arguments: [x, y]}
+      - {name: UPGRADE_GENERATION_SPEED, code: 31, arguments: []}
+      - {name: UPGRADE_GENERATED_ANT, code: 32, arguments: []}
+atomization:
+  support: state.can_apply_operation(player, operation, accepted_prefix)
+  sequence: preserve accepted execution order
+  empty_bundle: HOLD
+  rejected_operations: log separately and exclude from behavioral sequence

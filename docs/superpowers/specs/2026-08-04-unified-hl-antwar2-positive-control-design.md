@@ -204,7 +204,7 @@ The manually auditable decision space contains protocol-level operations only:
 ```yaml
 atomic_operations:
   - HOLD
-  - BUILD_TOWER(cell)
+  - BUILD_TOWER(x, y)
   - UPGRADE_TOWER(tower_id, target_type)
   - DOWNGRADE_TOWER(tower_id)
   - USE_LIGHTNING_STORM(target_cell)

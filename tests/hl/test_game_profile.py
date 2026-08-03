@@ -23,6 +23,8 @@ class FakeProfile:
             output_contract="list[AtomicOperation]",
             planner_diversity=("distinct mechanism", "distinct falsifier"),
             prohibited_information=("opponent source", "seed lookup"),
+            policy_entry_symbol="Agent.act",
+            candidate_source_relative="policy.py",
         )
 
     def build_bindings(self, *, config, run_root):
@@ -99,6 +101,8 @@ def test_prompt_profile_validates_roles_and_terms():
     profile = FakeProfile().prompt_profile()
 
     assert profile.roles == ("north", "south")
+    assert profile.policy_entry_symbol == "Agent.act"
+    assert profile.candidate_source_relative == "policy.py"
     with pytest.raises(ValueError, match="roles must be unique"):
         PromptProfile(
             candidate_label="agent",

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Callable, Mapping, Sequence
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Any, Protocol, runtime_checkable
 
@@ -42,6 +42,8 @@ class PromptProfile:
     output_contract: str
     planner_diversity: tuple[str, ...]
     prohibited_information: tuple[str, ...]
+    policy_entry_symbol: str = "ai_func"
+    candidate_source_relative: str = "ai.py"
 
     def __post_init__(self) -> None:
         for field in (
@@ -49,8 +51,13 @@ class PromptProfile:
             "opponent_label",
             "policy_input",
             "output_contract",
+            "policy_entry_symbol",
+            "candidate_source_relative",
         ):
             object.__setattr__(self, field, _text(getattr(self, field), field=field))
+        source = PurePosixPath(self.candidate_source_relative)
+        if source.is_absolute() or ".." in source.parts:
+            raise ValueError("candidate_source_relative must stay inside the candidate")
         object.__setattr__(
             self,
             "roles",
@@ -202,6 +209,10 @@ def _load_builtin_profile(game_id: str) -> GameProfile | None:
         from agentbench_frame.games.rollman.hl_profile import RollmanHLProfile
 
         return RollmanHLProfile()
+    if game_id == "30_antwar2":
+        from agentbench_frame.games.antwar2.hl_profile import AntWar2HLProfile
+
+        return AntWar2HLProfile()
     return None
 
 
