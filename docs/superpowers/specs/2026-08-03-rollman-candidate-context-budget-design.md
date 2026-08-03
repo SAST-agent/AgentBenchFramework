@@ -135,8 +135,8 @@ Failure to compile or satisfy both activation and preservation assertions makes 
 
 - The packet is the only required context read.
 - Re-running symbol search, file discovery, full-file printing, or packet filtering is prohibited.
-- A first-edit reminder is injected at remaining weighted-token budgets of 20,000 and 10,000 tokens when no file change has been observed.
-- The 5,000-token reminder permits only compile, smoke, and final response.
+- Candidate-packet acts enforce at most six pre-edit tool calls and twelve total tool calls through the provider's JSONL tool-limit guard.
+- The provider-native 20,000, 10,000, and 5,000 weighted-token reminders remain enabled. The prompt requires the first patch by tool call five and reserves the final calls for compile, smoke, and final response.
 - Candidate acceptance after budget exhaustion requires a changed snapshot, successful compilation, successful public-entry activation smoke, clean access audit, and successful Framework activation probe.
 
 These checks supplement the frozen match quick screen; they do not replace it.
