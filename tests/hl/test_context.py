@@ -362,6 +362,11 @@ def test_all_profile_prompts_are_game_neutral(tmp_path, kind):
         assert "changed_action_count=0" in prompt
         assert "集成失败" in prompt
         assert "至少一个原子动作" in prompt
+    if kind == "repair":
+        assert "candidate_code_slices" in prompt
+        assert "Do not read the digest, research state, Experience Skill" in prompt
+        assert "next tool call must edit" in prompt
+        assert "smoke_contract.command" in prompt
     for forbidden in ("Rollman", "Ghost", "pacman", "rank15", "rank16"):
         assert forbidden not in prompt
 

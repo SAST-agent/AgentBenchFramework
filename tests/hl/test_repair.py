@@ -184,6 +184,72 @@ def test_activation_repair_packet_needs_no_match_and_preserves_scope(tmp_path):
     assert value["scope"]["preservation_contract"].startswith("ordinary portal")
 
 
+def test_activation_repair_packet_embeds_bounded_edit_context(tmp_path):
+    from dataclasses import replace
+
+    from agentbench_frame.hl.repair import (
+        build_activation_repair_packet,
+        enrich_activation_repair_packet,
+    )
+
+    candidate = replace(
+        _result(version_id="v000041", branch_index=1, status="failed"),
+        activation={
+            "status": "complete",
+            "decision_count": 256,
+            "changed_action_count": 0,
+            "details": {"changed_examples": []},
+        },
+    )
+    path = build_activation_repair_packet(
+        output_path=tmp_path / "activation-repair.json",
+        iteration_id="iter-000012",
+        branch_brief=_brief(),
+        parent=_result(version_id="v000037", branch_index=-1),
+        candidate=candidate,
+        minimum_changed_actions=2,
+    )
+    source = tmp_path / "ai.py"
+    source.write_text(
+        "def ai_func(state):\n    return helper(state)\n\n"
+        "def helper(state):\n    return 0\n",
+        encoding="utf-8",
+    )
+    digest = tmp_path / "digest.json"
+    digest.write_text('{"atomic_actions":["HOLD","BUILD"]}\n', encoding="utf-8")
+    research = tmp_path / "research.json"
+    research.write_text('{"open_questions":["activation"]}\n', encoding="utf-8")
+    experience = tmp_path / "SKILL.md"
+    experience.write_text("condition-scoped experience", encoding="utf-8")
+
+    enrich_activation_repair_packet(
+        path,
+        game_digest_path=digest,
+        research_state_path=research,
+        experience_path=experience,
+        candidate_source_path=source,
+        policy_entry_symbol="ai_func",
+        smoke_command=("python", "smoke.py", "--workspace", str(tmp_path)),
+    )
+
+    value = json.loads(path.read_text(encoding="utf-8"))
+    assert value["candidate"]["activation"]["changed_action_count"] == 0
+    assert value["game_digest"]["atomic_actions"] == ["HOLD", "BUILD"]
+    assert value["research_state"]["open_questions"] == ["activation"]
+    assert value["experience_skill"] == "condition-scoped experience"
+    assert [item["name"] for item in value["candidate_code_slices"]] == [
+        "ai_func",
+        "helper",
+    ]
+    assert value["smoke_contract"]["command"][0] == "python"
+    assert value["experience_update_contract"]["required_arrays"] == [
+        "positive_patterns",
+        "negative_patterns",
+        "open_questions",
+        "compression_notes",
+    ]
+
+
 def test_repair_packet_rejects_feedback_without_shared_seed(tmp_path):
     from agentbench_frame.hl.repair import build_repair_packet
 

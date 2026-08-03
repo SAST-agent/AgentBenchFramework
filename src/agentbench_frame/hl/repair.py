@@ -4,15 +4,20 @@ from __future__ import annotations
 
 import dataclasses
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from agentbench_frame.hl.proposal import BranchBrief
+from agentbench_frame.hl.proposal import (
+    BranchBrief,
+    build_candidate_code_index,
+    build_candidate_code_slices,
+)
 from agentbench_frame.hl.selection import CandidateDiagnostics
 
 
 _SUMMARY_TEXT_LIMIT = 12_000
+_INLINE_TEXT_LIMIT = 32_768
 
 if TYPE_CHECKING:
     from agentbench_frame.hl.controller import CandidateResult
@@ -179,6 +184,81 @@ def build_activation_repair_packet(
         encoding="utf-8",
     )
     return path
+
+
+def _bounded_text(path: str | Path, *, limit: int = _INLINE_TEXT_LIMIT) -> str:
+    text = Path(path).read_text(encoding="utf-8")
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n[text truncated]"
+
+
+def enrich_activation_repair_packet(
+    path: str | Path,
+    *,
+    game_digest_path: str | Path,
+    research_state_path: str | Path,
+    experience_path: str | Path,
+    candidate_source_path: str | Path,
+    policy_entry_symbol: str,
+    smoke_command: Sequence[str],
+) -> Path:
+    """Inline all bounded edit inputs so repair needs one read before editing."""
+
+    destination = Path(path)
+    value = json.loads(destination.read_text(encoding="utf-8"))
+    if not isinstance(value, Mapping) or value.get("repair_kind") != (
+        "activation_integration"
+    ):
+        raise ValueError("activation repair packet has an invalid repair_kind")
+    scope = value.get("scope")
+    if not isinstance(scope, Mapping):
+        raise ValueError("activation repair packet requires scope")
+    raw_symbols = scope.get("code_symbols")
+    if not isinstance(raw_symbols, list) or not raw_symbols:
+        raise ValueError("activation repair scope requires code_symbols")
+    command = [str(item) for item in smoke_command]
+    if not command or any(not item for item in command):
+        raise ValueError("smoke command must contain non-empty strings")
+    source = Path(candidate_source_path)
+    value.update(
+        {
+            "game_digest": json.loads(
+                Path(game_digest_path).read_text(encoding="utf-8")
+            ),
+            "research_state": json.loads(
+                Path(research_state_path).read_text(encoding="utf-8")
+            ),
+            "experience_skill": _bounded_text(experience_path),
+            "candidate_code_index": build_candidate_code_index(source),
+            "candidate_code_slices": build_candidate_code_slices(
+                source,
+                code_symbols=tuple(str(item) for item in raw_symbols),
+                entry_symbol=policy_entry_symbol,
+            ),
+            "smoke_contract": {"command": command},
+            "experience_update_contract": {
+                "path": str(
+                    (
+                        source.parent
+                        / ".agentbench"
+                        / "experience_update.json"
+                    ).resolve()
+                ),
+                "required_arrays": [
+                    "positive_patterns",
+                    "negative_patterns",
+                    "open_questions",
+                    "compression_notes",
+                ],
+            },
+        }
+    )
+    destination.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return destination
 
 
 def _diagnostics(result: CandidateResult) -> CandidateDiagnostics:

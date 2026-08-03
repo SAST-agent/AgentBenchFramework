@@ -841,6 +841,27 @@ def run_profile(
                 candidate_input_path=packet,
             )
         if phase == "repair":
+            from agentbench_frame.hl.repair import (
+                enrich_activation_repair_packet,
+            )
+
+            smoke_result = workspace / ".agentbench/candidate_smoke_result.json"
+            repair_input = enrich_activation_repair_packet(
+                values["repair_input"],
+                game_digest_path=digest,
+                research_state_path=research,
+                experience_path=experience.path,
+                candidate_source_path=source,
+                policy_entry_symbol=prompt_profile.policy_entry_symbol,
+                smoke_command=(
+                    sys.executable,
+                    str(bundle.files["smoke_fixture"]),
+                    "--workspace",
+                    str(workspace),
+                    "--output",
+                    str(smoke_result),
+                ),
+            )
             return context.build_repair_prompt(
                 act_id=values["act_id"],
                 iteration_id=values["iteration_id"],
@@ -848,7 +869,7 @@ def run_profile(
                 workspace=workspace,
                 game_digest_path=digest,
                 research_state_path=research,
-                repair_input_path=values["repair_input"],
+                repair_input_path=repair_input,
                 experience_path=experience.path,
             )
         if phase == "reducer":
