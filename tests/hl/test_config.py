@@ -384,6 +384,47 @@ class HLConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "source_size_penalty"):
             SelectionConfig(source_size_penalty=True)
 
+    def test_generalizable_seed_roles_are_disjoint_and_sealed_gate_has_five(self):
+        from agentbench_frame.hl.config import EvaluationConfig
+
+        value = EvaluationConfig(
+            hard_opponents=("rank15", "rank16"),
+            training_seeds=(1, 2, 3, 4),
+            validation_seeds=(11, 12),
+            certification_seeds=(91, 92, 93, 94, 95),
+            certification_wins_required=4,
+        )
+
+        self.assertEqual(value.hard_opponents, ("rank15", "rank16"))
+        self.assertEqual(value.certification_wins_required, 4)
+
+    def test_generalizable_seed_roles_reject_overlap(self):
+        from agentbench_frame.hl.config import EvaluationConfig
+
+        with self.assertRaisesRegex(ValueError, "disjoint"):
+            EvaluationConfig(
+                hard_opponents=("rank15", "rank16"),
+                training_seeds=(1, 2),
+                validation_seeds=(2, 3),
+                certification_seeds=(91, 92, 93, 94, 95),
+                certification_wins_required=4,
+            )
+
+    def test_generalizable_gate_requires_five_unique_certification_seeds(self):
+        from agentbench_frame.hl.config import EvaluationConfig
+
+        for bad in ((1, 2, 3, 4), (1, 2, 3, 4, 4)):
+            with self.subTest(bad=bad), self.assertRaisesRegex(
+                ValueError, "five unique"
+            ):
+                EvaluationConfig(
+                    hard_opponents=("rank15", "rank16"),
+                    training_seeds=(10, 11),
+                    validation_seeds=(20, 21),
+                    certification_seeds=bad,
+                    certification_wins_required=4,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

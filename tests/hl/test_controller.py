@@ -1476,6 +1476,7 @@ def test_k4_cycle_keeps_current_parent_when_every_candidate_regresses(tmp_path):
         parent_evaluation=parent_evaluation,
     )
 
+    assert tuple(brief.branch_index for brief in result.branch_briefs) == (0, 1, 2, 3)
     assert result.search_parent_version_id == origin.version_id
     assert controller.lineage.lineage_head_version_id == origin.version_id
     assert result.selected.version.version_id != origin.version_id

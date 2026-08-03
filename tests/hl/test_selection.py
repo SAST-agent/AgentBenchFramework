@@ -98,3 +98,54 @@ def test_diagnostics_ignore_source_size_and_use_only_valid_matches():
     assert diagnostics.mean_score_margin == -60.0
     assert diagnostics.survival_decisions == 200
     assert not hasattr(diagnostics, "source_lines")
+
+
+def _dual_diagnostics(version_id, rank15_margin, rank16_margin):
+    from agentbench_frame.hl.selection import CandidateDiagnostics
+
+    return CandidateDiagnostics.from_matches(
+        version_id=version_id,
+        branch_index=0,
+        matches=(
+            {
+                "status": "complete",
+                "opponent": "rank15",
+                "seed": 1,
+                "result": "loss",
+                "rollman_score": rank15_margin,
+                "ghosts_score": 0,
+            },
+            {
+                "status": "complete",
+                "opponent": "rank16",
+                "seed": 1,
+                "result": "loss",
+                "rollman_score": rank16_margin,
+                "ghosts_score": 0,
+            },
+        ),
+    )
+
+
+def test_dual_opponent_successor_rejects_improvement_that_regresses_other_target():
+    from agentbench_frame.hl.selection import select_linear_successor
+
+    parent = _dual_diagnostics("v0", -100, -100)
+    narrow = _dual_diagnostics("v1", -20, -110)
+
+    decision = select_linear_successor(parent, (narrow,))
+
+    assert decision.search_parent_version_id == "v0"
+    assert decision.reason == "no_progress"
+
+
+def test_dual_opponent_successor_accepts_pareto_dense_progress():
+    from agentbench_frame.hl.selection import select_linear_successor
+
+    parent = _dual_diagnostics("v0", -100, -100)
+    robust = _dual_diagnostics("v1", -20, -90)
+
+    decision = select_linear_successor(parent, (robust,))
+
+    assert decision.search_parent_version_id == "v1"
+    assert decision.reason == "robust_dense_progress"

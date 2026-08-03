@@ -72,6 +72,43 @@ def test_resume_ignores_gate_from_a_different_target():
     assert evaluation is None
 
 
+def test_resume_rebuilds_dual_opponent_gate_containing_active_target():
+    from agentbench_frame.hl.cli import _curriculum_evaluation_from_events
+
+    evaluation = _curriculum_evaluation_from_events(
+        [
+            {
+                "event_type": "evaluation_completed",
+                "version_id": "v000077",
+                "status": "complete",
+                "benchmark_score": 0.75,
+                "matches": [
+                    {
+                        "status": "complete",
+                        "opponent": "rank15",
+                        "seed": 101,
+                        "result": "loss",
+                    },
+                    {
+                        "status": "complete",
+                        "opponent": "rank16",
+                        "seed": 101,
+                        "result": "win",
+                    },
+                ],
+            }
+        ],
+        version_id="v000077",
+        active_target="rank15",
+    )
+
+    assert evaluation is not None
+    assert {match["opponent"] for match in evaluation.matches} == {
+        "rank15",
+        "rank16",
+    }
+
+
 def test_resume_parent_uses_stage_origin_after_rejection_and_best_after_stagnation():
     from types import SimpleNamespace
 

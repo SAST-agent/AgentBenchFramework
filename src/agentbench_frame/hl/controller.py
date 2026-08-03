@@ -74,6 +74,7 @@ class ProposalCycleResult:
     reducer: ProviderInvocation
     reducer_input_path: Path
     rollback: Optional[ParentDecision]
+    branch_briefs: tuple[BranchBrief, ...] = ()
     repairs: tuple[RepairSelection, ...] = ()
     representatives: tuple[CandidateResult, ...] = ()
 
@@ -1567,6 +1568,7 @@ class HLController:
             reducer=reducer,
             reducer_input_path=reducer_input,
             rollback=iteration.rollback,
+            branch_briefs=briefs,
             repairs=iteration.repairs,
             representatives=iteration.representatives,
         )

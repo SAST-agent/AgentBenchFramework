@@ -17,6 +17,8 @@ class CandidateDiagnostics:
     captures: int
     behavioral_novelty: float
     branch_index: int
+    opponent_points: tuple[tuple[str, float], ...] = ()
+    opponent_mean_score_margins: tuple[tuple[str, float], ...] = ()
 
     @classmethod
     def from_matches(
@@ -45,6 +47,34 @@ class CandidateDiagnostics:
             float(match["rollman_score"]) - float(match["ghosts_score"])
             for match in valid
         ]
+        opponents = sorted({str(match.get("opponent") or "") for match in valid})
+        opponent_points = []
+        opponent_margins = []
+        for opponent in opponents:
+            rows = [
+                match
+                for match in valid
+                if str(match.get("opponent") or "") == opponent
+            ]
+            row_points = [
+                1.0
+                if match["result"] == "win"
+                else 0.5
+                if match["result"] == "draw"
+                else 0.0
+                for match in rows
+            ]
+            row_margins = [
+                float(match["rollman_score"])
+                - float(match["ghosts_score"])
+                for match in rows
+            ]
+            opponent_points.append(
+                (opponent, sum(row_points) / len(row_points))
+            )
+            opponent_margins.append(
+                (opponent, sum(row_margins) / len(row_margins))
+            )
         return cls(
             version_id=version_id,
             points=sum(point_values) / len(point_values),
@@ -57,6 +87,8 @@ class CandidateDiagnostics:
             captures=sum(int(match.get("captures") or 0) for match in valid),
             behavioral_novelty=float(behavioral_novelty),
             branch_index=int(branch_index),
+            opponent_points=tuple(opponent_points),
+            opponent_mean_score_margins=tuple(opponent_margins),
         )
 
     def key(self) -> tuple[float, ...]:
@@ -92,6 +124,30 @@ def select_linear_successor(
 ) -> SelectionDecision:
     if not candidates:
         return SelectionDecision(parent.version_id, False, "no_valid_candidate")
+    parent_points = dict(parent.opponent_points)
+    parent_margins = dict(parent.opponent_mean_score_margins)
+    if len(parent_points) > 1:
+        robust: list[tuple[CandidateDiagnostics, str]] = []
+        for candidate in candidates:
+            points = dict(candidate.opponent_points)
+            margins = dict(candidate.opponent_mean_score_margins)
+            if set(points) != set(parent_points) or set(margins) != set(
+                parent_margins
+            ):
+                continue
+            if any(points[key] < parent_points[key] for key in parent_points):
+                continue
+            if any(points[key] > parent_points[key] for key in parent_points):
+                robust.append((candidate, "robust_target_points_progress"))
+                continue
+            if any(margins[key] < parent_margins[key] for key in parent_margins):
+                continue
+            if any(margins[key] > parent_margins[key] for key in parent_margins):
+                robust.append((candidate, "robust_dense_progress"))
+        if robust:
+            best, reason = max(robust, key=lambda item: item[0].key())
+            return SelectionDecision(best.version_id, False, reason)
+        return SelectionDecision(parent.version_id, False, "no_progress")
     best = max(candidates, key=CandidateDiagnostics.key)
     if best.points > parent.points:
         return SelectionDecision(best.version_id, False, "target_points_progress")

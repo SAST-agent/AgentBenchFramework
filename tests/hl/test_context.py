@@ -396,6 +396,42 @@ def test_curriculum_prompt_rejects_evidence_from_another_opponent(tmp_path):
         )
 
 
+def test_curriculum_prompt_accepts_evidence_from_locked_hard_opponent(tmp_path):
+    from agentbench_frame.hl.context import ContextBundle, IterationContext
+
+    bundle = ContextBundle.create(
+        tmp_path / "bundle",
+        _static_files(tmp_path / "assets"),
+    )
+
+    prompt = IterationContext(bundle).build_prompt(
+        act_id="act-0003",
+        branch_index=0,
+        branch_count=4,
+        parent_version_id="v000001",
+        workspace=tmp_path / "candidate",
+        replay_evidence=[
+            {
+                "opponent": "rank15",
+                "seed": 101,
+                "replay": "/matches/rank15/replay.jsonl",
+            },
+            {
+                "opponent": "rank16",
+                "seed": 101,
+                "replay": "/matches/rank16/replay.jsonl",
+            },
+        ],
+        previous_measurements={"benchmark_score": 0.0},
+        experience_path=tmp_path / "experience.md",
+        active_target="rank15",
+        locked_opponents=("rank16",),
+    )
+
+    assert "rank15" in prompt
+    assert "rank16" in prompt
+
+
 def test_k4_role_prompts_use_digest_research_state_and_exact_branch_brief(tmp_path):
     from agentbench_frame.hl.context import ContextBundle, IterationContext
 

@@ -317,3 +317,35 @@ def test_resume_from_stagnation_keeps_best_parent_and_resets_patience():
     assert parent == "v000000"
     assert manager.state.stagnation_count == 1
     assert decision.kind == "continue"
+
+
+def test_hard_opponent_gate_requires_four_of_five_for_each_opponent():
+    from agentbench_frame.hl.curriculum import meets_hard_opponent_gate
+
+    def matches(rank16_wins):
+        rows = []
+        for opponent, wins in (("rank15", 4), ("rank16", rank16_wins)):
+            rows.extend(
+                {
+                    "status": "complete",
+                    "opponent": opponent,
+                    "seed": 91 + index,
+                    "result": "win" if index < wins else "loss",
+                    "end_state": ["OK", "OK"],
+                }
+                for index in range(5)
+            )
+        return rows
+
+    assert meets_hard_opponent_gate(
+        matches(4),
+        opponents=("rank15", "rank16"),
+        expected_seeds=(91, 92, 93, 94, 95),
+        wins_required=4,
+    )
+    assert not meets_hard_opponent_gate(
+        matches(3),
+        opponents=("rank15", "rank16"),
+        expected_seeds=(91, 92, 93, 94, 95),
+        wins_required=4,
+    )

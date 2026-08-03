@@ -35,6 +35,52 @@ class CurriculumDecision:
     lost_locked_opponents: tuple[str, ...] = ()
 
 
+def meets_hard_opponent_gate(
+    matches: Iterable[Mapping[str, Any]],
+    *,
+    opponents: tuple[str, str],
+    expected_seeds: tuple[int, ...],
+    wins_required: int,
+) -> bool:
+    """Return whether each hard opponent wins enough sealed valid cases."""
+
+    if len(set(opponents)) != 2:
+        raise ValueError("hard-opponent gate requires two distinct opponents")
+    if len(expected_seeds) != 5 or len(set(expected_seeds)) != 5:
+        raise ValueError("hard-opponent gate requires five unique seeds")
+    if not 1 <= wins_required <= len(expected_seeds):
+        raise ValueError("wins_required is outside the sealed seed count")
+    by_opponent: dict[str, dict[int, str]] = {
+        opponent: {} for opponent in opponents
+    }
+    for match in matches:
+        opponent = str(match.get("opponent") or "")
+        seed = match.get("seed")
+        if opponent not in by_opponent or seed not in expected_seeds:
+            continue
+        if match.get("status") != "complete":
+            return False
+        result = str(match.get("result") or "")
+        if result not in {"win", "draw", "loss"}:
+            return False
+        if seed in by_opponent[opponent]:
+            return False
+        end_state = match.get("end_state")
+        fault_free = (
+            end_state is None
+            or end_state == ("OK", "OK")
+            or end_state == ["OK", "OK"]
+        )
+        by_opponent[opponent][int(seed)] = result if fault_free else "loss"
+    expected = set(expected_seeds)
+    return all(
+        set(results) == expected
+        and sum(result == "win" for result in results.values())
+        >= wins_required
+        for results in by_opponent.values()
+    )
+
+
 def summarize_certification(
     matches: Iterable[Mapping[str, Any]],
     *,

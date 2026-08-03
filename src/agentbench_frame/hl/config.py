@@ -295,8 +295,13 @@ class CurriculumConfig:
 class EvaluationConfig:
     learning_opponent: str = "rank01"
     fixed_gate_seeds: tuple[int, ...] = ()
+    hard_opponents: tuple[str, ...] = ()
+    training_seeds: tuple[int, ...] = ()
+    validation_seeds: tuple[int, ...] = ()
+    training_rotation_stride: int = 1
     certification_opponents: str = "all"
     certification_seeds: tuple[int, ...] = ()
+    certification_wins_required: int = 1
     required_human_opponents: int = 15
     required_win_rate: float = 0.5
     full_pool_every_iteration: bool = True
@@ -305,8 +310,62 @@ class EvaluationConfig:
     max_parallel_matches: int = 1
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "fixed_gate_seeds", tuple(self.fixed_gate_seeds))
-        object.__setattr__(self, "certification_seeds", tuple(self.certification_seeds))
+        for field in (
+            "fixed_gate_seeds",
+            "hard_opponents",
+            "training_seeds",
+            "validation_seeds",
+            "certification_seeds",
+        ):
+            object.__setattr__(self, field, tuple(getattr(self, field)))
+        if not self.fixed_gate_seeds and (
+            self.training_seeds or self.validation_seeds
+        ):
+            object.__setattr__(
+                self,
+                "fixed_gate_seeds",
+                (*self.training_seeds, *self.validation_seeds),
+            )
+        if self.training_rotation_stride < 1:
+            raise ValueError(
+                "evaluation.training_rotation_stride must be >= 1"
+            )
+        if self.hard_opponents:
+            if (
+                len(self.hard_opponents) != 2
+                or len(set(self.hard_opponents)) != 2
+            ):
+                raise ValueError(
+                    "evaluation.hard_opponents must contain two distinct opponents"
+                )
+            if not self.training_seeds or not self.validation_seeds:
+                raise ValueError(
+                    "generalizable evaluation requires training and validation seeds"
+                )
+            if (
+                len(self.certification_seeds) != 5
+                or len(set(self.certification_seeds)) != 5
+            ):
+                raise ValueError(
+                    "generalizable evaluation requires five unique certification seeds"
+                )
+            seed_sets = (
+                set(self.training_seeds),
+                set(self.validation_seeds),
+                set(self.certification_seeds),
+            )
+            if any(
+                left & right
+                for index, left in enumerate(seed_sets)
+                for right in seed_sets[index + 1 :]
+            ):
+                raise ValueError(
+                    "training, validation, and certification seeds must be disjoint"
+                )
+            if not 1 <= self.certification_wins_required <= 5:
+                raise ValueError(
+                    "evaluation.certification_wins_required must be in [1, 5]"
+                )
         if self.required_human_opponents < 1:
             raise ValueError("evaluation.required_human_opponents must be >= 1")
         if not 0.0 <= self.required_win_rate <= 1.0:

@@ -515,3 +515,60 @@ def test_certification_runs_every_human_on_same_seed_set(tmp_path):
     assert len(calls) == 32
     assert calls[:2] == [("ghost-1", 7), ("ghost-1", 8)]
     assert calls[-2:] == [("ghost-16", 7), ("ghost-16", 8)]
+
+
+def test_dual_opponent_stages_share_rotating_training_and_validation_cases(tmp_path):
+    rank15 = Opponent(
+        opponent_id="rank15",
+        rank=15,
+        archive=Path("rank15.zip"),
+        process=ProcessSpec(("ghost-15",)),
+    )
+    rank16 = Opponent(
+        opponent_id="rank16",
+        rank=16,
+        archive=Path("rank16.zip"),
+        process=ProcessSpec(("ghost-16",)),
+    )
+    calls = []
+
+    def runner(**kwargs):
+        calls.append((kwargs["ghosts"].argv[0], kwargs["seed"]))
+        return _Match(
+            status="complete",
+            seed=kwargs["seed"],
+            rollman_score=1,
+            ghosts_score=0,
+            result="win",
+        )
+
+    evaluator = RollmanEvaluator(
+        logic=ProcessSpec(("logic",)),
+        candidate_factory=lambda version: ProcessSpec(("candidate",)),
+        learning_opponent=rank15,
+        learning_opponents=(rank15, rank16),
+        human_pool=(rank15, rank16),
+        fixed_gate_seeds=(101, 102, 103, 201, 202),
+        training_seeds=(101, 102, 103),
+        validation_seeds=(201, 202),
+        certification_seeds=(91, 92, 93, 94, 95),
+        artifact_root=tmp_path,
+        match_runner=runner,
+        quick_screen_seed_count=1,
+        finalist_seed_count=2,
+        training_rotation_stride=1,
+    )
+    evaluator.set_training_cycle(2)
+
+    evaluator.quick_screen(_version())
+    assert calls == [("ghost-15", 102), ("ghost-16", 102)]
+
+    calls.clear()
+    evaluator.evaluate_finalist(_version())
+    assert calls == [
+        ("ghost-15", 201),
+        ("ghost-15", 202),
+        ("ghost-16", 201),
+        ("ghost-16", 202),
+    ]
+    assert all(seed < 90_000 for _, seed in calls)

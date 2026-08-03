@@ -75,6 +75,10 @@ class RollmanEvaluator:
         fixed_gate_seeds: Iterable[int],
         certification_seeds: Iterable[int],
         artifact_root: str | Path,
+        learning_opponents: Sequence[Opponent] | None = None,
+        training_seeds: Iterable[int] | None = None,
+        validation_seeds: Iterable[int] | None = None,
+        training_rotation_stride: int = 1,
         timeout_s: float = 2.0,
         match_runner: MatchRunner = run_match,
         state_tracker_factory: TrackerFactory | None = None,
@@ -85,8 +89,20 @@ class RollmanEvaluator:
         self.logic = logic
         self.candidate_factory = candidate_factory
         self.learning_opponent = learning_opponent
+        self.learning_opponents = tuple(learning_opponents or (learning_opponent,))
         self.human_pool = tuple(sorted(human_pool, key=lambda item: item.rank))
         self.fixed_gate_seeds = tuple(int(seed) for seed in fixed_gate_seeds)
+        self.training_seeds = tuple(
+            int(seed)
+            for seed in (
+                self.fixed_gate_seeds if training_seeds is None else training_seeds
+            )
+        )
+        self.validation_seeds = tuple(
+            int(seed) for seed in (() if validation_seeds is None else validation_seeds)
+        )
+        self.training_rotation_stride = int(training_rotation_stride)
+        self.training_cycle = 1
         self.certification_seeds = tuple(
             int(seed) for seed in certification_seeds
         )
@@ -97,22 +113,36 @@ class RollmanEvaluator:
         self.max_parallel_matches = int(max_parallel_matches)
         self.quick_screen_seed_count = int(quick_screen_seed_count)
         self.finalist_seed_count = (
-            len(self.fixed_gate_seeds) - self.quick_screen_seed_count
+            (
+                len(self.validation_seeds)
+                if self.validation_seeds
+                else len(self.fixed_gate_seeds) - self.quick_screen_seed_count
+            )
             if finalist_seed_count is None
             else int(finalist_seed_count)
         )
         self.last_evaluation: CandidateEvaluation | None = None
-        if learning_opponent.process is None:
+        if any(opponent.process is None for opponent in self.learning_opponents):
             raise ValueError("learning opponent has not been prepared")
         if not self.fixed_gate_seeds:
             raise ValueError("fixed_gate_seeds cannot be empty")
         if not self.certification_seeds:
             raise ValueError("certification_seeds cannot be empty")
+        if not self.training_seeds:
+            raise ValueError("training_seeds cannot be empty")
+        if self.training_rotation_stride < 1:
+            raise ValueError("training rotation stride must be positive")
         if self.quick_screen_seed_count < 1:
             raise ValueError("quick-screen seed count must be positive")
         if finalist_seed_count is not None and self.finalist_seed_count < 1:
             raise ValueError("finalist seed count must be positive")
-        if (
+        if self.quick_screen_seed_count > len(self.training_seeds):
+            raise ValueError("quick-screen seed count exceeds training seeds")
+        if self.validation_seeds and self.finalist_seed_count > len(
+            self.validation_seeds
+        ):
+            raise ValueError("finalist seed count exceeds validation seeds")
+        if not self.validation_seeds and (
             self.quick_screen_seed_count + self.finalist_seed_count
             > len(self.fixed_gate_seeds)
         ):
@@ -125,10 +155,11 @@ class RollmanEvaluator:
             raise ValueError("max_parallel_matches must be positive")
 
     def evaluate(self, version: Version) -> CandidateEvaluation:
+        seeds = (*self._current_training_seeds(), *self._finalist_seeds())
         self.last_evaluation = self._evaluate_cases(
             version,
-            opponents=(self.learning_opponent,),
-            seeds=self.fixed_gate_seeds,
+            opponents=self.learning_opponents,
+            seeds=seeds,
             phase="learning",
         )
         return self.last_evaluation
@@ -138,18 +169,15 @@ class RollmanEvaluator:
 
         return self._evaluate_cases(
             version,
-            opponents=(self.learning_opponent,),
-            seeds=self.fixed_gate_seeds[: self.quick_screen_seed_count],
+            opponents=self.learning_opponents,
+            seeds=self._current_training_seeds(),
             phase="quick_screen",
         )
 
     def evaluate_finalist(self, version: Version) -> CandidateEvaluation:
         """Evaluate a quick-screen finalist on the remaining target seeds."""
 
-        start = self.quick_screen_seed_count
-        seeds = self.fixed_gate_seeds[
-            start : start + self.finalist_seed_count
-        ]
+        seeds = self._finalist_seeds()
         if not seeds:
             return CandidateEvaluation(
                 status="complete",
@@ -158,7 +186,7 @@ class RollmanEvaluator:
             )
         return self._evaluate_cases(
             version,
-            opponents=(self.learning_opponent,),
+            opponents=self.learning_opponents,
             seeds=seeds,
             phase="finalist",
         )
@@ -241,6 +269,32 @@ class RollmanEvaluator:
         if opponent.process is None:
             raise ValueError("learning opponent has not been prepared")
         self.learning_opponent = opponent
+        if len(self.learning_opponents) == 1:
+            self.learning_opponents = (opponent,)
+
+    def set_training_cycle(self, cycle: int) -> None:
+        """Select one deterministic rotating training window for a cycle."""
+
+        if cycle < 1:
+            raise ValueError("training cycle must be positive")
+        self.training_cycle = int(cycle)
+
+    def _current_training_seeds(self) -> tuple[int, ...]:
+        start = (
+            (self.training_cycle - 1) * self.training_rotation_stride
+        ) % len(self.training_seeds)
+        return tuple(
+            self.training_seeds[(start + offset) % len(self.training_seeds)]
+            for offset in range(self.quick_screen_seed_count)
+        )
+
+    def _finalist_seeds(self) -> tuple[int, ...]:
+        if self.validation_seeds:
+            return self.validation_seeds[: self.finalist_seed_count]
+        start = self.quick_screen_seed_count
+        return self.fixed_gate_seeds[
+            start : start + self.finalist_seed_count
+        ]
 
     def certify(self, version: Version) -> CandidateEvaluation:
         if len(self.human_pool) != 16:

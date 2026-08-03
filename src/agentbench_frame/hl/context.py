@@ -275,11 +275,12 @@ Act 预算：
         if not 0 <= branch_index < branch_count:
             raise ValueError("branch_index must be inside branch_count")
         if active_target is not None:
+            allowed_opponents = {active_target, *locked_opponents}
             wrong_opponents = sorted(
                 {
                     str(item.get("opponent"))
                     for item in replay_evidence
-                    if item.get("opponent") != active_target
+                    if item.get("opponent") not in allowed_opponents
                 }
             )
             if wrong_opponents:

@@ -1148,9 +1148,9 @@ def _curriculum_evaluation_from_events(
         }:
             continue
         matches = tuple(event.get("matches") or ())
-        if not matches or any(
-            match.get("opponent") != active_target for match in matches
-        ):
+        if not matches or active_target not in {
+            match.get("opponent") for match in matches
+        }:
             continue
         status = str(event.get("status"))
         score_value = (
@@ -1382,9 +1382,10 @@ def _run_real(
     from agentbench_frame.games.rollman.state_tracker import FrozenStateTracker
     from agentbench_frame.hl.codebase import Version, VersionStore
     from agentbench_frame.hl.context import IterationContext, compile_game_digest
-    from agentbench_frame.hl.controller import HLController
+    from agentbench_frame.hl.controller import HLController, ProposalCycleResult
     from agentbench_frame.hl.curriculum import (
         CurriculumManager,
+        meets_hard_opponent_gate,
         rerank_certification,
         summarize_certification,
     )
@@ -1435,12 +1436,13 @@ def _run_real(
     _ensure_candidate(workspace)
     pool = load_human_pool(config.paths.human_manifest)
     curriculum_mode = config.run.curriculum.mode == "weakest_failed"
+    generalizable_mode = bool(config.run.evaluation.hard_opponents)
     prepared_pool = (
         prepare_human_pool(
             pool,
             build_root=config.paths.opponent_build_root,
         )
-        if curriculum_mode
+        if curriculum_mode or generalizable_mode
         else ()
     )
     if curriculum_mode:
@@ -1456,6 +1458,13 @@ def _run_real(
             rank1_raw,
             build_root=config.paths.opponent_build_root,
         )
+    prepared_by_id = {
+        opponent.opponent_id: opponent for opponent in prepared_pool
+    }
+    hard_learning_opponents = tuple(
+        prepared_by_id[opponent_id]
+        for opponent_id in config.run.evaluation.hard_opponents
+    )
     logic_root = (
         config.paths.agentbench_root
         / "backend_sources/corpus/29_rollman/logic/gamecode_logic/PacmanLogic"
@@ -1503,6 +1512,12 @@ def _run_real(
         fixed_gate_seeds=config.run.evaluation.fixed_gate_seeds,
         certification_seeds=config.run.evaluation.certification_seeds,
         artifact_root=run_dir / "matches",
+        learning_opponents=(hard_learning_opponents or None),
+        training_seeds=(config.run.evaluation.training_seeds or None),
+        validation_seeds=(config.run.evaluation.validation_seeds or None),
+        training_rotation_stride=(
+            config.run.evaluation.training_rotation_stride
+        ),
         match_runner=run_match,
         state_tracker_factory=lambda: FrozenStateTracker(logic_root),
         max_parallel_matches=(
@@ -2081,6 +2096,21 @@ def _run_real(
                 required_human_opponents=(
                     config.run.curriculum.required_human_opponents
                 ),
+                hard_opponents=list(config.run.evaluation.hard_opponents),
+                hard_opponent_gate_passed=(
+                    certification.status == "complete"
+                    and bool(config.run.evaluation.hard_opponents)
+                    and meets_hard_opponent_gate(
+                        certification.matches,
+                        opponents=config.run.evaluation.hard_opponents,
+                        expected_seeds=(
+                            config.run.evaluation.certification_seeds
+                        ),
+                        wins_required=(
+                            config.run.evaluation.certification_wins_required
+                        ),
+                    )
+                ),
                 matches=list(certification.matches),
             )
             return certification, summary
@@ -2117,7 +2147,11 @@ def _run_real(
 
         certified = any(
             event.get("event_type") == "run_completed"
-            and event.get("reason") == "all_human_opponents_defeated"
+            and event.get("reason")
+            in {
+                "all_human_opponents_defeated",
+                "hard_opponents_4_of_5",
+            }
             for event in historical
         )
         curriculum_has_started = any(
@@ -2514,6 +2548,34 @@ def _run_real(
                     }
                 )
                 return 2
+            if generalizable_mode and meets_hard_opponent_gate(
+                certification.matches,
+                opponents=config.run.evaluation.hard_opponents,
+                expected_seeds=config.run.evaluation.certification_seeds,
+                wins_required=(
+                    config.run.evaluation.certification_wins_required
+                ),
+            ):
+                writer.write(
+                    "run_completed",
+                    reason="hard_opponents_4_of_5",
+                    version_id=origin.version_id,
+                    hard_opponents=list(
+                        config.run.evaluation.hard_opponents
+                    ),
+                    wins_required=(
+                        config.run.evaluation.certification_wins_required
+                    ),
+                )
+                _json(
+                    {
+                        "run_dir": str(run_dir),
+                        "certified": True,
+                        "status": "hard_opponents_4_of_5",
+                        **controller.summary(),
+                    }
+                )
+                return 0
             curriculum_manager = CurriculumManager.start(
                 version_id=origin.version_id,
                 summary=origin_summary,
@@ -2632,13 +2694,41 @@ def _run_real(
                 raise RuntimeError(
                     "provider credential is required for a model act"
                 )
+            if generalizable_mode:
+                evaluator.set_training_cycle(
+                    controller.summary()["iterations"] + 1
+                )
+                rotating_parent = version_store.get(next_parent)
+                rotating_parent_evaluation = evaluator.evaluate(
+                    rotating_parent
+                )
+                if rotating_parent_evaluation.status != "complete":
+                    _json(
+                        {
+                            "run_dir": str(run_dir),
+                            "status": "incomplete_parent_evaluation",
+                            "version_id": next_parent,
+                            **controller.summary(),
+                        }
+                    )
+                    return 2
+                evaluations_by_version[next_parent] = (
+                    rotating_parent_evaluation
+                )
+                controller.record_matches(
+                    version=rotating_parent,
+                    act_id=rotating_parent.act_id,
+                    phase="learning",
+                    matches=rotating_parent_evaluation.matches,
+                )
+            parent_evaluation_for_cycle = evaluations_by_version.get(
+                next_parent
+            )
             iteration_result = (
                 controller.run_proposal_cycle(
                     parent_version_id=next_parent,
                     defer_experience=True,
-                    parent_evaluation=evaluations_by_version.get(
-                        next_parent
-                    ),
+                    parent_evaluation=parent_evaluation_for_cycle,
                     planner_recovery=pending_planner_recovery,
                     candidate_recoveries=pending_candidate_recoveries,
                     repair_recoveries=pending_repair_recoveries,
@@ -2698,7 +2788,6 @@ def _run_real(
             search_parent_id = iteration_result.search_parent_version_id
             if search_parent_id == best_candidate.version.version_id:
                 selected = best_candidate
-                controller.commit_experience(selected)
             else:
                 parent_evaluation = evaluations_by_version.get(
                     search_parent_id
@@ -2719,6 +2808,17 @@ def _run_real(
                     evaluation=parent_evaluation,
                     pending_experience_path=None,
                 )
+            if isinstance(iteration_result, ProposalCycleResult):
+                controller.consolidate_experience_cycle(
+                    iteration_id=iteration_result.iteration_id,
+                    parent_version_id=iteration_result.parent_version_id,
+                    parent_evaluation=parent_evaluation_for_cycle,
+                    representatives=iteration_result.representatives,
+                    branch_briefs=iteration_result.branch_briefs,
+                    selected_version_id=search_parent_id,
+                )
+            else:
+                controller.commit_experience(selected)
             if config.run.evaluation.reporting_panel_every_cycle:
                 reporting = evaluator.evaluate_reporting_panel(
                     selected.version,
@@ -2883,6 +2983,28 @@ def _run_real(
                     )
                     return 2
             assert summary is not None
+            if generalizable_mode and meets_hard_opponent_gate(
+                certification.matches,
+                opponents=config.run.evaluation.hard_opponents,
+                expected_seeds=config.run.evaluation.certification_seeds,
+                wins_required=(
+                    config.run.evaluation.certification_wins_required
+                ),
+            ):
+                certified = True
+                writer.write(
+                    "run_completed",
+                    reason="hard_opponents_4_of_5",
+                    version_id=selected.version.version_id,
+                    hard_opponents=list(
+                        config.run.evaluation.hard_opponents
+                    ),
+                    wins_required=(
+                        config.run.evaluation.certification_wins_required
+                    ),
+                )
+                sync_research_state()
+                break
             completed_target = (
                 curriculum_manager.state.active_target
             )
