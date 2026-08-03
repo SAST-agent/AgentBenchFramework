@@ -175,7 +175,18 @@ _EVENT_FIELDS = {
     "search_parent_selected": ({"iteration_id", "version_id", "act_id"}, set()),
     "match_completed": ({"match_id", "version_id", "act_id", "phase", "role", "opponent", "seed", "result", "valid"}, {"rollman_score", "ghosts_score", "replay", "trace", "error"}),
     "evaluation_completed": ({"version_id", "status", "benchmark_score", "wins", "draws", "losses", "matches"}, set()),
-    "certification_completed": ({"version_id", "act_id", "status", "score", "passing_human_opponents", "required_human_opponents", "matches"}, set()),
+    "certification_completed": (
+        {
+            "version_id",
+            "act_id",
+            "status",
+            "score",
+            "passing_human_opponents",
+            "required_human_opponents",
+            "matches",
+        },
+        {"hard_opponents", "hard_opponent_gate_passed"},
+    ),
     "policy_kl_measured": ({"version_id", "parent_version_id", "epsilon", "action_support", "local_policy_kl_trace", "episode_local_policy_kl", "reference_manifest"}, set()),
     "occupancy_measured": ({"version_id", "parent_version_id", "occupancy_shift"}, set()),
     "measurement_failed": (
@@ -206,7 +217,10 @@ _EVENT_FIELDS = {
         set(),
     ),
     "checkpoint_created": ({"act_id", "iteration_id", "path", "parent_version_id"}, {"thread_id"}),
-    "run_completed": ({"reason", "version_id"}, {"passing_human_opponents"}),
+    "run_completed": (
+        {"reason", "version_id"},
+        {"passing_human_opponents", "hard_opponents", "wins_required"},
+    ),
     "proposal_cycle_started": (
         {"iteration_id", "parent_version_id", "candidate_count"},
         set(),
@@ -342,7 +356,7 @@ def _validate_record(record: Mapping[str, Any]) -> None:
             raise ValueError(f"{event_type}.{field} must be a string or null")
     for field in (
         "branch_index", "seed", "wins", "draws", "losses",
-        "passing_human_opponents", "required_human_opponents",
+        "passing_human_opponents", "required_human_opponents", "wins_required",
         "coding_agent_acts", "iterations", "prompt_tokens",
         "cached_input_tokens", "completion_tokens",
         "reasoning_output_tokens", "total_tokens", "rollman_score",
@@ -368,13 +382,14 @@ def _validate_record(record: Mapping[str, Any]) -> None:
             raise ValueError(f"{event_type}.{field} must be numeric or null")
     for field in (
         "selected", "valid", "baseline", "improved", "failed_active_target",
+        "hard_opponent_gate_passed",
     ):
         if field in record and not isinstance(record[field], bool):
             raise ValueError(f"{event_type}.{field} must be boolean")
     for field in (
         "matches", "action_support", "local_policy_kl_trace",
         "episode_local_policy_kl",
-        "locked_opponents", "lost_locked_opponents",
+        "locked_opponents", "lost_locked_opponents", "hard_opponents",
         "version_ids", "candidate_version_ids",
         "branch_indices",
         "episodes",

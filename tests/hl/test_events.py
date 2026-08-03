@@ -4,6 +4,37 @@ import unittest
 
 
 class HLEventTests(unittest.TestCase):
+    def test_hard_opponent_certification_fields_are_schema_valid(self):
+        from agentbench_frame.hl.events import HLEventWriter, read_events
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as directory:
+            path = f"{directory}/events.jsonl"
+            writer = HLEventWriter(path, run_id="run-hard-gate")
+            writer.write(
+                "certification_completed",
+                version_id="v000001",
+                act_id="act-000001",
+                status="complete",
+                score=0.8,
+                passing_human_opponents=2,
+                required_human_opponents=2,
+                hard_opponents=["rank15", "rank16"],
+                hard_opponent_gate_passed=True,
+                matches=[],
+            )
+            writer.write(
+                "run_completed",
+                reason="hard_opponents_4_of_5",
+                version_id="v000001",
+                hard_opponents=["rank15", "rank16"],
+                wins_required=4,
+            )
+
+            records = read_events(path)
+            self.assertTrue(records[0]["hard_opponent_gate_passed"])
+            self.assertEqual(records[1]["wins_required"], 4)
+
     def test_finalized_events_append_once_with_common_fields(self):
         from agentbench_frame.hl.events import HLEventWriter, read_events
 
