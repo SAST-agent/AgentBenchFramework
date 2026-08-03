@@ -331,6 +331,30 @@ class HLEventTests(unittest.TestCase):
                     invented=True,
                 )
 
+    def test_evaluation_event_accepts_optional_failure_classification(self):
+        from agentbench_frame.hl.events import HLEventWriter, read_events
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as directory:
+            path = f"{directory}/events.jsonl"
+            writer = HLEventWriter(path, run_id="run-error")
+            writer.write(
+                "evaluation_completed",
+                version_id="v1",
+                status="failed",
+                benchmark_score=None,
+                wins=0,
+                draws=0,
+                losses=0,
+                matches=[],
+                error="activation_probe_failed: invalid delta",
+            )
+
+            self.assertEqual(
+                read_events(path)[0]["error"],
+                "activation_probe_failed: invalid delta",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

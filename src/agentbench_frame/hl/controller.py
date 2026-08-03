@@ -2200,6 +2200,7 @@ class HLController:
             version_id=version.version_id,
             status=evaluation.status,
             benchmark_score=evaluation.score,
+            error=evaluation.error,
             wins=sum(match["result"] == "win" for match in match_records),
             draws=sum(match["result"] == "draw" for match in match_records),
             losses=sum(match["result"] == "loss" for match in match_records),

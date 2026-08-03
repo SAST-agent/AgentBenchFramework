@@ -373,6 +373,16 @@ def _historical_evaluations(
     events: Sequence[Mapping[str, Any]],
 ) -> dict[str, CandidateEvaluation]:
     result = {}
+    activation_errors = {
+        str(event["version_id"]): (
+            "activation_probe_failed: " + str(event["error"])
+        )
+        for event in events
+        if event.get("event_type") == "candidate_activation_measured"
+        and event.get("status") == "failed"
+        and event.get("error")
+        and event.get("version_id") is not None
+    }
     for event in events:
         if event.get("event_type") != "evaluation_completed":
             continue
@@ -384,7 +394,15 @@ def _historical_evaluations(
                 if status == "complete"
                 else None
             ),
-            error=None if status == "complete" else "historical incomplete evaluation",
+            error=(
+                None
+                if status == "complete"
+                else str(
+                    event.get("error")
+                    or activation_errors.get(str(event["version_id"]))
+                    or "historical incomplete evaluation"
+                )
+            ),
             matches=tuple(event.get("matches", ())),
         )
     return result

@@ -138,6 +138,43 @@ def test_profile_pending_cycle_recovery_uses_latest_attempt_boundary(tmp_path):
     assert recoveries["repair_recoveries"] == {}
 
 
+def test_historical_evaluation_preserves_and_backfills_failure_classification():
+    from agentbench_frame.hl.profile_runner import _historical_evaluations
+
+    evaluations = _historical_evaluations(
+        [
+            {
+                "event_type": "candidate_activation_measured",
+                "version_id": "v-old",
+                "status": "failed",
+                "error": "tower delta was invalid",
+            },
+            {
+                "event_type": "evaluation_completed",
+                "version_id": "v-old",
+                "status": "failed",
+                "benchmark_score": None,
+                "matches": [],
+            },
+            {
+                "event_type": "evaluation_completed",
+                "version_id": "v-new",
+                "status": "failed",
+                "benchmark_score": None,
+                "error": "candidate_smoke_failed: fixture mismatch",
+                "matches": [],
+            },
+        ]
+    )
+
+    assert evaluations["v-old"].error == (
+        "activation_probe_failed: tower delta was invalid"
+    )
+    assert evaluations["v-new"].error == (
+        "candidate_smoke_failed: fixture mismatch"
+    )
+
+
 def test_resume_progress_reconstructs_best_archive_and_stagnation():
     from agentbench_frame.hl.profile_runner import _resume_progress
 

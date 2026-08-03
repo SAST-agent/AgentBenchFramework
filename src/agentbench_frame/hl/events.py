@@ -210,7 +210,10 @@ _EVENT_FIELDS = {
             "error",
         },
     ),
-    "evaluation_completed": ({"version_id", "status", "benchmark_score", "wins", "draws", "losses", "matches"}, set()),
+    "evaluation_completed": (
+        {"version_id", "status", "benchmark_score", "wins", "draws", "losses", "matches"},
+        {"error"},
+    ),
     "certification_completed": (
         {
             "version_id",
