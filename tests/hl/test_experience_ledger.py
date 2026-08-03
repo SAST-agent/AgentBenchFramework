@@ -3,18 +3,43 @@ import dataclasses
 import pytest
 
 
-def _match(opponent, seed, rollman, ghosts, *, result=None):
+def _match(
+    opponent,
+    role,
+    seed,
+    candidate_score,
+    opponent_score,
+    *,
+    result=None,
+    live_opponent=True,
+):
     if result is None:
-        result = "win" if rollman > ghosts else "draw" if rollman == ghosts else "loss"
+        result = (
+            "win"
+            if candidate_score > opponent_score
+            else "draw"
+            if candidate_score == opponent_score
+            else "loss"
+        )
     return {
+        "schema_version": "1.0",
+        "game": "antwar2",
+        "candidate": "v000001" if candidate_score == 0 else "v000002",
         "status": "complete",
         "opponent": opponent,
+        "candidate_role": role,
         "seed": seed,
         "result": result,
-        "rollman_score": rollman,
-        "ghosts_score": ghosts,
+        "points": {"win": 1.0, "draw": 0.5, "loss": 0.0}[result],
+        "candidate_score": candidate_score,
+        "opponent_score": opponent_score,
+        "dense_margin": candidate_score - opponent_score,
+        "terminal_metrics": {},
+        "rounds": 100,
         "replay": f"matches/{opponent}/{seed}/replay.jsonl",
         "trace": f"matches/{opponent}/{seed}/trace.jsonl",
+        "faults": [],
+        "live_opponent": live_opponent,
     }
 
 
@@ -34,8 +59,8 @@ def _derive(*, candidate_matches, activation=None, mechanism="bounded breakout")
             "preservation_contract": "outside the respawn window preserve the parent",
         },
         parent_matches=(
-            _match("rank15", 11, 0, 100),
-            _match("rank15", 12, 0, 100),
+            _match("rank15", "P0", 11, 0, 100),
+            _match("rank15", "P1", 12, 0, 100),
         ),
         candidate_matches=tuple(candidate_matches),
         activation=activation
@@ -50,21 +75,22 @@ def _derive(*, candidate_matches, activation=None, mechanism="bounded breakout")
 def test_mixed_record_preserves_good_and_bad_match_conditions():
     record = _derive(
         candidate_matches=(
-            _match("rank15", 11, 60, 100),
-            _match("rank15", 12, -50, 100),
+            _match("rank15", "P0", 11, 60, 100),
+            _match("rank15", "P1", 12, -50, 100),
         )
     )
 
     assert record.verdict == "mixed"
-    assert [row.margin_delta for row in record.comparisons] == [60.0, -50.0]
+    assert [row.dense_margin_delta for row in record.comparisons] == [60.0, -50.0]
+    assert [row.candidate_role for row in record.comparisons] == ["P0", "P1"]
     assert record.activation_condition == "level == 3 and recent observable respawn"
 
 
 def test_record_is_verified_good_only_without_a_measured_regression():
     record = _derive(
         candidate_matches=(
-            _match("rank15", 11, 60, 100),
-            _match("rank15", 12, 10, 100),
+            _match("rank15", "P0", 11, 60, 100),
+            _match("rank15", "P1", 12, 10, 100),
         )
     )
 
@@ -74,8 +100,8 @@ def test_record_is_verified_good_only_without_a_measured_regression():
 def test_zero_activation_is_invalid_even_when_matches_are_complete():
     record = _derive(
         candidate_matches=(
-            _match("rank15", 11, 60, 100),
-            _match("rank15", 12, 10, 100),
+            _match("rank15", "P0", 11, 60, 100),
+            _match("rank15", "P1", 12, 10, 100),
         ),
         activation={
             "status": "complete",
@@ -92,8 +118,8 @@ def test_ledger_round_trips_canonical_jsonl_and_is_idempotent(tmp_path):
 
     record = _derive(
         candidate_matches=(
-            _match("rank15", 11, 60, 100),
-            _match("rank15", 12, 10, 100),
+            _match("rank15", "P0", 11, 60, 100),
+            _match("rank15", "P1", 12, 10, 100),
         )
     )
     ledger = ExperienceLedger(tmp_path / "ledger.jsonl")
@@ -109,11 +135,23 @@ def test_ledger_rejects_credential_material(tmp_path):
 
     record = _derive(
         candidate_matches=(
-            _match("rank15", 11, 60, 100),
-            _match("rank15", 12, 10, 100),
+            _match("rank15", "P0", 11, 60, 100),
+            _match("rank15", "P1", 12, 10, 100),
         )
     )
     unsafe = dataclasses.replace(record, mechanism="sk-abcdefghijklmno")
 
     with pytest.raises(ValueError, match="credential"):
         ExperienceLedger(tmp_path / "ledger.jsonl").append(unsafe)
+
+
+def test_comparisons_join_on_role_and_ignore_non_live_diagnostics():
+    record = _derive(
+        candidate_matches=(
+            _match("rank15", "P1", 11, 900, 0),
+            _match("rank15", "P0", 11, 60, 100, live_opponent=False),
+        )
+    )
+
+    assert record.verdict == "inconclusive"
+    assert record.comparisons == ()

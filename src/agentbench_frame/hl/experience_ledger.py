@@ -9,6 +9,8 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any, Literal
 
+from agentbench_frame.hl.match_record import MatchRecord
+
 
 _SECRET = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}")
 _VERDICTS = {
@@ -23,16 +25,19 @@ _VERDICTS = {
 @dataclasses.dataclass(frozen=True)
 class ExperienceComparison:
     opponent: str
+    candidate_role: str
     seed: int
     parent_result: str
     candidate_result: str
-    parent_rollman_score: float
-    parent_ghosts_score: float
-    candidate_rollman_score: float
-    candidate_ghosts_score: float
-    parent_margin: float
-    candidate_margin: float
-    margin_delta: float
+    parent_points: float
+    candidate_points: float
+    parent_candidate_score: float
+    parent_opponent_score: float
+    candidate_candidate_score: float
+    candidate_opponent_score: float
+    parent_dense_margin: float
+    candidate_dense_margin: float
+    dense_margin_delta: float
     replay: str | None = None
     trace: str | None = None
 
@@ -77,29 +82,19 @@ def _text(value: Any, *, field: str) -> str:
     return normalized
 
 
-def _margin(match: Mapping[str, Any]) -> float | None:
-    rollman = match.get("rollman_score")
-    ghosts = match.get("ghosts_score")
-    if not isinstance(rollman, (int, float)) or not isinstance(
-        ghosts, (int, float)
-    ):
-        return None
-    return float(rollman) - float(ghosts)
-
-
 def _complete_matches(
-    matches: Iterable[Mapping[str, Any]],
-) -> dict[tuple[str, int], Mapping[str, Any]]:
-    result: dict[tuple[str, int], Mapping[str, Any]] = {}
-    for match in matches:
-        if (
-            match.get("status", "complete") != "complete"
-            or match.get("result") not in {"win", "draw", "loss"}
-            or _margin(match) is None
-            or not isinstance(match.get("seed"), int)
-        ):
+    matches: Iterable[MatchRecord | Mapping[str, Any]],
+) -> dict[tuple[str, str, int], MatchRecord]:
+    result: dict[tuple[str, str, int], MatchRecord] = {}
+    for value in matches:
+        match = (
+            value
+            if isinstance(value, MatchRecord)
+            else MatchRecord.from_mapping(value)
+        )
+        if not match.promotable:
             continue
-        result[(str(match.get("opponent")), int(match["seed"]))] = match
+        result[match.comparison_key] = match
     return result
 
 
@@ -112,8 +107,8 @@ def derive_experience_record(
     candidate_version_id: str,
     selected: bool,
     brief: Mapping[str, Any],
-    parent_matches: Iterable[Mapping[str, Any]],
-    candidate_matches: Iterable[Mapping[str, Any]],
+    parent_matches: Iterable[MatchRecord | Mapping[str, Any]],
+    candidate_matches: Iterable[MatchRecord | Mapping[str, Any]],
     activation: Mapping[str, Any] | None,
 ) -> ExperienceRecord:
     """Join comparable Framework matches and derive a deterministic verdict."""
@@ -121,35 +116,39 @@ def derive_experience_record(
     parent_by_case = _complete_matches(parent_matches)
     candidate_by_case = _complete_matches(candidate_matches)
     comparisons: list[ExperienceComparison] = []
-    for opponent, seed in sorted(set(parent_by_case) & set(candidate_by_case)):
-        parent = parent_by_case[(opponent, seed)]
-        candidate = candidate_by_case[(opponent, seed)]
-        parent_margin = _margin(parent)
-        candidate_margin = _margin(candidate)
-        assert parent_margin is not None and candidate_margin is not None
+    for opponent, candidate_role, seed in sorted(
+        set(parent_by_case) & set(candidate_by_case)
+    ):
+        parent = parent_by_case[(opponent, candidate_role, seed)]
+        candidate = candidate_by_case[(opponent, candidate_role, seed)]
+        assert parent.result is not None and candidate.result is not None
+        assert parent.points is not None and candidate.points is not None
+        assert parent.candidate_score is not None
+        assert parent.opponent_score is not None
+        assert candidate.candidate_score is not None
+        assert candidate.opponent_score is not None
+        assert parent.dense_margin is not None
+        assert candidate.dense_margin is not None
         comparisons.append(
             ExperienceComparison(
                 opponent=opponent,
+                candidate_role=candidate_role,
                 seed=seed,
-                parent_result=str(parent["result"]),
-                candidate_result=str(candidate["result"]),
-                parent_rollman_score=float(parent["rollman_score"]),
-                parent_ghosts_score=float(parent["ghosts_score"]),
-                candidate_rollman_score=float(candidate["rollman_score"]),
-                candidate_ghosts_score=float(candidate["ghosts_score"]),
-                parent_margin=parent_margin,
-                candidate_margin=candidate_margin,
-                margin_delta=candidate_margin - parent_margin,
-                replay=(
-                    None
-                    if candidate.get("replay") is None
-                    else str(candidate["replay"])
+                parent_result=parent.result,
+                candidate_result=candidate.result,
+                parent_points=parent.points,
+                candidate_points=candidate.points,
+                parent_candidate_score=parent.candidate_score,
+                parent_opponent_score=parent.opponent_score,
+                candidate_candidate_score=candidate.candidate_score,
+                candidate_opponent_score=candidate.opponent_score,
+                parent_dense_margin=parent.dense_margin,
+                candidate_dense_margin=candidate.dense_margin,
+                dense_margin_delta=(
+                    candidate.dense_margin - parent.dense_margin
                 ),
-                trace=(
-                    None
-                    if candidate.get("trace") is None
-                    else str(candidate["trace"])
-                ),
+                replay=candidate.replay,
+                trace=candidate.trace,
             )
         )
 
@@ -170,8 +169,8 @@ def derive_experience_record(
     elif not comparisons:
         verdict = "inconclusive"
     else:
-        has_gain = any(row.margin_delta > 0 for row in comparisons)
-        has_regression = any(row.margin_delta < 0 for row in comparisons)
+        has_gain = any(row.dense_margin_delta > 0 for row in comparisons)
+        has_regression = any(row.dense_margin_delta < 0 for row in comparisons)
         if has_gain and has_regression:
             verdict = "mixed"
         elif has_gain:

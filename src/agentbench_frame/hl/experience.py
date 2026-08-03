@@ -180,7 +180,8 @@ class ExperienceManager:
     @classmethod
     def _record_line(cls, record: ExperienceRecord) -> str:
         effects = "; ".join(
-            f"{row.opponent}/seed{row.seed} margin_delta={cls._number(row.margin_delta)}"
+            f"{row.opponent}/{row.candidate_role}/seed{row.seed} "
+            f"dense_margin_delta={cls._number(row.dense_margin_delta)}"
             for row in record.comparisons
         ) or "no comparable complete matches"
         selected = "selected" if record.selected else "not-selected"
@@ -217,19 +218,23 @@ class ExperienceManager:
         for key in groups:
             groups[key] = groups[key][-self.max_entries_per_section :]
 
-        negative_by_opponent: dict[str, list[float]] = {}
+        negative_by_opponent_role: dict[tuple[str, str], list[float]] = {}
         for record in records:
             for comparison in record.comparisons:
-                if comparison.margin_delta < 0:
-                    negative_by_opponent.setdefault(comparison.opponent, []).append(
-                        comparison.margin_delta
+                if comparison.dense_margin_delta < 0:
+                    negative_by_opponent_role.setdefault(
+                        (comparison.opponent, comparison.candidate_role), []
+                    ).append(
+                        comparison.dense_margin_delta
                     )
         profile = [
             (
-                f"{opponent}: {len(values)} measured regressions; "
-                f"worst_margin_delta={self._number(min(values))}."
+                f"{opponent}/{candidate_role}: {len(values)} measured regressions; "
+                f"worst_dense_margin_delta={self._number(min(values))}."
             )
-            for opponent, values in sorted(negative_by_opponent.items())
+            for (opponent, candidate_role), values in sorted(
+                negative_by_opponent_role.items()
+            )
         ]
 
         def bullets(values: list[str]) -> list[str]:

@@ -27,16 +27,19 @@ def _ledger_record(*, verdict, version, delta):
         comparisons=(
             ExperienceComparison(
                 opponent="rank15" if version != "3" else "rank16",
+                candidate_role="P0" if version != "3" else "P1",
                 seed=100 + int(version),
                 parent_result="loss",
                 candidate_result="loss",
-                parent_rollman_score=0.0,
-                parent_ghosts_score=100.0,
-                candidate_rollman_score=delta,
-                candidate_ghosts_score=100.0,
-                parent_margin=-100.0,
-                candidate_margin=-100.0 + delta,
-                margin_delta=delta,
+                parent_points=0.0,
+                candidate_points=0.0,
+                parent_candidate_score=0.0,
+                parent_opponent_score=100.0,
+                candidate_candidate_score=delta,
+                candidate_opponent_score=100.0,
+                parent_dense_margin=-100.0,
+                candidate_dense_margin=-100.0 + delta,
+                dense_margin_delta=delta,
             ),
         ),
     )
@@ -181,13 +184,14 @@ def test_skill_projects_verified_good_bad_and_mixed_outcomes(tmp_path):
 
     text = manager.path.read_text(encoding="utf-8")
     assert "## Verified good conditions" in text
-    assert "v-1" in text and "margin_delta=+60" in text
+    assert "v-1" in text and "dense_margin_delta=+60" in text
     assert "## Verified bad conditions" in text
-    assert "v-2" in text and "margin_delta=-20" in text
+    assert "v-2" in text and "dense_margin_delta=-20" in text
     assert "## Mixed or scope-sensitive findings" in text
     assert "v-3" in text
     assert "## Current hard-opponent failure profile" in text
     assert "rank15" in text and "rank16" in text
+    assert "rank16/P1" in text
 
 
 def test_skill_projection_is_deterministic_across_record_order(tmp_path):
