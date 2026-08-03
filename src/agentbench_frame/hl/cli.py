@@ -13,7 +13,7 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from agentbench_frame.games.rollman import rollman_smoke_fixture
 from agentbench_frame.games.rollman.contract import (
@@ -89,6 +89,66 @@ def _verify_rollman_candidate_smoke(
         "scenario_path": str(scenario),
         "result_path": str(result_path),
     }
+
+
+def _write_rollman_planner_packet(
+    *,
+    output_path: str | Path,
+    iteration_id: str,
+    parent_version_id: str,
+    game_digest_path: str | Path,
+    context_manifest_path: str | Path,
+    research_state_path: str | Path,
+    replay_evidence: list[Mapping[str, Any]],
+    previous_measurements: Mapping[str, Any],
+    active_target: str | None,
+    candidate_source_path: str | Path,
+) -> Path:
+    return write_planner_input_packet(
+        output_path=output_path,
+        iteration_id=iteration_id,
+        parent_version_id=parent_version_id,
+        game_digest_path=game_digest_path,
+        context_manifest_path=context_manifest_path,
+        research_state_path=research_state_path,
+        replay_evidence=replay_evidence,
+        previous_measurements=previous_measurements,
+        active_target=active_target,
+        candidate_source_path=candidate_source_path,
+    )
+
+
+def _write_rollman_candidate_packet(
+    *,
+    output_path: str | Path,
+    iteration_id: str,
+    branch_brief: Mapping[str, Any],
+    game_digest_path: str | Path,
+    research_state_path: str | Path,
+    experience_path: str | Path,
+    replay_evidence: list[Mapping[str, Any]],
+    previous_measurements: Mapping[str, Any],
+    active_target: str | None,
+    locked_opponents: tuple[str, ...],
+    candidate_source_path: str | Path,
+    smoke_fixture_path: str | Path,
+    candidate_workspace: str | Path,
+) -> Path:
+    return write_candidate_input_packet(
+        output_path=output_path,
+        iteration_id=iteration_id,
+        branch_brief=branch_brief,
+        game_digest_path=game_digest_path,
+        research_state_path=research_state_path,
+        experience_path=experience_path,
+        replay_evidence=replay_evidence,
+        previous_measurements=previous_measurements,
+        active_target=active_target,
+        locked_opponents=locked_opponents,
+        candidate_source_path=candidate_source_path,
+        smoke_fixture_path=smoke_fixture_path,
+        candidate_workspace=candidate_workspace,
+    )
 
 
 def _json(value: Any) -> None:
@@ -1869,7 +1929,7 @@ def _run_real(
                     shared_distillation_path
                 )
         if phase == "planner":
-            planner_input = write_planner_input_packet(
+            planner_input = _write_rollman_planner_packet(
                 output_path=(
                     run_dir
                     / "proposals"
@@ -1885,8 +1945,6 @@ def _run_real(
                 previous_measurements=previous_measurements,
                 active_target=active_target,
                 candidate_source_path=workspace / "ai.py",
-                smoke_fixture_path=bundle.files["smoke_fixture"],
-                candidate_workspace=workspace,
             )
             return iteration_context.build_planner_prompt(
                 act_id=values["act_id"],
@@ -1931,7 +1989,7 @@ def _run_real(
                 reducer_input_path=reducer_input,
             )
         if phase == "candidate" and values.get("branch_brief") is not None:
-            candidate_input = write_candidate_input_packet(
+            candidate_input = _write_rollman_candidate_packet(
                 output_path=(
                     run_dir
                     / "proposals"
@@ -1948,6 +2006,8 @@ def _run_real(
                 active_target=active_target,
                 locked_opponents=tuple(locked_opponents),
                 candidate_source_path=workspace / "ai.py",
+                smoke_fixture_path=bundle.files["smoke_fixture"],
+                candidate_workspace=workspace,
             )
             return iteration_context.build_candidate_prompt(
                 act_id=values["act_id"],

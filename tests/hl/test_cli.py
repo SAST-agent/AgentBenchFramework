@@ -352,6 +352,72 @@ def test_framework_smoke_callback_reexecutes_fixture_and_checks_hashes(tmp_path)
     assert result["result_path"] == str(result_path.resolve())
 
 
+def test_cli_packet_builders_keep_smoke_contract_on_candidates_only(tmp_path):
+    """Catch smoke-only arguments being forwarded to the planner packet."""
+    from agentbench_frame.hl.cli import (
+        _write_rollman_candidate_packet,
+        _write_rollman_planner_packet,
+    )
+
+    digest = tmp_path / "digest.json"
+    manifest = tmp_path / "manifest.json"
+    research = tmp_path / "research.json"
+    experience = tmp_path / "SKILL.md"
+    source = tmp_path / "candidate" / "ai.py"
+    fixture = tmp_path / "context" / "rollman_smoke_fixture.py"
+    source.parent.mkdir()
+    fixture.parent.mkdir()
+    digest.write_text('{"actions":[0,1,2,3,4]}\n', encoding="utf-8")
+    manifest.write_text('{"bundle_hash":"test"}\n', encoding="utf-8")
+    research.write_text('{"open_questions":[]}\n', encoding="utf-8")
+    experience.write_text("experience\n", encoding="utf-8")
+    source.write_text(
+        "def helper(state):\n    return 0\n\n"
+        "def ai_func(state):\n    return helper(state)\n",
+        encoding="utf-8",
+    )
+    fixture.write_text("# fixture\n", encoding="utf-8")
+
+    planner = _write_rollman_planner_packet(
+        output_path=tmp_path / "planner.json",
+        iteration_id="iter-test",
+        parent_version_id="v000016",
+        game_digest_path=digest,
+        context_manifest_path=manifest,
+        research_state_path=research,
+        replay_evidence=[],
+        previous_measurements={},
+        active_target="rank15",
+        candidate_source_path=source,
+    )
+    candidate = _write_rollman_candidate_packet(
+        output_path=tmp_path / "candidate.json",
+        iteration_id="iter-test",
+        branch_brief={
+            "branch_index": 0,
+            "mechanism": "test",
+            "code_symbols": ["ai_func", "helper"],
+        },
+        game_digest_path=digest,
+        research_state_path=research,
+        experience_path=experience,
+        replay_evidence=[],
+        previous_measurements={},
+        active_target="rank15",
+        locked_opponents=(),
+        candidate_source_path=source,
+        smoke_fixture_path=fixture,
+        candidate_workspace=source.parent,
+    )
+
+    planner_value = json.loads(planner.read_text(encoding="utf-8"))
+    candidate_value = json.loads(candidate.read_text(encoding="utf-8"))
+    assert "smoke_contract" not in planner_value
+    assert candidate_value["smoke_contract"]["fixture_path"] == str(
+        fixture.resolve()
+    )
+
+
 def test_imported_run_can_inherit_bounded_research_state(tmp_path):
     from agentbench_frame.hl.cli import _prepare_research_state
     from agentbench_frame.hl.config import OriginConfig
