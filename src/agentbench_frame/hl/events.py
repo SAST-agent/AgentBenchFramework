@@ -26,6 +26,12 @@ HL event types (see the measurement contract / plan.md):
                       explicit); a no_emission/out_of_support point is recorded
                       with kl=None, never folded into a false 0.0
     occupancy_shift — state-occupancy distribution change between two versions
+    reference_refresh — rolling dynamic ν swapped the reference set (n fresh /
+                      anchor / sources / spec_id) after an act's eval
+    action_freq     — per-version real-match action-frequency KL between
+                      consecutive versions: kl + total_actions_new/old +
+                      vocab_size + top_actions (canonical token, count in each
+                      version). The channel that sees mid-game edits.
     budget          — learning/evaluation/total resource accounting
     rules_validation — one REPLAY_SKILL verification act: the coding agent parses
                       a real replay round, states each field's meaning + its
@@ -58,6 +64,8 @@ KNOWN_EVENT_TYPES = frozenset({
     "occupancy_shift",
     "budget",
     "rules_validation",
+    "reference_refresh",
+    "action_freq",
     # Legacy framework event types are also recognized so a mixed log is
     # readable; they simply lack some HL payload fields.
     "step", "episode", "eval_result", "log", "resource", "lostspace_match",

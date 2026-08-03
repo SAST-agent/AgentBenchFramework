@@ -38,7 +38,7 @@ import argparse
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from agentbench_frame.hl.distribution import (
     STATUS_ALIVE,
@@ -50,7 +50,7 @@ from agentbench_frame.hl.distribution import (
 )
 from agentbench_frame.hl.reference import ReferenceSample, ReferenceStateSet
 
-__all__ = ["record_reference_states", "main"]
+__all__ = ["record_reference_states", "subsample", "main"]
 
 _log = logging.getLogger(__name__)
 
@@ -197,6 +197,93 @@ def record_reference_states(
         )
 
     return ReferenceStateSet(spec_id=spec_id, samples=tuple(samples))
+
+
+def _sample_round(sample: ReferenceSample) -> Optional[int]:
+    """The decision-point round number, or None when unparseable.
+
+    Real LostSpace roundbegins carry ``state`` (a monotonic round counter
+    1..N), not ``round`` (which only the fabricated ν uses) — fall back to
+    ``state`` so the ``max_round`` cap keeps working on recorded ν.
+    """
+    obs = sample.observation or {}
+    r = obs.get("round")
+    if r is None:
+        r = obs.get("state")
+    try:
+        return int(r)
+    except (TypeError, ValueError):
+        return None
+
+
+def _state_key(sample: ReferenceSample) -> Tuple[Any, ...]:
+    """A near-identity key for a decision point, for dedupe.
+
+    Two samples with the same hp, key count, position, sorted interprops, and
+    inventory signature are near-identical states — keeping both would waste
+    probe budget on redundant measurements. The key is intentionally coarse
+    (not the full observation) so ν stays diverse rather than exact.
+    """
+    obs = sample.observation or {}
+    inv = sample.inventory or {}
+    hp = obs.get("hp")
+    try:
+        keys = len(obs.get("keys") or [])
+    except TypeError:
+        keys = 0
+    pos = obs.get("pos")
+    pos_key = tuple(pos) if isinstance(pos, (list, tuple)) else pos
+    interprops = tuple(sorted(
+        str(x) for x in (sample.legal_actions or {}).get("interprops") or []))
+    inv_key = tuple(
+        (k, int(inv.get(k, 0) or 0))
+        for k in ("LandMine", "Sticky", "Transport", "Kit"))
+    return (hp, keys, pos_key, interprops, inv_key, sample.status)
+
+
+def subsample(samples: Sequence[ReferenceSample], *,
+              max_round: Optional[int] = None,
+              max_count: Optional[int] = None) -> Tuple[ReferenceSample, ...]:
+    """Select a diverse, probe-able subset of decision points for a rolling ν.
+
+    The dynamic-ν refresh records from real match traces, which can carry
+    thousands of decision points per match. A ν that big is both slow to probe
+    (each sample replays its whole transcript) and redundant (near-identical
+    states dominate). This helper:
+
+    - ``max_round``: drop decision points at round > ``max_round`` — keeps
+      transcripts short so per-sample replay stays fast, and samples the
+      early/mid game where policy differences actually register.
+    - dedupe: drop near-identical states (see ``_state_key``).
+    - ``max_count``: spread-select up to ``max_count`` points evenly across the
+      (match-ordered) sequence so one stretch of a match can't monopolize ν.
+
+    Pure and deterministic; returns a tuple (empty input → empty tuple).
+    """
+    pool = list(samples)
+    if max_round is not None:
+        pool = [s for s in pool
+                if _sample_round(s) is None or _sample_round(s) <= max_round]
+    kept: List[ReferenceSample] = []
+    seen: set = set()
+    for s in pool:
+        key = _state_key(s)
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(s)
+    if max_count is not None and len(kept) > max_count:
+        if max_count <= 1:
+            kept = kept[:max_count]
+        else:
+            # even spread over the sequence: pick max_count indices that cover
+            # [0, len-1] uniformly (deterministic, no RNG).
+            idxs = sorted({
+                round(i * (len(kept) - 1) / (max_count - 1))
+                for i in range(max_count)
+            })
+            kept = [kept[i] for i in idxs]
+    return tuple(kept)
 
 
 def main(argv: List[str] | None = None) -> int:

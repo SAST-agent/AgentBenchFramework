@@ -20,6 +20,13 @@ Example::
       --acts 5 --pairs 3 --seats 0 --timeout 15 \\
       --dangerously-skip-permissions
 
+For a rolling (dynamic) reference set that keeps policy-KL alive across every
+act instead of saturating after the first strategy flip, add
+``--dynamic-nu [--nu-samples 24] [--nu-anchor 6] [--nu-max-round N]`` (implies
+``--save-traces``). To also measure full-match action-frequency KL (the channel
+that sees mid-game edits the first-primitive probe is blind to), add
+``--action-freq`` (also implies ``--save-traces``).
+
 See ``hl/README.md`` for the full operator guide (env setup, run procedure,
 data layout, customizing opponents/ν/acts, gotchas).
 """
@@ -356,6 +363,32 @@ def build_parser() -> argparse.ArgumentParser:
                    help="write per-match .trace.jsonl frame streams next to the "
                         "replay artifacts, so the inert-agent / R6-stall "
                         "behaviour can be root-caused from the actual frames")
+    p.add_argument("--dynamic-nu", action="store_true",
+                   help="refresh the reference set (ν) each act from the "
+                        "evaluated version's real match traces (rolling "
+                        "reference). A frozen ν saturates: KL registers only "
+                        "the first strategy flip, then reads 0 for every "
+                        "following edit. Dynamic ν keeps the signal live by "
+                        "comparing v_{k-1} vs v_k over the states v_{k-1} "
+                        "actually reached. Implies --save-traces.")
+    p.add_argument("--nu-samples", type=int, default=24,
+                   help="max recorded decision points in the rolling ν "
+                        "(default 24)")
+    p.add_argument("--nu-anchor", type=int, default=6,
+                   help="keep this many spawn-pinned points from the seed "
+                        "reference as a fixed measurable core of the rolling ν "
+                        "(default 6; 0 = pure rolling)")
+    p.add_argument("--nu-max-round", type=int, default=None,
+                   help="cap rolling-ν decision points to rounds <= N (keeps "
+                        "transcripts short so the probe stays fast; default: "
+                        "no cap)")
+    p.add_argument("--action-freq", action="store_true",
+                   help="after every eval, count the version's full real-match "
+                        "action mix (canonicalized action frequencies) and "
+                        "report the KL vs the previous version's distribution. "
+                        "This is the channel that sees mid-game edits — the "
+                        "first-primitive reference KL reads 0 once play()'s "
+                        "top branch stabilizes. Implies --save-traces.")
     p.add_argument("--rules-validation", action="store_true",
                    help="before the edit loop, run one REPLAY_SKILL validation "
                         "act (doc Fix-D): the coding agent parses a real replay "
@@ -372,17 +405,27 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _kl_stalled(events_path, min_kl: float, window: int = 3) -> bool:
-    """True when the last ``window`` policy_kl events are all below ``min_kl``
-    (or unmeasurable) — consecutive acts with no valid policy update."""
+    """True when the last ``window`` acts' KL measurements are all below
+    ``min_kl`` (or unmeasurable) — consecutive acts with no valid policy
+    update.
+
+    Uses the action-frequency KL (``--action-freq``) when present — that is
+    the channel that stays live past the first strategy flip (the first-
+    primitive reference KL saturates), so a stall verdict based on it is
+    honest. Falls back to the reference first-primitive KL."""
     from agentbench_frame.hl.events import read_events
 
-    kls = [e for e in read_events(events_path)
-           if e.get("event_type") == "policy_kl"]
-    if len(kls) < 2:
+    events = read_events(events_path)
+    kls = [e for e in events if e.get("event_type") == "policy_kl"]
+    freq = [e for e in events if e.get("event_type") == "action_freq"]
+    if len(kls) < 2 and len(freq) < 2:
         return False
-    for e in kls[-window:]:
-        ig = e.get("ig")
-        if ig is None or ig >= min_kl:
+    if len(freq) >= 2:
+        vals = [e.get("kl") for e in freq[-window:]]
+    else:
+        vals = [e.get("ig") for e in kls[-window:]]
+    for v in vals:
+        if v is None or v >= min_kl:
             return False
     return True
 
@@ -396,6 +439,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from agentbench_frame.hl.events import read_events
 
     args = build_parser().parse_args(argv)
+    # --dynamic-nu and --action-freq both need the per-match .trace.jsonl frame
+    # streams; enable --save-traces implicitly so they don't silently measure
+    # nothing.
+    if (args.dynamic_nu or args.action_freq) and not args.save_traces:
+        print("[hl] --dynamic-nu/--action-freq imply --save-traces "
+              "(recording match traces)", file=sys.stderr)
+        args.save_traces = True
     data_root = Path(args.data_dir) if args.data_dir else Path(_data_root())
 
     # Resolve the round name + codebase root. ``--name`` overrides (manual,
@@ -511,6 +561,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ctrl = HLIterationController(
         codebase=codebase, runner=runner, spec=spec, reference=reference,
         run_id=run_id, events_path=events_path, epsilon=args.epsilon,
+        dynamic_nu=args.dynamic_nu, nu_samples=args.nu_samples,
+        nu_anchor=args.nu_anchor, nu_max_round=args.nu_max_round,
+        action_freq=args.action_freq,
         evaluator_factory=eval_factory, stage_root=stage_root,
         context_builder=context_builder.build,
         curriculum=args.curriculum, promote_rank=args.promote_rank,

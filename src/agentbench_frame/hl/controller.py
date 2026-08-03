@@ -42,6 +42,7 @@ from agentbench_frame.hl.distribution import (
 )
 from agentbench_frame.hl.events import HLEventWriter, read_events
 from agentbench_frame.hl.probe import ReferenceProbe, EmittedAction
+from agentbench_frame.hl.action_freq import action_freq_kl
 from agentbench_frame.hl.reference import (
     BenchmarkSpec, ReferenceStateSet, ReferenceSample,
 )
@@ -84,6 +85,11 @@ class HLIterationController:
         run_id: str,
         events_path,
         epsilon: float = 0.1,
+        dynamic_nu: bool = False,
+        nu_samples: int = 24,
+        nu_anchor: int = 0,
+        nu_max_round: Optional[int] = None,
+        action_freq: bool = False,
         evaluator_factory: Optional[EvaluatorFactory] = None,
         probe_factory: Optional[ProbeFactory] = None,
         stage_root: Optional[Path] = None,
@@ -100,6 +106,40 @@ class HLIterationController:
         self.reference = reference
         self.run_id = run_id
         self.epsilon = epsilon
+        # Rolling dynamic ν: re-record the reference set from the evaluated
+        # version's real match traces each act, so policy KL stays live past
+        # the first strategy flip (a frozen ν saturates — after edit 1 the new
+        # first-actions land out-of-support and every following edit reads
+        # KL=0). The seed reference still measures act 1 and supplies the
+        # fixed anchor core (see ``_nu_anchor``).
+        self.dynamic_nu = dynamic_nu
+        self.nu_samples = max(1, int(nu_samples))
+        self.nu_max_round = nu_max_round
+        # Base spec_id for rolling ν generations ("<seed>-a<act>"); the
+        # current self.reference.spec_id already carries the last generation
+        # suffix, so deriving from it would compound ("seed-a1-a2-a3").
+        self._nu_base_spec = reference.spec_id
+        # Fixed anchor: spawn-pinned samples from the seed reference, kept at
+        # the head of every rolling ν — a stable axis + guaranteed measurable
+        # points even when a recording fails. Empty when nu_anchor==0.
+        self._nu_anchor: Tuple[ReferenceSample, ...] = self._pick_anchor(
+            reference, int(nu_anchor))
+        # Rolling: the version evaluated LAST act's trace paths, fed into the
+        # next ``_refresh_dynamic_nu`` so act k's KL compares v_{k-1} vs v_k
+        # over states v_{k-1} actually reached (high n_ok, live signal).
+        self._pending_traces: List[Path] = []
+        # Last ν-refresh summary, surfaced in the next act's feedback so the
+        # agent knows the 'reference first-actions' rows target real states.
+        self._last_nu_refresh: Optional[Dict[str, Any]] = None
+        # Action-frequency KL (--action-freq): per-version counts of the full
+        # real-match action mix, KL'd between consecutive versions. This is the
+        # channel that sees mid-game edits — the first-primitive probe is blind
+        # to them once play()'s top branch stabilizes after one strategy flip.
+        self.action_freq = action_freq
+        self._version_freq: Dict[str, Counter] = {}
+        self._pending_trace_seats: Dict[Path, int] = {}
+        self._last_action_kl: Optional[float] = None
+        self._last_action_top: Optional[List[Dict[str, Any]]] = None
         self._evaluator_factory = evaluator_factory
         self._probe_factory = probe_factory or ReferenceProbe
         self._stage_root = Path(stage_root) if stage_root else codebase.root.parent / "stage"
@@ -259,6 +299,22 @@ class HLIterationController:
                 eval_status = "incomplete"
                 win_rate = None
                 ev_result = None
+        # Stash the evaluated version's real-match traces for the next act's
+        # dynamic-ν refresh: act k+1's KL will compare v_k vs v_{k+1} over the
+        # states v_k actually reached.
+        if ev_result is not None:
+            self._capture_eval_traces(ev_result)
+        # 5.5 action-frequency stats (--action-freq): count the evaluated
+        # version's full real-match action mix so step 6.4 can KL it against
+        # the previous version's (the channel that sees mid-game edits).
+        if (self.action_freq and version_after is not None
+                and self._pending_traces):
+            from agentbench_frame.hl.action_freq import count_actions
+            freq: Counter = Counter()
+            for tp in self._pending_traces:
+                seat = self._pending_trace_seats.get(tp, 0)
+                freq.update(count_actions(tp, seat=seat))
+            self._version_freq[version_after.version_id] = freq
         self._events.write(
             "eval", act_id=act_id,
             spec_id=self.spec.spec_id,
@@ -291,6 +347,7 @@ class HLIterationController:
                 )
             self._events.write(
                 "policy_kl", act_id=act_id,
+                nu_spec_id=self.reference.spec_id,
                 version_before=version_before.version_id,
                 version_after=version_after.version_id,
                 local_policy_kl_trace=[p.to_dict() for p in kl_trace],
@@ -310,6 +367,37 @@ class HLIterationController:
                 shift=occupancy_shift,
             )
 
+            # 6.4 action-frequency KL (--action-freq): the evaluated version's
+            # full real-match action mix vs the previous version's. This is the
+            # channel that sees mid-game edits (first-primitive KL is blind to
+            # them once the top branch stabilizes).
+            self._last_action_kl = None
+            self._last_action_top = None
+            if self.action_freq:
+                freq_old = self._version_freq.get(version_before.version_id)
+                freq_new = self._version_freq.get(version_after.version_id)
+                if freq_old is not None and freq_new is not None:
+                    akl = action_freq_kl(freq_new, freq_old,
+                                         epsilon=self.epsilon)
+                    self._last_action_kl = akl
+                    self._last_action_top = self._top_actions(
+                        freq_new, freq_old, k=6)
+                    self._events.write(
+                        "action_freq", act_id=act_id,
+                        version_before=version_before.version_id,
+                        version_after=version_after.version_id,
+                        kl=akl,
+                        total_actions_new=sum(freq_new.values()),
+                        total_actions_old=sum(freq_old.values()),
+                        vocab_size=len(set(freq_new) | set(freq_old)),
+                        top_actions=self._last_action_top,
+                    )
+
+        # 6.5a roll the reference set forward from THIS act's traces so the
+        # next act compares v_k vs v_{k+1} over states v_k reached. The KL
+        # just measured used the pre-refresh ν (deliberate); a failed refresh
+        # keeps the previous ν unchanged (fallback).
+        self._refresh_dynamic_nu()
         # 6.5 carry this act's measurements into the NEXT act's prompt so the
         # coding agent sees whether its edit moved behavior/outcome (not just
         # the events.jsonl research stream). Best-effort: missing fields stay
@@ -319,6 +407,11 @@ class HLIterationController:
             occupancy_shift=occupancy_shift, run_result=run_result,
             version_after=version_after, ref_digest=ref_digest,
         )
+        if self._last_nu_refresh:
+            self._prev_feedback["nu_refreshed"] = dict(self._last_nu_refresh)
+        if self._last_action_kl is not None:
+            self._prev_feedback["action_kl"] = self._last_action_kl
+            self._prev_feedback["action_top"] = self._last_action_top
 
         # 6.6 update the self-summarized experience store + rolling LOC history
         # (HL std 4/5). Best-effort: a failure here never breaks the act loop.
@@ -680,6 +773,141 @@ class HLIterationController:
         reached_new = sum(1 for e in emitted_new if e is not None)
         total = max(1, len(emitted_old))
         return abs(reached_old - reached_new) / total
+
+    # ---- rolling dynamic ν ----
+
+    @staticmethod
+    def _spawn_pinned(s: ReferenceSample) -> bool:
+        """True iff a sample's observation pos is the seat-0 spawn [0,0].
+
+        The fabricated ν pins states to spawn (so the candidate's tracked
+        position from the 2-frame transcript equals the decision-point state),
+        which is exactly what keeps ``normalize_emitted`` in-support. Anchor
+        candidates are drawn from these — the reliably measurable points."""
+        pos = (s.observation or {}).get("pos")
+        if isinstance(pos, (list, tuple)) and len(pos) >= 2:
+            try:
+                return int(pos[0]) == 0 and int(pos[1]) == 0
+            except (TypeError, ValueError):
+                return False
+        return False
+
+    @classmethod
+    def _pick_anchor(cls, reference: ReferenceStateSet, n: int
+                     ) -> Tuple[ReferenceSample, ...]:
+        """Up to ``n`` spawn-pinned seed samples, kept as the rolling ν's
+        fixed core. Spawn-pinned points are the ones whose emissions reliably
+        normalize against A(s), so the anchor is a stable, measurable axis even
+        when a recording fails. Falls back to the first samples overall when no
+        spawn-pinned ones exist."""
+        if n <= 0 or not reference.samples:
+            return ()
+        pinned = [s for s in reference.samples if cls._spawn_pinned(s)]
+        pool = pinned or list(reference.samples)
+        return tuple(pool[:n])
+
+    def _capture_eval_traces(self, ev_result) -> None:
+        """Stash the evaluated version's per-match ``.trace.jsonl`` paths for
+        the next act's dynamic-ν refresh / action-freq stats.
+
+        Trace paths are relative to the eval's ``run_dir``
+        (``evaluator.py:226``); resolve and keep only files that exist. Each
+        trace's candidate seat (``candidate_seat``) is remembered so
+        action-frequency counting targets the right player. Best-effort: no
+        run_dir / no trace records / missing files → empty."""
+        traces: List[Path] = []
+        seats: Dict[Path, int] = {}
+        run_dir = getattr(ev_result, "run_dir", None)
+        if run_dir is not None:
+            for m in (getattr(ev_result, "matches", None) or []):
+                rel = m.get("trace") if isinstance(m, dict) else None
+                if not rel:
+                    continue
+                p = Path(run_dir) / rel
+                if p.is_file():
+                    traces.append(p)
+                    try:
+                        seat = int(m.get("candidate_seat", 0))
+                    except (TypeError, ValueError):
+                        seat = 0
+                    seats[p] = seat
+        self._pending_traces = traces
+        self._pending_trace_seats = seats
+
+    def _refresh_dynamic_nu(self) -> None:
+        """Rolling dynamic ν: re-record decision points from the previous act's
+        real match traces, prepend the fixed anchor, and swap ``self.reference``
+        (used by the NEXT act's KL measurement).
+
+        Keeps policy KL live past the first strategy flip: a frozen ν saturates
+        once the new first-actions stop being in-support, while a ν re-recorded
+        from the evaluated version's own states stays aligned with where the
+        policy actually acts. Act k+1's KL then compares v_k vs v_{k+1} over
+        the states v_k reached — the older version is in-support by
+        construction, so mid-game decision changes register KL every act.
+
+        Best-effort + honest: too few usable samples (<4) or no traces at all
+        keeps the previous ν (fallback), and every swap is announced via a
+        ``reference_refresh`` event + the next act's feedback.
+        """
+        self._last_nu_refresh = None
+        if not self.dynamic_nu or not self._pending_traces:
+            return
+        from agentbench_frame.hl.naming import act_name
+        from agentbench_frame.hl.reference_recorder import (
+            record_reference_states, subsample)
+
+        combined: List[ReferenceSample] = []
+        sources: List[str] = []
+        for tp in self._pending_traces:
+            try:
+                rss = record_reference_states(
+                    tp, spec_id=f"dyn-a{self._act_counter}",
+                    opponent=str(tp.parent.name), seat=0,
+                )
+            except Exception:
+                continue  # a broken trace must not kill the act loop
+            if rss.samples:
+                combined.extend(rss.samples)
+                sources.append(str(tp))
+        if len(combined) < 4:
+            return  # fallback: keep the previous ν
+        picked = subsample(combined, max_count=self.nu_samples,
+                           max_round=self.nu_max_round)
+        samples = list(self._nu_anchor) + list(picked)
+        if not samples:
+            return
+        self.reference = ReferenceStateSet(
+            spec_id=f"{self._nu_base_spec}-a{self._act_counter}",
+            samples=tuple(samples),
+        )
+        self._last_nu_refresh = {
+            "n": len(samples), "fresh": len(picked),
+            "anchor": len(self._nu_anchor), "sources": sources,
+        }
+        self._events.write(
+            "reference_refresh", act_id=act_name(self.run_id, self._act_counter),
+            n=len(samples), fresh=len(picked), anchor=len(self._nu_anchor),
+            sources=sources, spec_id=self.reference.spec_id,
+        )
+
+    @staticmethod
+    def _top_actions(freq_new: Counter, freq_old: Counter, k: int = 6
+                     ) -> List[Dict[str, Any]]:
+        """The most-frequent canonical actions for the action_freq event +
+        feedback digest. Ranked by the NEW version's count (ties by old), so
+        the headline rows are the actions the edit actually shifted."""
+        union = sorted(set(freq_new) | set(freq_old))
+
+        def rank(t):
+            return (-freq_new.get(t, 0), -freq_old.get(t, 0), str(t))
+
+        top = sorted(union, key=rank)[:k]
+        return [{
+            "action": list(t) if isinstance(t, tuple) else t,
+            "count_new": freq_new.get(t, 0),
+            "count_old": freq_old.get(t, 0),
+        } for t in top]
 
     def _assemble_feedback(
         self, *, ev_result, kl_trace: List[PolicyKLPoint],

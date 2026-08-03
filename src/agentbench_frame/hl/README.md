@@ -431,6 +431,65 @@ reaches them (opponent choice, seat, map), then record. Editing a recorded ν
 by hand to fix typos is fine; constructing one from scratch with empty
 transcripts is not (the probe will reject it).
 
+### 6.5 Rolling (dynamic) ν — `--dynamic-nu`
+
+A **frozen** ν saturates: policy-KL registers the first strategy flip, then
+reads 0 for every following edit (the new first-actions land out-of-support on
+the stale seed points, and mid-game refinements don't change the first emitted
+primitive there). `--dynamic-nu` re-records ν **each act** from the evaluated
+version's real match traces (`--save-traces` is implied), so act *k*'s KL
+compares `v_{k-1}` vs `v_k` over the states `v_{k-1}` actually reached —
+in-support by construction, so the signal stays live across the whole run.
+
+```bash
+python -m agentbench_frame.hl \
+  --logic "..." --reference ./agentbench_data/reference/nu-v2-t3.json \
+  --ladder-opponent rank=6 --ladder-opponent rank=12 \
+  --acts 8 --pairs 3 --seats 0 --timeout 15 \
+  --dynamic-nu --nu-samples 24 --nu-anchor 6 --nu-max-round 60
+```
+
+- `--nu-samples N` (24): max recorded decision points in the rolling ν.
+- `--nu-anchor N` (6): keep N **spawn-pinned** points from the seed reference
+  as a fixed, measurable core (a stable axis + guaranteed points even if a
+  recording fails). `0` = pure rolling.
+- `--nu-max-round N`: cap recorded points to rounds ≤ N — keeps transcripts
+  short (fast probe) and samples the early/mid game where policy differences
+  register.
+
+Each swap is announced with a `reference_refresh` event, and each `policy_kl`
+event carries the `nu_spec_id` it was measured over — cross-act IG is a
+per-occupancy behavioral-shift curve, not a fixed-benchmark KL (the anchor
+preserves a partial fixed axis).
+
+### 6.6 Action-frequency KL — `--action-freq`
+
+The first-primitive reference KL has a structural blind spot: the coding
+agent's `play()` top branch stabilizes after one strategy flip
+(`use_tool("Kit")` → `interact("KeyMachine")` → …), so the **winning**
+improvements — BFS key-targeting weights, loot/escape timing — land in
+mid-game logic that leaves the first emitted primitive identical. First-primitive
+KL then reads 0 for every following edit, on any ν.
+
+`--action-freq` adds a second, occupancy-aware channel that sees those edits:
+after every eval it counts the version's **full real-match action mix** (every
+primitive it emitted across all matches, canonicalized — coordinates collapse,
+prop/tool args kept) and reports the KL of that frequency distribution vs the
+previous version's. `--save-traces` is implied.
+
+```bash
+python -m agentbench_frame.hl \
+  --logic "..." --reference ./agentbench_data/reference/nu-v2-t3.json \
+  --ladder-opponent rank=6 --ladder-opponent rank=12 \
+  --acts 8 --pairs 3 --seats 0 --timeout 15 --action-freq
+```
+
+Each act emits an `action_freq` event (kl, total_actions_new/old, vocab_size,
+top_actions) and the next act's feedback shows the shifted action counts. The
+`ig_iteration.png` curve plots both channels (green = first-primitive KL,
+orange = action_freq KL). The `--min-kl` early-stop uses the action_freq KL
+when present, since that is the signal that stays live.
+
 ### 6.4 Codebase shape
 
 `--initial-candidate` is a directory copied into the workspace. It **must**
@@ -492,6 +551,11 @@ python -m agentbench_frame.hl
 
   --acts N            (5)     coding-agent acts
   --epsilon EPS       (0.1)   policy-KL smoothing
+  --dynamic-nu                rolling ν: re-record from real traces each act
+  --nu-samples N      (24)    max decision points in the rolling ν
+  --nu-anchor N       (6)     seed points kept as fixed measurable core (0=off)
+  --nu-max-round N    (none)  cap rolling-ν points to rounds <= N
+  --action-freq               full-match action-frequency KL vs last version
   --pairs N           (3)     match pairs per opponent
   --seats S           ("0")   candidate seat: all|0|1|2|3
   --timeout SEC       (15)    per-action judger TLE

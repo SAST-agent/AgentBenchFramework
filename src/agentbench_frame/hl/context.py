@@ -319,6 +319,34 @@ class ContextBuilder:
         if active:
             parts.append(f"- evaluated against: {', '.join(active)}")
         parts.append(f"- behavior: {behavior}")
+        # Rolling dynamic ν (--dynamic-nu): the reference set was re-recorded
+        # from the previous act's real match this act, so the first-actions
+        # digest below targets REAL states the agent reached — not the
+        # hand-authored seed points.
+        nu_ref = fb.get("nu_refreshed")
+        if nu_ref:
+            parts.append(
+                f"- reference refreshed: {nu_ref.get('n')} decision points "
+                f"({nu_ref.get('fresh')} recorded from your last match + "
+                f"{nu_ref.get('anchor')} anchor). The rows below are states "
+                "you actually reached in your last eval."
+            )
+        # Action-frequency KL (--action-freq): the full-match action-mix shift
+        # vs last version — the channel that sees mid-game edits (move-target
+        # weights, loot/escape timing), not just the first emitted primitive.
+        action_kl = fb.get("action_kl")
+        if action_kl is not None:
+            rows = []
+            for r in (fb.get("action_top") or []):
+                act = r["action"]
+                a = " ".join(str(x) for x in act) if isinstance(act, list) else act
+                rows.append(f"  {a}: {r['count_old']} -> {r['count_new']}")
+            parts.append(
+                f"- action-frequency KL={fmt(action_kl, '%.4g')} — your "
+                "full-match action mix vs last version (counts across all "
+                "matches):\n"
+                + "\n".join(rows)
+            )
         # Per-measurable-point first-action digest: name the exact decision
         # points the edit did (not) move, so the next edit has a concrete
         # target for a valid policy update (policy_kl > 0).

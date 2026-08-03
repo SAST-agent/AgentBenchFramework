@@ -66,6 +66,9 @@ class IterationPoint:
     # the eval/parent was missing). mean of the per-decision trace.
     policy_kl_mean: Optional[float] = None
     policy_kl_n: Optional[int] = None        # number of decision points in the trace
+    # action-frequency KL (--action-freq) vs the previous version's full-match
+    # action mix — the channel that stays live after the top branch stabilizes.
+    action_kl: Optional[float] = None
     # honesty markers
     failed: bool = False                     # failure_reason on version/budget
     failure_reason: Optional[str] = None
@@ -133,6 +136,8 @@ def read_iteration_curves(events_path) -> CurveData:
                     kl_vals.append(t)
             p.policy_kl_mean = _mean(kl_vals)
             p.policy_kl_n = len(kl_vals)
+        elif et == "action_freq":
+            p.action_kl = e.get("kl")
         elif et == "version":
             p.edit_type = e.get("edit_type")
             fr = e.get("failure_reason")
@@ -216,25 +221,31 @@ def plot_ig_iteration(data: CurveData, out_path: Path) -> Path:
     plt = _require_matplotlib()
     fig, ax = plt.subplots(figsize=(7, 4))
     xs, ys = [], []
+    axs, ays = [], []
     fx, fy = [], []
     for p in data.points:
         if p.policy_kl_mean is not None:
             xs.append(p.iteration)
             ys.append(p.policy_kl_mean)
+        if p.action_kl is not None:
+            axs.append(p.iteration)
+            ays.append(p.action_kl)
         if p.failed:
             fx.append(p.iteration)
             fy.append(0.0)
     if xs:
         ax.plot(xs, ys, "-o", color="tab:green", label="policy_kl (mean)")
+    if axs:
+        ax.plot(axs, ays, "-s", color="tab:orange", label="action_freq KL")
     if fx:
         ax.scatter(fx, fy, marker="x", color="tab:red", s=60, zorder=5,
                    label="failed act")
     ax.set_xlabel("iteration (act index)")
-    ax.set_ylabel("policy_kl (nats, mean over reference decisions)")
+    ax.set_ylabel("KL (nats)")
     # leave y auto-scaled; KL can spike to +inf on out-of-support emissions.
     ax.set_xticks([p.iteration for p in data.points])
     ax.grid(True, alpha=0.3)
-    _annotate_honesty(ax, data, what="IG–iteration (policy_kl)")
+    _annotate_honesty(ax, data, what="IG–iteration (KL)")
     ax.legend(loc="best", fontsize=8)
     fig.tight_layout()
     fig.savefig(out_path, dpi=130)
@@ -293,15 +304,18 @@ def main(argv=None) -> int:
     # Print a compact honest table so the terminal mirrors the figure.
     print(f"[plot_curves] {len(data.points)} acts · "
           f"{data.n_incomplete} incomplete · {data.n_failed} failed")
-    print(f"{'#':>3}  {'act_id':<32}  {'win_rate':>9}  {'kl_mean':>9}  {'edit':>11}  status")
+    print(f"{'#':>3}  {'act_id':<32}  {'win_rate':>9}  {'kl_mean':>9}  "
+          f"{'act_kl':>9}  {'edit':>11}  status")
     for pt in data.points:
         wr = "-" if pt.win_rate is None else f"{pt.win_rate:.3f}"
         kl = "-" if pt.policy_kl_mean is None else f"{pt.policy_kl_mean:.4f}"
+        ak = "-" if pt.action_kl is None else f"{pt.action_kl:.4f}"
         et = pt.edit_type or "-"
         st = pt.evaluation_status or "-"
         if pt.failed:
             st = f"FAIL({pt.failure_reason[:16]})" if pt.failure_reason else "FAIL"
-        print(f"{pt.iteration:>3}  {pt.act_id:<32}  {wr:>9}  {kl:>9}  {et:>11}  {st}")
+        print(f"{pt.iteration:>3}  {pt.act_id:<32}  {wr:>9}  {kl:>9}  "
+              f"{ak:>9}  {et:>11}  {st}")
     print(f"\n[plot_curves] wrote:")
     for k, v in out.items():
         print(f"  {k:16} {v}")
