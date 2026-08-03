@@ -629,6 +629,11 @@ Planner 压缩边界：
 - 记录 activation_condition 与 preservation_contract 供分析，但本候选不强制保持父代路径。
 """
         )
+        packet_command = (
+            f"cat {Path(candidate_input_path).resolve()}"
+            if candidate_input_path is not None
+            else "read the candidate input packet"
+        )
         return base + f"""
 
 本候选的唯一结构化 branch brief：{brief}
@@ -636,8 +641,8 @@ Planner 压缩边界：
 {scope_contract}
 
 候选 checkpoint-first 顺序：
-- 第一次调用只读取 candidate input packet；其中已内嵌 game digest、research state、全部有界 summary、共享蒸馏与 Experience Skill，禁止再次分别读取这些文件。
-- 第二次调用用符号索引定位 `ai.py` 的入口与 brief 涉及的已有机制；第三次只读相关代码区间，不得顺序打印完整 ai.py。
+- 第一次调用必须直接执行 `{packet_command}`，完整读取一次后不得写脚本筛选或发现其中路径。顶层键为 `branch_brief`、`game_digest`、`research_state`、`experience_skill`、`replay_evidence`、`previous_measurements`、`opponent_distillation`、`candidate_code_index`；禁止再次分别读取已内嵌内容。
+- 第二次调用直接使用 `candidate_code_index` 定位 `ai.py` 的入口与 brief 涉及的已有机制；第三次只读相关代码区间，不得重复运行符号搜索；不得顺序打印完整 ai.py。
 - 第四次最多读取两个定点 trace 窗口；第 6 次工具调用结束前必须已完成 `ai.py` 的首次可编译修改并写入 experience_update.json。
 - 首次修改落盘后，只允许编译、一次对象 smoke，以及为修复验证失败所必需的一次更正；不得把实现留到长推理末尾。
 - 命令必须直接引用白名单中的完整文件路径；不得把 run 根目录或父目录保存为变量后再拼接，也不得列举这些目录。

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import dataclasses
 import json
 import re
@@ -188,6 +189,7 @@ def write_candidate_input_packet(
     previous_measurements: Mapping[str, Any],
     active_target: str | None,
     locked_opponents: tuple[str, ...],
+    candidate_source_path: str | Path | None = None,
 ) -> Path:
     """Write one bounded candidate context artifact for a single first read."""
 
@@ -210,6 +212,19 @@ def write_candidate_input_packet(
             distillation = json.loads(raw)
         except json.JSONDecodeError:
             distillation = raw
+    code_index = []
+    if candidate_source_path is not None:
+        source = Path(candidate_source_path).read_text(encoding="utf-8")
+        module = ast.parse(source)
+        code_index = [
+            {
+                "name": node.name,
+                "start_line": node.lineno,
+                "end_line": node.end_lineno,
+            }
+            for node in module.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ]
     value = {
         "schema_version": "1.0",
         "iteration_id": iteration_id,
@@ -227,6 +242,7 @@ def write_candidate_input_packet(
         "replay_evidence": evidence,
         "previous_measurements": measurements,
         "opponent_distillation": distillation,
+        "candidate_code_index": code_index,
     }
     destination = Path(output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)

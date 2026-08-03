@@ -97,11 +97,20 @@ def test_candidate_input_packet_inlines_bounded_reusable_context(tmp_path):
     experience = tmp_path / "SKILL.md"
     summary = tmp_path / "summary.md"
     distillation = tmp_path / "ghost.json"
+    candidate_source = tmp_path / "ai.py"
     digest.write_text('{"actions":[0,1,2,3,4]}', encoding="utf-8")
     research.write_text('{"open_questions":["corner"]}', encoding="utf-8")
     experience.write_text("stable experience", encoding="utf-8")
     summary.write_text("s" * 13000, encoding="utf-8")
     distillation.write_text('{"fine":{"stay":0.5}}', encoding="utf-8")
+    candidate_source.write_text(
+        "def decide(state):\n"
+        "    return helper(state)\n"
+        "\n"
+        "def helper(state):\n"
+        "    return 0\n",
+        encoding="utf-8",
+    )
 
     path = write_candidate_input_packet(
         output_path=tmp_path / "candidate_input.json",
@@ -124,6 +133,7 @@ def test_candidate_input_packet_inlines_bounded_reusable_context(tmp_path):
         },
         active_target="rank15",
         locked_opponents=(),
+        candidate_source_path=candidate_source,
     )
 
     value = json.loads(path.read_text(encoding="utf-8"))
@@ -132,6 +142,10 @@ def test_candidate_input_packet_inlines_bounded_reusable_context(tmp_path):
     assert value["research_state"]["open_questions"] == ["corner"]
     assert value["experience_skill"] == "stable experience"
     assert value["opponent_distillation"]["fine"]["stay"] == 0.5
+    assert value["candidate_code_index"] == [
+        {"name": "decide", "start_line": 1, "end_line": 2},
+        {"name": "helper", "start_line": 4, "end_line": 5},
+    ]
     assert value["replay_evidence"][0]["trace"].endswith("trace.jsonl")
     assert len(value["replay_evidence"][0]["summary_text"]) <= 12032
     assert value["replay_evidence"][0]["summary_text"].endswith(

@@ -159,6 +159,25 @@ def test_main_curve_measurement_skips_rejected_sibling_when_parent_is_retained()
     assert _measurement_candidates(iteration) == ()
 
 
+def test_activation_seed_filter_tracks_rotating_parent_evaluation():
+    """Catch activation probes pinned to first-cycle seeds after rotation."""
+    from agentbench_frame.hl.cli import _parent_activation_seeds
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+
+    evaluation = CandidateEvaluation(
+        status="complete",
+        score=0.5,
+        matches=(
+            {"status": "complete", "opponent": "rank15", "seed": 1103},
+            {"status": "complete", "opponent": "rank16", "seed": 1103},
+            {"status": "complete", "opponent": "rank15", "seed": 1104},
+            {"status": "failed", "opponent": "rank16", "seed": 9999},
+        ),
+    )
+
+    assert _parent_activation_seeds(evaluation) == (1103, 1104)
+
+
 def test_resume_does_not_remeasure_parent_retained_by_completed_proposal():
     from agentbench_frame.hl.cli import _pending_measurement_candidate
 
