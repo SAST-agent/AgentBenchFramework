@@ -19,6 +19,11 @@ from collections import Counter
 from typing import Any, Dict, List, Optional
 
 from agentbench_frame.eval.curves import multi_axis_auc
+from agentbench_frame.eval.information_gain import (
+    FORMAL_POLICY_INFORMATION_GAIN_PROFILE,
+    GENERIC_TRAJECTORY_KL_PROFILE,
+)
+from agentbench_frame.eval.trajectory_kl import trajectory_kl_result_from_payload
 from agentbench_frame.tracking.quality import inspect_event_file
 
 try:
@@ -199,96 +204,58 @@ class ReportBuilder:
         for index, event in enumerate(events, start=1):
             event_type = event.get("event_type", event.get("event"))
             if event_type == "policy_kl_trace":
-                trace = event.get("trace")
-                values = []
-                valid_trace = isinstance(trace, list) and bool(trace)
-                if valid_trace:
-                    for value in trace:
-                        number = _strict_nonnegative_number(value)
-                        if number is None:
-                            valid_trace = False
-                            break
-                        values.append(number)
-                declared_status = event.get("measurement_status")
-                decision_steps = event.get(
-                    "decision_steps",
-                    len(trace) if isinstance(trace, list) else None,
-                )
-                decision_steps_present = "decision_steps" in event
-                aligned = (
-                    isinstance(decision_steps, int)
-                    and not isinstance(decision_steps, bool)
-                    and isinstance(trace, list)
-                    and decision_steps == len(trace)
-                )
-                decisions_present = "decisions" in event
-                decisions = event.get("decisions")
-                if decisions_present:
-                    aligned = (
-                        aligned
-                        and decision_steps_present
-                        and isinstance(decisions, list)
-                        and len(decisions) == len(trace)
-                    )
-                    if aligned:
-                        for decision, value in zip(decisions, values):
-                            local_value = (
-                                decision.get("local_policy_kl")
-                                if isinstance(decision, dict)
-                                else None
-                            )
-                            local_number = _strict_nonnegative_number(
-                                local_value
-                            )
-                            if (
-                                local_number is None
-                                or not math.isclose(
-                                    local_number,
-                                    value,
-                                    rel_tol=0.0,
-                                    abs_tol=1e-12,
-                                )
-                            ):
-                                aligned = False
-                                break
-                status_allows_complete = (
-                    declared_status == "complete"
-                    if decisions_present
-                    else declared_status in {None, "complete"}
-                )
-                complete = valid_trace and aligned and status_allows_complete
-                trajectory_kl_episode = sum(values) if complete else None
-                if (
-                    trajectory_kl_episode is not None
-                    and not math.isfinite(trajectory_kl_episode)
-                ):
-                    complete = False
-                    trajectory_kl_episode = None
-                if complete:
-                    display_status = "complete"
-                elif (
-                    isinstance(declared_status, str)
-                    and declared_status
-                    and declared_status != "complete"
-                ):
-                    display_status = declared_status
+                profile = event.get("measurement_profile")
+                trajectory_kl_episode = None
+                mean_local_policy_kl = None
+                information_gain = None
+                decision_steps = event.get("decision_steps")
+                estimand = event.get("estimand", "legacy_unspecified")
+                if profile in {
+                    FORMAL_POLICY_INFORMATION_GAIN_PROFILE,
+                    GENERIC_TRAJECTORY_KL_PROFILE,
+                }:
+                    candidate = dict(event)
+                    candidate["status"] = candidate.get("measurement_status")
+                    try:
+                        verified = trajectory_kl_result_from_payload(
+                            candidate,
+                            require_formal=(
+                                profile
+                                == FORMAL_POLICY_INFORMATION_GAIN_PROFILE
+                            ),
+                        )
+                    except (TypeError, ValueError):
+                        display_status = "incomplete"
+                    else:
+                        decision_steps = verified.decision_steps
+                        trajectory_kl_episode = verified.local_policy_kl_sum
+                        mean_local_policy_kl = verified.mean_local_policy_kl
+                        information_gain = verified.information_gain
+                        if verified.status != "complete":
+                            display_status = verified.status
+                        elif information_gain is not None:
+                            display_status = "complete"
+                        else:
+                            display_status = "generic_unverified"
                 else:
-                    display_status = "incomplete"
-                mean_local_policy_kl = (
-                    trajectory_kl_episode / len(values)
-                    if trajectory_kl_episode is not None
-                    else None
-                )
+                    display_status = "legacy_unverified"
                 ig_history.append({
                     "episode": event.get("episode", index),
                     "trajectory_kl_episode": trajectory_kl_episode,
                     "mean_local_policy_kl": mean_local_policy_kl,
-                    "ig": trajectory_kl_episode,
+                    "information_gain": information_gain,
+                    "local_policy_kl_sum": trajectory_kl_episode,
+                    "ig": information_gain,
+                    "information_gain_unit": (
+                        event.get("information_gain_unit")
+                        if information_gain is not None
+                        else None
+                    ),
+                    "local_policy_kl_sum_unit": event.get("local_policy_kl_sum_unit"),
                     "decision_steps": decision_steps,
                     "status": display_status,
-                    "estimand": event.get(
-                        "estimand", "legacy_unspecified"
-                    ),
+                    "estimand": estimand,
+                    "measurement_profile": profile,
                 })
             elif event_type == "occupancy":
                 state_ids = event.get("state_ids")
@@ -331,9 +298,9 @@ class ReportBuilder:
         height = 180
         padding = 24
         complete_values = [
-            float(point["trajectory_kl_episode"])
+            float(point["information_gain"])
             for point in history
-            if point.get("trajectory_kl_episode") is not None
+            if point.get("information_gain") is not None
         ]
         y_max = max(complete_values, default=0.0)
         scale_max = y_max if y_max > 0.0 else 1.0
@@ -341,7 +308,7 @@ class ReportBuilder:
         segments = []
         current = []
         for index, point in enumerate(history):
-            value = point.get("trajectory_kl_episode")
+            value = point.get("information_gain")
             if value is None:
                 if current:
                     segments.append(current)
@@ -512,13 +479,13 @@ class ReportBuilder:
             research = ctx["latest_research"]
             lines.append("<h2>Information gain</h2>")
             lines.append(
-                "<p>Trajectory KL (nats / episode); "
-                "Mean local policy KL (nats / decision)</p>"
+                "<p>Episode policy information gain (mean local policy KL, "
+                "nats / decision); local policy KL sum (nats / episode)</p>"
             )
             chart = research.get("ig_chart", {})
             segments = chart.get("segments", [])
             lines.append(
-                '<svg aria-label="Trajectory KL by episode" '
+                '<svg aria-label="Policy information gain by episode" '
                 f'data-segment-count="{len(segments)}" '
                 f'viewBox="0 0 {chart.get("width", 560)} {chart.get("height", 180)}">'
             )
@@ -529,23 +496,23 @@ class ReportBuilder:
                 )
             lines.append("</svg>")
             lines.append(
-                "<table><tr><th>Episode</th><th>Trajectory KL</th>"
-                "<th>Mean local policy KL</th><th>Status</th></tr>"
+                "<table><tr><th>Episode</th><th>Policy IG</th>"
+                "<th>Local KL sum</th><th>Status</th></tr>"
             )
             for point in research.get("ig_history", []):
-                trajectory_value = point.get("trajectory_kl_episode")
-                mean_value = point.get("mean_local_policy_kl")
-                trajectory_text = (
-                    f"{trajectory_value:.2f}"
-                    if trajectory_value is not None
+                information_gain = point.get("information_gain")
+                local_sum = point.get("local_policy_kl_sum")
+                information_gain_text = (
+                    f"{information_gain:.2f}"
+                    if information_gain is not None
                     else "missing"
                 )
-                mean_text = (
-                    f"{mean_value:.2f}" if mean_value is not None else "missing"
+                local_sum_text = (
+                    f"{local_sum:.2f}" if local_sum is not None else "missing"
                 )
                 lines.append(
                     f"<tr><td>{point.get('episode')}</td>"
-                    f"<td>{trajectory_text}</td><td>{mean_text}</td>"
+                    f"<td>{information_gain_text}</td><td>{local_sum_text}</td>"
                     f"<td>{point.get('status')}</td></tr>"
                 )
             lines.append("</table>")

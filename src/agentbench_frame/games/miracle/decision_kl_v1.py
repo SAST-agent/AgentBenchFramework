@@ -14,6 +14,15 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
+from agentbench_frame.eval.information_gain import (
+    FORMAL_POLICY_INFORMATION_GAIN_UNIT,
+    FORMAL_POLICY_KL_DIRECTION,
+    FORMAL_POLICY_KL_ROLLOUT_SOURCE,
+    FORMAL_POLICY_KL_SMOOTHING,
+    FORMAL_POLICY_KL_SUM_UNIT,
+    MAIN_POLICY_KL_EPSILON,
+    formal_policy_kl,
+)
 from agentbench_frame.eval.measurement import ActionSupport
 from agentbench_frame.games.miracle.research_protocol import (
     IncompleteActionSupportError,
@@ -22,11 +31,13 @@ from agentbench_frame.games.miracle.research_protocol import (
 )
 
 
-ACCEPTANCE_THRESHOLD = 0.01
-DIRECTION = "old||new"
-ROLLOUT_SOURCE = "new_policy"
-SMOOTHING = "none"
-UNIT = "nats / decision"
+ACCEPTANCE_THRESHOLD = None
+DIRECTION = FORMAL_POLICY_KL_DIRECTION
+ROLLOUT_SOURCE = FORMAL_POLICY_KL_ROLLOUT_SOURCE
+EPSILON = MAIN_POLICY_KL_EPSILON
+SMOOTHING = FORMAL_POLICY_KL_SMOOTHING
+UNIT = FORMAL_POLICY_INFORMATION_GAIN_UNIT
+SUM_UNIT = FORMAL_POLICY_KL_SUM_UNIT
 _IDENTITY_KEYS = {"schema_version", "support_id", "action_ids"}
 _DISTRIBUTION_SUM_TOLERANCE = 1e-9
 _STRICT_MASS_ROUNDOFF = 8 * math.ulp(1.0)
@@ -52,10 +63,6 @@ class _DistributionValidationError(ValueError):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
         self.code = code
-
-
-def _passes_acceptance_threshold(value: float) -> bool:
-    return value <= ACCEPTANCE_THRESHOLD
 
 
 def _strict_step(value: Any) -> int:
@@ -204,6 +211,7 @@ class DecisionKLRecord:
     local_kl: float | None
     reason: str | None = None
     direction: str = DIRECTION
+    epsilon: float = EPSILON
     smoothing: str = SMOOTHING
     log_base: str = "e"
 
@@ -226,7 +234,7 @@ class DecisionKLRecord:
         object.__setattr__(self, "action_ids", action_ids)
         if (
             type(self.status) is not str
-            or self.status not in {"complete", "incomplete", "threshold_failed"}
+            or self.status not in {"complete", "incomplete"}
         ):
             raise ValueError("local KL status is invalid")
         if self.status == "complete":
@@ -238,20 +246,17 @@ class DecisionKLRecord:
             if self.reason is not None:
                 raise ValueError("complete local KL cannot have a failure reason")
         elif self.local_kl is not None:
-            raise ValueError("failed or incomplete local KL must not expose a scalar")
+            raise ValueError("incomplete local KL must not expose a scalar")
         if self.reason is not None and type(self.reason) is not str:
             raise ValueError("local KL reason must be an exact string or null")
         if self.status == "incomplete" and self.reason not in _INCOMPLETE_REASONS:
             raise ValueError("incomplete local KL reason is invalid")
         if (
-            self.status == "threshold_failed"
-            and self.reason != "old_positive_new_zero"
-        ):
-            raise ValueError("threshold-failed local KL reason is invalid")
-        if (
             type(self.direction) is not str
             or type(self.smoothing) is not str
             or self.direction != DIRECTION
+            or type(self.epsilon) is not float
+            or self.epsilon != EPSILON
             or self.smoothing != SMOOTHING
         ):
             raise ValueError("local KL contract identity is invalid")
@@ -270,6 +275,7 @@ class DecisionKLRecord:
             "local_kl": self.local_kl,
             "reason": self.reason,
             "direction": self.direction,
+            "epsilon": self.epsilon,
             "smoothing": self.smoothing,
             "log_base": self.log_base,
         }
@@ -285,6 +291,7 @@ class _IncompleteDecisionRecord:
     support_id: None = None
     action_ids: tuple[()] = ()
     direction: str = DIRECTION
+    epsilon: float = EPSILON
     smoothing: str = SMOOTHING
     log_base: str = "e"
 
@@ -306,9 +313,11 @@ class _IncompleteDecisionRecord:
         if (
             type(self.status) is not str
             or type(self.direction) is not str
+            or type(self.epsilon) is not float
             or type(self.smoothing) is not str
             or type(self.log_base) is not str
             or self.direction != DIRECTION
+            or self.epsilon != EPSILON
             or self.smoothing != SMOOTHING
             or self.log_base != "e"
         ):
@@ -326,6 +335,7 @@ class _IncompleteDecisionRecord:
             "local_kl": self.local_kl,
             "reason": self.reason,
             "direction": self.direction,
+            "epsilon": self.epsilon,
             "smoothing": self.smoothing,
             "log_base": self.log_base,
         }
@@ -344,6 +354,7 @@ def _decision_record_snapshot(
         record.local_kl,
         record.reason,
         record.direction,
+        record.epsilon,
         record.smoothing,
         record.log_base,
     )
@@ -371,6 +382,7 @@ def _build_decision_record_authority():
             "local_kl": local_kl,
             "reason": reason,
             "direction": DIRECTION,
+            "epsilon": EPSILON,
             "smoothing": SMOOTHING,
             "log_base": "e",
         }
@@ -391,6 +403,7 @@ def _build_decision_record_authority():
             "support_id": None,
             "action_ids": (),
             "direction": DIRECTION,
+            "epsilon": EPSILON,
             "smoothing": SMOOTHING,
             "log_base": "e",
         }
@@ -458,18 +471,6 @@ def _derived_trajectory_fields(
             "reason": "empty_trajectory",
             **missing,
         }
-    failed = next(
-        (record for record in records if record.status == "threshold_failed"),
-        None,
-    )
-    if failed is not None:
-        return {
-            "status": "threshold_failed",
-            "trace": trace,
-            "threshold_passed": False,
-            "reason": failed.reason or "threshold_failed",
-            **missing,
-        }
     incomplete = next(
         (record for record in records if record.status == "incomplete"),
         None,
@@ -493,13 +494,12 @@ def _derived_trajectory_fields(
     mean = total / len(values)
     if not math.isfinite(total) or not math.isfinite(mean):
         raise ValueError("trajectory aggregates must remain finite")
-    passed = _passes_acceptance_threshold(mean)
     return {
-        "status": "complete" if passed else "threshold_failed",
+        "status": "complete",
         "trajectory_kl": mean,
         "trace": values,
-        "threshold_passed": passed,
-        "reason": None if passed else "trajectory_kl_above_threshold",
+        "threshold_passed": None,
+        "reason": None,
         "sum_local_kl": total,
         "max_local_kl": max(values),
         "p50_local_kl": _percentile(values, 0.50),
@@ -521,8 +521,9 @@ class TrajectoryKLSummary:
     max_local_kl: float | None
     p50_local_kl: float | None
     p95_local_kl: float | None
-    acceptance_threshold: float = ACCEPTANCE_THRESHOLD
+    acceptance_threshold: None = ACCEPTANCE_THRESHOLD
     direction: str = DIRECTION
+    epsilon: float = EPSILON
     smoothing: str = SMOOTHING
     log_base: str = "e"
     unit: str = UNIT
@@ -532,6 +533,8 @@ class TrajectoryKLSummary:
     verified_rollout_source: None = None
     policy_binding_verified: bool = False
     aggregation: str = "arithmetic_mean"
+    information_gain_unit: str = UNIT
+    sum_local_kl_unit: str = SUM_UNIT
 
     def __new__(cls, *_args: Any, **_kwargs: Any):
         raise TypeError("TrajectoryKLSummary can only be issued by the KL calculator")
@@ -550,6 +553,7 @@ class TrajectoryKLSummary:
         contract = {
             "acceptance_threshold": ACCEPTANCE_THRESHOLD,
             "direction": DIRECTION,
+            "epsilon": EPSILON,
             "smoothing": SMOOTHING,
             "log_base": "e",
             "unit": UNIT,
@@ -559,6 +563,8 @@ class TrajectoryKLSummary:
             "verified_rollout_source": None,
             "policy_binding_verified": False,
             "aggregation": "arithmetic_mean",
+            "information_gain_unit": UNIT,
+            "sum_local_kl_unit": SUM_UNIT,
         }
         for field_name, expected in contract.items():
             if not _exact_scientific_value(getattr(self, field_name), expected):
@@ -583,6 +589,7 @@ class TrajectoryKLSummary:
         return {
             "status": self.status,
             "trajectory_kl": self.trajectory_kl,
+            "information_gain": self.information_gain,
             "trace": list(self.trace),
             "decision_records": [record.to_dict() for record in self.decision_records],
             "threshold_passed": self.threshold_passed,
@@ -593,6 +600,7 @@ class TrajectoryKLSummary:
             "p95_local_kl": self.p95_local_kl,
             "acceptance_threshold": self.acceptance_threshold,
             "direction": self.direction,
+            "epsilon": self.epsilon,
             "smoothing": self.smoothing,
             "log_base": self.log_base,
             "unit": self.unit,
@@ -602,7 +610,13 @@ class TrajectoryKLSummary:
             "verified_rollout_source": self.verified_rollout_source,
             "policy_binding_verified": self.policy_binding_verified,
             "aggregation": self.aggregation,
+            "information_gain_unit": self.information_gain_unit,
+            "sum_local_kl_unit": self.sum_local_kl_unit,
         }
+
+    @property
+    def information_gain(self) -> float | None:
+        return self.trajectory_kl
 
 
 def _trajectory_summary_snapshot(summary: TrajectoryKLSummary) -> tuple[Any, ...]:
@@ -620,6 +634,7 @@ def _trajectory_summary_snapshot(summary: TrajectoryKLSummary) -> tuple[Any, ...
         summary.p95_local_kl,
         summary.acceptance_threshold,
         summary.direction,
+        summary.epsilon,
         summary.smoothing,
         summary.log_base,
         summary.unit,
@@ -629,6 +644,8 @@ def _trajectory_summary_snapshot(summary: TrajectoryKLSummary) -> tuple[Any, ...
         summary.verified_rollout_source,
         summary.policy_binding_verified,
         summary.aggregation,
+        summary.information_gain_unit,
+        summary.sum_local_kl_unit,
     )
 
 
@@ -665,6 +682,7 @@ def _build_trajectory_summary_authority():
             "p95_local_kl": p95_local_kl,
             "acceptance_threshold": ACCEPTANCE_THRESHOLD,
             "direction": DIRECTION,
+            "epsilon": EPSILON,
             "smoothing": SMOOTHING,
             "log_base": "e",
             "unit": UNIT,
@@ -674,6 +692,8 @@ def _build_trajectory_summary_authority():
             "verified_rollout_source": None,
             "policy_binding_verified": False,
             "aggregation": "arithmetic_mean",
+            "information_gain_unit": UNIT,
+            "sum_local_kl_unit": SUM_UNIT,
         }
         for field_name, value in values.items():
             object.__setattr__(summary, field_name, value)
@@ -828,7 +848,7 @@ def _compute_local_kl(
     *,
     decision_step: int,
 ) -> DecisionKLRecord:
-    """Compute strict unsmoothed local ``D_KL(old || new)``."""
+    """Compute epsilon-regularized local ``D_KL(new || old)``."""
 
     step = _strict_step(decision_step)
     _validate_support_identity(support_identity, support)
@@ -854,25 +874,11 @@ def _compute_local_kl(
         return _incomplete_local_record(
             step, support, "new_distribution_mass_not_strict"
         )
-    for action_id in support.action_ids:
-        old_probability = old[action_id]
-        new_probability = new[action_id]
-        if old_probability > 0.0 and new_probability == 0.0:
-            return _issue_supported_decision_record(
-                step,
-                support,
-                "threshold_failed",
-                None,
-                "old_positive_new_zero",
-            )
-    terms = [
-        old_probability
-        * (math.log(old_probability) - math.log(new[action_id]))
-        for action_id in support.action_ids
-        if (old_probability := old[action_id]) > 0.0
-    ]
-    value = math.fsum(terms)
-    negative_roundoff = 8 * math.ulp(1.0) * max(1, len(terms))
+    value = formal_policy_kl(
+        [new[action_id] for action_id in support.action_ids],
+        [old[action_id] for action_id in support.action_ids],
+    )
+    negative_roundoff = 8 * math.ulp(1.0) * max(1, len(support.action_ids))
     if value < 0.0:
         if abs(value) <= negative_roundoff:
             value = 0.0
@@ -948,17 +954,6 @@ def compute_trajectory_kl(
         )
     trace = tuple(record.local_kl for record in records)
     frozen_records = tuple(records)
-    failed = next(
-        (record for record in records if record.status == "threshold_failed"), None
-    )
-    if failed is not None:
-        return _missing_summary(
-            "threshold_failed",
-            trace,
-            frozen_records,
-            failed.reason or "threshold_failed",
-            False,
-        )
     incomplete = next(
         (record for record in records if record.status == "incomplete"), None
     )
@@ -976,14 +971,13 @@ def compute_trajectory_kl(
     finite = [float(value) for value in values if value is not None]
     total = math.fsum(finite)
     mean = total / len(finite)
-    passed = _passes_acceptance_threshold(mean)
     return _issue_trajectory_summary(
-        "complete" if passed else "threshold_failed",
+        "complete",
         mean,
         tuple(finite),
         frozen_records,
-        passed,
-        None if passed else "trajectory_kl_above_threshold",
+        None,
+        None,
         total,
         max(finite),
         _percentile(finite, 0.50),
@@ -994,9 +988,11 @@ def compute_trajectory_kl(
 __all__ = [
     "ACCEPTANCE_THRESHOLD",
     "DIRECTION",
+    "EPSILON",
     "ROLLOUT_SOURCE",
     "SMOOTHING",
     "UNIT",
+    "SUM_UNIT",
     "DecisionKLEvidence",
     "DecisionKLRecord",
     "TrajectoryKLSummary",

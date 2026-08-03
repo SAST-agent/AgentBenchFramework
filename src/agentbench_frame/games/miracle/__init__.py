@@ -131,6 +131,18 @@ from agentbench_frame.games.miracle.replay_reading_v1 import (
     preflight_replay_reading,
     render_replay_timeline,
 )
+from agentbench_frame.games.miracle.ifelse_policy_state_v1 import (
+    ExplicitIfElseStateMachineV1,
+    IncompletePolicyEvidenceError,
+    LegacyPolicySourceV1,
+    PolicyComparisonIdentityV1,
+    PolicyConfigV1,
+    PolicyMemoryV1,
+    PolicyPairDecisionV1,
+    ProviderIdentityV1,
+    SequentialReplayAuditV1,
+    audit_sequential_trace,
+)
 
 __all__ = [
     "GameOutcome", "WIN", "LOSS", "DRAW", "ERROR", "VALID_RESULTS",
@@ -177,4 +189,8 @@ __all__ = [
     "validate_distribution",
     "DecisionFrame", "ReplayPacket", "ReplayReadingContext",
     "open_replay_reading", "preflight_replay_reading", "render_replay_timeline",
+    "ExplicitIfElseStateMachineV1", "IncompletePolicyEvidenceError",
+    "LegacyPolicySourceV1", "PolicyComparisonIdentityV1", "PolicyConfigV1",
+    "PolicyMemoryV1", "PolicyPairDecisionV1", "ProviderIdentityV1",
+    "SequentialReplayAuditV1", "audit_sequential_trace",
 ]

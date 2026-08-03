@@ -12,16 +12,16 @@
     {% if lr.get('score_history') %}<table class="data-table"><tr><th>Act</th><th>Score</th><th>Act id</th></tr>{% for point in lr.get('score_history') %}<tr><td>{{ point.x }}</td><td>{% if point.score is none %}<span class="amber">missing</span>{% else %}{{ fmt_pct(point.score) }}{% endif %}</td><td class="mono">{{ point.act_id or '—' }}</td></tr>{% endfor %}</table>{% else %}<div class="empty-state">No score history yet.</div>{% endif %}
   </article>
   <article class="panel">
-    <div class="panel-header"><div><h2>{{ icon('spark') }} Information gain</h2><p class="panel-subtitle">Per-event estimand and rollout provenance are preserved; incomplete episodes remain gaps</p></div><div class="panel-meta">Trajectory KL estimate<br>nats / episode</div></div>
+    <div class="panel-header"><div><h2>{{ icon('spark') }} Information gain</h2><p class="panel-subtitle">Per-event estimand and rollout provenance are preserved; incomplete episodes remain gaps</p></div><div class="panel-meta">Policy IG<br>nats / decision</div></div>
     {% if lr.get('ig_history') %}
     {% set chart = lr.get('ig_chart', {}) %}
-    <svg class="kl-chart" aria-label="Trajectory KL by episode" data-segment-count="{{ chart.get('segments', [])|length }}" viewBox="0 0 {{ chart.get('width', 560) }} {{ chart.get('height', 180) }}" role="img">
+    <svg class="kl-chart" aria-label="Policy information gain by episode" data-segment-count="{{ chart.get('segments', [])|length }}" viewBox="0 0 {{ chart.get('width', 560) }} {{ chart.get('height', 180) }}" role="img">
       {% for segment in chart.get('segments', []) %}
       {% if segment.nodes|length > 1 %}<polyline points="{{ segment.points }}"/>{% endif %}
       {% for node in segment.nodes %}<circle cx="{{ node.x }}" cy="{{ node.y }}" r="4"><title>episode {{ node.episode }}: {{ fmt_num(node.value) }} nats</title></circle>{% endfor %}
       {% endfor %}
     </svg>
-    <table class="data-table"><tr><th>Episode</th><th>Trajectory KL<br><span class="missing">nats / episode</span></th><th>Mean local policy KL<br><span class="missing">nats / decision</span></th><th>Decision steps</th><th>Estimand</th><th>Status</th></tr>{% for point in lr.get('ig_history') %}<tr><td>{{ point.episode }}</td><td class="mint">{% if point.trajectory_kl_episode is none %}<span class="missing">missing</span>{% else %}{{ fmt_num(point.trajectory_kl_episode) }}{% endif %}</td><td>{% if point.mean_local_policy_kl is none %}<span class="missing">missing</span>{% else %}{{ fmt_num(point.mean_local_policy_kl) }}{% endif %}</td><td>{{ point.decision_steps }}</td><td class="mono">{{ point.estimand }}</td><td><span class="status status-{{ status_class(point.status) }}">{{ point.status }}</span></td></tr>{% endfor %}</table>
+    <table class="data-table"><tr><th>Episode</th><th>Policy IG<br><span class="missing">nats / decision</span></th><th>Local KL sum<br><span class="missing">nats / episode</span></th><th>Decision steps</th><th>Estimand</th><th>Status</th></tr>{% for point in lr.get('ig_history') %}<tr><td>{{ point.episode }}</td><td class="mint">{% if point.information_gain is none %}<span class="missing">missing</span>{% else %}{{ fmt_num(point.information_gain) }}{% endif %}</td><td>{% if point.local_policy_kl_sum is none %}<span class="missing">missing</span>{% else %}{{ fmt_num(point.local_policy_kl_sum) }}{% endif %}</td><td>{{ point.decision_steps }}</td><td class="mono">{{ point.estimand }}</td><td><span class="status status-{{ status_class(point.status) }}">{{ point.status }}</span></td></tr>{% endfor %}</table>
     {% else %}<div class="empty-state">No policy KL trace events found.</div>{% endif %}
   </article>
 </section>

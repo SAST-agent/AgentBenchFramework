@@ -13,6 +13,52 @@ from agentbench_frame.eval.measurement import ActionSupport
 
 
 POLICY_SUM_TOLERANCE = 1e-9
+MAIN_POLICY_KL_EPSILON = 0.01
+POLICY_KL_SENSITIVITY_EPSILONS = (0.001, 0.01, 0.05)
+GENERIC_TRAJECTORY_KL_PROFILE = "generic_trajectory_kl"
+LEGACY_POLICY_KL_TRACE_PROFILE = "legacy_policy_kl_trace"
+FORMAL_POLICY_INFORMATION_GAIN_PROFILE = (
+    "24_miracle_policy_information_gain_v2"
+)
+FORMAL_POLICY_KL_DIRECTION = "new||old"
+FORMAL_POLICY_KL_LOG_BASE = "e"
+FORMAL_POLICY_KL_SMOOTHING = "symmetric_epsilon_uniform_full_support"
+FORMAL_POLICY_KL_ROLLOUT_SOURCE = "new_policy"
+FORMAL_POLICY_KL_SUM_ESTIMAND = (
+    "epsilon_regularized_local_kl_sum_under_new_policy_occupancy"
+)
+FORMAL_POLICY_INFORMATION_GAIN_ESTIMAND = (
+    "epsilon_regularized_mean_local_policy_kl_under_new_policy_occupancy"
+)
+FORMAL_POLICY_INFORMATION_GAIN_AGGREGATION = "arithmetic_mean"
+FORMAL_POLICY_INFORMATION_GAIN_UNIT = "nats / decision"
+FORMAL_POLICY_KL_SUM_UNIT = "nats / episode"
+
+
+def _strict_number(value: Any, label: str) -> float:
+    if type(value) not in {int, float}:
+        raise TypeError(f"{label} must be an int or float, not bool")
+    number = float(value)
+    if not math.isfinite(number) or number < 0.0:
+        raise ValueError(f"{label} must be finite and non-negative")
+    return number
+
+
+def _strict_probability_sequence(values: Sequence[float]) -> List[float]:
+    if not values:
+        raise ValueError("probability support cannot be empty")
+    converted = [
+        _strict_number(value, f"probability[{index}]")
+        for index, value in enumerate(values)
+    ]
+    if not math.isclose(
+        math.fsum(converted),
+        1.0,
+        rel_tol=0.0,
+        abs_tol=POLICY_SUM_TOLERANCE,
+    ):
+        raise ValueError("policy probabilities must sum to 1")
+    return converted
 
 
 def validate_policy_distribution(
@@ -31,26 +77,19 @@ def validate_policy_distribution(
         raise ValueError(
             f"policy distribution support mismatch; missing={missing}, extra={extra}"
         )
-    values = [float(distribution[action_id]) for action_id in support.action_ids]
-    if any(not math.isfinite(value) or value < 0.0 for value in values):
-        raise ValueError("probabilities must be finite and non-negative")
-    if not math.isclose(
-        sum(values),
-        1.0,
-        rel_tol=0.0,
-        abs_tol=POLICY_SUM_TOLERANCE,
-    ):
-        raise ValueError("policy probabilities must sum to 1")
-    return values
+    return _strict_probability_sequence(
+        [distribution[action_id] for action_id in support.action_ids]
+    )
 
 
 def _normalize(values: Sequence[float]) -> List[float]:
     if not values:
         raise ValueError("probability support cannot be empty")
-    converted = [float(value) for value in values]
-    if any(not math.isfinite(value) or value < 0.0 for value in converted):
-        raise ValueError("probabilities must be finite and non-negative")
-    total = sum(converted)
+    converted = [
+        _strict_number(value, f"mass[{index}]")
+        for index, value in enumerate(values)
+    ]
+    total = math.fsum(converted)
     if total <= 0.0:
         raise ValueError("probability mass must be positive")
     return [value / total for value in converted]
@@ -61,14 +100,17 @@ def epsilon_regularize(
 ) -> List[float]:
     """Mix a distribution with uniform mass over the common legal support."""
 
-    if not 0.0 <= epsilon <= 1.0:
+    if type(epsilon) not in {int, float}:
+        raise TypeError("epsilon must be an int or float, not bool")
+    epsilon = float(epsilon)
+    if not math.isfinite(epsilon) or not 0.0 <= epsilon <= 1.0:
         raise ValueError("epsilon must be in [0, 1]")
-    normalized = _normalize(probs)
-    support_size = legal_count if legal_count is not None else len(normalized)
-    if support_size != len(normalized) or support_size <= 0:
+    validated = _strict_probability_sequence(probs)
+    support_size = legal_count if legal_count is not None else len(validated)
+    if type(support_size) is not int or support_size != len(validated) or support_size <= 0:
         raise ValueError("legal_count must match the probability support")
     uniform = 1.0 / support_size
-    return [(1.0 - epsilon) * value + epsilon * uniform for value in normalized]
+    return [(1.0 - epsilon) * value + epsilon * uniform for value in validated]
 
 
 def policy_kl(
@@ -81,8 +123,8 @@ def policy_kl(
     if len(new_probs) != len(old_probs) or not new_probs:
         raise ValueError("new and old distributions must share a non-empty support")
     if epsilon is None:
-        new = _normalize(new_probs)
-        old = _normalize(old_probs)
+        new = _strict_probability_sequence(new_probs)
+        old = _strict_probability_sequence(old_probs)
     else:
         new = epsilon_regularize(new_probs, epsilon)
         old = epsilon_regularize(old_probs, epsilon)
@@ -97,10 +139,42 @@ def policy_kl(
     return value
 
 
+def formal_policy_kl(
+    new_probs: Sequence[float],
+    old_probs: Sequence[float],
+) -> float:
+    """Compute the formal 24_miracle local IG primitive.
+
+    This entry point intentionally has no epsilon argument.  Research callers
+    that need another epsilon (or no smoothing) must use :func:`policy_kl`,
+    whose result does not carry the formal measurement profile.
+    """
+
+    return policy_kl(
+        new_probs,
+        old_probs,
+        epsilon=MAIN_POLICY_KL_EPSILON,
+    )
+
+
+def policy_kl_sensitivity(
+    new_probs: Sequence[float],
+    old_probs: Sequence[float],
+) -> dict[float, float]:
+    """Derive the fixed sensitivity panel without changing the main identity."""
+
+    return {
+        epsilon: policy_kl(new_probs, old_probs, epsilon=epsilon)
+        for epsilon in POLICY_KL_SENSITIVITY_EPSILONS
+    }
+
+
 def _distribution_for_context(policy: Callable[[Any], Any], context: Any, actions: List[Any]) -> List[float]:
     raw = policy(context)
     if isinstance(raw, Mapping):
-        return [float(raw.get(action, 0.0)) for action in actions]
+        if set(raw) != set(actions):
+            raise ValueError("policy distribution must exactly match legal actions")
+        return [raw[action] for action in actions]
     values = list(raw)
     if len(values) != len(actions):
         raise ValueError("policy distribution length does not match legal actions")
@@ -164,7 +238,20 @@ def occupancy_shift(
 def trajectory_kl_from_trace(trace: Iterable[float]) -> float:
     """Return the per-rollout trajectory-KL contribution derived from a trace."""
 
-    values = [float(value) for value in trace]
-    if any(not math.isfinite(value) or value < 0.0 for value in values):
-        raise ValueError("KL trace values must be finite and non-negative")
-    return sum(values)
+    values = [
+        _strict_number(value, f"KL trace[{index}]")
+        for index, value in enumerate(trace)
+    ]
+    total = math.fsum(values)
+    if not math.isfinite(total):
+        raise ValueError("KL trace sum must be finite")
+    return total
+
+
+def episode_information_gain_from_trace(trace: Iterable[float]) -> float:
+    """Return the primary episode IG: the unweighted local-KL trace mean."""
+
+    values = tuple(trace)
+    if not values:
+        raise ValueError("episode information gain requires a non-empty trace")
+    return trajectory_kl_from_trace(values) / len(values)

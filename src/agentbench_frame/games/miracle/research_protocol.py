@@ -18,13 +18,24 @@ from itertools import permutations
 from typing import Any
 
 from agentbench_frame.eval import ActionCandidate, ActionSupport, PolicyDecision
+from agentbench_frame.eval.information_gain import (
+    FORMAL_POLICY_INFORMATION_GAIN_PROFILE,
+    FORMAL_POLICY_KL_DIRECTION,
+    FORMAL_POLICY_KL_ROLLOUT_SOURCE,
+    FORMAL_POLICY_KL_SMOOTHING,
+    MAIN_POLICY_KL_EPSILON,
+)
 
 
-PROTOCOL_VERSION = "24-miracle-research-v1"
+PROTOCOL_VERSION = "24-miracle-research-v2"
 BENCHMARK_VERSION = "24m-frozen-v1"
-MANIFEST_SCHEMA_VERSION = "24-miracle-research-manifest-v1"
+MANIFEST_SCHEMA_VERSION = "24-miracle-research-manifest-v2"
 ACTION_SCHEMA_VERSION = "24-miracle-command-v1"
-TRAJECTORY_KL_EPSILON = 0.01
+TRAJECTORY_KL_EPSILON = MAIN_POLICY_KL_EPSILON
+INTERNAL_MEMORY_EVIDENCE_BOUND = (
+    "state_and_internal_memory_bound_to_policy_identity"
+)
+CURRENT_INTERNAL_MEMORY_EVIDENCE = "not_collected"
 TEST_REPEATS = 3
 SEED_MIN = 0
 SEED_MAX = 0x7FFF_FFFF
@@ -291,9 +302,19 @@ def research_protocol_manifest() -> dict[str, Any]:
         },
         "trajectory_kl": {
             "required": True,
+            "measurement_profile": FORMAL_POLICY_INFORMATION_GAIN_PROFILE,
             "epsilon": TRAJECTORY_KL_EPSILON,
-            "direction": "new||old",
-            "rollout_source": "new_policy",
+            "direction": FORMAL_POLICY_KL_DIRECTION,
+            "rollout_source": FORMAL_POLICY_KL_ROLLOUT_SOURCE,
+            "smoothing": FORMAL_POLICY_KL_SMOOTHING,
+            "local_policy_kl_trace": "required_ordered_target_agent_decisions",
+            "primary_episode_information_gain": "arithmetic_mean",
+            "primary_unit": "nats / decision",
+            "optional_sum_unit": "nats / episode",
+            "terminal_state_included": False,
+            "occupancy_shift_combined_with_information_gain": False,
+            "internal_memory_context": "required_when_policy_stateful",
+            "current_internal_memory_evidence": CURRENT_INTERNAL_MEMORY_EVIDENCE,
             "decision_change_rate": "not_collected",
             "failure_policy": "mark_measurement_incomplete",
         },

@@ -1,15 +1,11 @@
 # Trajectory KL 下游接入指南
 
-> **24_miracle 作用域与迁移状态。** 本文记录的是当前 generic legacy
-> trajectory-KL 接口：`KL(new||old)`、epsilon regularization 和 episode
-> local-KL sum。它继续适用于仍采用该接口的通用/其他游戏接入，但不再是
-> 24_miracle 的目标合同。24_miracle 已裁决为 atomic Judge operation、状态
-> 局部完整有序的 `ActionSupport + support_id`，以及 `KL(old||new)`、自然
-> 对数、无 smoothing、new-policy occupancy、trajectory arithmetic mean、
-> `nats / decision`、阈值 `0.01`。参见
-> [24_miracle KL contract authority v1](../games/24_miracle_kl_contract_authority.v1.md)。
-> 当前 generic runtime、tracking 和 downstream integration 尚未迁移；本文
-> 不构成迁移完成声明。
+> **24_miracle 作用域。** 当前接口已统一为 atomic Judge operation、状态
+> 局部完整有序的 `ActionSupport + support_id`、`KL(new||old)`、自然对数、
+> 双方固定 `epsilon=0.01` 均匀 smoothing、new-policy occupancy、episode
+> arithmetic mean 与 `nats / decision`。不存在 KL 大小阈值。参见
+> [24_miracle KL contract authority v2](../games/24_miracle_kl_contract_authority.v2.md)。
+> 真实运行与权威批准仍是独立边界。
 
 本文面向接入具体 Saiblo 游戏、RL agent、HL（heuristic learning，
 rule-based agent iteration）agent 或自定义对局 runner 的开发者。目标是让
@@ -25,8 +21,8 @@ KL，也不是 replay-based KL。数学背景和设计取舍见
 一次接入会为每个目标 agent episode 产生：
 
 - 每个目标决策点的新旧原始策略分布、合法动作 ID、实际动作 ID 和 local KL；
-- 主指标 `trajectory_kl_episode`，单位为 `nats / episode`；
-- 辅助指标 `mean_local_policy_kl`，单位为 `nats / decision`；
+- 主指标 `information_gain`（等于 `mean_local_policy_kl`），单位为 `nats / decision`；
+- 独立派生 `local_policy_kl_sum`（兼容字段 `trajectory_kl_episode`），单位为 `nats / episode`；
 - episode 的版本、epsilon、对手、seed、先后手和错误信息；
 - `events.jsonl` 中的追加式一手记录；
 - 本地和 CI 中按 episode 展示且不跨越缺失点的折线图。
@@ -481,10 +477,9 @@ measured_agent = TrajectoryKLAgent(
     active_policy=new_policy_adapter,
     reference_policy=old_policy_adapter,
     support_provider=support_provider,
-    config=TrajectoryKLConfig(
+    config=TrajectoryKLConfig.for_policy_information_gain(
         version_before="artifact-sha256:old",
         version_after="artifact-sha256:new",
-        epsilon=0.01,
         metadata={
             "evaluation_suite": "fixed-suite-v1",
         },
@@ -714,8 +709,8 @@ on_episode_complete=run.log_trajectory_kl_result
 | `epsilon` | 本次固定 regularization 参数 |
 | `trace` | 与 decisions 一一对齐的 local KL 序列 |
 | `decision_steps` | 目标 agent 决策次数 |
-| `trajectory_kl_episode` | 主指标，`nats / episode` |
-| `mean_local_policy_kl` | 辅助指标，`nats / decision` |
+| `information_gain` / `mean_local_policy_kl` | 主 episode IG（trace 算术平均），`nats / decision` |
+| `local_policy_kl_sum` / `trajectory_kl_episode` | 可选 trace 总和，`nats / episode` |
 | `direction` | 固定为 `new||old` |
 | `log_base` | 固定为自然对数 `e` |
 | `rollout_source` | rich 在线测量为 `new_policy` |
@@ -723,11 +718,13 @@ on_episode_complete=run.log_trajectory_kl_result
 | `metadata` | seed、对手、先后手和实验协议等 |
 | `errors` | episode 级错误列表 |
 
-报告会从 `trace` 重新派生总和与均值，不盲信可能陈旧的预计算标量。畸形、
-不对齐、非有限或 incomplete 事件在图中保留为缺口。
+报告会从有序 decision records 的 old/new distributions 重新计算每个 local
+KL、trace、总和与均值，不盲信上传的 local 或预计算 summary。畸形、不对齐、
+非有限或 incomplete 事件在图中保留为缺口。
 
 旧的 `Run.log_policy_kl_trace()` 只用于兼容已经计算好的 legacy trace，无法
-证明其 rollout 来源；新接入应使用 `log_trajectory_kl_result()`。
+证明其 rollout 来源；它保留原 trace，但正式 `information_gain` 必须为 null。
+新接入应使用 `log_trajectory_kl_result()`。
 
 ## 13. 固定实验协议
 
@@ -758,11 +755,15 @@ trajectory KL 具有统一单位，但其数值仍受游戏、动作支持规模
 不能把整条曲线的变化全部归因于 learning。更稳妥的做法是每轮迭代重复同一
 固定对手序列，并按对手或 case 分层比较。
 
-epsilon 由 `TrajectoryKLConfig` 固定，必须满足：
+24_miracle 正式主 epsilon 由无 epsilon 参数的
+`TrajectoryKLConfig.for_policy_information_gain()` 固定，必须满足：
 
 ```text
-0 < epsilon < 1
+epsilon == 0.01
 ```
+
+通用研究工具仍可用 `TrajectoryKLConfig(..., epsilon=...)` 选择合法的其他
+epsilon，但其 `measurement_profile=generic_trajectory_kl`，不能填充正式 IG。
 
 不要让 adapter 自行平滑后又让 framework 二次平滑。
 
@@ -835,8 +836,9 @@ rollout；但该 episode 不再产生主标量。下游不能从已有 local KL 
 
 - [ ] 一个正常 episode 的 decision 数与 trace 长度严格相等。
 - [ ] 每个正常 local KL 有限且非负。
-- [ ] `trajectory_kl_episode` 等于完整 trace 之和。
-- [ ] 单位明确为主 `nats / episode`、辅 `nats / decision`。
+- [ ] `information_gain` 等于完整 trace 的算术平均。
+- [ ] `local_policy_kl_sum`（及兼容 sum 字段）等于完整 trace 之和。
+- [ ] 单位明确为主 `nats / decision`、可选 sum `nats / episode`。
 - [ ] 分布/查询失败会保留当前决策已取得的 raw evidence，并使 episode incomplete。
 - [ ] support、active 类型或非法动作的前置失败只要求保留先前 decisions 和 abort error。
 - [ ] incomplete episode 的总和与均值为缺失，不是 0。

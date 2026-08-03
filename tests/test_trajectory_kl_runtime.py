@@ -1,3 +1,4 @@
+import copy
 import unittest
 
 
@@ -132,6 +133,162 @@ def _support(_observation):
 
 
 class TrajectoryKLRuntimeTests(unittest.TestCase):
+    def test_decision_record_freezes_source_distributions_and_metadata(self):
+        from agentbench_frame.eval.trajectory_kl import (
+            TrajectoryKLDecisionRecord,
+        )
+
+        new_distribution = {"a": 0.75, "b": 0.25}
+        old_distribution = {"a": 0.5, "b": 0.5}
+        record = TrajectoryKLDecisionRecord(
+            decision_step=1,
+            context_ref="context",
+            action_schema_version="actions-v1",
+            support_id="support",
+            legal_action_ids=("a", "b"),
+            selected_action_id="a",
+            new_distribution=new_distribution,
+            old_distribution=old_distribution,
+            new_probabilities=(0.75, 0.25),
+            old_probabilities=(0.5, 0.5),
+            local_policy_kl=0.1,
+        )
+
+        new_distribution["a"] = 0.0
+        old_distribution["a"] = 1.0
+        self.assertEqual(record.to_dict()["new_distribution"]["a"], 0.75)
+        self.assertEqual(record.to_dict()["old_distribution"]["a"], 0.5)
+        with self.assertRaises(TypeError):
+            record.new_distribution["a"] = 0.0
+
+    def test_episode_result_rejects_forged_summary_derived_from_records(self):
+        from agentbench_frame.eval.information_gain import policy_kl
+        from agentbench_frame.eval.trajectory_kl import (
+            TrajectoryKLDecisionRecord,
+            TrajectoryKLEpisodeResult,
+        )
+
+        local = policy_kl([0.75, 0.25], [0.5, 0.5], epsilon=0.01)
+        record = TrajectoryKLDecisionRecord(
+            decision_step=1,
+            context_ref="context",
+            action_schema_version="actions-v1",
+            support_id="support",
+            legal_action_ids=("a", "b"),
+            selected_action_id="a",
+            new_distribution={"a": 0.75, "b": 0.25},
+            old_distribution={"a": 0.5, "b": 0.5},
+            new_probabilities=(0.75, 0.25),
+            old_probabilities=(0.5, 0.5),
+            local_policy_kl=local,
+        )
+        with self.assertRaisesRegex(ValueError, "mean|summary|aggregate"):
+            TrajectoryKLEpisodeResult(
+                episode=1,
+                version_before="v1",
+                version_after="v2",
+                epsilon=0.01,
+                status="complete",
+                decisions=(record,),
+                trace=(local,),
+                trajectory_kl_episode=local,
+                mean_local_policy_kl=local + 0.25,
+                errors=(),
+                metadata={},
+            )
+
+    def test_episode_result_rejects_bool_aggregate_aliases(self):
+        from agentbench_frame.eval.trajectory_kl import (
+            TrajectoryKLDecisionRecord,
+            TrajectoryKLEpisodeResult,
+        )
+
+        record = TrajectoryKLDecisionRecord(
+            decision_step=1,
+            context_ref="context",
+            action_schema_version="actions-v1",
+            support_id="support",
+            legal_action_ids=("a", "b"),
+            selected_action_id="a",
+            new_distribution={"a": 0.5, "b": 0.5},
+            old_distribution={"a": 0.5, "b": 0.5},
+            new_probabilities=(0.5, 0.5),
+            old_probabilities=(0.5, 0.5),
+            local_policy_kl=0.0,
+        )
+        for field in ("trajectory_kl_episode", "mean_local_policy_kl"):
+            values = {
+                "trajectory_kl_episode": 0.0,
+                "mean_local_policy_kl": 0.0,
+            }
+            values[field] = False
+            with self.subTest(field=field), self.assertRaisesRegex(
+                ValueError, "aggregate|mean"
+            ):
+                TrajectoryKLEpisodeResult(
+                    episode=1,
+                    version_before="v1",
+                    version_after="v2",
+                    epsilon=0.01,
+                    status="complete",
+                    decisions=(record,),
+                    trace=(0.0,),
+                    errors=(),
+                    metadata={},
+                    **values,
+                )
+
+    def test_payload_rejects_bool_numeric_aliases(self):
+        from agentbench_frame.eval.trajectory_kl import (
+            TrajectoryKLDecisionRecord,
+            TrajectoryKLEpisodeResult,
+            trajectory_kl_result_from_payload,
+        )
+
+        record = TrajectoryKLDecisionRecord(
+            decision_step=1,
+            context_ref="context",
+            action_schema_version="actions-v1",
+            support_id="support",
+            legal_action_ids=("a", "b"),
+            selected_action_id="a",
+            new_distribution={"a": 0.5, "b": 0.5},
+            old_distribution={"a": 0.5, "b": 0.5},
+            new_probabilities=(0.5, 0.5),
+            old_probabilities=(0.5, 0.5),
+            local_policy_kl=0.0,
+        )
+        result = TrajectoryKLEpisodeResult(
+            episode=1,
+            version_before="v1",
+            version_after="v2",
+            epsilon=0.01,
+            status="complete",
+            decisions=(record,),
+            trace=(0.0,),
+            trajectory_kl_episode=0.0,
+            mean_local_policy_kl=0.0,
+            errors=(),
+            metadata={},
+            measurement_profile="24_miracle_policy_information_gain_v2",
+        )
+        payload = result.to_dict()
+
+        replacements = {
+            "decision_steps": True,
+            "trajectory_kl_episode": False,
+            "mean_local_policy_kl": False,
+            "information_gain": False,
+            "local_policy_kl_sum": False,
+        }
+        for field, forged in replacements.items():
+            candidate = copy.deepcopy(payload)
+            candidate[field] = forged
+            with self.subTest(field=field), self.assertRaises(
+                (TypeError, ValueError)
+            ):
+                trajectory_kl_result_from_payload(candidate)
+
     def test_match_measures_only_new_policy_decisions_on_the_actual_rollout(self):
         from agentbench_frame.arena.match import Match
         from agentbench_frame.eval.information_gain import policy_kl
@@ -147,10 +304,9 @@ class TrajectoryKLRuntimeTests(unittest.TestCase):
             active_policy=active,
             reference_policy=reference,
             support_provider=_support,
-            config=TrajectoryKLConfig(
+            config=TrajectoryKLConfig.for_policy_information_gain(
                 version_before="v1",
                 version_after="v2",
-                epsilon=0.1,
             ),
             on_episode_complete=completed.append,
         )
@@ -185,13 +341,17 @@ class TrajectoryKLRuntimeTests(unittest.TestCase):
 
         episode = completed[0]
         expected = (
-            policy_kl([0.75, 0.25], [0.5, 0.5], epsilon=0.1)
-            + policy_kl([0.5, 0.5], [0.5, 0.5], epsilon=0.1)
+            policy_kl([0.75, 0.25], [0.5, 0.5], epsilon=0.01)
+            + policy_kl([0.5, 0.5], [0.5, 0.5], epsilon=0.01)
         )
         self.assertEqual(episode.status, "complete")
         self.assertEqual(episode.decision_steps, 2)
         self.assertAlmostEqual(episode.trajectory_kl_episode, expected)
         self.assertAlmostEqual(episode.mean_local_policy_kl, expected / 2)
+        self.assertAlmostEqual(episode.information_gain, expected / 2)
+        self.assertAlmostEqual(episode.local_policy_kl_sum, expected)
+        self.assertEqual(episode.information_gain_unit, "nats / decision")
+        self.assertEqual(episode.local_policy_kl_sum_unit, "nats / episode")
         self.assertEqual(episode.metadata["seed"], 17)
         self.assertEqual(episode.metadata["player_id"], 0)
         self.assertEqual(episode.metadata["opponent_name"], "opponent")
@@ -216,10 +376,9 @@ class TrajectoryKLRuntimeTests(unittest.TestCase):
             active_policy=_ActivePolicy(),
             reference_policy=_ReferencePolicy(fail=True),
             support_provider=_support,
-            config=TrajectoryKLConfig(
+            config=TrajectoryKLConfig.for_policy_information_gain(
                 version_before="v1",
                 version_after="v2",
-                epsilon=0.1,
             ),
             on_episode_complete=completed.append,
         )
@@ -255,7 +414,7 @@ class TrajectoryKLRuntimeTests(unittest.TestCase):
             active_policy=active,
             reference_policy=reference,
             support_provider=_support,
-            config=TrajectoryKLConfig("v1", "v2", 0.1),
+            config=TrajectoryKLConfig.for_policy_information_gain("v1", "v2"),
         )
 
         Match(
@@ -289,7 +448,7 @@ class TrajectoryKLRuntimeTests(unittest.TestCase):
             active_policy=_ActivePolicy(),
             reference_policy=_ReferencePolicy(),
             support_provider=_support,
-            config=TrajectoryKLConfig("v1", "v2", 0.1),
+            config=TrajectoryKLConfig.for_policy_information_gain("v1", "v2"),
             on_episode_complete=completed.append,
         )
 
@@ -320,7 +479,7 @@ class TrajectoryKLRuntimeTests(unittest.TestCase):
             active_policy=_ActivePolicy(),
             reference_policy=_ReferencePolicy(),
             support_provider=_support,
-            config=TrajectoryKLConfig("v1", "v2", 0.1),
+            config=TrajectoryKLConfig.for_policy_information_gain("v1", "v2"),
             on_episode_complete=fail_persistence,
         )
 
@@ -343,7 +502,7 @@ class TrajectoryKLRuntimeTests(unittest.TestCase):
             active_policy=_ActivePolicy(),
             reference_policy=_ReferencePolicy(),
             support_provider=_support,
-            config=TrajectoryKLConfig("v1", "v2", 0.1),
+            config=TrajectoryKLConfig.for_policy_information_gain("v1", "v2"),
             on_episode_complete=completed.append,
         )
         measured.reset()
@@ -354,15 +513,18 @@ class TrajectoryKLRuntimeTests(unittest.TestCase):
         self.assertEqual(completed[0].status, "incomplete")
         self.assertIn("reset before terminal transition", completed[0].errors[-1])
 
-    def test_config_requires_fixed_non_degenerate_epsilon_and_version_ids(self):
+    def test_generic_config_accepts_research_epsilon_but_rejects_invalid_values(self):
         from agentbench_frame.eval.trajectory_kl import TrajectoryKLConfig
 
-        for epsilon in (0.0, 1.0, -0.1, 1.1):
+        for epsilon in (0.0, 0.001, 0.05, 1.0):
+            config = TrajectoryKLConfig("v1", "v2", epsilon)
+            self.assertFalse(config.is_formal_policy_information_gain)
+        for epsilon in (-0.1, 1.1, True):
             with self.subTest(epsilon=epsilon):
-                with self.assertRaises(ValueError):
+                with self.assertRaises((TypeError, ValueError)):
                     TrajectoryKLConfig("v1", "v2", epsilon)
         with self.assertRaises(ValueError):
-            TrajectoryKLConfig("", "v2", 0.1)
+            TrajectoryKLConfig("", "v2", 0.01)
 
 
 if __name__ == "__main__":

@@ -19,8 +19,23 @@ from enum import Enum
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping
 
+from agentbench_frame.eval.information_gain import (
+    FORMAL_POLICY_INFORMATION_GAIN_AGGREGATION,
+    FORMAL_POLICY_INFORMATION_GAIN_ESTIMAND,
+    FORMAL_POLICY_INFORMATION_GAIN_PROFILE,
+    FORMAL_POLICY_INFORMATION_GAIN_UNIT,
+    FORMAL_POLICY_KL_DIRECTION,
+    FORMAL_POLICY_KL_LOG_BASE,
+    FORMAL_POLICY_KL_ROLLOUT_SOURCE,
+    FORMAL_POLICY_KL_SMOOTHING,
+    FORMAL_POLICY_KL_SUM_ESTIMAND,
+    FORMAL_POLICY_KL_SUM_UNIT,
+    formal_policy_kl,
+)
 from agentbench_frame.games.miracle.research_protocol import (
     BENCHMARK_VERSION,
+    CURRENT_INTERNAL_MEMORY_EVIDENCE,
+    INTERNAL_MEMORY_EVIDENCE_BOUND,
     PROTOCOL_VERSION,
     SEED_MAX,
     SEED_MIN,
@@ -31,7 +46,7 @@ from agentbench_frame.games.miracle.research_protocol import (
     research_manifest_sha256,
 )
 
-ITERATION_PROTOCOL_VERSION = "24-miracle-iteration-v3"
+ITERATION_PROTOCOL_VERSION = "24-miracle-iteration-v4"
 BOOTSTRAP_TEMPLATE_VERSION = "24m-minimal-bootstrap-v1"
 HUMAN_CHAMPION_SCHEMA_VERSION = "24-miracle-human-champion-v1"
 HUMAN_REPLAY_SKILL_SCHEMA_VERSION = "24-miracle-human-replay-skill-v1"
@@ -44,8 +59,11 @@ ITERATION_ACCEPTANCE_SCHEMA_VERSION = "24-miracle-iteration-acceptance-v1"
 STRATEGY_SCHEMA_VERSION = "24-miracle-strategy-v3"
 ROLLBACK_SCHEMA_VERSION = "24-miracle-rollback-v1"
 LEGAL_ACTION_UNIT = "one_legal_atomic_judge_command"
-KL_DIRECTION = "new||old"
-KL_ROLLOUT_SOURCE = "new_policy"
+KL_DIRECTION = FORMAL_POLICY_KL_DIRECTION
+KL_ROLLOUT_SOURCE = FORMAL_POLICY_KL_ROLLOUT_SOURCE
+KL_AGGREGATION = FORMAL_POLICY_INFORMATION_GAIN_AGGREGATION
+KL_INFORMATION_GAIN_UNIT = FORMAL_POLICY_INFORMATION_GAIN_UNIT
+KL_SUM_UNIT = FORMAL_POLICY_KL_SUM_UNIT
 DECISION_CHANGE_RATE = "not_collected"
 HUMAN_AUTHORED_CONTENT_REQUIRED = "HUMAN_AUTHORED_CONTENT_REQUIRED"
 
@@ -1026,9 +1044,19 @@ class CandidateEvaluationPlan:
         return plan
 
 
+@dataclass(frozen=True)
+class _ValidatedTrajectoryKL:
+    complete: bool
+    information_gain: float | None
+    local_policy_kl_sum: float | None
+
+    def __bool__(self) -> bool:
+        return self.complete
+
+
 def _validate_trajectory_kl(
     value: Mapping[str, Any], plan: CandidateEvaluationPlan
-) -> bool:
+) -> _ValidatedTrajectoryKL:
     if not isinstance(value, Mapping):
         raise IterationPreflightError("trajectory KL evidence must be an object")
     episode = value.get("episode")
@@ -1037,12 +1065,16 @@ def _validate_trajectory_kl(
         raise IterationPreflightError("trajectory KL old-policy identity mismatch")
     if value.get("version_after") != plan.candidate_strategy_version:
         raise IterationPreflightError("trajectory KL new-policy identity mismatch")
+    if value.get("measurement_profile") != FORMAL_POLICY_INFORMATION_GAIN_PROFILE:
+        raise IterationPreflightError(
+            "trajectory KL formal measurement profile mismatch"
+        )
     epsilon = value.get("epsilon")
     if isinstance(epsilon, bool) or not isinstance(epsilon, (int, float)) or epsilon != TRAJECTORY_KL_EPSILON:
         raise IterationPreflightError("trajectory KL epsilon must be 0.01")
     if value.get("direction") != KL_DIRECTION or value.get("rollout_source") != KL_ROLLOUT_SOURCE:
         raise IterationPreflightError("trajectory KL direction/rollout identity mismatch")
-    if value.get("log_base") != "e" or value.get("estimand") != "epsilon_regularized_local_kl_sum_under_new_policy_occupancy":
+    if value.get("log_base") != FORMAL_POLICY_KL_LOG_BASE or value.get("estimand") != FORMAL_POLICY_KL_SUM_ESTIMAND:
         raise IterationPreflightError("trajectory KL estimand mismatch")
     status = value.get("status")
     if status not in {"complete", "incomplete", "failed"} or value.get("measurement_status") != status:
@@ -1061,7 +1093,7 @@ def _validate_trajectory_kl(
     complete = status == "complete"
     if complete and (not decisions or errors):
         raise IterationPreflightError("complete trajectory KL requires decisions and no errors")
-    total = 0.0
+    local_values: list[float] = []
     for index, decision in enumerate(decisions, start=1):
         if not isinstance(decision, Mapping) or decision.get("decision_step") != index:
             raise IterationPreflightError("trajectory KL decision steps must be strict and continuous")
@@ -1072,38 +1104,120 @@ def _validate_trajectory_kl(
             raise IterationPreflightError("trajectory KL ActionSupport identity is invalid")
         for label in ("context_ref", "action_schema_version", "support_id"):
             _required_text(decision.get(label), f"trajectory KL {label}")
-        local = decision.get("local_policy_kl")
-        if complete:
+        decision_errors = decision.get("errors")
+        if not isinstance(decision_errors, list) or any(
+            not isinstance(item, str) for item in decision_errors
+        ):
+            raise IterationPreflightError(
+                "trajectory KL decision errors must be strings"
+            )
+        raw_local = decision.get("local_policy_kl")
+        if raw_local is None:
+            if complete:
+                raise IterationPreflightError(
+                    "complete trajectory KL decision requires local policy KL"
+                )
+            if trace[index - 1] is not None:
+                raise IterationPreflightError(
+                    "trajectory KL trace disagrees with decisions"
+                )
+        else:
+            local = raw_local
             local = _strict_finite_number(local, "local policy KL")
             if local < 0.0:
                 raise IterationPreflightError("local policy KL cannot be negative")
             if trace[index - 1] != local:
                 raise IterationPreflightError("trajectory KL trace disagrees with decisions")
-            total += local
+            local_values.append(local)
+            aligned_vectors: dict[str, list[float]] = {}
             for label in ("new_distribution", "old_distribution"):
                 distribution = decision.get(label)
                 if not isinstance(distribution, Mapping) or set(distribution) != set(legal):
                     raise IterationPreflightError("trajectory KL policy distribution support mismatch")
                 values = [_strict_score(distribution[action], f"{label} probability") for action in legal]
-                if not math.isclose(sum(values), 1.0, rel_tol=0.0, abs_tol=1e-9):
+                if not math.isclose(math.fsum(values), 1.0, rel_tol=0.0, abs_tol=1e-9):
                     raise IterationPreflightError("trajectory KL policy distribution is not normalized")
+                aligned_vectors[label] = values
             for label in ("new_probabilities", "old_probabilities"):
                 probabilities = decision.get(label)
                 if not isinstance(probabilities, list) or len(probabilities) != len(legal):
                     raise IterationPreflightError("trajectory KL probability vector is incomplete")
                 values = [_strict_score(item, f"{label} probability") for item in probabilities]
-                if not math.isclose(sum(values), 1.0, rel_tol=0.0, abs_tol=1e-9):
+                if not math.isclose(math.fsum(values), 1.0, rel_tol=0.0, abs_tol=1e-9):
                     raise IterationPreflightError("trajectory KL probability vector is not normalized")
-            if decision.get("errors") != []:
+                distribution_label = label.removesuffix("_probabilities") + "_distribution"
+                if any(
+                    not math.isclose(left, right, rel_tol=0.0, abs_tol=1e-12)
+                    for left, right in zip(
+                        values, aligned_vectors[distribution_label], strict=True
+                    )
+                ):
+                    raise IterationPreflightError(
+                        "trajectory KL probability vector disagrees with distribution"
+                    )
+            try:
+                recomputed_local = formal_policy_kl(
+                    aligned_vectors["new_distribution"],
+                    aligned_vectors["old_distribution"],
+                )
+            except (TypeError, ValueError) as exc:
+                raise IterationPreflightError(
+                    f"local policy KL inputs are invalid: {exc}"
+                ) from exc
+            if not math.isclose(local, recomputed_local, rel_tol=0.0, abs_tol=1e-12):
+                raise IterationPreflightError(
+                    "local policy KL disagrees with authoritative distributions"
+                )
+            if decision_errors:
                 raise IterationPreflightError("complete trajectory KL decision cannot contain errors")
     if complete:
+        try:
+            total = math.fsum(local_values)
+        except OverflowError as exc:
+            raise IterationPreflightError(
+                "trajectory KL aggregates must be finite"
+            ) from exc
+        information_gain = total / len(decisions)
+        if not math.isfinite(total) or not math.isfinite(information_gain):
+            raise IterationPreflightError("trajectory KL aggregates must be finite")
         uploaded_total = _strict_finite_number(value.get("trajectory_kl_episode"), "trajectory KL episode")
         uploaded_mean = _strict_finite_number(value.get("mean_local_policy_kl"), "mean local policy KL")
         if not math.isclose(uploaded_total, total, rel_tol=0.0, abs_tol=1e-12):
             raise IterationPreflightError("trajectory KL episode total mismatch")
         if not math.isclose(uploaded_mean, total / len(decisions), rel_tol=0.0, abs_tol=1e-12):
             raise IterationPreflightError("trajectory KL episode mean mismatch")
-    return complete
+        uploaded_ig = _strict_finite_number(
+            value.get("information_gain"), "information gain"
+        )
+        uploaded_sum = _strict_finite_number(
+            value.get("local_policy_kl_sum"), "local policy KL sum"
+        )
+        if not math.isclose(uploaded_ig, information_gain, rel_tol=0.0, abs_tol=1e-12):
+            raise IterationPreflightError("information gain disagrees with ordered trace")
+        if not math.isclose(uploaded_sum, total, rel_tol=0.0, abs_tol=1e-12):
+            raise IterationPreflightError("local policy KL sum disagrees with ordered trace")
+        if (
+            value.get("aggregation") != KL_AGGREGATION
+            or value.get("information_gain_unit") != KL_INFORMATION_GAIN_UNIT
+            or value.get("local_policy_kl_sum_unit") != KL_SUM_UNIT
+            or value.get("information_gain_estimand")
+            != FORMAL_POLICY_INFORMATION_GAIN_ESTIMAND
+        ):
+            raise IterationPreflightError("information gain aggregate identity mismatch")
+        if CURRENT_INTERNAL_MEMORY_EVIDENCE != INTERNAL_MEMORY_EVIDENCE_BOUND:
+            return _ValidatedTrajectoryKL(False, None, None)
+        return _ValidatedTrajectoryKL(True, information_gain, total)
+    for label in (
+        "trajectory_kl_episode",
+        "mean_local_policy_kl",
+        "information_gain",
+        "local_policy_kl_sum",
+    ):
+        if value.get(label) is not None:
+            raise IterationPreflightError(
+                "incomplete trajectory KL cannot expose aggregate scalars"
+            )
+    return _ValidatedTrajectoryKL(False, None, None)
 
 
 @dataclass(frozen=True)
@@ -1213,12 +1327,27 @@ class EvaluationCaseEvidence:
         _strict_score(self.candidate_score, "candidate score")
         if self.terminal_status not in {"complete", "incomplete", "failed"}:
             raise IterationPreflightError("evaluation terminal status is invalid")
-        kl_complete = _validate_trajectory_kl(self.trajectory_kl, plan)
-        if self.information_gain is not None:
-            _strict_finite_number(self.information_gain, "information gain")
+        validated_kl = _validate_trajectory_kl(self.trajectory_kl, plan)
+        if validated_kl.complete:
+            supplied_information_gain = _strict_finite_number(
+                self.information_gain, "information gain"
+            )
+            if not math.isclose(
+                supplied_information_gain,
+                validated_kl.information_gain,
+                rel_tol=0.0,
+                abs_tol=1e-12,
+            ):
+                raise IterationPreflightError(
+                    "information gain must match the authoritative ordered KL trace"
+                )
+        elif self.information_gain is not None:
+            raise IterationPreflightError(
+                "incomplete trajectory KL cannot expose information gain"
+            )
         if self.failure_reason is not None:
             _required_text(self.failure_reason, "evaluation failure reason")
-        if self.terminal_status == "complete" and (not kl_complete or self.information_gain is None):
+        if self.terminal_status == "complete" and not validated_kl.complete:
             if self.failure_reason is None:
                 raise IterationPreflightError("incomplete KL/IG requires a failure reason")
         if self.sha256 and self.sha256 != _digest(self._unsigned_dict()):
@@ -1370,13 +1499,22 @@ class IterationAcceptanceManifest:
         blockers: tuple[str, ...],
     ) -> dict[str, Any]:
         evidence.validate(plan)
-        raw_score = sum(item.baseline_score for item in evidence.evidence) / len(evidence.evidence)
-        evo_score = sum(item.candidate_score for item in evidence.evidence) / len(evidence.evidence)
+        raw_score = math.fsum(
+            item.baseline_score for item in evidence.evidence
+        ) / len(evidence.evidence)
+        evo_score = math.fsum(
+            item.candidate_score for item in evidence.evidence
+        ) / len(evidence.evidence)
         gain = evo_score - raw_score
-        kl_complete = all(_validate_trajectory_kl(item.trajectory_kl, plan) for item in evidence.evidence)
-        ig_values = [item.information_gain for item in evidence.evidence]
+        validated_kl = [
+            _validate_trajectory_kl(item.trajectory_kl, plan)
+            for item in evidence.evidence
+        ]
+        kl_complete = all(item.complete for item in validated_kl)
+        ig_values = [item.information_gain for item in validated_kl]
         information_gain = (
-            sum(value for value in ig_values if value is not None) / len(ig_values)
+            math.fsum(value for value in ig_values if value is not None)
+            / len(ig_values)
             if all(value is not None for value in ig_values)
             else None
         )
@@ -2440,9 +2578,15 @@ def preflight_learning(config: LearningConfig) -> LearningReadyContext:
             "benchmark_version": BENCHMARK_VERSION,
             "legal_action_unit": LEGAL_ACTION_UNIT,
             "trajectory_kl": {
+                "measurement_profile": FORMAL_POLICY_INFORMATION_GAIN_PROFILE,
                 "epsilon": TRAJECTORY_KL_EPSILON,
                 "direction": KL_DIRECTION,
                 "rollout_source": KL_ROLLOUT_SOURCE,
+                "smoothing": FORMAL_POLICY_KL_SMOOTHING,
+                "information_gain_aggregation": KL_AGGREGATION,
+                "information_gain_unit": KL_INFORMATION_GAIN_UNIT,
+                "local_policy_kl_sum_unit": KL_SUM_UNIT,
+                "internal_memory_evidence": CURRENT_INTERNAL_MEMORY_EVIDENCE,
                 "decision_change_rate": DECISION_CHANGE_RATE,
             },
         },
@@ -3101,6 +3245,19 @@ def iteration_protocol_manifest() -> dict[str, Any]:
             "sha256": bootstrap.sha256,
         },
         "legal_action_unit": LEGAL_ACTION_UNIT,
+        "policy_information_gain": {
+            "measurement_profile": FORMAL_POLICY_INFORMATION_GAIN_PROFILE,
+            "direction": KL_DIRECTION,
+            "epsilon": TRAJECTORY_KL_EPSILON,
+            "smoothing": FORMAL_POLICY_KL_SMOOTHING,
+            "rollout_source": KL_ROLLOUT_SOURCE,
+            "aggregation": KL_AGGREGATION,
+            "unit": KL_INFORMATION_GAIN_UNIT,
+            "optional_sum_unit": KL_SUM_UNIT,
+            "terminal_state_included": False,
+            "occupancy_shift_combined": False,
+            "internal_memory_evidence": CURRENT_INTERNAL_MEMORY_EVIDENCE,
+        },
         "allowed_change_operations": sorted(_CHANGE_OPERATIONS),
         "interpretable_strategy_categories": sorted(_INTERPRETABLE_CATEGORIES),
         "human_champion_schema_version": HUMAN_CHAMPION_SCHEMA_VERSION,

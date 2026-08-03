@@ -5,6 +5,75 @@ from pathlib import Path
 
 
 class LocalResearchReportTests(unittest.TestCase):
+    def test_report_does_not_promote_legacy_or_forged_rich_events_to_formal_ig(self):
+        from agentbench_frame.eval.information_gain import policy_kl
+        from agentbench_frame.report.builder import ReportBuilder
+
+        local = policy_kl([0.75, 0.25], [0.5, 0.5], epsilon=0.01)
+        forged = {
+            "event_type": "policy_kl_trace",
+            "episode": 2,
+            "version_before": "v1",
+            "version_after": "v2",
+            "measurement_profile": "24_miracle_policy_information_gain_v2",
+            "measurement_status": "complete",
+            "epsilon": 0.01,
+            "direction": "new||old",
+            "log_base": "e",
+            "rollout_source": "new_policy",
+            "estimand": "epsilon_regularized_local_kl_sum_under_new_policy_occupancy",
+            "information_gain_estimand": "epsilon_regularized_mean_local_policy_kl_under_new_policy_occupancy",
+            "aggregation": "arithmetic_mean",
+            "information_gain_unit": "nats / decision",
+            "local_policy_kl_sum_unit": "nats / episode",
+            "decision_steps": 1,
+            "trace": [local + 0.25],
+            "trajectory_kl_episode": local + 0.25,
+            "mean_local_policy_kl": local + 0.25,
+            "information_gain": local + 0.25,
+            "local_policy_kl_sum": local + 0.25,
+            "errors": [],
+            "metadata": {},
+            "decisions": [{
+                "decision_step": 1,
+                "context_ref": "context",
+                "action_schema_version": "actions-v1",
+                "support_id": "support",
+                "legal_action_ids": ["a", "b"],
+                "selected_action_id": "a",
+                "new_distribution": {"a": 0.75, "b": 0.25},
+                "old_distribution": {"a": 0.5, "b": 0.5},
+                "new_probabilities": [0.75, 0.25],
+                "old_probabilities": [0.5, 0.5],
+                "local_policy_kl": local + 0.25,
+                "errors": [],
+            }],
+        }
+        valid = json.loads(json.dumps(forged))
+        valid["episode"] = 3
+        valid["trace"] = [local]
+        valid["trajectory_kl_episode"] = local
+        valid["mean_local_policy_kl"] = local
+        valid["information_gain"] = local
+        valid["local_policy_kl_sum"] = local
+        valid["decisions"][0]["local_policy_kl"] = local
+        history = ReportBuilder._derive_research(
+            {},
+            [
+                {"event_type": "policy_kl_trace", "episode": 1, "trace": [0.2]},
+                forged,
+                valid,
+            ],
+            "missing-events.jsonl",
+        )["ig_history"]
+
+        self.assertEqual(history[0]["status"], "legacy_unverified")
+        self.assertIsNone(history[0]["information_gain"])
+        self.assertEqual(history[1]["status"], "incomplete")
+        self.assertIsNone(history[1]["information_gain"])
+        self.assertEqual(history[2]["status"], "complete")
+        self.assertAlmostEqual(history[2]["information_gain"], local)
+
     def test_local_report_reads_first_hand_events_and_renders_research_fields(self):
         from agentbench_frame.report.builder import ReportBuilder
 
@@ -115,35 +184,35 @@ class LocalResearchReportTests(unittest.TestCase):
             quality = builder.runs[0]["research"]["quality"]
             html = (output / "index.html").read_text(encoding="utf-8")
 
-        self.assertAlmostEqual(ig_history[0]["trajectory_kl_episode"], 0.4)
-        self.assertAlmostEqual(ig_history[0]["mean_local_policy_kl"], 0.2)
-        self.assertEqual(ig_history[0]["status"], "complete")
+        self.assertIsNone(ig_history[0]["trajectory_kl_episode"])
+        self.assertIsNone(ig_history[0]["mean_local_policy_kl"])
+        self.assertIsNone(ig_history[0]["information_gain"])
+        self.assertIsNone(ig_history[0]["local_policy_kl_sum"])
+        self.assertEqual(ig_history[0]["status"], "legacy_unverified")
         self.assertEqual(ig_history[0]["estimand"], "legacy_unspecified")
         self.assertEqual(len(ig_history), 11)
         self.assertEqual(quality["malformed_lines"], 1)
         self.assertIsNone(ig_history[1]["trajectory_kl_episode"])
         self.assertIsNone(ig_history[1]["mean_local_policy_kl"])
-        self.assertEqual(ig_history[1]["status"], "incomplete")
-        self.assertAlmostEqual(ig_history[2]["trajectory_kl_episode"], 0.6)
-        self.assertAlmostEqual(ig_history[2]["mean_local_policy_kl"], 0.3)
+        self.assertEqual(ig_history[1]["status"], "legacy_unverified")
+        self.assertIsNone(ig_history[2]["trajectory_kl_episode"])
+        self.assertIsNone(ig_history[2]["mean_local_policy_kl"])
+        self.assertIsNone(ig_history[2]["information_gain"])
         self.assertIsNone(ig_history[3]["trajectory_kl_episode"])
-        self.assertEqual(ig_history[3]["status"], "quarantined")
+        self.assertEqual(ig_history[3]["status"], "legacy_unverified")
         self.assertIsNone(ig_history[4]["trajectory_kl_episode"])
-        self.assertEqual(ig_history[4]["status"], "incomplete")
+        self.assertEqual(ig_history[4]["status"], "legacy_unverified")
         for point in ig_history[5:]:
             self.assertIsNone(point["trajectory_kl_episode"])
-            self.assertEqual(point["status"], "incomplete")
-        self.assertEqual(len(ig_chart["segments"]), 2)
+            self.assertEqual(point["status"], "legacy_unverified")
+        self.assertEqual(len(ig_chart["segments"]), 0)
         self.assertIn("Information gain", html)
-        self.assertIn("Trajectory KL", html)
-        self.assertIn("Mean local policy KL", html)
+        self.assertIn("Policy IG", html)
+        self.assertIn("Local KL sum", html)
         self.assertIn("nats / episode", html)
         self.assertIn("nats / decision", html)
-        self.assertIn('aria-label="Trajectory KL by episode"', html)
-        self.assertIn('data-segment-count="2"', html)
-        self.assertIn("0.40", html)
-        self.assertIn("0.20", html)
-        self.assertIn("0.60", html)
+        self.assertIn('aria-label="Policy information gain by episode"', html)
+        self.assertIn('data-segment-count="0"', html)
         self.assertIn("missing", html)
         self.assertNotIn("999.00", html)
         self.assertIn("AUC / act", html)

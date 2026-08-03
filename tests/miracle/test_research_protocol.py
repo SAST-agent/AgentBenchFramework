@@ -130,17 +130,25 @@ def test_each_logic_seed_realizes_the_frozen_map_and_day_draws():
 def test_manifest_freezes_kl_and_explicitly_excludes_decision_change_rate():
     manifest = research_protocol_manifest()
     assert research_protocol_module.MANIFEST_SCHEMA_VERSION == (
-        "24-miracle-research-manifest-v1"
+        "24-miracle-research-manifest-v2"
     )
     assert manifest["manifest_schema_version"] == (
         research_protocol_module.MANIFEST_SCHEMA_VERSION
     )
     assert research_protocol_module.BENCHMARK_VERSION == "24m-frozen-v1"
-    assert manifest["protocol_version"] == "24-miracle-research-v1"
+    assert manifest["protocol_version"] == "24-miracle-research-v2"
     assert manifest["benchmark_version"] == research_protocol_module.BENCHMARK_VERSION
     assert manifest["frozen_test"]["case_count"] == 72
     assert manifest["trajectory_kl"]["epsilon"] == 0.01
+    assert manifest["trajectory_kl"]["measurement_profile"] == (
+        "24_miracle_policy_information_gain_v2"
+    )
     assert manifest["trajectory_kl"]["direction"] == "new||old"
+    assert manifest["trajectory_kl"]["smoothing"] == "symmetric_epsilon_uniform_full_support"
+    assert manifest["trajectory_kl"]["primary_episode_information_gain"] == "arithmetic_mean"
+    assert manifest["trajectory_kl"]["primary_unit"] == "nats / decision"
+    assert manifest["trajectory_kl"]["optional_sum_unit"] == "nats / episode"
+    assert manifest["trajectory_kl"]["current_internal_memory_evidence"] == "not_collected"
     assert manifest["trajectory_kl"]["decision_change_rate"] == "not_collected"
     assert manifest["optimization_class"]["criterion"] == (
         "no_backpropagation_or_gradient_updates"
@@ -159,7 +167,7 @@ def test_research_manifest_canonical_bytes_and_hash_are_stable():
     assert research_protocol_module.research_manifest_sha256(
         research_protocol_manifest()
     ) == expected
-    assert expected == "0eaa88a77ff215381f5058024cc0028b2cffe195094c2a4d2b86795e189ad9d0"
+    assert expected == "7557015c0979c5acfbb1c553fc18614e3ea7246f6d2627478a94baa262ce61c5"
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
@@ -214,7 +222,7 @@ def test_strict_deterministic_hl_adapters_produce_complete_finite_kl():
         active,
         reference,
         lambda observation: support,
-        TrajectoryKLConfig("old", "new", TRAJECTORY_KL_EPSILON),
+        TrajectoryKLConfig.for_policy_information_gain("old", "new"),
         results.append,
     )
     measured.reset()
