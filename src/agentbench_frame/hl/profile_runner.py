@@ -288,6 +288,74 @@ def _inherit_profile_semantic_state(
         shutil.copy2(source, run_dir / "research_state.json")
 
 
+def _load_imported_certification(
+    *,
+    source_run: str | Path,
+    source_version_id: str,
+    origin_version: Version,
+    game: str,
+    evaluation_config: Any,
+) -> dict[str, Any] | None:
+    """Load an exact-content, exact-evaluation certification as a safe cache."""
+
+    root = Path(source_run).resolve()
+    snapshot = root / "run-config.json"
+    manifest = root / "versions" / "manifests" / f"{source_version_id}.json"
+    events_path = root / "events.jsonl"
+    if not snapshot.is_file() or not manifest.is_file() or not events_path.is_file():
+        return None
+    frozen = json.loads(snapshot.read_text(encoding="utf-8"))
+    source_run_config = frozen.get("run")
+    if not isinstance(source_run_config, Mapping):
+        return None
+    if source_run_config.get("game") != game:
+        return None
+    expected_evaluation = _json_native(dataclasses.asdict(evaluation_config))
+    if source_run_config.get("evaluation") != expected_evaluation:
+        return None
+    source_manifest = json.loads(manifest.read_text(encoding="utf-8"))
+    if source_manifest.get("content_hash") != origin_version.content_hash:
+        return None
+    certification = next(
+        (
+            event
+            for event in reversed(read_events(events_path))
+            if event.get("event_type") == "certification_completed"
+            and str(event.get("version_id")) == source_version_id
+        ),
+        None,
+    )
+    if certification is None:
+        return None
+    status = str(certification.get("status"))
+    score = certification.get("score")
+    matches = certification.get("matches")
+    if not isinstance(matches, list):
+        return None
+    try:
+        evaluation = CandidateEvaluation(
+            status=status,
+            score=(
+                float(score)
+                if isinstance(score, (int, float)) and not isinstance(score, bool)
+                else None
+            ),
+            matches=tuple(matches),
+        )
+    except (TypeError, ValueError):
+        return None
+    return {
+        "evaluation": evaluation,
+        "passing_human_opponents": int(
+            certification.get("passing_human_opponents") or 0
+        ),
+        "source_run_id": root.name,
+        "source_version_id": source_version_id,
+        "source_event_id": str(certification["event_id"]),
+        "content_hash": origin_version.content_hash,
+    }
+
+
 def validate_profile(config: LocalHLConfig) -> dict[str, Any]:
     profile = get_game_profile(config.run.game)
     missing = [
@@ -902,8 +970,47 @@ def run_profile(
     needs_origin_certification = (
         not resume and config.run.origin.mode == "imported_version"
     )
+    imported_certification = None
     if needs_origin_certification:
-        certification = bindings.evaluator.certify(origin_version)
+        assert config.run.origin.source_run is not None
+        assert config.run.origin.source_version is not None
+        imported_certification = _load_imported_certification(
+            source_run=config.run.origin.source_run,
+            source_version_id=config.run.origin.source_version,
+            origin_version=origin_version,
+            game=config.run.game,
+            evaluation_config=config.run.evaluation,
+        )
+
+    def write_certification_reuse(
+        cache: Mapping[str, Any],
+        *,
+        iteration_id: str,
+        version: Version,
+        reason: str,
+    ) -> None:
+        writer.write(
+            "certification_reused",
+            iteration_id=iteration_id,
+            version_id=version.version_id,
+            content_hash=version.content_hash,
+            source_run_id=str(cache["source_run_id"]),
+            source_version_id=str(cache["source_version_id"]),
+            source_event_id=str(cache["source_event_id"]),
+            reason=reason,
+        )
+
+    if needs_origin_certification:
+        if imported_certification is None:
+            certification = bindings.evaluator.certify(origin_version)
+        else:
+            certification = imported_certification["evaluation"]
+            write_certification_reuse(
+                imported_certification,
+                iteration_id="iter-000000",
+                version=origin_version,
+                reason="exact_imported_content_and_evaluation_config",
+            )
         controller.record_matches(
             version=origin_version,
             act_id=origin_version.act_id,
@@ -1048,7 +1155,20 @@ def run_profile(
         )
         certification = None
         if should_certify:
-            certification = bindings.evaluator.certify(selected_version)
+            if (
+                imported_certification is not None
+                and selected_version.content_hash
+                == imported_certification["content_hash"]
+            ):
+                certification = imported_certification["evaluation"]
+                write_certification_reuse(
+                    imported_certification,
+                    iteration_id=cycle.iteration_id,
+                    version=selected_version,
+                    reason="selected_content_matches_imported_certification",
+                )
+            else:
+                certification = bindings.evaluator.certify(selected_version)
             controller.record_matches(
                 version=selected_version,
                 act_id=selected_version.act_id,

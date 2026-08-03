@@ -33,6 +33,7 @@ KNOWN_EVENT_TYPES = frozenset(
         "match_completed",
         "evaluation_completed",
         "certification_completed",
+        "certification_reused",
         "policy_kl_measured",
         "behavior_measured",
         "occupancy_measured",
@@ -226,6 +227,18 @@ _EVENT_FIELDS = {
             "matches",
         },
         {"hard_opponents", "hard_opponent_gate_passed"},
+    ),
+    "certification_reused": (
+        {
+            "iteration_id",
+            "version_id",
+            "content_hash",
+            "source_run_id",
+            "source_version_id",
+            "source_event_id",
+            "reason",
+        },
+        set(),
     ),
     "policy_kl_measured": ({"version_id", "parent_version_id", "epsilon", "action_support", "local_policy_kl_trace", "episode_local_policy_kl", "reference_manifest"}, set()),
     "behavior_measured": (

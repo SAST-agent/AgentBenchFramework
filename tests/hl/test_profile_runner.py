@@ -39,6 +39,77 @@ def test_imported_profile_inherits_experience_and_research_when_requested(tmp_pa
     assert (run / "experience/ledger.jsonl").read_bytes() == b""
 
 
+def test_imported_certification_cache_requires_matching_config_and_content(tmp_path):
+    import dataclasses
+
+    from agentbench_frame.hl.codebase import Version
+    from agentbench_frame.hl.config import EvaluationConfig
+    from agentbench_frame.hl.events import HLEventWriter
+    from agentbench_frame.hl.profile_runner import _load_imported_certification
+
+    source = tmp_path / "source-run"
+    (source / "versions/manifests").mkdir(parents=True)
+    evaluation_config = EvaluationConfig(
+        fixed_gate_seeds=(1, 2),
+        certification_seeds=(11, 12, 13),
+        full_pool_every_iteration=False,
+    )
+    (source / "run-config.json").write_text(
+        json.dumps(
+            {
+                "run": {
+                    "game": "30_antwar2",
+                    "evaluation": dataclasses.asdict(evaluation_config),
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    (source / "versions/manifests/v000000.json").write_text(
+        json.dumps({"content_hash": "hash-origin"}), encoding="utf-8"
+    )
+    writer = HLEventWriter(source / "events.jsonl", run_id="source-run")
+    writer.write(
+        "certification_completed",
+        version_id="v000000",
+        act_id="imported-origin",
+        status="incomplete",
+        score=None,
+        passing_human_opponents=0,
+        required_human_opponents=18,
+        matches=[{"status": "failed", "opponent": "rank01", "seed": 11}],
+    )
+    version = Version(
+        version_id="v000000",
+        content_hash="hash-origin",
+        parent_version_id=None,
+        act_id="imported-origin",
+        edit_type="imported",
+        created_at="2026-08-04T00:00:00.000Z",
+        files=("ai.py",),
+    )
+
+    cached = _load_imported_certification(
+        source_run=source,
+        source_version_id="v000000",
+        origin_version=version,
+        game="30_antwar2",
+        evaluation_config=evaluation_config,
+    )
+
+    assert cached is not None
+    assert cached["evaluation"].status == "incomplete"
+    assert cached["passing_human_opponents"] == 0
+    assert cached["source_event_id"]
+    assert _load_imported_certification(
+        source_run=source,
+        source_version_id="v000000",
+        origin_version=dataclasses.replace(version, content_hash="other-hash"),
+        game="30_antwar2",
+        evaluation_config=evaluation_config,
+    ) is None
+
+
 def _frozen_config(*, mode=None, hash_value="hash-a", max_acts=None):
     provider = {"kind": "codex"}
     if mode is not None:
