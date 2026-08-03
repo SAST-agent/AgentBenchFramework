@@ -545,6 +545,18 @@ def test_rollman_v2_candidate_stops_after_six_pre_edit_tool_calls(tmp_path):
     assert "pre-edit tool call limit 6" in str(result.error)
 
 
+def test_generic_profile_acts_use_bounded_tool_budgets():
+    from agentbench_frame.hl.provider import _tool_limits
+
+    assert _tool_limits(
+        "# Generic HL candidate act-b00\ncandidate-context-contract: generic-v1"
+    ) == (6, 12)
+    assert _tool_limits("# Generic HL bootstrap act-bootstrap") == (14, 20)
+    assert _tool_limits("# Generic HL scoped repair act-repair") == (14, 20)
+    assert _tool_limits("# Generic HL hypothesis planner act-planner") == (None, 8)
+    assert _tool_limits("# Generic HL comparative reducer act-reducer") == (None, 8)
+
+
 def test_provider_retries_zero_usage_transport_failure_and_preserves_attempt(
     tmp_path, monkeypatch
 ):

@@ -1873,6 +1873,129 @@ def test_same_version_records_distinct_targets_without_match_id_collision(
     assert len({event["match_id"] for event in match_events}) == 2
 
 
+def test_game_neutral_matches_keep_roles_and_dense_metrics_distinct(tmp_path):
+    from agentbench_frame.hl.events import read_events
+
+    controller = _controller(
+        tmp_path,
+        FakeProvider([]),
+        FakeEvaluator([]),
+    )
+    version = controller.initialize()
+
+    common = {
+        "schema_version": "1.0",
+        "game": "30_antwar2",
+        "candidate": version.version_id,
+        "opponent": "human-01",
+        "seed": 7,
+        "status": "complete",
+        "result": "win",
+        "points": 1.0,
+        "candidate_score": 8.0,
+        "opponent_score": 0.0,
+        "dense_margin": 8.0,
+        "terminal_metrics": {"candidate_camp_hp": 8.0},
+        "rounds": 120,
+        "replay": "/tmp/replay.json",
+        "trace": "/tmp/trace.jsonl",
+        "faults": [],
+        "live_opponent": True,
+    }
+    recorded = controller.record_matches(
+        version=version,
+        act_id=version.act_id,
+        phase="learning",
+        matches=(
+            {**common, "candidate_role": "P0"},
+            {**common, "candidate_role": "P1"},
+        ),
+    )
+
+    events = read_events(tmp_path / "events.jsonl")
+    matches = [event for event in events if event["event_type"] == "match_completed"]
+    elo = [event for event in events if event["event_type"] == "elo_updated"]
+    assert recorded == 2
+    assert [event["candidate_role"] for event in matches] == ["P0", "P1"]
+    assert [event["dense_margin"] for event in matches] == [8.0, 8.0]
+    assert [event["role"] for event in elo] == ["P0", "P1"]
+
+
+def test_positive_margin_deltas_use_generic_dense_margin_and_role():
+    from agentbench_frame.hl.codebase import Version
+    from agentbench_frame.hl.controller import CandidateResult, _positive_margin_deltas
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+    from agentbench_frame.tracking.provider import ProviderInvocation
+
+    parent = CandidateEvaluation(
+        status="complete",
+        score=0.0,
+        matches=(
+            {
+                "status": "complete",
+                "opponent": "human-01",
+                "candidate_role": "P0",
+                "seed": 7,
+                "result": "loss",
+                "dense_margin": -4.0,
+            },
+            {
+                "status": "complete",
+                "opponent": "human-01",
+                "candidate_role": "P1",
+                "seed": 7,
+                "result": "loss",
+                "dense_margin": -9.0,
+            },
+        ),
+    )
+    candidate = CandidateResult(
+        act_id="act-1",
+        branch_index=0,
+        version=Version(
+            version_id="v1",
+            content_hash="hash",
+            parent_version_id="v0",
+            act_id="act-1",
+            edit_type="candidate",
+            created_at="2026-01-01T00:00:00Z",
+            files=("ai.py",),
+        ),
+        evaluation=CandidateEvaluation(
+            status="complete",
+            score=0.5,
+            matches=(
+                {
+                    "status": "complete",
+                    "opponent": "human-01",
+                    "candidate_role": "P1",
+                    "seed": 7,
+                    "result": "win",
+                    "dense_margin": 2.0,
+                },
+            ),
+        ),
+        provider=ProviderInvocation(status="completed"),
+    )
+
+    assert _positive_margin_deltas(parent, (candidate,)) == [
+        {
+            "version_id": "v1",
+            "branch_index": 0,
+            "opponent": "human-01",
+            "candidate_role": "P1",
+            "seed": 7,
+            "parent_result": "loss",
+            "candidate_result": "win",
+            "parent_margin": -9.0,
+            "candidate_margin": 2.0,
+            "margin_delta": 11.0,
+            "candidate_score_delta": None,
+            "opponent_score_delta": None,
+        }
+    ]
+
+
 def test_resume_restores_act_counter_and_parent_session(tmp_path):
     from agentbench_frame.hl.events import read_events
     from agentbench_frame.hl.lineage import LineageManager

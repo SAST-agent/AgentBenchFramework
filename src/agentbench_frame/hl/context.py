@@ -307,6 +307,178 @@ The atomic decision space in the frozen digest is authoritative for behavior mea
 Write `workspace/.agentbench/branch_briefs.json` by the second tool call, validate its strict JSON shape once, and stop. Each of the four objects must use branch_index 0..3 and the fields diagnosis, mechanism, activation_condition, preservation_contract, expected_change, falsifier, and code_symbols. `code_symbols` must contain 2–8 unique names from candidate_code_index and include the public policy entry point. Scope contract: {"required" if scope_contract_required else "diagnostic-only"}.
 """
 
+    def _profile_contract(self) -> str:
+        profile = self.prompt_profile
+        assert profile is not None
+        prohibited = "\n".join(
+            f"- {item}" for item in profile.prohibited_information
+        )
+        return f"""candidate: {profile.candidate_label}
+opponent: {profile.opponent_label}
+candidate roles: {", ".join(profile.roles)}
+policy input: {profile.policy_input}
+policy entry: {profile.policy_entry_symbol}
+policy source: {profile.candidate_source_relative}
+output contract: {profile.output_contract}
+
+Forbidden information and shortcuts:
+{prohibited}
+"""
+
+    def _build_profile_bootstrap_prompt(
+        self,
+        *,
+        act_id: str,
+        workspace: str | Path,
+        experience_path: str | Path,
+    ) -> str:
+        return f"""# Generic HL bootstrap {act_id}
+
+Create the scientific origin policy from the frozen game specification. It must be interpretable, runnable, reproducible, and materially stronger than the placeholder.
+
+{self._profile_contract()}
+Authoritative inputs:
+- context manifest: {self.bundle.manifest_path.resolve()}
+- candidate workspace: {Path(workspace).resolve()}
+- Experience Skill: {Path(experience_path).resolve()}
+
+Read every file indexed by the context manifest once: rules, literal atomic decision space, SDK interface when present, and Replay Skill. Then inspect the candidate scaffold and implement the policy through the public entry point. There is no replay evidence in this act; do not fabricate feedback or experience.
+
+The atomic operations in the decision-space file are the only behavioral vocabulary. Do not invent tactical labels or a latent hypothesis space. Interpretable code may use conditionals, search, planning, state machines, finite memory, scoring functions, or their composition. Source growth and additional evidence-backed branches are not penalties.
+
+Do not run grid search, enumerate arbitrary thresholds, memorize seeds, fixed replay coordinates, opponent identities, or read opponent source. Compile the candidate and run the workspace smoke command exactly once. Stop after the first successful compile and smoke validation. Do not edit the Experience Skill in the bootstrap act.
+
+The framework audits paths. Read only the manifest-indexed context, candidate workspace, and Experience Skill. Do not enumerate their parent directories or inspect other runs, versions, framework source, human submissions, or evaluation-only policies.
+"""
+
+    def _build_profile_candidate_prompt(
+        self,
+        *,
+        act_id: str,
+        branch_index: int,
+        branch_count: int,
+        parent_version_id: str,
+        workspace: str | Path,
+        game_digest_path: str | Path,
+        research_state_path: str | Path,
+        experience_path: str | Path,
+        branch_brief: Mapping[str, Any],
+        scope_contract_required: bool,
+        candidate_input_path: str | Path | None,
+    ) -> str:
+        profile = self.prompt_profile
+        assert profile is not None
+        packet = (
+            str(Path(candidate_input_path).resolve())
+            if candidate_input_path is not None
+            else "not provided; use only the explicit bounded inputs below"
+        )
+        scope = (
+            "Implement activation_condition as an explicit visible-state gate and preserve the parent action-selection path outside it."
+            if scope_contract_required
+            else "Record activation and preservation conditions, but the scope gate is diagnostic-only in this ablation."
+        )
+        brief = json.dumps(
+            dict(branch_brief),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        trace_tool = (
+            self.bundle.files["replay_skill"].parent
+            / "scripts"
+            / "inspect_trace_window.py"
+        )
+        return f"""# Generic HL candidate {act_id}
+
+proposal branch: {branch_index + 1}/{branch_count}
+common parent: {parent_version_id}
+
+{self._profile_contract()}
+candidate-context-contract: generic-v1
+
+Bounded inputs:
+- candidate packet: {packet}
+- compact game digest: {Path(game_digest_path).resolve()}
+- research state: {Path(research_state_path).resolve()}
+- Experience Skill: {Path(experience_path).resolve()}
+- candidate workspace: {Path(workspace).resolve()}
+- bounded trace inspector: {trace_tool.resolve()}
+
+Read the candidate packet exactly once. It contains the compact digest, accumulated condition-scoped experience, bounded replay summaries, previous measurements, the branch brief, and selected code slices. Do not reopen static long-form context unless a precise rule or SDK ambiguity must be resolved through the manifest. Never print a complete replay, trace, board stream, or source file.
+
+The only branch brief is: {brief}
+Implement this mechanism rather than switching branches. Ground the diagnosis in the supplied replay summary and, only when necessary, inspect at most two small trace windows with the supplied Replay Skill tool. {scope}
+
+Use literal protocol atomic operations from the frozen decision space. A deterministic selected operation still defines one observed atomic decision for KL; do not invent probabilities, tactical labels, or a human-authored hypothesis space. Do not run grid search, arbitrary parameter enumeration, seed/coordinate/identity lookup, or inspect {profile.opponent_label} source. Code growth and explicit condition handling are allowed when grounded in evidence.
+
+By the fifth tool call, make the first compilable edit to `{profile.candidate_source_relative}` and write `workspace/.agentbench/experience_update.json` with exactly four string arrays: stable_knowledge, failed_hypotheses, replay_evidence, active_questions. Each lesson must state an observable condition, attempted action/mechanism, and observed outcome; classify unsupported claims as questions. Then compile and run one candidate smoke validation. Stop after success; do not run git commands or a second refactor.
+
+Read only the packet, its explicitly authorized trace files, exact manifest files needed for ambiguity resolution, Experience Skill, and candidate workspace. Other runs, versions, submissions, framework internals, and evaluation-only policies are forbidden.
+"""
+
+    def _build_profile_repair_prompt(
+        self,
+        *,
+        act_id: str,
+        iteration_id: str,
+        branch_index: int,
+        workspace: str | Path,
+        game_digest_path: str | Path,
+        research_state_path: str | Path,
+        repair_input_path: str | Path,
+        experience_path: str | Path,
+    ) -> str:
+        profile = self.prompt_profile
+        assert profile is not None
+        return f"""# Generic HL scoped repair {act_id}
+
+proposal cycle: {iteration_id}
+branch index: {branch_index}
+
+{self._profile_contract()}
+Bounded inputs:
+- compact game digest: {Path(game_digest_path).resolve()}
+- research state: {Path(research_state_path).resolve()}
+- repair packet: {Path(repair_input_path).resolve()}
+- Experience Skill: {Path(experience_path).resolve()}
+- candidate workspace: {Path(workspace).resolve()}
+
+Read the bounded repair packet first. Compare parent and candidate on the same opponent, role, and seed. Classify failure as a wrong causal diagnosis, an over-broad activation condition, or an integration error. Repair only this mechanism and preserve the parent path outside the brief's activation condition. The initial sibling remains immutable, so a failed repair cannot erase it.
+
+Use only literal protocol atomic operations. Do not run grid search, threshold enumeration, seed/coordinate/opponent-identity memorization, or inspect {profile.opponent_label} source. At most two trace windows may be inspected through the Replay Skill. Compile `{profile.candidate_source_relative}`, run one smoke validation, and write the four condition-scoped Experience arrays to `workspace/.agentbench/experience_update.json`. Stop after success.
+"""
+
+    def _build_profile_reducer_prompt(
+        self,
+        *,
+        act_id: str,
+        iteration_id: str,
+        selected_version_id: str,
+        workspace: str | Path,
+        game_digest_path: str | Path,
+        research_state_path: str | Path,
+        reducer_input_path: str | Path,
+    ) -> str:
+        profile = self.prompt_profile
+        assert profile is not None
+        return f"""# Generic HL comparative reducer {act_id}
+
+proposal cycle: {iteration_id}
+selected search parent: {selected_version_id}
+
+{self._profile_contract()}
+Read-only inputs:
+- compact game digest: {Path(game_digest_path).resolve()}
+- research state: {Path(research_state_path).resolve()}
+- factual sibling packet: {Path(reducer_input_path).resolve()}
+- selected candidate workspace: {Path(workspace).resolve()}
+
+Compare all sibling mechanisms using framework-recorded outcomes for the same opponent, role, and seed. Match facts outrank model inference. Preserve conditional gains and failures, including exact dense-margin deltas and activation evidence; do not turn speculation into stable knowledge. Code size and local conditionals are not failure criteria.
+
+Do not modify policy code, version pointers, curriculum, or certification facts. Do not run grid search or inspect {profile.opponent_label} source. Write exactly one `workspace/.agentbench/research_state_update.json` object with four arrays: stable_knowledge, failed_hypotheses, open_questions, recent_comparisons. The first three contain non-empty strings; comparisons are concise objects. Read, write, validate once, and stop.
+"""
+
     def build_bootstrap_prompt(
         self,
         *,
@@ -314,6 +486,12 @@ Write `workspace/.agentbench/branch_briefs.json` by the second tool call, valida
         workspace: str | Path,
         experience_path: str | Path,
     ) -> str:
+        if self.prompt_profile is not None:
+            return self._build_profile_bootstrap_prompt(
+                act_id=act_id,
+                workspace=workspace,
+                experience_path=experience_path,
+            )
         return f"""# HL bootstrap {act_id} — 生成科研 origin
 
 目标：根据冻结游戏规则，从规则出发设计并实现一版可解释、可运行、可复现的初始算法。该版本将作为后续 HL 迭代的 origin。
@@ -652,6 +830,20 @@ Planner 压缩边界：
     ) -> str:
         if int(branch_brief.get("branch_index", -1)) != branch_index:
             raise ValueError("branch brief index does not match candidate branch")
+        if self.prompt_profile is not None:
+            return self._build_profile_candidate_prompt(
+                act_id=act_id,
+                branch_index=branch_index,
+                branch_count=branch_count,
+                parent_version_id=parent_version_id,
+                workspace=workspace,
+                game_digest_path=game_digest_path,
+                research_state_path=research_state_path,
+                experience_path=experience_path,
+                branch_brief=branch_brief,
+                scope_contract_required=scope_contract_required,
+                candidate_input_path=candidate_input_path,
+            )
         prompt_measurements = dict(previous_measurements)
         if candidate_input_path is not None:
             prompt_measurements.pop("opponent_distillation_path", None)
@@ -768,6 +960,17 @@ candidate-context-contract: rollman-v2
         repair_input_path: str | Path,
         experience_path: str | Path,
     ) -> str:
+        if self.prompt_profile is not None:
+            return self._build_profile_repair_prompt(
+                act_id=act_id,
+                iteration_id=iteration_id,
+                branch_index=branch_index,
+                workspace=workspace,
+                game_digest_path=game_digest_path,
+                research_state_path=research_state_path,
+                repair_input_path=repair_input_path,
+                experience_path=experience_path,
+            )
         trace_window_tool = (
             self.bundle.files["replay_skill"].parent
             / "scripts"
@@ -815,6 +1018,16 @@ Repair checkpoint-first 顺序：
         research_state_path: str | Path,
         reducer_input_path: str | Path,
     ) -> str:
+        if self.prompt_profile is not None:
+            return self._build_profile_reducer_prompt(
+                act_id=act_id,
+                iteration_id=iteration_id,
+                selected_version_id=selected_version_id,
+                workspace=workspace,
+                game_digest_path=game_digest_path,
+                research_state_path=research_state_path,
+                reducer_input_path=reducer_input_path,
+            )
         return f"""# Rollman HL comparative reducer {act_id}
 
 proposal cycle: {iteration_id}

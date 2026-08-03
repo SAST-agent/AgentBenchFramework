@@ -10,7 +10,13 @@ from agentbench_frame.games.antwar2.evaluator import AntWar2Evaluator, load_huma
 from agentbench_frame.games.antwar2.evidence import build_replay_evidence
 from agentbench_frame.games.antwar2.match import ProcessSpec
 from agentbench_frame.games.antwar2.measurement import compare_behavior
-from agentbench_frame.games.antwar2.runtime import AntWarLayout, build_backend
+from agentbench_frame.games.antwar2.runtime import (
+    AntWarLayout,
+    assemble_candidate,
+    assemble_bootstrap_candidate,
+    build_backend,
+)
+from agentbench_frame.games.antwar2 import smoke as smoke_module
 from agentbench_frame.games.antwar2.smoke import verify_candidate_smoke
 from agentbench_frame.hl.game_profile import (
     HLGameBindings,
@@ -62,6 +68,24 @@ class AntWar2HLProfile:
             ),
             policy_entry_symbol="AI.choose_operations",
             candidate_source_relative="ai.py",
+        )
+
+    def materialize_named_origin(
+        self,
+        *,
+        config: Any,
+        name: str,
+        destination: Path,
+    ) -> dict[str, Any]:
+        if name != "v22":
+            raise ValueError("AntWar2 supports only the blinded v22 positive control")
+        layout = self.layout(config)
+        layout.validate(require_positive_control=True)
+        assert layout.historical_versions_root is not None
+        return assemble_candidate(
+            destination=destination,
+            policy_root=layout.historical_versions_root / "ifelse_v22",
+            sdk_root=layout.sdk_root,
         )
 
     def build_bindings(
@@ -119,6 +143,19 @@ class AntWar2HLProfile:
             assets
             / "replay-skill/antwar2-replay/scripts/summarize_replay.py"
         )
+        candidate_template = run_root / "candidate-template"
+        if not candidate_template.is_dir():
+            support_root = (
+                layout.historical_versions_root / "ifelse_v22"
+                if layout.historical_versions_root is not None
+                else layout.sdk_root.parent
+            )
+            assemble_bootstrap_candidate(
+                destination=candidate_template,
+                support_root=support_root,
+                sdk_root=layout.sdk_root,
+                policy_template=assets / "candidate-template/ai.py",
+            )
         return HLGameBindings(
             prompt_profile=self.prompt_profile(),
             metric_schema=MetricSchema(
@@ -132,8 +169,9 @@ class AntWar2HLProfile:
                 "decision_space": assets / "decision_space.yaml",
                 "sdk_interface": assets / "sdk_interface.md",
                 "replay_skill": assets / "replay-skill/antwar2-replay",
+                "smoke_fixture": Path(smoke_module.__file__),
             },
-            candidate_template=assets / "candidate-template",
+            candidate_template=candidate_template,
             evaluator=evaluator,
             smoke_verifier=lambda workspace, **_kwargs: verify_candidate_smoke(
                 workspace

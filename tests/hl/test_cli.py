@@ -578,6 +578,8 @@ def test_frozen_run_config_is_json_native_and_round_trips():
     snapshot = _frozen_run_config(LocalHLConfig.load(CONFIG))
 
     assert isinstance(snapshot["run"]["evaluation"]["fixed_gate_seeds"], list)
+    assert "values" not in snapshot["paths"]
+    assert "workspace" in snapshot["paths"]
     assert json.loads(json.dumps(snapshot)) == snapshot
     legacy_snapshot = json.loads(json.dumps(snapshot))
     del legacy_snapshot["run"]["origin"]

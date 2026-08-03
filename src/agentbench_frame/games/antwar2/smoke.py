@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import argparse
+import dataclasses
 import hashlib
 import json
 import os
@@ -100,3 +102,22 @@ def verify_candidate_smoke(
             "returncode": completed.returncode,
         },
     )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--workspace", required=True)
+    parser.add_argument("--output", required=True)
+    args = parser.parse_args(argv)
+    result = verify_candidate_smoke(args.workspace)
+    output = Path(args.output).resolve()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps(dataclasses.asdict(result), sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return 0 if result.status == "complete" else 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

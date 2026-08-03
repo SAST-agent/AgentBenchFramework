@@ -871,8 +871,8 @@ def _frozen_run_config(config: LocalHLConfig) -> dict[str, Any]:
         ).hexdigest(),
         "run": config.run.to_dict(),
         "paths": {
-            field.name: str(getattr(config.paths, field.name))
-            for field in dataclasses.fields(config.paths)
+            name: str(path)
+            for name, path in sorted(config.paths.values.items())
         },
     }
     return json.loads(json.dumps(value, ensure_ascii=False, sort_keys=True))
@@ -1376,12 +1376,23 @@ def _curriculum_resume_parent(
 
 
 def _cmd_validate(args: argparse.Namespace) -> int:
-    _json(_validate(_load(args.config)))
+    config = _load(args.config)
+    if config.run.game != "29_rollman":
+        from agentbench_frame.hl.profile_runner import validate_profile
+
+        _json(validate_profile(config))
+        return 0
+    _json(_validate(config))
     return 0
 
 
 def _cmd_audit(args: argparse.Namespace) -> int:
     config = _load(args.config)
+    if config.run.game != "29_rollman":
+        from agentbench_frame.hl.profile_runner import validate_profile
+
+        _json(validate_profile(config))
+        return 0
     result = audit_sources(
         config.paths.agentbench_root,
         config.paths.official_logic_root,
@@ -1403,7 +1414,17 @@ def _cmd_run(args: argparse.Namespace) -> int:
         else config.paths.workspace
     )
     if args.dry_run:
-        _json(_dry_run(config, run_dir=run_dir, workspace=workspace))
+        if config.run.game == "29_rollman":
+            result = _dry_run(config, run_dir=run_dir, workspace=workspace)
+        else:
+            from agentbench_frame.hl.profile_runner import dry_run_profile
+
+            result = dry_run_profile(
+                config,
+                run_dir=run_dir,
+                workspace=workspace,
+            )
+        _json(result)
         return 0
     needs_provider = (
         args.acts != 0 or config.run.origin.mode == "model_bootstrap"
@@ -1417,6 +1438,21 @@ def _cmd_run(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+    if config.run.game != "29_rollman":
+        from agentbench_frame.hl.profile_runner import run_profile
+
+        assert provider_environment is not None
+        _json(
+            run_profile(
+                config,
+                run_dir=run_dir,
+                workspace=workspace,
+                acts=args.acts,
+                resume=False,
+                provider_environment=provider_environment,
+            )
+        )
+        return 0
     return _run_real(
         config,
         run_dir=run_dir,
@@ -1442,6 +1478,25 @@ def _cmd_resume(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 2
+    if config.run.game != "29_rollman":
+        from agentbench_frame.hl.profile_runner import run_profile
+
+        assert provider_environment is not None
+        _json(
+            run_profile(
+                config,
+                run_dir=Path(args.run_dir).resolve(),
+                workspace=(
+                    Path(args.workspace).resolve()
+                    if args.workspace
+                    else config.paths.workspace
+                ),
+                acts=args.acts,
+                resume=True,
+                provider_environment=provider_environment,
+            )
+        )
+        return 0
     return _run_real(
         config,
         run_dir=Path(args.run_dir).resolve(),
@@ -1494,6 +1549,20 @@ def _cmd_prepare(args: argparse.Namespace) -> int:
                 if opponent.process is not None
             ]
         }
+    )
+    return 0
+
+
+def _cmd_seed_origin(args: argparse.Namespace) -> int:
+    from agentbench_frame.hl.profile_runner import seed_named_origin
+
+    config = _load(args.config)
+    _json(
+        seed_named_origin(
+            config,
+            name=args.name,
+            run_dir=Path(args.run_dir).resolve(),
+        )
     )
     return 0
 
@@ -3600,6 +3669,11 @@ def main(argv: list[str] | None = None) -> int:
     prepare.add_argument("--config", required=True)
     prepare.add_argument("--ranks")
     prepare.set_defaults(handler=_cmd_prepare)
+    seed_origin = sub.add_parser("seed-origin")
+    seed_origin.add_argument("--config", required=True)
+    seed_origin.add_argument("--name", required=True)
+    seed_origin.add_argument("--run-dir", required=True)
+    seed_origin.set_defaults(handler=_cmd_seed_origin)
     report = sub.add_parser("report")
     report.add_argument("--run-dir", required=True)
     report.set_defaults(handler=_cmd_report)

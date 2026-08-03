@@ -225,6 +225,97 @@ def test_profile_prompt_uses_game_vocabulary_without_rollman_leak(tmp_path):
         assert forbidden not in prompt
 
 
+def _profile_context(tmp_path):
+    from agentbench_frame.hl.context import ContextBundle, IterationContext
+    from agentbench_frame.hl.game_profile import PromptProfile
+
+    bundle = ContextBundle.create(
+        tmp_path / "bundle", _static_files(tmp_path / "assets")
+    )
+    return IterationContext(
+        bundle,
+        prompt_profile=PromptProfile(
+            candidate_label="colony policy",
+            opponent_label="human colony",
+            roles=("P0", "P1"),
+            policy_input="antwar_sdk.PublicState",
+            output_contract="ordered list[AtomicOperation]",
+            planner_diversity=("economy", "defense", "timing", "counterplay"),
+            prohibited_information=("opponent source", "seed lookup"),
+            policy_entry_symbol="AI.choose_operations",
+        ),
+    )
+
+
+@pytest.mark.parametrize("kind", ["bootstrap", "candidate", "repair", "reducer"])
+def test_all_profile_prompts_are_game_neutral(tmp_path, kind):
+    context = _profile_context(tmp_path)
+    common = {
+        "act_id": f"act-{kind}",
+        "workspace": tmp_path / "candidate",
+    }
+    if kind == "bootstrap":
+        prompt = context.build_bootstrap_prompt(
+            **common,
+            experience_path=tmp_path / "experience" / "SKILL.md",
+        )
+    elif kind == "candidate":
+        prompt = context.build_candidate_prompt(
+            **common,
+            branch_index=0,
+            branch_count=4,
+            parent_version_id="v0",
+            game_digest_path=tmp_path / "digest.json",
+            research_state_path=tmp_path / "research.json",
+            replay_evidence=[
+                {
+                    "opponent": "human-01",
+                    "candidate_role": "P0",
+                    "summary": str(tmp_path / "summary.json"),
+                }
+            ],
+            previous_measurements={"live_win_rate": 0.25},
+            experience_path=tmp_path / "experience" / "SKILL.md",
+            branch_brief={
+                "branch_index": 0,
+                "diagnosis": "round 8: camp lost health",
+                "mechanism": "counterattack after visible damage",
+                "activation_condition": "camp hp decreased",
+                "preservation_contract": "otherwise retain parent ordering",
+                "expected_change": "larger camp margin",
+                "falsifier": "no margin gain",
+                "code_symbols": ["AI.choose_operations", "AI.counterattack"],
+            },
+        )
+    elif kind == "repair":
+        prompt = context.build_repair_prompt(
+            **common,
+            iteration_id="iter-1",
+            branch_index=0,
+            game_digest_path=tmp_path / "digest.json",
+            research_state_path=tmp_path / "research.json",
+            repair_input_path=tmp_path / "repair.json",
+            experience_path=tmp_path / "experience" / "SKILL.md",
+        )
+    else:
+        prompt = context.build_reducer_prompt(
+            **common,
+            iteration_id="iter-1",
+            selected_version_id="v1",
+            game_digest_path=tmp_path / "digest.json",
+            research_state_path=tmp_path / "research.json",
+            reducer_input_path=tmp_path / "reducer.json",
+        )
+
+    assert "colony policy" in prompt
+    assert "human colony" in prompt
+    assert "P0" in prompt and "P1" in prompt
+    assert "AI.choose_operations" in prompt
+    assert "grid search" in prompt
+    for forbidden in ("Rollman", "Ghost", "pacman", "rank15", "rank16"):
+        assert forbidden not in prompt
+
+
 def test_prompt_requires_replay_grounded_causal_change_and_blocks_grid_search(tmp_path):
     from agentbench_frame.hl.context import ContextBundle, IterationContext
 

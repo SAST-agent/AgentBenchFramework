@@ -19,6 +19,11 @@ def _load_replay(path: Path) -> list[dict[str, Any]]:
     return value
 
 
+def _is_terminal_state(state: dict[str, Any]) -> bool:
+    winner = state.get("winner")
+    return isinstance(winner, int) and not isinstance(winner, bool) and winner in {0, 1}
+
+
 def _main(request_path: Path, output_path: Path) -> None:
     request = json.loads(request_path.read_text(encoding="utf-8"))
     candidate_root = Path(request["candidate_root"]).resolve()
@@ -168,6 +173,8 @@ def _main(request_path: Path, output_path: Path) -> None:
             state_data = record.get("round_state")
             if not isinstance(state_data, dict):
                 raise ValueError(f"replay round {index} has no public state")
+            if _is_terminal_state(state_data):
+                continue
             frozen = public_state(index + 1, state_data)
             runtime.state.sync_public_round_state(frozen)
             agent.on_round_state(frozen)

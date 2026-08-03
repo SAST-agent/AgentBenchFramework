@@ -69,3 +69,11 @@ def test_extra_bundle_atom_is_compared_against_hold_at_same_frozen_state():
     assert result.decision_count == 2
     assert result.changed_action_count == 1
     assert result.details["state_count"] == 1
+
+
+def test_terminal_replay_snapshot_is_not_a_valid_decision_state():
+    from agentbench_frame.games.antwar2.policy_probe import _is_terminal_state
+
+    assert _is_terminal_state({"winner": 0, "camps": [6, 0]})
+    assert _is_terminal_state({"winner": 1, "camps": [0, 4]})
+    assert not _is_terminal_state({"winner": -1, "camps": [50, 50]})

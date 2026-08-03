@@ -35,13 +35,27 @@ def _toml_string(value: str) -> str:
 def _tool_limits(prompt: str) -> tuple[int | None, int | None]:
     """Return hard grace limits after the tighter prompt-level soft budget."""
 
-    if "candidate-context-contract: rollman-v2" in prompt:
+    if any(
+        marker in prompt
+        for marker in (
+            "candidate-context-contract: rollman-v2",
+            "candidate-context-contract: generic-v1",
+        )
+    ):
         return 6, 12
-    if prompt.startswith(("# HL bootstrap", "# HL iteration", "# Rollman scoped repair")):
+    if prompt.startswith((
+        "# HL bootstrap",
+        "# HL iteration",
+        "# Rollman scoped repair",
+        "# Generic HL bootstrap",
+        "# Generic HL scoped repair",
+    )):
         return 14, 20
     if prompt.startswith((
         "# Rollman HL hypothesis planner",
         "# Rollman HL comparative reducer",
+        "# Generic HL hypothesis planner",
+        "# Generic HL comparative reducer",
     )):
         return None, 8
     return None, None

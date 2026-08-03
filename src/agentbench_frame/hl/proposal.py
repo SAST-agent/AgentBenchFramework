@@ -8,7 +8,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 
 _INLINE_SUMMARY_LIMIT = 12_000
@@ -312,6 +312,7 @@ def write_candidate_input_packet(
     smoke_fixture_path: str | Path | None = None,
     candidate_workspace: str | Path | None = None,
     policy_entry_symbol: str = "ai_func",
+    smoke_command: Sequence[str] | None = None,
 ) -> Path:
     """Write one bounded candidate context artifact for a single first read."""
 
@@ -349,12 +350,19 @@ def write_candidate_input_packet(
             entry_symbol=policy_entry_symbol,
         )
     )
+    if smoke_command is not None and smoke_fixture_path is not None:
+        raise ValueError("smoke command and smoke fixture are mutually exclusive")
     if (smoke_fixture_path is None) != (candidate_workspace is None):
         raise ValueError(
             "smoke fixture and candidate workspace must be provided together"
         )
     smoke_contract = None
-    if smoke_fixture_path is not None and candidate_workspace is not None:
+    if smoke_command is not None:
+        command = [str(item) for item in smoke_command]
+        if not command or any(not item for item in command):
+            raise ValueError("smoke command must contain non-empty strings")
+        smoke_contract = {"command": command}
+    elif smoke_fixture_path is not None and candidate_workspace is not None:
         fixture = Path(smoke_fixture_path).resolve()
         workspace = Path(candidate_workspace).resolve()
         if not fixture.is_file():

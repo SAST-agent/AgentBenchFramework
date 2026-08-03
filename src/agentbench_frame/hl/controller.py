@@ -92,6 +92,9 @@ def _positive_margin_deltas(
         return []
 
     def margin(match: Mapping[str, Any]) -> float | None:
+        dense = match.get("dense_margin")
+        if isinstance(dense, (int, float)) and not isinstance(dense, bool):
+            return float(dense)
         rollman = match.get("rollman_score")
         ghosts = match.get("ghosts_score")
         if not isinstance(rollman, (int, float)) or not isinstance(
@@ -100,17 +103,44 @@ def _positive_margin_deltas(
             return None
         return float(rollman) - float(ghosts)
 
-    parent_by_match: dict[tuple[Any, Any], Mapping[str, Any]] = {}
+    def score_delta(
+        candidate: Mapping[str, Any],
+        parent: Mapping[str, Any],
+        generic_field: str,
+        legacy_field: str,
+    ) -> float | None:
+        candidate_value = candidate.get(generic_field)
+        parent_value = parent.get(generic_field)
+        if not isinstance(candidate_value, (int, float)) or not isinstance(
+            parent_value, (int, float)
+        ):
+            candidate_value = candidate.get(legacy_field)
+            parent_value = parent.get(legacy_field)
+        if (
+            isinstance(candidate_value, bool)
+            or isinstance(parent_value, bool)
+            or not isinstance(candidate_value, (int, float))
+            or not isinstance(parent_value, (int, float))
+        ):
+            return None
+        return float(candidate_value) - float(parent_value)
+
+    def comparison_key(match: Mapping[str, Any]) -> tuple[Any, Any, Any]:
+        return (
+            match.get("opponent"),
+            match.get("candidate_role") or match.get("role") or "rollman",
+            match.get("seed"),
+        )
+
+    parent_by_match: dict[tuple[Any, Any, Any], Mapping[str, Any]] = {}
     for match in parent_evaluation.matches:
         if match.get("status") == "complete" and margin(match) is not None:
-            parent_by_match[(match.get("opponent"), match.get("seed"))] = match
+            parent_by_match[comparison_key(match)] = match
 
     improvements: list[dict[str, Any]] = []
     for representative in representatives:
         for match in representative.evaluation.matches:
-            parent = parent_by_match.get(
-                (match.get("opponent"), match.get("seed"))
-            )
+            parent = parent_by_match.get(comparison_key(match))
             candidate_margin = margin(match)
             parent_margin = None if parent is None else margin(parent)
             if (
@@ -121,23 +151,45 @@ def _positive_margin_deltas(
                 or candidate_margin <= parent_margin
             ):
                 continue
-            improvements.append(
-                {
-                    "version_id": representative.version.version_id,
-                    "branch_index": representative.branch_index,
-                    "opponent": match.get("opponent"),
-                    "seed": match.get("seed"),
-                    "parent_result": parent.get("result"),
-                    "candidate_result": match.get("result"),
-                    "parent_margin": parent_margin,
-                    "candidate_margin": candidate_margin,
-                    "margin_delta": candidate_margin - parent_margin,
-                    "rollman_score_delta": float(match["rollman_score"])
-                    - float(parent["rollman_score"]),
-                    "ghosts_score_delta": float(match["ghosts_score"])
-                    - float(parent["ghosts_score"]),
-                }
-            )
+            improvement = {
+                "version_id": representative.version.version_id,
+                "branch_index": representative.branch_index,
+                "opponent": match.get("opponent"),
+                "seed": match.get("seed"),
+                "parent_result": parent.get("result"),
+                "candidate_result": match.get("result"),
+                "parent_margin": parent_margin,
+                "candidate_margin": candidate_margin,
+                "margin_delta": candidate_margin - parent_margin,
+            }
+            if "dense_margin" in match or "candidate_role" in match:
+                improvement.update(
+                    {
+                        "candidate_role": (
+                            match.get("candidate_role")
+                            or match.get("role")
+                            or "rollman"
+                        ),
+                        "candidate_score_delta": score_delta(
+                            match, parent, "candidate_score", "rollman_score"
+                        ),
+                        "opponent_score_delta": score_delta(
+                            match, parent, "opponent_score", "ghosts_score"
+                        ),
+                    }
+                )
+            else:
+                improvement.update(
+                    {
+                        "rollman_score_delta": score_delta(
+                            match, parent, "candidate_score", "rollman_score"
+                        ),
+                        "ghosts_score_delta": score_delta(
+                            match, parent, "opponent_score", "ghosts_score"
+                        ),
+                    }
+                )
+            improvements.append(improvement)
     return sorted(
         improvements,
         key=lambda row: (
@@ -178,6 +230,8 @@ class HLController:
         candidate_smoke_verifier: (
             Callable[..., Mapping[str, Any]] | None
         ) = None,
+        candidate_source_relative: str = "ai.py",
+        policy_entry_symbol: str = "ai_func",
     ) -> None:
         self.workspace = Path(workspace)
         self.run_root = Path(run_root)
@@ -206,12 +260,19 @@ class HLController:
         )
         self.activation_probe = activation_probe
         self.candidate_smoke_verifier = candidate_smoke_verifier
+        source = Path(candidate_source_relative)
+        if source.is_absolute() or ".." in source.parts:
+            raise ValueError("candidate source must stay inside workspace")
+        self.candidate_source_relative = source
+        if not policy_entry_symbol.strip():
+            raise ValueError("policy entry symbol cannot be empty")
+        self.policy_entry_symbol = policy_entry_symbol.strip()
         self._iteration_count = 0
         self._coding_agent_acts = 0
         self._sessions: dict[str, str] = {}
         self._recorded_match_ids: set[str] = set()
         self._recorded_match_keys: set[
-            tuple[str, str, str, int]
+            tuple[str, str, str, str, int]
         ] = set()
         self._started = False
 
@@ -494,11 +555,20 @@ class HLController:
                     str(event["version_id"]),
                     str(event.get("phase") or "learning"),
                     str(event["opponent"]),
+                    str(
+                        event.get("candidate_role")
+                        or event.get("role")
+                        or "rollman"
+                    ),
                     int(event["seed"]),
                 )
             )
             self.elo_ledger.update_game(
-                role=str(event.get("role") or "rollman"),
+                role=str(
+                    event.get("candidate_role")
+                    or event.get("role")
+                    or "rollman"
+                ),
                 candidate=str(event["version_id"]),
                 opponent=str(event["opponent"]),
                 result=str(event["result"]),
@@ -575,12 +645,19 @@ class HLController:
             if match.get("status", "complete") == "complete"
             and match.get("result") in {"win", "draw", "loss"}
         ]
+        emitted = 0
         for index, match in enumerate(match_records):
             match_phase = str(match.get("phase") or phase)
+            candidate_role = str(
+                match.get("candidate_role")
+                or match.get("role")
+                or "rollman"
+            )
             match_key = (
                 version.version_id,
                 match_phase,
                 str(match.get("opponent")),
+                candidate_role,
                 int(match["seed"]),
             )
             if match_key in self._recorded_match_keys:
@@ -592,6 +669,7 @@ class HLController:
                 fallback_match_id = (
                     f"{version.version_id}-{match_phase}-"
                     f"{match.get('opponent', 'unknown')}-"
+                    f"{candidate_role}-"
                     f"{match.get('seed', index)}"
                 )
             match_id = str(
@@ -608,10 +686,20 @@ class HLController:
                 version_id=version.version_id,
                 act_id=act_id,
                 phase=match_phase,
-                role="rollman",
+                game=match.get("game"),
+                role=candidate_role,
+                candidate_role=candidate_role,
                 opponent=match.get("opponent"),
                 seed=match.get("seed"),
                 result=match.get("result"),
+                points=match.get("points"),
+                candidate_score=match.get("candidate_score"),
+                opponent_score=match.get("opponent_score"),
+                dense_margin=match.get("dense_margin"),
+                terminal_metrics=match.get("terminal_metrics", {}),
+                rounds=match.get("rounds"),
+                faults=match.get("faults", []),
+                live_opponent=match.get("live_opponent", True),
                 rollman_score=match.get("rollman_score"),
                 ghosts_score=match.get("ghosts_score"),
                 valid=True,
@@ -620,8 +708,9 @@ class HLController:
             )
             self._recorded_match_ids.add(match_id)
             self._recorded_match_keys.add(match_key)
+            emitted += 1
             elo_record = self.elo_ledger.update_game(
-                role="rollman",
+                role=candidate_role,
                 candidate=version.version_id,
                 opponent=str(match.get("opponent")),
                 result=str(match["result"]),
@@ -645,7 +734,7 @@ class HLController:
                 opponent_rating=elo_record.opponent_rating_after,
                 role=elo_record.role,
             )
-        return len(match_records)
+        return emitted
 
     def _run_coding_candidate(
         self,
@@ -763,7 +852,10 @@ class HLController:
                         ("scenario_path", "smoke_scenario.json"),
                         ("result_path", "candidate_smoke_result.json"),
                     ):
-                        source = Path(str(measured_smoke.get(key, "")))
+                        raw_source = measured_smoke.get(key)
+                        if raw_source is None:
+                            continue
+                        source = Path(str(raw_source))
                         if not source.is_file():
                             raise ValueError(f"verifier {key} is missing")
                         target = audit_root / filename
@@ -1327,7 +1419,10 @@ class HLController:
                 planner_final = planner_raw.with_suffix(".final.json")
                 planner_schema.write_text(
                     json.dumps(
-                        branch_briefs_json_schema(expected_count=4),
+                        branch_briefs_json_schema(
+                            expected_count=4,
+                            required_entry_symbol=self.policy_entry_symbol,
+                        ),
                         ensure_ascii=False,
                         sort_keys=True,
                         indent=2,
@@ -1359,9 +1454,10 @@ class HLController:
                         known_code_symbols={
                             item["name"]
                             for item in build_candidate_code_index(
-                                self.workspace / "ai.py"
+                                self.workspace / self.candidate_source_relative
                             )
                         },
+                        required_entry_symbol=self.policy_entry_symbol,
                     )
                     shutil.copy2(planner_final, planner_output)
             else:
@@ -1412,9 +1508,10 @@ class HLController:
             known_code_symbols={
                 item["name"]
                 for item in build_candidate_code_index(
-                    self.workspace / "ai.py"
+                    self.workspace / self.candidate_source_relative
                 )
             },
+            required_entry_symbol=self.policy_entry_symbol,
         )
         self.events.write(
             "planner_completed",
