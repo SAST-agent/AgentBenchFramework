@@ -194,6 +194,77 @@ def test_replay_summarizer_translates_operations_and_breaches(tmp_path):
     assert value["event_index"][0]["operation"]["name"] == "BUILD_TOWER"
 
 
+def test_replay_summary_keeps_terminal_and_phase_evidence_without_event_dump(
+    tmp_path,
+):
+    replay = tmp_path / "long-replay.json"
+    output = tmp_path / "long-summary.json"
+    records = []
+    camp0 = 50
+    for round_index in range(240):
+        if round_index and round_index % 5 == 0:
+            camp0 -= 1
+        records.append(
+            {
+                "seed": 17,
+                "op0": [
+                    {
+                        "type": 11,
+                        "id": -1,
+                        "args": -1,
+                        "pos": {"x": 5, "y": 9},
+                    }
+                ],
+                "op1": [
+                    {
+                        "type": 21,
+                        "id": -1,
+                        "args": -1,
+                        "pos": {"x": 5, "y": 9},
+                    }
+                ],
+                "round_state": {
+                    "camps": [camp0, 50],
+                    "coins": [round_index, 240 - round_index],
+                    "towers": [],
+                    "ants": [],
+                    "winner": 1 if round_index == 239 else -1,
+                },
+            }
+        )
+    replay.write_text(json.dumps(records), encoding="utf-8")
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(
+                ASSETS
+                / "replay-skill"
+                / "antwar2-replay"
+                / "scripts"
+                / "summarize_replay.py"
+            ),
+            str(replay),
+            "--output",
+            str(output),
+        ],
+        check=True,
+    )
+    value = json.loads(output.read_text(encoding="utf-8"))
+
+    assert value["rounds"] == 240
+    assert value["winner"] == 1
+    assert value["terminal_camps"] == [3, 50]
+    assert [phase["phase"] for phase in value["phase_summaries"]] == [
+        "early",
+        "middle",
+        "late",
+    ]
+    assert len(value["event_index"]) <= 48
+    assert value["event_index_omitted"] > 400
+    assert len(output.read_text(encoding="utf-8")) < 12_000
+
+
 def test_trace_window_is_round_bounded_and_omits_unrequested_records(tmp_path):
     trace = tmp_path / "trace.jsonl"
     output = tmp_path / "window.json"

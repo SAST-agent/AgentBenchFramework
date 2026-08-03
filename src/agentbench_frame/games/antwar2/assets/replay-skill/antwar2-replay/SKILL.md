@@ -17,7 +17,7 @@ Translate public records into auditable evidence for an interpretable edit. Repl
    ```
 
 3. Reject incomplete replays, protocol faults, timeouts without a valid terminal state, and unknown operation codes. Infrastructure failure is not a strategy result.
-4. Start with terminal camps, winner, breaches, operation counts, and event index. Select at most two hypotheses.
+4. Start with terminal camps, winner, phase summaries, operation counts, breaches, and the bounded key-event index. Select at most two hypotheses.
 5. For each hypothesis, record exactly:
 
    ```text
@@ -40,6 +40,8 @@ Translate public records into auditable evidence for an interpretable edit. Repl
 ## Evidence rules
 
 - Treat `op0` and `op1` as accepted atomic operation sequences for the recorded round.
+- `phase_summaries` preserve complete early/middle/late atomic-operation counts; `event_index` is only a bounded locator for first/special operations and camp-HP threshold breaches.
+- When omitted events matter, inspect the referenced replay or a bounded trace window; never treat the key-event index as the full trajectory.
 - `BUILD_TOWER` is code 11 with `(x, y)`; it has no tower-type argument and creates a Basic tower.
 - `UPGRADE_TOWER` is code 12 with `(tower_id, target_type)`.
 - `DOWNGRADE_TOWER` is code 13 with `(tower_id)`.
