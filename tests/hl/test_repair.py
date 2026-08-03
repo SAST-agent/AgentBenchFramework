@@ -230,6 +230,12 @@ def test_activation_repair_packet_embeds_bounded_edit_context(tmp_path):
         candidate_source_path=source,
         policy_entry_symbol="ai_func",
         smoke_command=("python", "smoke.py", "--workspace", str(tmp_path)),
+        activation_command=(
+            "python",
+            "activation_check.py",
+            "--candidate",
+            str(tmp_path),
+        ),
     )
 
     value = json.loads(path.read_text(encoding="utf-8"))
@@ -242,6 +248,8 @@ def test_activation_repair_packet_embeds_bounded_edit_context(tmp_path):
         "helper",
     ]
     assert value["smoke_contract"]["command"][0] == "python"
+    assert value["activation_contract"]["command"][1] == "activation_check.py"
+    assert value["activation_contract"]["minimum_changed_actions"] == 2
     assert value["experience_update_contract"]["required_arrays"] == [
         "positive_patterns",
         "negative_patterns",

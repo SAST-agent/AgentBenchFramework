@@ -459,13 +459,13 @@ branch index: {branch_index}
 Single bounded input: {Path(repair_input_path).resolve()}
 Candidate workspace: {Path(workspace).resolve()}
 
-The first tool call must read the bounded repair packet exactly once. It embeds the compact digest, research state, Experience Skill, branch scope, activation measurement, authoritative `candidate_code_slices`, exact smoke command, and Experience update contract. Do not read the digest, research state, Experience Skill, SDK, protocol files, or complete policy separately. Do not run `rg`, `find`, `ls`, `git status`, or directory discovery.
+The first tool call must read the bounded repair packet exactly once. It embeds the compact digest, research state, Experience Skill, branch scope, activation measurement, authoritative `candidate_code_slices`, exact activation check command, exact smoke command, and Experience update contract. Do not read the digest, research state, Experience Skill, SDK, protocol files, or complete policy separately. Do not run `rg`, `find`, `ls`, `git status`, or directory discovery.
 
 Obey `repair_kind`. For `activation_integration`, the candidate has not earned a match: its mechanism failed to change enough final protocol actions on frozen parent states. Make the scoped mechanism penetrate the final action-selection path and reach `minimum_changed_actions`; do not reinterpret zero/insufficient activation as gameplay evidence. Repair only this mechanism and preserve the parent path outside the brief's activation condition. The initial sibling remains immutable, so a failed repair cannot erase it.
 
 Treat complete `candidate_code_slices` as authoritative and the next tool call must edit `{profile.candidate_source_relative}`. If and only if a selected slice is explicitly marked truncated, one exact line-range read is allowed and the following tool call must edit. Use only literal protocol atomic operations from the embedded digest. Do not run grid search, threshold enumeration, seed/coordinate/opponent-identity memorization, inspect {profile.opponent_label} source, or inspect replay/trace during activation repair.
 
-After the edit, compile `{profile.candidate_source_relative}`, run `smoke_contract.command` exactly once, and write the four condition-scoped arrays required by `experience_update_contract` to its exact path. Stop after success; use at most 8 tool calls total.
+After the edit, compile `{profile.candidate_source_relative}` and run `activation_contract.command` exactly. A nonzero exit writes a bounded result at the command's `--output` path: read only that result, make at most one additional scoped edit, then compile and run the same activation command again. Do not claim integration success unless it exits zero and reports at least `minimum_changed_actions`. After activation succeeds, run `smoke_contract.command` exactly once and write the four condition-scoped arrays required by `experience_update_contract` to its exact path. Stop after success; use at most 12 tool calls total.
 """
 
     def _build_profile_reducer_prompt(

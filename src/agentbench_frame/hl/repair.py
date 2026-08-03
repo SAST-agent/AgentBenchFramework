@@ -202,6 +202,7 @@ def enrich_activation_repair_packet(
     candidate_source_path: str | Path,
     policy_entry_symbol: str,
     smoke_command: Sequence[str],
+    activation_command: Sequence[str] | None = None,
 ) -> Path:
     """Inline all bounded edit inputs so repair needs one read before editing."""
 
@@ -220,6 +221,15 @@ def enrich_activation_repair_packet(
     command = [str(item) for item in smoke_command]
     if not command or any(not item for item in command):
         raise ValueError("smoke command must contain non-empty strings")
+    activation = (
+        None
+        if activation_command is None
+        else [str(item) for item in activation_command]
+    )
+    if activation is not None and (
+        not activation or any(not item for item in activation)
+    ):
+        raise ValueError("activation command must contain non-empty strings")
     source = Path(candidate_source_path)
     value.update(
         {
@@ -237,6 +247,16 @@ def enrich_activation_repair_packet(
                 entry_symbol=policy_entry_symbol,
             ),
             "smoke_contract": {"command": command},
+            "activation_contract": (
+                None
+                if activation is None
+                else {
+                    "command": activation,
+                    "minimum_changed_actions": int(
+                        value["minimum_changed_actions"]
+                    ),
+                }
+            ),
             "experience_update_contract": {
                 "path": str(
                     (

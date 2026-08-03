@@ -846,6 +846,37 @@ def run_profile(
             )
 
             smoke_result = workspace / ".agentbench/candidate_smoke_result.json"
+            activation_command = None
+            if bindings.activation_contract_builder is not None:
+                if current_evaluation is None:
+                    raise ValueError(
+                        "activation contract requires a complete parent evaluation"
+                    )
+                repair_value = json.loads(
+                    Path(values["repair_input"]).read_text(encoding="utf-8")
+                )
+                parent_value = repair_value.get("parent")
+                if not isinstance(parent_value, Mapping):
+                    raise ValueError("repair packet requires parent metadata")
+                parent_version_id = str(parent_value.get("version_id") or "")
+                parent_version = store.get(parent_version_id)
+                branch_index = int(values["branch_index"])
+                activation_command = bindings.activation_contract_builder(
+                    parent_root=store.objects / parent_version.content_hash,
+                    candidate_root=workspace,
+                    references=_references(current_evaluation),
+                    references_path=(
+                        proposal_root
+                        / f"activation_references-b{branch_index:02d}.json"
+                    ),
+                    output_path=(
+                        workspace / ".agentbench/activation_check_result.json"
+                    ),
+                    epsilon=config.run.measurement.epsilon,
+                    minimum_changed_actions=(
+                        config.run.iteration.activation_min_changed_actions
+                    ),
+                )
             repair_input = enrich_activation_repair_packet(
                 values["repair_input"],
                 game_digest_path=digest,
@@ -861,6 +892,7 @@ def run_profile(
                     "--output",
                     str(smoke_result),
                 ),
+                activation_command=activation_command,
             )
             return context.build_repair_prompt(
                 act_id=values["act_id"],

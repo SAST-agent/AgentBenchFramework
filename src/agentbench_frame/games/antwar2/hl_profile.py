@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from agentbench_frame.games.antwar2.evaluator import AntWar2Evaluator, load_human_pool
+from agentbench_frame.games.antwar2.activation_check import (
+    build_activation_check_command,
+)
 from agentbench_frame.games.antwar2.evidence import build_replay_evidence
 from agentbench_frame.games.antwar2.match import ProcessSpec
 from agentbench_frame.games.antwar2.measurement import compare_behavior
@@ -196,5 +199,8 @@ class AntWar2HLProfile:
                 candidate,
                 references=kwargs["references"],
                 epsilon=float(kwargs.get("epsilon", 0.05)),
+            ),
+            activation_contract_builder=lambda **kwargs: (
+                build_activation_check_command(**kwargs)
             ),
         )

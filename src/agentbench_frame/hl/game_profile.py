@@ -151,6 +151,7 @@ ReplayEvidenceBuilder = Callable[
     Sequence[Mapping[str, Any]],
 ]
 BehaviorComparator = Callable[..., BehaviorComparison]
+ActivationContractBuilder = Callable[..., Sequence[str]]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -165,6 +166,7 @@ class HLGameBindings:
     smoke_verifier: SmokeVerifier
     replay_evidence_builder: ReplayEvidenceBuilder
     behavior_comparator: BehaviorComparator
+    activation_contract_builder: ActivationContractBuilder | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.context_sources, Mapping) or not self.context_sources:
@@ -180,6 +182,10 @@ class HLGameBindings:
             raise ValueError("replay_evidence_builder must be callable")
         if not callable(self.behavior_comparator):
             raise ValueError("behavior_comparator must be callable")
+        if self.activation_contract_builder is not None and not callable(
+            self.activation_contract_builder
+        ):
+            raise ValueError("activation_contract_builder must be callable")
         if not callable(getattr(self.evaluator, "evaluate", None)):
             raise ValueError("evaluator must define evaluate(version)")
 
