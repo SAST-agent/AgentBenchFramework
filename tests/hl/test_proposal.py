@@ -1,4 +1,5 @@
 import json
+import sys
 
 import pytest
 
@@ -160,6 +161,7 @@ def test_candidate_input_packet_inlines_bounded_reusable_context(tmp_path):
     summary = tmp_path / "summary.md"
     distillation = tmp_path / "ghost.json"
     candidate_source = tmp_path / "ai.py"
+    smoke_fixture = tmp_path / "context" / "rollman_smoke_fixture.py"
     digest.write_text('{"actions":[0,1,2,3,4]}', encoding="utf-8")
     research.write_text('{"open_questions":["corner"]}', encoding="utf-8")
     experience.write_text("stable experience", encoding="utf-8")
@@ -173,6 +175,8 @@ def test_candidate_input_packet_inlines_bounded_reusable_context(tmp_path):
         "    return 0\n",
         encoding="utf-8",
     )
+    smoke_fixture.parent.mkdir()
+    smoke_fixture.write_text("# framework fixture\n", encoding="utf-8")
 
     path = write_candidate_input_packet(
         output_path=tmp_path / "candidate_input.json",
@@ -200,6 +204,8 @@ def test_candidate_input_packet_inlines_bounded_reusable_context(tmp_path):
         active_target="rank15",
         locked_opponents=(),
         candidate_source_path=candidate_source,
+        smoke_fixture_path=smoke_fixture,
+        candidate_workspace=tmp_path,
     )
 
     value = json.loads(path.read_text(encoding="utf-8"))
@@ -240,6 +246,25 @@ def test_candidate_input_packet_inlines_bounded_reusable_context(tmp_path):
             "source": "def helper(state):\n    return 0\n",
         },
     ]
+    assert value["smoke_contract"] == {
+        "fixture_path": str(smoke_fixture.resolve()),
+        "scenario_path": str((tmp_path / ".agentbench" / "smoke_scenario.json").resolve()),
+        "result_path": str(
+            (tmp_path / ".agentbench" / "candidate_smoke_result.json").resolve()
+        ),
+        "command": [
+            sys.executable,
+            str(smoke_fixture.resolve()),
+            "--workspace",
+            str(tmp_path.resolve()),
+            "--scenario",
+            str((tmp_path / ".agentbench" / "smoke_scenario.json").resolve()),
+            "--output",
+            str(
+                (tmp_path / ".agentbench" / "candidate_smoke_result.json").resolve()
+            ),
+        ],
+    }
     assert value["replay_evidence"][0]["trace"].endswith("trace.jsonl")
     assert len(value["replay_evidence"][0]["summary_text"]) <= 12032
     assert value["replay_evidence"][0]["summary_text"].endswith(

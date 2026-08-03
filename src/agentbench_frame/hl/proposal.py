@@ -6,6 +6,7 @@ import ast
 import dataclasses
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -292,6 +293,8 @@ def write_candidate_input_packet(
     active_target: str | None,
     locked_opponents: tuple[str, ...],
     candidate_source_path: str | Path | None = None,
+    smoke_fixture_path: str | Path | None = None,
+    candidate_workspace: str | Path | None = None,
 ) -> Path:
     """Write one bounded candidate context artifact for a single first read."""
 
@@ -328,6 +331,33 @@ def write_candidate_input_packet(
             code_symbols=tuple(str(item) for item in raw_symbols),
         )
     )
+    if (smoke_fixture_path is None) != (candidate_workspace is None):
+        raise ValueError(
+            "smoke fixture and candidate workspace must be provided together"
+        )
+    smoke_contract = None
+    if smoke_fixture_path is not None and candidate_workspace is not None:
+        fixture = Path(smoke_fixture_path).resolve()
+        workspace = Path(candidate_workspace).resolve()
+        if not fixture.is_file():
+            raise FileNotFoundError(fixture)
+        scenario = workspace / ".agentbench" / "smoke_scenario.json"
+        result = workspace / ".agentbench" / "candidate_smoke_result.json"
+        smoke_contract = {
+            "fixture_path": str(fixture),
+            "scenario_path": str(scenario),
+            "result_path": str(result),
+            "command": [
+                sys.executable,
+                str(fixture),
+                "--workspace",
+                str(workspace),
+                "--scenario",
+                str(scenario),
+                "--output",
+                str(result),
+            ],
+        }
     value = {
         "schema_version": "1.0",
         "iteration_id": iteration_id,
@@ -347,6 +377,7 @@ def write_candidate_input_packet(
         "opponent_distillation": distillation,
         "candidate_code_index": code_index,
         "candidate_code_slices": code_slices,
+        "smoke_contract": smoke_contract,
     }
     destination = Path(output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
