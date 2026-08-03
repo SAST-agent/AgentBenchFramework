@@ -143,8 +143,18 @@ def test_candidate_input_packet_inlines_bounded_reusable_context(tmp_path):
     assert value["experience_skill"] == "stable experience"
     assert value["opponent_distillation"]["fine"]["stay"] == 0.5
     assert value["candidate_code_index"] == [
-        {"name": "decide", "start_line": 1, "end_line": 2},
-        {"name": "helper", "start_line": 4, "end_line": 5},
+        {
+            "name": "decide",
+            "signature": "decide(state)",
+            "start_line": 1,
+            "end_line": 2,
+        },
+        {
+            "name": "helper",
+            "signature": "helper(state)",
+            "start_line": 4,
+            "end_line": 5,
+        },
     ]
     assert value["replay_evidence"][0]["trace"].endswith("trace.jsonl")
     assert len(value["replay_evidence"][0]["summary_text"]) <= 12032

@@ -219,6 +219,7 @@ def write_candidate_input_packet(
         code_index = [
             {
                 "name": node.name,
+                "signature": f"{node.name}({ast.unparse(node.args)})",
                 "start_line": node.lineno,
                 "end_line": node.end_lineno,
             }

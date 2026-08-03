@@ -663,6 +663,8 @@ def test_candidate_prompt_uses_one_prebuilt_context_packet(tmp_path):
     assert str(packet) in prompt
     assert "第一次调用只读取 candidate input packet" in prompt
     assert "candidate_code_index" in prompt
+    assert "每个既有 helper 的 signature" in prompt
+    assert "必须命中新机制的 activation_condition" in prompt
     assert "replay_evidence" in prompt
     assert f"cat {packet}" in prompt
     assert "逐个读取 summary" not in prompt
