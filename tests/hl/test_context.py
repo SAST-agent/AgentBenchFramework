@@ -665,6 +665,8 @@ def test_candidate_prompt_uses_one_prebuilt_context_packet(tmp_path):
     assert "candidate_code_index" in prompt
     assert "每个既有 helper 的 signature" in prompt
     assert "必须命中新机制的 activation_condition" in prompt
+    assert "公开入口 `ai_func` 返回新增分支的 `memory_id`" in prompt
+    assert "直接调用内部 helper 不算" in prompt
     assert "replay_evidence" in prompt
     assert f"cat {packet}" in prompt
     assert "逐个读取 summary" not in prompt

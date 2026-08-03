@@ -645,7 +645,7 @@ Planner 压缩边界：
 - 第二次调用直接使用 `candidate_code_index` 定位 `ai.py` 的入口与 brief 涉及的已有机制；第三次只读相关代码区间，不得重复运行符号搜索；不得顺序打印完整 ai.py。
 - `candidate_code_index` 已给出模块级函数行号和 signature。新增代码调用前必须核对每个既有 helper 的 signature；不得凭函数名猜参数。
 - 第四次最多读取两个定点 trace 窗口；第 6 次工具调用结束前必须已完成 `ai.py` 的首次可编译修改并写入 experience_update.json。
-- 首次修改落盘后，只允许编译、一次对象 smoke，以及为修复验证失败所必需的一次更正；对象 smoke 必须命中新机制的 activation_condition 并执行新增路径，不能只验证父代 fallback；不得把实现留到长推理末尾。
+- 首次修改落盘后，只允许编译、一次对象 smoke，以及为修复验证失败所必需的一次更正；对象 smoke 必须命中新机制的 activation_condition，并断言公开入口 `ai_func` 返回新增分支的 `memory_id`；直接调用内部 helper 不算，不能只验证父代 fallback；不得把实现留到长推理末尾。
 - 命令必须直接引用白名单中的完整文件路径；不得把 run 根目录或父目录保存为变量后再拼接，也不得列举这些目录。
 """
 
