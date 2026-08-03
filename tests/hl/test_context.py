@@ -287,6 +287,8 @@ def test_profile_candidate_packet_requires_immediate_edit_without_duplicate_read
     assert "Do not run `sed`, `cat ai.py`, `rg`, `find`, or `ls`" in prompt
     assert "candidate_code_slices" in prompt
     assert "same file-change tool call" in prompt
+    assert "must print `smoke_contract`" in prompt
+    assert "exact `smoke_contract.command`" in prompt
 
 
 @pytest.mark.parametrize("kind", ["bootstrap", "candidate", "repair", "reducer"])

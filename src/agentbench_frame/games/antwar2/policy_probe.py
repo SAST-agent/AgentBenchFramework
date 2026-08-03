@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 import json
 import sys
@@ -10,6 +11,35 @@ from typing import Any
 
 
 HOLD = (0, -1, -1)
+
+
+def _reconstruct_tower_snapshots(
+    replay: list[dict[str, Any]],
+) -> dict[int, list[dict[str, Any]]]:
+    """Expand the replay's tower delta stream into full public snapshots."""
+
+    towers_by_id: dict[int, dict[str, Any]] = {}
+    snapshots: dict[int, list[dict[str, Any]]] = {}
+    for index, record in enumerate(replay):
+        state = record.get("round_state")
+        if not isinstance(state, dict):
+            continue
+        rows = state.get("towers", [])
+        if not isinstance(rows, list):
+            raise ValueError(f"replay round {index} towers must be a list")
+        for row in rows:
+            if not isinstance(row, dict):
+                raise ValueError(f"replay round {index} tower must be an object")
+            tower_id = int(row["id"])
+            if int(row["type"]) == -1:
+                towers_by_id.pop(tower_id, None)
+            else:
+                towers_by_id[tower_id] = copy.deepcopy(row)
+        snapshots[index] = [
+            copy.deepcopy(towers_by_id[tower_id])
+            for tower_id in sorted(towers_by_id)
+        ]
+    return snapshots
 
 
 def _load_replay(path: Path) -> list[dict[str, Any]]:
@@ -88,7 +118,11 @@ def _main(request_path: Path, output_path: Path) -> None:
             return Operation(operation_type, int(item["id"]))
         return Operation(operation_type)
 
-    def public_state(round_index: int, data: dict[str, Any]) -> PublicRoundState:
+    def public_state(
+        round_index: int,
+        data: dict[str, Any],
+        tower_snapshot: list[dict[str, Any]],
+    ) -> PublicRoundState:
         towers = [
             (
                 int(item["id"]),
@@ -99,7 +133,7 @@ def _main(request_path: Path, output_path: Path) -> None:
                 int(item.get("cd", 0)),
                 int(item.get("hp", -1)),
             )
-            for item in data.get("towers", [])
+            for item in tower_snapshot
         ]
         ants = [
             (
@@ -189,6 +223,7 @@ def _main(request_path: Path, output_path: Path) -> None:
             raise ValueError(f"invalid role: {role}")
         player = 0 if role == "P0" else 1
         replay = _load_replay(replay_path)
+        tower_snapshots = _reconstruct_tower_snapshots(replay)
         seed = int(replay[0].get("seed", 0))
         agent = module.AI()
         agent.on_match_start(player, seed)
@@ -198,7 +233,11 @@ def _main(request_path: Path, output_path: Path) -> None:
             state_data = record.get("round_state")
             if not isinstance(state_data, dict):
                 raise ValueError(f"replay round {index} has no public state")
-            frozen = public_state(index + 1, state_data)
+            frozen = public_state(
+                index + 1,
+                state_data,
+                tower_snapshots[index],
+            )
             runtime.state.sync_public_round_state(frozen)
             agent.on_round_state(frozen)
             opponent_operations = [

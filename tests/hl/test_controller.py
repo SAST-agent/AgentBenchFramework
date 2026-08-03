@@ -238,6 +238,88 @@ def test_activation_probe_skips_paid_screen_when_parent_trace_actions_do_not_cha
     assert event["changed_action_count"] == 0
 
 
+def test_recovered_activation_infrastructure_failure_retries_without_provider_call(
+    tmp_path,
+):
+    from agentbench_frame.hl.controller import CandidateResult
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+    from agentbench_frame.hl.proposal import BranchBrief
+    from agentbench_frame.tracking.provider import ProviderInvocation
+
+    class StagedEvaluator:
+        def __init__(self):
+            self.quick_calls = 0
+
+        def quick_screen(self, version):
+            self.quick_calls += 1
+            return CandidateEvaluation(status="complete", score=0.75)
+
+    evaluator = StagedEvaluator()
+    provider = FakeProvider([])
+    controller = _controller(
+        tmp_path,
+        provider,
+        evaluator,
+        activation_probe=lambda **kwargs: {
+            "status": "complete",
+            "decision_count": 16,
+            "changed_action_count": 4,
+            "episodes": [{"role": "P0"}],
+        },
+        staged=True,
+    )
+    origin = controller.initialize(evaluate=False)
+    Path(controller.workspace, "agent.py").write_text("VALUE = 1\n", encoding="utf-8")
+    version = controller.version_store.snapshot(
+        parent_version_id=origin.version_id,
+        act_id="act-000014-b00",
+        edit_type="candidate",
+    )
+    controller.lineage.register_candidate(
+        version.version_id,
+        parent_version_id=origin.version_id,
+        status="failed",
+        score=None,
+    )
+    recovered = CandidateResult(
+        act_id="act-000014-b00",
+        branch_index=0,
+        version=version,
+        evaluation=CandidateEvaluation(
+            status="failed",
+            score=None,
+            error="activation_probe_failed: invalid replay delta",
+        ),
+        provider=ProviderInvocation(
+            status="completed",
+            metadata={"iteration_id": "iter-000001"},
+        ),
+    )
+    brief = BranchBrief(
+        branch_index=0,
+        diagnosis="candidate must alter a failed decision",
+        mechanism="one bounded action rule",
+        activation_condition="visible danger",
+        preservation_contract="other states stay unchanged",
+        expected_change="one action changes",
+        falsifier="zero action changes",
+        code_symbols=("ai_func", "helper"),
+    )
+
+    result = controller.run_act(
+        parent_version_id=origin.version_id,
+        parent_evaluation=CandidateEvaluation(status="complete", score=0.25),
+        branch_briefs=(brief,),
+        candidate_recoveries={0: recovered},
+    )
+
+    assert provider.calls == []
+    assert evaluator.quick_calls == 1
+    assert result.candidates[0].evaluation.score == 0.75
+    assert result.candidates[0].activation["changed_action_count"] == 4
+    assert controller.lineage.versions[version.version_id].status == "complete"
+
+
 def test_activation_probe_allows_changed_candidate_to_reach_paid_screen(tmp_path):
     from agentbench_frame.hl.evaluator import CandidateEvaluation
     from agentbench_frame.hl.proposal import BranchBrief

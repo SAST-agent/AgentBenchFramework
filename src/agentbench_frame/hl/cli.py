@@ -1187,6 +1187,12 @@ def _pending_candidate_recoveries(
             or version.parent_version_id != parent_id
         ):
             continue
+        pending_experience = (
+            checkpoint_path.parent.parent
+            / "experience"
+            / "pending"
+            / f"{act_id}.json"
+        )
         recovered[branch_index] = CandidateResult(
             act_id=act_id,
             branch_index=branch_index,
@@ -1200,6 +1206,9 @@ def _pending_candidate_recoveries(
                     "iteration_id": iteration_id,
                     "recovered_from_persisted_output": True,
                 },
+            ),
+            pending_experience_path=(
+                pending_experience if pending_experience.is_file() else None
             ),
         )
     return recovered

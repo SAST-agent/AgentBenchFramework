@@ -673,6 +673,118 @@ class HLController:
             )
         return evaluation
 
+    def _retry_recovered_activation_failure(
+        self,
+        candidate: CandidateResult,
+        *,
+        parent_evaluation: CandidateEvaluation | None,
+    ) -> CandidateResult:
+        """Retry framework-owned activation/evaluation without another model act."""
+
+        error = str(candidate.evaluation.error or "")
+        if (
+            not error.startswith("activation_probe_failed:")
+            or self.activation_probe is None
+            or parent_evaluation is None
+            or not hasattr(self.evaluator, "quick_screen")
+        ):
+            return candidate
+        parent_id = candidate.version.parent_version_id
+        if parent_id is None:
+            return candidate
+        iteration_id = str(
+            candidate.provider.metadata.get("iteration_id", "iter-unknown")
+        )
+        try:
+            measured = dict(
+                self.activation_probe(
+                    new_version=candidate.version,
+                    old_version=self.version_store.get(parent_id),
+                    version_store=self.version_store,
+                    parent_evaluation=parent_evaluation,
+                )
+            )
+            decision_count = int(measured["decision_count"])
+            changed_action_count = int(measured["changed_action_count"])
+            if (
+                decision_count < 1
+                or changed_action_count < 0
+                or changed_action_count > decision_count
+            ):
+                raise ValueError("invalid activation probe counts")
+            activation = {
+                **measured,
+                "status": "complete",
+                "decision_count": decision_count,
+                "changed_action_count": changed_action_count,
+                "changed_fraction": changed_action_count / decision_count,
+                "episodes": list(measured.get("episodes", ())),
+            }
+            activation_error = (
+                "no_parent_trace_action_change"
+                if changed_action_count == 0
+                else None
+            )
+        except Exception as exception:
+            message = (
+                " ".join(str(exception).split())
+                or exception.__class__.__name__
+            )
+            activation_error = f"activation_probe_failed: {message}"
+            activation = {
+                "status": "failed",
+                "decision_count": 0,
+                "changed_action_count": 0,
+                "changed_fraction": 0.0,
+                "episodes": [],
+                "error": message,
+            }
+        self.events.write(
+            "candidate_activation_measured",
+            iteration_id=iteration_id,
+            act_id=candidate.act_id,
+            branch_index=candidate.branch_index,
+            version_id=candidate.version.version_id,
+            parent_version_id=parent_id,
+            status=str(activation["status"]),
+            decision_count=int(activation["decision_count"]),
+            changed_action_count=int(activation["changed_action_count"]),
+            changed_fraction=float(activation["changed_fraction"]),
+            episodes=list(activation["episodes"]),
+            error=activation.get("error"),
+        )
+        if activation_error is None:
+            try:
+                evaluation = self.evaluator.quick_screen(candidate.version)
+            except Exception as exception:
+                message = (
+                    " ".join(str(exception).split())
+                    or exception.__class__.__name__
+                )
+                evaluation = CandidateEvaluation(
+                    status="failed",
+                    score=None,
+                    error=f"evaluation_retry_failed: {message}",
+                )
+        else:
+            evaluation = CandidateEvaluation(
+                status="failed",
+                score=None,
+                error=activation_error,
+            )
+        self.lineage.update_incomplete_evaluation(
+            candidate.version.version_id,
+            status=evaluation.status,
+            score=evaluation.score,
+            select=False,
+        )
+        self._write_evaluation_event(candidate.version, evaluation)
+        return dataclasses.replace(
+            candidate,
+            evaluation=evaluation,
+            activation=activation,
+        )
+
     def record_matches(
         self,
         *,
@@ -1103,6 +1215,10 @@ class HLController:
                     or recovered_candidate.version.parent_version_id != parent_id
                 ):
                     raise ValueError("recovered candidate lineage does not match")
+                recovered_candidate = self._retry_recovered_activation_failure(
+                    recovered_candidate,
+                    parent_evaluation=parent_evaluation,
+                )
                 results.append(recovered_candidate)
                 continue
             act_id = f"act-{self._provider_attempts + 1:06d}-b{branch_index:02d}"
