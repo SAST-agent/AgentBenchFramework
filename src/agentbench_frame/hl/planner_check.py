@@ -81,6 +81,17 @@ def run_planner_check(
                     if isinstance(code, int) and not isinstance(code, bool)
                 }
         action_codes = _action_codes(packet.get("game_digest") or {})
+
+        def named_legal_operations(state: str) -> list[dict[str, Any]]:
+            return [
+                {"code": code, "name": name}
+                for name, code in sorted(
+                    action_codes.items(),
+                    key=lambda item: (item[1], item[0]),
+                )
+                if code in legal_by_state[state]
+            ]
+
         evidence: list[dict[str, Any]] = []
         for brief in briefs:
             text = " ".join(
@@ -97,6 +108,20 @@ def run_planner_check(
                 if code in legal_by_state[state]
             ]
             if not cited_states:
+                correction_hint = {
+                    "branch_index": brief.branch_index,
+                    "available_states": [
+                        {
+                            "state_id": state,
+                            "legal_operations": named_legal_operations(state),
+                        }
+                        for state in sorted(legal_by_state)[:8]
+                    ],
+                    "requirement": (
+                        "Cite one listed state_id and name one of its legal "
+                        "operations exactly."
+                    ),
+                }
                 raise ValueError(
                     f"branch {brief.branch_index} cites no parent occupancy state"
                 )
@@ -106,14 +131,7 @@ def run_planner_check(
                     "cited_states": [
                         {
                             "state_id": state,
-                            "legal_operations": [
-                                {"code": code, "name": name}
-                                for name, code in sorted(
-                                    action_codes.items(),
-                                    key=lambda item: (item[1], item[0]),
-                                )
-                                if code in legal_by_state[state]
-                            ],
+                            "legal_operations": named_legal_operations(state),
                         }
                         for state in cited_states
                     ],

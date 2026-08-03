@@ -150,3 +150,43 @@ def test_planner_check_failure_reports_exact_legal_names_for_correction(tmp_path
             "activation_condition."
         ),
     }
+
+
+def test_planner_check_missing_state_reports_bounded_reachable_examples(tmp_path):
+    """A range-only branch must receive exact state ids for its sole correction."""
+    from agentbench_frame.hl.planner_check import run_planner_check
+
+    packet = tmp_path / "planner.json"
+    briefs = tmp_path / "briefs.json"
+    output = tmp_path / "result.json"
+    packet.write_text(json.dumps(_packet()), encoding="utf-8")
+    branches = [_branch(index) for index in range(4)]
+    branches[0]["activation_condition"] = "activate within the observed range"
+    briefs.write_text(json.dumps(branches), encoding="utf-8")
+
+    returncode = run_planner_check(
+        briefs_path=briefs,
+        planner_input_path=packet,
+        output_path=output,
+        expected_count=4,
+        entry_symbol="AI.choose_operations",
+    )
+
+    assert returncode == 2
+    value = json.loads(output.read_text(encoding="utf-8"))
+    assert value["correction_hint"] == {
+        "branch_index": 0,
+        "available_states": [
+            {
+                "state_id": "reference-0:0:P0",
+                "legal_operations": [
+                    {"code": 0, "name": "HOLD"},
+                    {"code": 11, "name": "BUILD_TOWER"},
+                ],
+            }
+        ],
+        "requirement": (
+            "Cite one listed state_id and name one of its legal operations "
+            "exactly."
+        ),
+    }

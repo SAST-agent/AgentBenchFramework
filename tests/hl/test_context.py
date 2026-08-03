@@ -237,6 +237,29 @@ def test_profile_prompt_uses_game_vocabulary_without_rollman_leak(tmp_path):
         assert forbidden not in prompt
 
 
+def test_profile_planner_requires_exact_state_for_every_branch(tmp_path):
+    """Keep the prompt and reachable-action validator on one contract."""
+    prompt = _profile_context(tmp_path).build_planner_prompt(
+        act_id="act-planner",
+        iteration_id="iter-000003",
+        parent_version_id="v0",
+        workspace=tmp_path / "candidate",
+        game_digest_path=tmp_path / "digest.json",
+        research_state_path=tmp_path / "research.json",
+        replay_evidence=[],
+        previous_measurements={},
+    )
+
+    assert (
+        "Every branch must cite at least one exact state_id from "
+        "parent_occupancy.state_examples" in prompt
+    )
+    assert (
+        "An observed per-role range is supplementary and never replaces "
+        "that exact state citation" in prompt
+    )
+
+
 def _profile_context(tmp_path):
     from agentbench_frame.hl.context import ContextBundle, IterationContext
     from agentbench_frame.hl.game_profile import PromptProfile
