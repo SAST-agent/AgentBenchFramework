@@ -14,6 +14,7 @@ from typing import Any, Mapping, Sequence
 _INLINE_SUMMARY_LIMIT = 12_000
 _INLINE_TEXT_LIMIT = 24_000
 _CANDIDATE_SOURCE_LIMIT = 24_000
+_BOOTSTRAP_TEXT_LIMIT = 40_000
 
 
 def stratify_rollout_evidence(
@@ -286,6 +287,41 @@ def write_planner_input_packet(
         "candidate_code_index": build_candidate_code_index(
             candidate_source_path
         ),
+    }
+    destination = Path(output_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return destination
+
+
+def write_bootstrap_input_packet(
+    *,
+    output_path: str | Path,
+    context_manifest_path: str | Path,
+    context_files: Mapping[str, str | Path],
+    candidate_source_path: str | Path,
+) -> Path:
+    """Collapse one-time static game context into one bounded bootstrap read."""
+
+    static: dict[str, Any] = {}
+    for name in ("rules", "decision_space", "sdk_interface", "replay_skill"):
+        raw_path = context_files.get(name)
+        if raw_path is None:
+            continue
+        path = Path(raw_path)
+        static[name] = _bounded_text(path, limit=_BOOTSTRAP_TEXT_LIMIT)
+    source = Path(candidate_source_path)
+    value = {
+        "schema_version": "1.0",
+        "context_manifest": json.loads(
+            Path(context_manifest_path).read_text(encoding="utf-8")
+        ),
+        "static_context": static,
+        "candidate_source": _bounded_text(source, limit=_CANDIDATE_SOURCE_LIMIT),
+        "candidate_code_index": build_candidate_code_index(source),
     }
     destination = Path(output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)

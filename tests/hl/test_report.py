@@ -52,6 +52,92 @@ def test_curve_rows_keep_performance_information_and_budget_separate():
     assert rows[2]["cumulative_total_tokens"] == 230
 
 
+def test_generic_profile_report_uses_behavior_event_and_candidate_margin():
+    from agentbench_frame.hl.report import derive_curve_rows
+
+    events = [
+        {
+            "event_type": "version_created",
+            "version_id": "v0",
+            "act_id": "bootstrap",
+            "evaluation_status": "complete",
+            "benchmark_score": 0.0,
+        },
+        {
+            "event_type": "candidate_selected",
+            "iteration_id": "iter-000000",
+            "version_id": "v0",
+            "act_id": "bootstrap",
+        },
+        {
+            "event_type": "version_created",
+            "version_id": "v1",
+            "act_id": "act-b00",
+            "evaluation_status": "complete",
+            "benchmark_score": 0.75,
+        },
+        {
+            "event_type": "evaluation_completed",
+            "version_id": "v1",
+            "status": "complete",
+            "benchmark_score": 0.75,
+            "wins": 3,
+            "draws": 0,
+            "losses": 1,
+        },
+        {
+            "event_type": "behavior_measured",
+            "iteration": 1,
+            "version_id": "v1",
+            "reference_version_id": "v0",
+            "comparison": "origin_to_candidate",
+            "mean_kl_nats_per_decision": 0.42,
+        },
+        {
+            "event_type": "reporting_panel_completed",
+            "iteration_id": "iter-000001",
+            "version_id": "v1",
+            "status": "complete",
+            "score": 0.5,
+            "matches": [
+                {
+                    "status": "complete",
+                    "result": "win",
+                    "candidate_score": 35,
+                    "opponent_score": 0,
+                    "dense_margin": 35,
+                    "faults": [],
+                },
+                {
+                    "status": "complete",
+                    "result": "loss",
+                    "candidate_score": 0,
+                    "opponent_score": 25,
+                    "dense_margin": -25,
+                    "faults": [],
+                },
+            ],
+        },
+        {
+            "event_type": "proposal_cycle_completed",
+            "iteration_id": "iter-000001",
+            "parent_version_id": "v0",
+            "selected_version_id": "v1",
+            "candidate_version_ids": ["v1"],
+        },
+    ]
+
+    rows = derive_curve_rows(events)
+
+    assert [row["iteration"] for row in rows] == [0, 1]
+    assert rows[0]["mean_local_policy_kl"] == 0.0
+    assert rows[1]["mean_local_policy_kl"] == 0.42
+    assert rows[1]["mean_score_margin"] == 5.0
+    assert rows[1]["fault_free_mean_score_margin"] == 5.0
+    assert rows[1]["full_pool_win_rate"] == 0.5
+    assert rows[1]["population_elo"] == rows[1]["rollman_elo"]
+
+
 def test_no_change_proposal_records_zero_kl_and_zero_occupancy_shift():
     from agentbench_frame.hl.report import derive_curve_rows
 
@@ -680,12 +766,11 @@ def test_k4_report_uses_proposal_cycle_as_integer_x_and_keeps_four_branches(
     assert outputs["branches_csv"].is_file()
     svg = outputs["curves_svg"].read_text(encoding="utf-8")
     assert "Score Margin vs HL Iteration" in svg
-    assert "protocol official Elo" in svg
-    assert "fault-free Elo" in svg
-    assert "protocol official win rate" in svg
-    assert "fault-free pool win fraction" in svg
-    assert "opponent fault rate" in svg
-    assert "fault-free mean margin" in svg
+    assert "fixed-population Elo" in svg
+    assert "fixed-pool win rate" in svg
+    assert "fixed-panel mean margin" in svg
+    assert "fault-free Elo" not in svg
+    assert "opponent fault rate" not in svg
     assert "four rollout candidates" not in svg
 
 

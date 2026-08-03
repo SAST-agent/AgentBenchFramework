@@ -551,7 +551,7 @@ def test_generic_profile_acts_use_bounded_tool_budgets():
     assert _tool_limits(
         "# Generic HL candidate act-b00\ncandidate-context-contract: generic-v1"
     ) == (6, 12)
-    assert _tool_limits("# Generic HL bootstrap act-bootstrap") == (14, 20)
+    assert _tool_limits("# Generic HL bootstrap act-bootstrap") == (20, 28)
     assert _tool_limits("# Generic HL scoped repair act-repair") == (14, 20)
     assert _tool_limits("# Generic HL hypothesis planner act-planner") == (None, 8)
     assert _tool_limits("# Generic HL comparative reducer act-reducer") == (None, 8)
@@ -605,6 +605,56 @@ def test_provider_retries_zero_usage_transport_failure_and_preserves_attempt(
     attempt = raw.with_name("act-retry.attempt-1.jsonl")
     assert attempt.read_text(encoding="utf-8") == failed
     assert raw.read_text(encoding="utf-8") == completed
+
+
+def test_provider_retries_actual_gateway_502_diagnostic(tmp_path, monkeypatch):
+    from agentbench_frame.hl.provider import CodexSessionProvider
+
+    failed = (
+        '{"type":"thread.started","thread_id":"thread-gateway"}\n'
+        '{"type":"error","message":"unexpected status 502 Bad Gateway: '
+        'Upstream request failed"}\n'
+        '{"type":"turn.failed","error":{"message":"unexpected status 502 '
+        'Bad Gateway: Upstream request failed"}}\n'
+    )
+    completed = (
+        '{"type":"thread.started","thread_id":"thread-retried"}\n'
+        '{"type":"turn.completed","usage":{"input_tokens":20,"output_tokens":7}}\n'
+    )
+    calls = []
+
+    def run(*args, **kwargs):
+        calls.append(args[0])
+        if len(calls) == 1:
+            return subprocess.CompletedProcess(args[0], 1, failed, "")
+        return subprocess.CompletedProcess(args[0], 0, completed, "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr("agentbench_frame.hl.provider.time.sleep", lambda _: None)
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    raw = tmp_path / "run" / "provider" / "act-gateway.jsonl"
+    provider = CodexSessionProvider(
+        _provider_config(
+            transport_retry_attempts=2,
+            transport_retry_backoff_seconds=1.0,
+        ),
+        run_root=tmp_path / "run",
+        environ={"AGENTBENCH_API_KEY": "sk-runtime-only"},
+    )
+
+    result = provider.invoke(
+        prompt="retry actual 502 diagnostic",
+        workspace=workspace,
+        raw_output_path=raw,
+    )
+
+    assert len(calls) == 2
+    assert result.status == "completed"
+    assert result.metadata["transport_retry_count"] == 1
+    assert raw.with_name("act-gateway.attempt-1.jsonl").read_text(
+        encoding="utf-8"
+    ) == failed
 
 
 def test_provider_does_not_retry_failed_act_after_token_usage(tmp_path, monkeypatch):

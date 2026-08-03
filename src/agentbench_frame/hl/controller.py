@@ -343,6 +343,11 @@ class HLController:
             workspace=self.workspace,
             raw_output_path=raw_path,
             session_id=None,
+            **(
+                {"reasoning_effort": "high"}
+                if getattr(self.provider, "supports_structured_output", False)
+                else {}
+            ),
         )
         self._write_checkpoint(
             act_id=act_id,

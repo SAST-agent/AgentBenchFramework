@@ -20,6 +20,7 @@ CURVE_FIELDS = (
     "gain",
     "best_score_so_far",
     "win_rate",
+    "population_elo",
     "rollman_elo",
     "mean_local_policy_kl",
     "occupancy_shift",
@@ -122,14 +123,26 @@ def _fixed_pool_elo(matches: Any) -> float | None:
 def _score_margin(matches: Any) -> float | None:
     if not isinstance(matches, list):
         return None
-    margins = [
-        float(match["rollman_score"]) - float(match["ghosts_score"])
-        for match in matches
-        if isinstance(match, Mapping)
-        and match.get("status", "complete") == "complete"
-        and isinstance(match.get("rollman_score"), (int, float))
-        and isinstance(match.get("ghosts_score"), (int, float))
-    ]
+    margins: list[float] = []
+    for match in matches:
+        if not isinstance(match, Mapping) or match.get(
+            "status", "complete"
+        ) != "complete":
+            continue
+        if isinstance(match.get("dense_margin"), (int, float)):
+            margins.append(float(match["dense_margin"]))
+        elif isinstance(match.get("candidate_score"), (int, float)) and isinstance(
+            match.get("opponent_score"), (int, float)
+        ):
+            margins.append(
+                float(match["candidate_score"]) - float(match["opponent_score"])
+            )
+        elif isinstance(match.get("rollman_score"), (int, float)) and isinstance(
+            match.get("ghosts_score"), (int, float)
+        ):
+            margins.append(
+                float(match["rollman_score"]) - float(match["ghosts_score"])
+            )
     return sum(margins) / len(margins) if margins else None
 
 
@@ -155,20 +168,15 @@ def _fault_free_panel_metrics(matches: Any) -> dict[str, float | None]:
     ]
     if not complete:
         return empty
-    clean = [
-        match
-        for match in complete
-        if match.get("end_state") == ["OK", "OK"]
-        or match.get("end_state") == ("OK", "OK")
-    ]
+    clean = []
+    for match in complete:
+        end_state = match.get("end_state")
+        faults = match.get("faults")
+        if end_state in (["OK", "OK"], ("OK", "OK")) or faults == []:
+            clean.append(match)
     score_values = {"win": 1.0, "draw": 0.5, "loss": 0.0}
     clean_score = sum(score_values[str(match["result"])] for match in clean)
-    clean_margins = [
-        float(match["rollman_score"]) - float(match["ghosts_score"])
-        for match in clean
-        if isinstance(match.get("rollman_score"), (int, float))
-        and isinstance(match.get("ghosts_score"), (int, float))
-    ]
+    clean_margin = _score_margin(clean)
     opponent_faults = sum(
         isinstance(match.get("end_state"), (list, tuple))
         and len(match["end_state"]) >= 2
@@ -183,9 +191,7 @@ def _fault_free_panel_metrics(matches: Any) -> dict[str, float | None]:
         "fault_free_coverage": len(clean) / len(complete),
         "opponent_fault_rate": opponent_faults / len(complete),
         "fault_free_rollman_elo": _fixed_pool_elo(clean),
-        "fault_free_mean_score_margin": (
-            sum(clean_margins) / len(clean_margins) if clean_margins else None
-        ),
+        "fault_free_mean_score_margin": clean_margin,
     }
 
 
@@ -225,6 +231,7 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
     selected: list[dict[str, Any]] = []
     evaluations: dict[str, dict[str, Any]] = {}
     policy_kl: dict[str, list[float]] = {}
+    behavior_kl: dict[str, float] = {}
     occupancy: dict[str, float | None] = {}
     reported_elo: dict[str, float | None] = {}
     target_gates: dict[str, dict[str, Any]] = {}
@@ -281,6 +288,13 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
                 if any(not math.isfinite(value) for value in converted):
                     raise ValueError("KL trace contains non-finite values")
                 policy_kl[str(event["version_id"])] = converted
+        elif event_type == "behavior_measured":
+            value = event.get("mean_kl_nats_per_decision")
+            if value is not None:
+                converted = float(value)
+                if not math.isfinite(converted):
+                    raise ValueError("behavior KL must be finite")
+                behavior_kl[str(event["version_id"])] = converted
         elif event_type == "occupancy_measured":
             value = event.get("occupancy_shift")
             occupancy[str(event["version_id"])] = (
@@ -366,6 +380,13 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
         )
         fault_free = _fault_free_panel_metrics(panel_matches)
         kl_trace = policy_kl.get(version_id, [])
+        fixed_pool_elo = (
+            _fixed_pool_elo(panel.get("matches"))
+            if panel.get("matches")
+            else _fixed_pool_elo(certification.get("matches"))
+            if certification.get("matches")
+            else reported_elo.get(version_id)
+        )
         win_rate = _win_rate(evaluation)
         no_change = bool(
             selection.get("_proposal")
@@ -390,17 +411,12 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
                 ),
                 "best_score_so_far": best,
                 "win_rate": win_rate,
-                "rollman_elo": (
-                    _fixed_pool_elo(panel.get("matches"))
-                    if panel.get("matches")
-                    else _fixed_pool_elo(certification.get("matches"))
-                    if certification.get("matches")
-                    else reported_elo.get(version_id)
-                ),
+                "population_elo": fixed_pool_elo,
+                "rollman_elo": fixed_pool_elo,
                 "mean_local_policy_kl": (
                     0.0
                     if no_change or (iteration == 0 and not kl_trace)
-                    else _mean(kl_trace)
+                    else behavior_kl.get(version_id, _mean(kl_trace))
                 ),
                 "_local_policy_kl_trace": kl_trace,
                 "occupancy_shift": (
@@ -416,6 +432,8 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
                 "mean_score_margin": (
                     panel.get("mean_score_margin")
                     if panel.get("mean_score_margin") is not None
+                    else _score_margin(panel.get("matches"))
+                    if panel.get("matches")
                     else _score_margin(certification.get("matches"))
                 ),
                 "curriculum_event": curriculum_events.get(version_id),
@@ -677,18 +695,13 @@ def _plot(
     )
     axes[0].set_title("Information Gain vs HL Iteration")
     axes[0].set_ylabel("local policy KL (nats / decision)")
+    axes[0].legend()
 
     line(
         axes[1],
-        "rollman_elo",
-        "protocol official Elo",
+        "population_elo",
+        "fixed-population Elo",
         color="#7b2cbf",
-    )
-    line(
-        axes[1],
-        "fault_free_rollman_elo",
-        "fault-free Elo",
-        color="#f4a261",
     )
     axes[1].set_title("Elo vs HL Iteration")
     axes[1].set_ylabel("fixed-pool Elo")
@@ -697,21 +710,8 @@ def _plot(
     line(
         axes[2],
         "full_pool_win_rate",
-        "protocol official win rate",
+        "fixed-pool win rate",
         color="#00897b",
-    )
-    line(
-        axes[2],
-        "fault_free_pool_win_fraction",
-        "fault-free pool win fraction",
-        color="#1565c0",
-    )
-    line(
-        axes[2],
-        "opponent_fault_rate",
-        "opponent fault rate",
-        color="#c62828",
-        linestyle="--",
     )
     axes[2].set_title("Full-pool Win Rate vs HL Iteration")
     axes[2].set_ylabel("win rate")
@@ -721,18 +721,12 @@ def _plot(
     line(
         axes[3],
         "mean_score_margin",
-        "reporting-panel mean margin",
+        "fixed-panel mean margin",
         color="#e76f51",
-    )
-    line(
-        axes[3],
-        "fault_free_mean_score_margin",
-        "fault-free mean margin",
-        color="#264653",
     )
     axes[3].axhline(0.0, color="#555555", linewidth=1, alpha=0.5)
     axes[3].set_title("Score Margin vs HL Iteration")
-    axes[3].set_ylabel("Rollman score − Ghosts score")
+    axes[3].set_ylabel("candidate score − opponent score")
     axes[3].legend()
 
     for axis in axes:

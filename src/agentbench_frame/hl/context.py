@@ -331,18 +331,27 @@ Forbidden information and shortcuts:
         act_id: str,
         workspace: str | Path,
         experience_path: str | Path,
+        bootstrap_input_path: str | Path | None,
     ) -> str:
+        packet = (
+            str(Path(bootstrap_input_path).resolve())
+            if bootstrap_input_path is not None
+            else "not provided; read the context manifest"
+        )
         return f"""# Generic HL bootstrap {act_id}
 
 Create the scientific origin policy from the frozen game specification. It must be interpretable, runnable, reproducible, and materially stronger than the placeholder.
 
 {self._profile_contract()}
 Authoritative inputs:
+- bootstrap packet: {packet}
 - context manifest: {self.bundle.manifest_path.resolve()}
 - candidate workspace: {Path(workspace).resolve()}
 - Experience Skill: {Path(experience_path).resolve()}
 
-Read every file indexed by the context manifest once: rules, literal atomic decision space, SDK interface when present, and Replay Skill. Then inspect the candidate scaffold and implement the policy through the public entry point. There is no replay evidence in this act; do not fabricate feedback or experience.
+Read the bootstrap packet exactly once. It embeds the rules, literal atomic decision space, SDK interface, Replay Skill, context manifest, and candidate entry source. Do not reopen those static files. Inspect only the exact workspace support or SDK symbol needed to resolve a concrete implementation ambiguity, then implement the policy through the public entry point. There is no replay evidence in this act; do not fabricate feedback or experience.
+
+Checkpoint-first budget: after the packet, use at most five targeted workspace/SDK reads. By the eighth tool call, write the first compilable implementation to the policy source. Prefer a coherent simple economy/defense/offense controller over exhaustive engine inspection; live matches will supply the evidence for later refinement.
 
 The atomic operations in the decision-space file are the only behavioral vocabulary. Do not invent tactical labels or a latent hypothesis space. Interpretable code may use conditionals, search, planning, state machines, finite memory, scoring functions, or their composition. Source growth and additional evidence-backed branches are not penalties.
 
@@ -485,12 +494,14 @@ Do not modify policy code, version pointers, curriculum, or certification facts.
         act_id: str,
         workspace: str | Path,
         experience_path: str | Path,
+        bootstrap_input_path: str | Path | None = None,
     ) -> str:
         if self.prompt_profile is not None:
             return self._build_profile_bootstrap_prompt(
                 act_id=act_id,
                 workspace=workspace,
                 experience_path=experience_path,
+                bootstrap_input_path=bootstrap_input_path,
             )
         return f"""# HL bootstrap {act_id} — 生成科研 origin
 

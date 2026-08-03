@@ -24,6 +24,30 @@ def _is_terminal_state(state: dict[str, Any]) -> bool:
     return isinstance(winner, int) and not isinstance(winner, bool) and winner in {0, 1}
 
 
+def _sample_records(
+    replay: list[dict[str, Any]],
+    *,
+    max_states: int,
+) -> list[tuple[int, dict[str, Any]]]:
+    if max_states < 1:
+        raise ValueError("max_states must be positive")
+    valid = [
+        (index, record)
+        for index, record in enumerate(replay)
+        if isinstance(record.get("round_state"), dict)
+        and not _is_terminal_state(record["round_state"])
+    ]
+    if len(valid) <= max_states:
+        return valid
+    if max_states == 1:
+        return [valid[0]]
+    positions = {
+        round(offset * (len(valid) - 1) / (max_states - 1))
+        for offset in range(max_states)
+    }
+    return [valid[position] for position in sorted(positions)]
+
+
 def _main(request_path: Path, output_path: Path) -> None:
     request = json.loads(request_path.read_text(encoding="utf-8"))
     candidate_root = Path(request["candidate_root"]).resolve()
@@ -169,12 +193,11 @@ def _main(request_path: Path, output_path: Path) -> None:
         agent = module.AI()
         agent.on_match_start(player, seed)
         runtime = MatchRuntime.create(player=player, seed=seed, prefer_native=False)
-        for index, record in enumerate(replay):
+        max_states = int(request.get("max_states_per_reference", 64))
+        for index, record in _sample_records(replay, max_states=max_states):
             state_data = record.get("round_state")
             if not isinstance(state_data, dict):
                 raise ValueError(f"replay round {index} has no public state")
-            if _is_terminal_state(state_data):
-                continue
             frozen = public_state(index + 1, state_data)
             runtime.state.sync_public_round_state(frozen)
             agent.on_round_state(frozen)

@@ -48,10 +48,11 @@ def _tool_limits(prompt: str) -> tuple[int | None, int | None]:
         "# HL bootstrap",
         "# HL iteration",
         "# Rollman scoped repair",
-        "# Generic HL bootstrap",
         "# Generic HL scoped repair",
     )):
         return 14, 20
+    if prompt.startswith("# Generic HL bootstrap"):
+        return 20, 28
     if prompt.startswith((
         "# Rollman HL hypothesis planner",
         "# Rollman HL comparative reducer",
@@ -797,6 +798,9 @@ class CodexSessionProvider:
             "http status 502",
             "http status 503",
             "http status 504",
+            "unexpected status 502",
+            "unexpected status 503",
+            "unexpected status 504",
             "429 too many requests",
         )
         return any(marker in diagnostic for marker in transport_markers)

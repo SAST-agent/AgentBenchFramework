@@ -22,6 +22,7 @@ from agentbench_frame.hl.lineage import LineageManager
 from agentbench_frame.hl.local_config import LocalHLConfig
 from agentbench_frame.hl.match_record import MatchRecord
 from agentbench_frame.hl.proposal import (
+    write_bootstrap_input_packet,
     write_candidate_input_packet,
     write_planner_input_packet,
 )
@@ -298,6 +299,97 @@ def _passing_opponents(
     )
 
 
+@dataclasses.dataclass(frozen=True)
+class _RunProgress:
+    completed_cycles: int
+    best_version_id: str
+    best_learning_score: float
+    best_passing: int
+    stagnation: int
+    certified: bool
+
+
+def _resume_progress(
+    events: Sequence[Mapping[str, Any]],
+    *,
+    origin_version_id: str,
+) -> _RunProgress:
+    """Rebuild runner-owned state so process restarts preserve search semantics."""
+
+    scores: dict[str, float] = {}
+    best_version_id = origin_version_id
+    best_learning_score = 0.0
+    best_passing = 0
+    stagnation = 0
+    completed_cycles = 0
+    certified = False
+    for event in events:
+        event_type = event.get("event_type")
+        if event_type == "evaluation_completed" and event.get("status") == "complete":
+            value = event.get("benchmark_score")
+            if isinstance(value, (int, float)):
+                version_id = str(event["version_id"])
+                scores[version_id] = float(value)
+                if version_id == origin_version_id and completed_cycles == 0:
+                    best_learning_score = float(value)
+        elif event_type == "proposal_cycle_completed":
+            completed_cycles += 1
+            selected_id = str(event["selected_version_id"])
+            selected_score = scores.get(selected_id)
+            if selected_score is not None and selected_score > best_learning_score:
+                best_learning_score = selected_score
+                best_version_id = selected_id
+                stagnation = 0
+            else:
+                stagnation += 1
+        elif event_type == "certification_completed":
+            passing = event.get("passing_human_opponents")
+            if isinstance(passing, int) and passing > best_passing:
+                best_passing = passing
+                best_version_id = str(event["version_id"])
+                stagnation = 0
+        elif (
+            event_type == "run_completed"
+            and event.get("reason") == "human_pool_target_reached"
+        ):
+            certified = True
+            best_version_id = str(event.get("version_id") or best_version_id)
+    return _RunProgress(
+        completed_cycles=completed_cycles,
+        best_version_id=best_version_id,
+        best_learning_score=best_learning_score,
+        best_passing=best_passing,
+        stagnation=stagnation,
+        certified=certified,
+    )
+
+
+def _reporting_panel_payload(
+    evaluation: CandidateEvaluation,
+    *,
+    iteration_id: str,
+    proposal_cycle: int,
+    version_id: str,
+) -> dict[str, Any]:
+    margins = [
+        float(match["dense_margin"])
+        for match in evaluation.matches
+        if match.get("status") == "complete"
+        and isinstance(match.get("dense_margin"), (int, float))
+    ]
+    return {
+        "iteration_id": iteration_id,
+        "proposal_cycle": proposal_cycle,
+        "version_id": version_id,
+        "status": evaluation.status,
+        "score": evaluation.score,
+        "mean_score_margin": (
+            sum(margins) / len(margins) if margins else None
+        ),
+        "matches": list(evaluation.matches),
+    }
+
+
 def run_profile(
     config: LocalHLConfig,
     *,
@@ -370,10 +462,19 @@ def run_profile(
 
     def prompt_factory(**values: Any) -> str:
         if values.get("bootstrap"):
+            bootstrap_packet = write_bootstrap_input_packet(
+                output_path=run_dir / "context/bootstrap_input.json",
+                context_manifest_path=bundle.manifest_path,
+                context_files=bundle.files,
+                candidate_source_path=(
+                    workspace / prompt_profile.candidate_source_relative
+                ),
+            )
             return context.build_bootstrap_prompt(
                 act_id=values["act_id"],
                 workspace=workspace,
                 experience_path=experience.path,
+                bootstrap_input_path=bootstrap_packet,
             )
         phase = values.get("phase", "candidate")
         all_evidence = evidence()
@@ -556,13 +657,38 @@ def run_profile(
         stagnation_count=0,
     )
 
-    best_version = origin_version
-    best_learning_score = float(current_evaluation.score or 0.0)
-    best_passing = 0
-    stagnation = 0
-    completed_cycles = 0
-    certified = False
-    if not resume and config.run.origin.mode == "imported_version":
+    if resume:
+        progress = _resume_progress(
+            historical,
+            origin_version_id=origin_version.version_id,
+        )
+        best_version = store.get(progress.best_version_id)
+        best_learning_score = progress.best_learning_score
+        best_passing = progress.best_passing
+        stagnation = progress.stagnation
+        completed_cycles = progress.completed_cycles
+        certified = progress.certified
+    else:
+        best_version = origin_version
+        best_learning_score = float(current_evaluation.score or 0.0)
+        best_passing = 0
+        stagnation = 0
+        completed_cycles = 0
+        certified = False
+    cycles_this_invocation = 0
+    origin_panel_exists = any(
+        event.get("event_type") == "reporting_panel_completed"
+        and event.get("iteration_id") == "iter-000000"
+        for event in historical
+    )
+    needs_origin_certification = (
+        (not resume and config.run.origin.mode == "imported_version")
+        or (
+            config.run.evaluation.reporting_panel_every_cycle
+            and not origin_panel_exists
+        )
+    )
+    if needs_origin_certification:
         certification = bindings.evaluator.certify(origin_version)
         controller.record_matches(
             version=origin_version,
@@ -584,6 +710,16 @@ def run_profile(
             required_human_opponents=config.run.evaluation.required_human_opponents,
             matches=list(certification.matches),
         )
+        if config.run.evaluation.reporting_panel_every_cycle:
+            writer.write(
+                "reporting_panel_completed",
+                **_reporting_panel_payload(
+                    certification,
+                    iteration_id="iter-000000",
+                    proposal_cycle=0,
+                    version_id=origin_version.version_id,
+                ),
+            )
         certified = (
             certification.status == "complete"
             and best_passing >= config.run.evaluation.required_human_opponents
@@ -595,7 +731,7 @@ def run_profile(
                 version_id=origin_version.version_id,
                 passing_human_opponents=best_passing,
             )
-    while not certified and (acts is None or completed_cycles < acts):
+    while not certified and (acts is None or cycles_this_invocation < acts):
         if controller.reached_iteration_limit():
             break
         parent_id = controller.lineage.lineage_head_version_id
@@ -607,6 +743,7 @@ def run_profile(
             parent_evaluation=parent_evaluation,
         )
         completed_cycles += 1
+        cycles_this_invocation += 1
         for candidate in cycle.representatives:
             evaluations[candidate.version.version_id] = candidate.evaluation
         selected_id = cycle.search_parent_version_id
@@ -649,6 +786,7 @@ def run_profile(
 
         should_certify = (
             config.run.evaluation.full_pool_every_iteration
+            or config.run.evaluation.reporting_panel_every_cycle
             or improved
             or completed_cycles == 1
         )
@@ -674,6 +812,16 @@ def run_profile(
                 required_human_opponents=config.run.evaluation.required_human_opponents,
                 matches=list(certification.matches),
             )
+            if config.run.evaluation.reporting_panel_every_cycle:
+                writer.write(
+                    "reporting_panel_completed",
+                    **_reporting_panel_payload(
+                        certification,
+                        iteration_id=cycle.iteration_id,
+                        proposal_cycle=completed_cycles,
+                        version_id=selected_id,
+                    ),
+                )
             if passing > best_passing:
                 best_passing = passing
                 best_version = selected_version

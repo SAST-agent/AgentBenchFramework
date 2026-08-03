@@ -77,3 +77,21 @@ def test_terminal_replay_snapshot_is_not_a_valid_decision_state():
     assert _is_terminal_state({"winner": 0, "camps": [6, 0]})
     assert _is_terminal_state({"winner": 1, "camps": [0, 4]})
     assert not _is_terminal_state({"winner": -1, "camps": [50, 50]})
+
+
+def test_frozen_occupancy_sampling_is_deterministic_and_excludes_terminal():
+    from agentbench_frame.games.antwar2.policy_probe import _sample_records
+
+    replay = [
+        {"round_state": {"winner": -1}, "round": index}
+        for index in range(10)
+    ] + [{"round_state": {"winner": 0}, "round": 10}]
+
+    first = _sample_records(replay, max_states=4)
+    second = _sample_records(replay, max_states=4)
+
+    assert first == second
+    assert len(first) == 4
+    assert all(record[1]["round_state"]["winner"] == -1 for record in first)
+    assert first[0][0] == 0
+    assert first[-1][0] == 9

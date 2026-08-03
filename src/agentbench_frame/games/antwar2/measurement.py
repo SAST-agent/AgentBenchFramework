@@ -145,6 +145,7 @@ def probe_policy(
     *,
     candidate_root: str | Path,
     references: Sequence[tuple[str | Path, str]],
+    max_states_per_reference: int = 64,
     timeout_s: float = 120.0,
 ) -> dict[str, Any]:
     """Execute one candidate on frozen public-state occupancy in a subprocess."""
@@ -162,6 +163,7 @@ def probe_policy(
                         {"replay": str(Path(path).resolve()), "role": role}
                         for path, role in references
                     ],
+                    "max_states_per_reference": int(max_states_per_reference),
                 },
                 ensure_ascii=False,
                 sort_keys=True,
@@ -192,7 +194,16 @@ def compare_behavior(
     *,
     references: Sequence[tuple[str | Path, str]],
     epsilon: float = 0.05,
+    max_states_per_reference: int = 64,
 ) -> BehaviorComparison:
-    parent = probe_policy(candidate_root=parent_root, references=references)
-    candidate = probe_policy(candidate_root=candidate_root, references=references)
+    parent = probe_policy(
+        candidate_root=parent_root,
+        references=references,
+        max_states_per_reference=max_states_per_reference,
+    )
+    candidate = probe_policy(
+        candidate_root=candidate_root,
+        references=references,
+        max_states_per_reference=max_states_per_reference,
+    )
     return compare_probe_outputs(parent, candidate, epsilon=epsilon)
