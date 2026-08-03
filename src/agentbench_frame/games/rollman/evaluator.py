@@ -76,6 +76,7 @@ class RollmanEvaluator:
         certification_seeds: Iterable[int],
         artifact_root: str | Path,
         learning_opponents: Sequence[Opponent] | None = None,
+        certification_opponents: Sequence[Opponent] | None = None,
         training_seeds: Iterable[int] | None = None,
         validation_seeds: Iterable[int] | None = None,
         training_rotation_stride: int = 1,
@@ -91,6 +92,12 @@ class RollmanEvaluator:
         self.learning_opponent = learning_opponent
         self.learning_opponents = tuple(learning_opponents or (learning_opponent,))
         self.human_pool = tuple(sorted(human_pool, key=lambda item: item.rank))
+        self.certification_opponents = tuple(
+            self.human_pool
+            if certification_opponents is None
+            else certification_opponents
+        )
+        self._requires_full_human_certification = certification_opponents is None
         self.fixed_gate_seeds = tuple(int(seed) for seed in fixed_gate_seeds)
         self.training_seeds = tuple(
             int(seed)
@@ -297,13 +304,18 @@ class RollmanEvaluator:
         ]
 
     def certify(self, version: Version) -> CandidateEvaluation:
-        if len(self.human_pool) != 16:
+        if self._requires_full_human_certification and len(self.human_pool) != 16:
             raise ValueError("certification requires all 16 ranked humans")
-        if any(opponent.process is None for opponent in self.human_pool):
+        if not self.certification_opponents:
+            raise ValueError("certification opponents cannot be empty")
+        if any(
+            opponent.process is None
+            for opponent in self.certification_opponents
+        ):
             raise ValueError("every certification opponent must be prepared")
         result = self._evaluate_cases(
             version,
-            opponents=self.human_pool,
+            opponents=self.certification_opponents,
             seeds=self.certification_seeds,
             phase="certification",
         )

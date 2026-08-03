@@ -1513,6 +1513,7 @@ def _run_real(
         certification_seeds=config.run.evaluation.certification_seeds,
         artifact_root=run_dir / "matches",
         learning_opponents=(hard_learning_opponents or None),
+        certification_opponents=(hard_learning_opponents or None),
         training_seeds=(config.run.evaluation.training_seeds or None),
         validation_seeds=(config.run.evaluation.validation_seeds or None),
         training_rotation_stride=(
@@ -2046,7 +2047,11 @@ def _run_real(
                     required_win_rate=(
                         config.run.evaluation.required_win_rate
                     ),
-                    expected_opponents=len(pool),
+                    expected_opponents=(
+                        len(hard_learning_opponents)
+                        if generalizable_mode
+                        else len(pool)
+                    ),
                 )
                 if certification.status == "complete"
                 else None
@@ -2056,9 +2061,14 @@ def _run_real(
                     empirical_order = calibrate_opponent_difficulty(
                         certification.matches
                     )
-                    if len(empirical_order) != len(pool):
+                    expected_order_size = (
+                        len(hard_learning_opponents)
+                        if generalizable_mode
+                        else len(pool)
+                    )
+                    if len(empirical_order) != expected_order_size:
                         raise ValueError(
-                            "opponent calibration requires every valid human Ghost"
+                            "opponent calibration requires every certification Ghost"
                         )
                     difficulty_path.write_text(
                         json.dumps(

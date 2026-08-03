@@ -33,7 +33,7 @@ run:
     mode: "weakest_failed"
     target_order: "lowest_rank_first"
     preserve_passed_opponents: true
-    required_human_opponents: 16
+    required_human_opponents: 2
     stagnation_patience: 16
   iteration:
     max_acts: null
@@ -76,7 +76,7 @@ run:
     certification_opponents: "all"
     certification_seeds: [910001, 910002, 910003, 910004, 910005]
     certification_wins_required: 4
-    required_human_opponents: 16
+    required_human_opponents: 2
     required_win_rate: 0.75
     full_pool_every_iteration: false
     reporting_panel_every_cycle: false

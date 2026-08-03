@@ -517,6 +517,49 @@ def test_certification_runs_every_human_on_same_seed_set(tmp_path):
     assert calls[-2:] == [("ghost-16", 7), ("ghost-16", 8)]
 
 
+def test_generalizable_certification_runs_only_sealed_hard_opponents(tmp_path):
+    opponents = tuple(
+        Opponent(
+            opponent_id=f"rank{rank:02d}",
+            rank=rank,
+            archive=Path(f"rank{rank:02d}.zip"),
+            process=ProcessSpec((f"ghost-{rank}",)),
+        )
+        for rank in range(1, 17)
+    )
+    hard = (opponents[14], opponents[15])
+    calls = []
+
+    def runner(**kwargs):
+        calls.append((kwargs["ghosts"].argv[0], kwargs["seed"]))
+        return _Match(
+            status="complete",
+            seed=kwargs["seed"],
+            rollman_score=1,
+            ghosts_score=0,
+            result="win",
+        )
+
+    evaluator = RollmanEvaluator(
+        logic=ProcessSpec(("logic",)),
+        candidate_factory=lambda version: ProcessSpec(("candidate",)),
+        learning_opponent=hard[0],
+        learning_opponents=hard,
+        human_pool=opponents,
+        certification_opponents=hard,
+        fixed_gate_seeds=(1,),
+        certification_seeds=(91, 92, 93, 94, 95),
+        artifact_root=tmp_path,
+        match_runner=runner,
+    )
+
+    result = evaluator.certify(_version())
+
+    assert result.status == "complete"
+    assert len(calls) == 10
+    assert {opponent for opponent, _ in calls} == {"ghost-15", "ghost-16"}
+
+
 def test_dual_opponent_stages_share_rotating_training_and_validation_cases(tmp_path):
     rank15 = Opponent(
         opponent_id="rank15",
