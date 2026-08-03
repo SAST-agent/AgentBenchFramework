@@ -869,6 +869,64 @@ def test_completed_planner_artifact_resumes_without_provider_call(tmp_path):
     assert (workspace / ".agentbench" / "branch_briefs.json").read_bytes() == persisted.read_bytes()
 
 
+def test_completed_planner_act_recovers_workspace_artifact_without_new_call(
+    tmp_path,
+):
+    from agentbench_frame.hl.cli import _pending_planner_recovery
+
+    workspace = tmp_path / "candidate"
+    control = workspace / ".agentbench"
+    control.mkdir(parents=True)
+    briefs = control / "branch_briefs.json"
+    briefs.write_text(
+        json.dumps(
+            [
+                {
+                    "branch_index": index,
+                    "diagnosis": f"diagnosis-{index}",
+                    "mechanism": mechanism,
+                    "activation_condition": f"condition-{index}",
+                    "preservation_contract": f"preserve-{index}",
+                    "scope_contract": f"touch ai_func and helper_{index}",
+                    "expected_change": f"expected-{index}",
+                    "falsifier": f"falsifier-{index}",
+                    "code_symbols": ["ai_func", f"helper_{index}"],
+                }
+                for index, mechanism in enumerate(
+                    ("route", "shield", "portal", "escape")
+                )
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    recovered = _pending_planner_recovery(
+        [
+            {
+                "event_type": "proposal_cycle_started",
+                "iteration_id": "iter-000001",
+            },
+            {
+                "event_type": "act_completed",
+                "iteration_id": "iter-000001",
+                "act_id": "act-000003-planner",
+                "status": "completed",
+                "total_tokens": 98418,
+                "tool_call_count": 6,
+            },
+        ],
+        provider=object(),
+        workspace=workspace,
+    )
+
+    assert recovered.status == "completed"
+    assert recovered.metadata == {
+        "act_id": "act-000003-planner",
+        "iteration_id": "iter-000001",
+        "recovered_from_workspace_output": True,
+    }
+
+
 def test_pending_repair_is_recovered_from_checkpoint_and_immutable_version(tmp_path):
     from agentbench_frame.hl.cli import _pending_repair_recoveries
     from agentbench_frame.hl.codebase import VersionStore

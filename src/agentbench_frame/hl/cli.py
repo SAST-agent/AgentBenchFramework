@@ -980,6 +980,35 @@ def _pending_planner_recovery(
                 "recovered_from_persisted_output": True,
             },
         )
+    completed_act = next(
+        (
+            event
+            for event in reversed(historical)
+            if event.get("event_type") == "act_completed"
+            and str(event.get("iteration_id")) == iteration_id
+            and str(event.get("act_id", "")).endswith("-planner")
+            and event.get("status") == "completed"
+        ),
+        None,
+    )
+    if completed_act is not None:
+        from agentbench_frame.tracking.provider import ProviderInvocation
+
+        briefs_path = Path(workspace) / ".agentbench" / "branch_briefs.json"
+        if briefs_path.is_file():
+            load_branch_briefs(
+                briefs_path,
+                expected_count=expected_candidate_count,
+                required_entry_symbol=policy_entry_symbol,
+            )
+            return ProviderInvocation(
+                status="completed",
+                metadata={
+                    "act_id": str(completed_act["act_id"]),
+                    "iteration_id": iteration_id,
+                    "recovered_from_workspace_output": True,
+                },
+            )
     failed = next(
         (
             event

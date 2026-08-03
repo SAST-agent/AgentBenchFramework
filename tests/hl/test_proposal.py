@@ -87,7 +87,9 @@ def test_branch_briefs_reject_missing_scope_contract(tmp_path):
                 {
                     "branch_index": index,
                     "diagnosis": f"failure-{index}",
-                    "mechanism": f"mechanism-{index}",
+                    "mechanism": ("route", "shield", "portal", "escape")[
+                        index
+                    ],
                     "expected_change": f"change-{index}",
                     "falsifier": f"falsifier-{index}",
                 }
@@ -99,6 +101,48 @@ def test_branch_briefs_reject_missing_scope_contract(tmp_path):
 
     with pytest.raises(ValueError, match="fields are invalid"):
         load_branch_briefs(path, expected_count=4)
+
+
+def test_branch_briefs_accept_redundant_scope_annotation_from_file_mode(
+    tmp_path,
+):
+    """Validated-file planners may spell out the prompted scope annotation."""
+
+    from agentbench_frame.hl.proposal import load_branch_briefs
+
+    path = tmp_path / "branch_briefs.json"
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "branch_index": index,
+                    "diagnosis": f"failure-{index}",
+                    "mechanism": ("route", "shield", "portal", "escape")[
+                        index
+                    ],
+                    "activation_condition": f"condition-{index}",
+                    "preservation_contract": f"preserve-{index}",
+                    "scope_contract": f"touch ai_func and helper_{index}",
+                    "expected_change": f"change-{index}",
+                    "falsifier": f"falsifier-{index}",
+                    "code_symbols": ["ai_func", f"helper_{index}"],
+                }
+                for index in range(4)
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    briefs = load_branch_briefs(
+        path,
+        expected_count=4,
+        known_code_symbols={
+            "ai_func",
+            *(f"helper_{index}" for index in range(4)),
+        },
+    )
+
+    assert briefs[0].code_symbols == ("ai_func", "helper_0")
 
 
 @pytest.mark.parametrize(

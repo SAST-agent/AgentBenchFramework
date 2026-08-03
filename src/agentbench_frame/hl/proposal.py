@@ -555,7 +555,12 @@ def load_branch_briefs(
         "code_symbols",
     }
     for raw in raw_branches:
-        if not isinstance(raw, Mapping) or set(raw) != allowed:
+        if not isinstance(raw, Mapping):
+            raise ValueError("branch brief fields are invalid")
+        fields = set(raw)
+        if fields == allowed | {"scope_contract"}:
+            _text(raw["scope_contract"], "scope_contract")
+        elif fields != allowed:
             raise ValueError("branch brief fields are invalid")
         index = raw["branch_index"]
         if not isinstance(index, int) or isinstance(index, bool):

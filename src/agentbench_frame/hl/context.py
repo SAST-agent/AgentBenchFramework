@@ -306,7 +306,7 @@ The atomic decision space in the frozen digest is authoritative for behavior mea
 
 At least one branch must distill a reusable public state → opponent atomic operation pattern from the supplied replay evidence, then propose an observable counter-response or an interpretable imitation of that response. Distillation may use only public state and accepted atomic operations; it must not depend on opponent identity, seed, fixed replay coordinates, hidden intent, or opponent source.
 
-Write `workspace/.agentbench/branch_briefs.json` by the second tool call, validate its strict JSON shape once, and stop. Each of the four objects must use branch_index 0..3 and the fields diagnosis, mechanism, activation_condition, preservation_contract, expected_change, falsifier, and code_symbols. `code_symbols` must contain 2–8 unique names from candidate_code_index and include the public policy entry point. Scope contract: {"required" if scope_contract_required else "diagnostic-only"}.
+Write `workspace/.agentbench/branch_briefs.json` by the second tool call, validate its strict JSON shape once, and stop. Each of the four objects must use branch_index 0..3 and only the fields diagnosis, mechanism, activation_condition, preservation_contract, expected_change, falsifier, and code_symbols. `code_symbols` must contain 2–8 unique names from candidate_code_index and include the public policy entry point. Scope enforcement is {"required" if scope_contract_required else "diagnostic-only"}; express it through preservation_contract and code_symbols, and do not add a scope_contract field.
 """
 
     def _profile_contract(self) -> str:
@@ -821,7 +821,7 @@ Planner 压缩边界：
 
 基于同一份证据，提出恰好 4 个机制上不同、可证伪的 Rollman 改进方向。禁止把同一机制的阈值、权重或参数变化伪装成四种方案；禁止 grid search。允许 if/else、路径规划、搜索、状态机、有限记忆和策略代码增长。
 
-将严格 JSON 数组写入 workspace/.agentbench/branch_briefs.json。每项必须且只能包含：branch_index（0..3）、diagnosis、mechanism、activation_condition、preservation_contract、expected_change、falsifier、code_symbols。`code_symbols` 必须是 `candidate_code_index` 中 2–8 个互不重复的精确函数名，必须包含 `ai_func`，不得臆造 helper。diagnosis 必须引用具体回放 level/round/事件。activation_condition 必须是可观测状态谓词；preservation_contract 必须指出触发条件外保留的父代决策路径。作用域契约状态：{"required" if scope_contract_required else "diagnostic-only"}。不要修改候选策略代码。
+将严格 JSON 数组写入 workspace/.agentbench/branch_briefs.json。每项必须且只能包含：branch_index（0..3）、diagnosis、mechanism、activation_condition、preservation_contract、expected_change、falsifier、code_symbols。`code_symbols` 必须是 `candidate_code_index` 中 2–8 个互不重复的精确函数名，必须包含 `ai_func`，不得臆造 helper。diagnosis 必须引用具体回放 level/round/事件。activation_condition 必须是可观测状态谓词；preservation_contract 必须指出触发条件外保留的父代决策路径。作用域约束为{"必须执行" if scope_contract_required else "仅诊断"}，通过 preservation_contract 与 code_symbols 表达，禁止额外添加 scope_contract 字段。不要修改候选策略代码。
 """
 
     def build_candidate_prompt(
