@@ -6,7 +6,12 @@ import dataclasses
 import json
 import re
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Iterable, Mapping
+
+from agentbench_frame.hl.experience_ledger import (
+    ExperienceLedger,
+    ExperienceRecord,
+)
 
 
 _SECRET = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}")
@@ -43,6 +48,7 @@ class ExperienceManager:
         self.history = self.root / "history"
         self.path = self.root / "SKILL.md"
         self.state_path = self.root / "state.json"
+        self.ledger = ExperienceLedger(self.root / "ledger.jsonl")
         self.root.mkdir(parents=True, exist_ok=True)
         self.history.mkdir(parents=True, exist_ok=True)
         self.compress_every_acts = compress_every_acts
@@ -87,6 +93,11 @@ class ExperienceManager:
         return self.path
 
     def apply_file(self, act_id: str, path: str | Path) -> Path:
+        return self.update(act_id, self.read_file(path))
+
+    def read_file(self, path: str | Path) -> ExperienceUpdate:
+        """Load one strict, provisional candidate-authored update."""
+
         value = json.loads(Path(path).read_text(encoding="utf-8"))
         if not isinstance(value, Mapping):
             raise ValueError("experience update must be an object")
@@ -105,7 +116,35 @@ class ExperienceManager:
             ):
                 raise ValueError(f"experience {field} must be a list of strings")
             normalized[field] = tuple(items)
-        return self.update(act_id, ExperienceUpdate(**normalized))
+        return ExperienceUpdate(**normalized)
+
+    def consolidate_cycle(
+        self,
+        cycle_id: str,
+        *,
+        records: Iterable[ExperienceRecord],
+        notes: Iterable[ExperienceUpdate] = (),
+    ) -> Path:
+        """Append measured outcomes, merge bounded notes, and project the Skill."""
+
+        normalized_cycle = self._validate_entry(cycle_id)
+        for record in sorted(records, key=lambda item: item.identity):
+            self.ledger.append(record)
+        for update in notes:
+            for _, field in self._SECTIONS:
+                for raw in getattr(update, field):
+                    value = self._validate_entry(raw)
+                    if value not in self._entries[field]:
+                        self._entries[field].append(value)
+                self._entries[field] = self._entries[field][
+                    -self.max_entries_per_section :
+                ]
+        self._write()
+        (self.history / f"{normalized_cycle}.md").write_text(
+            self.path.read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        return self.path
 
     def rebuild(
         self,
@@ -120,18 +159,7 @@ class ExperienceManager:
         return self.path
 
     def _write(self) -> None:
-        lines = [
-            "# HL Experience Skill",
-            "",
-            "Only empirical, replay-grounded knowledge belongs here.",
-        ]
-        for title, field in self._SECTIONS:
-            lines.extend(["", f"## {title}", ""])
-            entries = self._entries[field]
-            lines.extend(f"- {entry}" for entry in entries)
-            if not entries:
-                lines.append("- (none)")
-        self.path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        self.path.write_text(self._render_skill(), encoding="utf-8")
         self.state_path.write_text(
             json.dumps(
                 self._entries,
@@ -142,3 +170,123 @@ class ExperienceManager:
             + "\n",
             encoding="utf-8",
         )
+
+    @staticmethod
+    def _number(value: float) -> str:
+        if float(value).is_integer():
+            return f"{value:+.0f}"
+        return f"{value:+.2f}".rstrip("0").rstrip(".")
+
+    @classmethod
+    def _record_line(cls, record: ExperienceRecord) -> str:
+        effects = "; ".join(
+            f"{row.opponent}/seed{row.seed} margin_delta={cls._number(row.margin_delta)}"
+            for row in record.comparisons
+        ) or "no comparable complete matches"
+        selected = "selected" if record.selected else "not-selected"
+        return (
+            f"{record.candidate_version_id} [{record.verdict}, {selected}, "
+            f"activation={record.changed_action_count}/{record.decision_count}]: "
+            f"when {record.activation_condition}; use {record.mechanism}; "
+            f"{effects}; preservation: {record.preservation_contract}."
+        )
+
+    def _render_skill(self) -> str:
+        records = sorted(self.ledger.load(), key=lambda item: item.identity)
+        groups: dict[str, list[str]] = {
+            "good": [
+                self._record_line(record)
+                for record in records
+                if record.verdict == "verified_good"
+            ],
+            "bad": [
+                self._record_line(record)
+                for record in records
+                if record.verdict == "verified_bad"
+            ],
+            "mixed": [
+                self._record_line(record)
+                for record in records
+                if record.verdict in {"mixed", "inconclusive", "invalid"}
+            ],
+            "stable": list(self._entries["stable_knowledge"]),
+            "failed": list(self._entries["failed_hypotheses"]),
+            "replay": list(self._entries["replay_evidence"]),
+            "questions": list(self._entries["active_questions"]),
+        }
+        for key in groups:
+            groups[key] = groups[key][-self.max_entries_per_section :]
+
+        negative_by_opponent: dict[str, list[float]] = {}
+        for record in records:
+            for comparison in record.comparisons:
+                if comparison.margin_delta < 0:
+                    negative_by_opponent.setdefault(comparison.opponent, []).append(
+                        comparison.margin_delta
+                    )
+        profile = [
+            (
+                f"{opponent}: {len(values)} measured regressions; "
+                f"worst_margin_delta={self._number(min(values))}."
+            )
+            for opponent, values in sorted(negative_by_opponent.items())
+        ]
+
+        def bullets(values: list[str]) -> list[str]:
+            return [f"- {value}" for value in values] if values else ["- (none)"]
+
+        def render() -> str:
+            lines = [
+                "# HL Experience Skill",
+                "",
+                "Framework-measured outcomes are authoritative; candidate notes are replay-grounded observations.",
+                "",
+                "## Verified good conditions",
+                "",
+                *bullets(groups["good"]),
+                "",
+                "## Verified bad conditions",
+                "",
+                *bullets(groups["bad"]),
+                "",
+                "## Mixed or scope-sensitive findings",
+                "",
+                *bullets(groups["mixed"]),
+                "",
+                "## Replay-grounded observations and open questions",
+                "",
+                "### Stable knowledge",
+                "",
+                *bullets(groups["stable"]),
+                "",
+                "### Failed hypotheses",
+                "",
+                *bullets(groups["failed"]),
+                "",
+                "### Replay evidence",
+                "",
+                *bullets(groups["replay"]),
+                "",
+                "### Active questions",
+                "",
+                *bullets(groups["questions"]),
+                "",
+                "## Current hard-opponent failure profile",
+                "",
+                *bullets(profile),
+            ]
+            return "\n".join(lines) + "\n"
+
+        rendered = render()
+        while len(rendered.encode("utf-8")) > 65536:
+            removable = [
+                (sum(len(item.encode("utf-8")) for item in values), key)
+                for key, values in groups.items()
+                if values
+            ]
+            if not removable:
+                raise ValueError("experience Skill fixed content exceeds 65536 bytes")
+            _, largest = max(removable)
+            groups[largest].pop(0)
+            rendered = render()
+        return rendered
