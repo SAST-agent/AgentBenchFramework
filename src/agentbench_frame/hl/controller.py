@@ -18,6 +18,7 @@ from agentbench_frame.hl.experience_ledger import derive_experience_record
 from agentbench_frame.hl.lineage import LineageManager, ParentDecision
 from agentbench_frame.hl.proposal import (
     BranchBrief,
+    build_candidate_code_index,
     branch_briefs_json_schema,
     load_branch_briefs,
 )
@@ -1286,7 +1287,16 @@ class HLController:
                 )
                 planner_prompt = structured_prompt
                 if planner.status == "completed" and planner_final.is_file():
-                    load_branch_briefs(planner_final, expected_count=4)
+                    load_branch_briefs(
+                        planner_final,
+                        expected_count=4,
+                        known_code_symbols={
+                            item["name"]
+                            for item in build_candidate_code_index(
+                                self.workspace / "ai.py"
+                            )
+                        },
+                    )
                     shutil.copy2(planner_final, planner_output)
             else:
                 planner = self.provider.invoke(
@@ -1330,7 +1340,16 @@ class HLController:
         proposal_root.mkdir(parents=True, exist_ok=True)
         persisted_briefs = proposal_root / "branch_briefs.json"
         shutil.copy2(planner_output, persisted_briefs)
-        briefs = load_branch_briefs(persisted_briefs, expected_count=4)
+        briefs = load_branch_briefs(
+            persisted_briefs,
+            expected_count=4,
+            known_code_symbols={
+                item["name"]
+                for item in build_candidate_code_index(
+                    self.workspace / "ai.py"
+                )
+            },
+        )
         self.events.write(
             "planner_completed",
             act_id=planner_act_id,

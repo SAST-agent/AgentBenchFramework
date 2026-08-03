@@ -87,6 +87,7 @@ class BranchBrief:
     preservation_contract: str
     expected_change: str
     falsifier: str
+    code_symbols: tuple[str, ...]
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -97,6 +98,25 @@ def _bounded_text(path: str | Path, *, limit: int) -> str:
     if len(text) > limit:
         return text[:limit] + "\n[summary truncated]"
     return text
+
+
+def build_candidate_code_index(
+    source_path: str | Path,
+) -> list[dict[str, Any]]:
+    """Index exact module-level policy functions without embedding source."""
+
+    source = Path(source_path).read_text(encoding="utf-8")
+    module = ast.parse(source)
+    return [
+        {
+            "name": node.name,
+            "signature": f"{node.name}({ast.unparse(node.args)})",
+            "start_line": node.lineno,
+            "end_line": node.end_lineno,
+        }
+        for node in module.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
 
 
 def write_planner_input_packet(
@@ -110,6 +130,7 @@ def write_planner_input_packet(
     replay_evidence: list[Mapping[str, Any]],
     previous_measurements: Mapping[str, Any],
     active_target: str | None,
+    candidate_source_path: str | Path,
 ) -> Path:
     """Collapse bounded planner evidence into one read-only artifact."""
 
@@ -167,6 +188,9 @@ def write_planner_input_packet(
         "replay_evidence": evidence,
         "previous_measurements": measurements,
         "opponent_distillation": distillation,
+        "candidate_code_index": build_candidate_code_index(
+            candidate_source_path
+        ),
     }
     destination = Path(output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -212,20 +236,11 @@ def write_candidate_input_packet(
             distillation = json.loads(raw)
         except json.JSONDecodeError:
             distillation = raw
-    code_index = []
-    if candidate_source_path is not None:
-        source = Path(candidate_source_path).read_text(encoding="utf-8")
-        module = ast.parse(source)
-        code_index = [
-            {
-                "name": node.name,
-                "signature": f"{node.name}({ast.unparse(node.args)})",
-                "start_line": node.lineno,
-                "end_line": node.end_lineno,
-            }
-            for node in module.body
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        ]
+    code_index = (
+        []
+        if candidate_source_path is None
+        else build_candidate_code_index(candidate_source_path)
+    )
     value = {
         "schema_version": "1.0",
         "iteration_id": iteration_id,
@@ -275,6 +290,7 @@ def branch_briefs_json_schema(*, expected_count: int) -> dict[str, Any]:
                 "preservation_contract",
                 "expected_change",
                 "falsifier",
+                "code_symbols",
             ],
             "properties": {
                 "branch_index": {
@@ -288,6 +304,18 @@ def branch_briefs_json_schema(*, expected_count: int) -> dict[str, Any]:
                 "preservation_contract": dict(text_field),
                 "expected_change": dict(text_field),
                 "falsifier": dict(text_field),
+                "code_symbols": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 8,
+                    "uniqueItems": True,
+                    "contains": {"const": "ai_func"},
+                    "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200,
+                    },
+                },
             },
         },
     }
@@ -318,6 +346,7 @@ def load_branch_briefs(
     path: str | Path,
     *,
     expected_count: int,
+    known_code_symbols: set[str] | None = None,
 ) -> tuple[BranchBrief, ...]:
     value = json.loads(Path(path).read_text(encoding="utf-8"))
     if isinstance(value, list):
@@ -337,6 +366,7 @@ def load_branch_briefs(
         "preservation_contract",
         "expected_change",
         "falsifier",
+        "code_symbols",
     }
     for raw in raw_branches:
         if not isinstance(raw, Mapping) or set(raw) != allowed:
@@ -344,6 +374,18 @@ def load_branch_briefs(
         index = raw["branch_index"]
         if not isinstance(index, int) or isinstance(index, bool):
             raise ValueError("branch_index must be an integer")
+        raw_symbols = raw["code_symbols"]
+        if not isinstance(raw_symbols, list) or not 2 <= len(raw_symbols) <= 8:
+            raise ValueError("code_symbols must contain 2-8 names")
+        if any(not isinstance(item, str) or not item for item in raw_symbols):
+            raise ValueError("code_symbols must contain non-empty names")
+        symbols = tuple(raw_symbols)
+        if len(set(symbols)) != len(symbols):
+            raise ValueError("code_symbols must be unique")
+        if "ai_func" not in symbols:
+            raise ValueError("code_symbols must include ai_func")
+        if known_code_symbols is not None and set(symbols) - known_code_symbols:
+            raise ValueError("code_symbols contain unknown module functions")
         briefs.append(
             BranchBrief(
                 branch_index=index,
@@ -357,6 +399,7 @@ def load_branch_briefs(
                 ),
                 expected_change=_text(raw["expected_change"], "expected_change"),
                 falsifier=_text(raw["falsifier"], "falsifier"),
+                code_symbols=symbols,
             )
         )
     briefs.sort(key=lambda brief: brief.branch_index)

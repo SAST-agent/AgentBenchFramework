@@ -19,6 +19,7 @@ def test_branch_briefs_require_four_distinct_mechanisms(tmp_path):
                         "preservation_contract": f"preserve-{index}",
                         "expected_change": f"change-{index}",
                         "falsifier": f"falsifier-{index}",
+                        "code_symbols": ["ai_func", f"helper_{index}"],
                     }
                     for index, mechanism in enumerate(
                         ("path planning", "ghost prediction", "shield state", "portal goals")
@@ -29,12 +30,17 @@ def test_branch_briefs_require_four_distinct_mechanisms(tmp_path):
         encoding="utf-8",
     )
 
-    briefs = load_branch_briefs(path, expected_count=4)
+    briefs = load_branch_briefs(
+        path,
+        expected_count=4,
+        known_code_symbols={"ai_func", *(f"helper_{index}" for index in range(4))},
+    )
 
     assert [brief.branch_index for brief in briefs] == [0, 1, 2, 3]
     assert len({brief.mechanism for brief in briefs}) == 4
     assert briefs[2].activation_condition == "condition-2"
     assert briefs[2].preservation_contract == "preserve-2"
+    assert briefs[2].code_symbols == ("ai_func", "helper_2")
 
 
 def test_branch_briefs_reject_duplicate_mechanisms(tmp_path):
@@ -53,6 +59,7 @@ def test_branch_briefs_reject_duplicate_mechanisms(tmp_path):
                         "preservation_contract": f"preserve-{index}",
                         "expected_change": "same",
                         "falsifier": "same",
+                        "code_symbols": ["ai_func", f"helper_{index}"],
                     }
                     for index in range(4)
                 ]
@@ -62,7 +69,11 @@ def test_branch_briefs_reject_duplicate_mechanisms(tmp_path):
     )
 
     with pytest.raises(ValueError, match="distinct mechanisms"):
-        load_branch_briefs(path, expected_count=4)
+        load_branch_briefs(
+            path,
+            expected_count=4,
+            known_code_symbols={"ai_func", *(f"helper_{index}" for index in range(4))},
+        )
 
 
 def test_branch_briefs_reject_missing_scope_contract(tmp_path):
@@ -87,6 +98,57 @@ def test_branch_briefs_reject_missing_scope_contract(tmp_path):
 
     with pytest.raises(ValueError, match="fields are invalid"):
         load_branch_briefs(path, expected_count=4)
+
+
+@pytest.mark.parametrize(
+    ("symbols", "message"),
+    [
+        (["helper"], "2-8"),
+        (["ai_func", "ai_func"], "unique"),
+        (["helper", "other"], "include ai_func"),
+        (["ai_func", "invented"], "unknown"),
+        (["ai_func", *[f"helper_{index}" for index in range(8)]], "2-8"),
+    ],
+)
+def test_branch_briefs_reject_invalid_code_symbol_contract(
+    tmp_path, symbols, message
+):
+    """Catch planner branches that cannot be resolved to bounded policy slices."""
+    from agentbench_frame.hl.proposal import load_branch_briefs
+
+    path = tmp_path / "branch_briefs.json"
+    path.write_text(
+        json.dumps(
+            {
+                "branches": [
+                    {
+                        "branch_index": index,
+                        "diagnosis": f"failure-{index}",
+                        "mechanism": f"mechanism-{index}",
+                        "activation_condition": f"condition-{index}",
+                        "preservation_contract": f"preserve-{index}",
+                        "expected_change": f"change-{index}",
+                        "falsifier": f"falsifier-{index}",
+                        "code_symbols": symbols,
+                    }
+                    for index in range(4)
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=message):
+        load_branch_briefs(
+            path,
+            expected_count=4,
+            known_code_symbols={
+                "ai_func",
+                "helper",
+                "other",
+                *(f"helper_{index}" for index in range(8)),
+            },
+        )
 
 
 def test_candidate_input_packet_inlines_bounded_reusable_context(tmp_path):
@@ -172,11 +234,20 @@ def test_planner_input_packet_collapses_exact_inputs_without_replay_paths(tmp_pa
     research = tmp_path / "research_state.json"
     summary = tmp_path / "summary.md"
     distillation = tmp_path / "ghost.json"
+    candidate_source = tmp_path / "ai.py"
     digest.write_text('{"actions":[0,1,2,3,4]}', encoding="utf-8")
     manifest.write_text('{"bundle_hash":"frozen"}', encoding="utf-8")
     research.write_text('{"open_questions":["corner"]}', encoding="utf-8")
     summary.write_text("rank15 evidence", encoding="utf-8")
     distillation.write_text('{"fine":{"chase":0.8}}', encoding="utf-8")
+    candidate_source.write_text(
+        "def ai_func(game_state):\n"
+        "    return helper(game_state)\n"
+        "\n"
+        "def helper(game_state):\n"
+        "    return 0\n",
+        encoding="utf-8",
+    )
 
     path = write_planner_input_packet(
         output_path=tmp_path / "planner_input.json",
@@ -202,6 +273,7 @@ def test_planner_input_packet_collapses_exact_inputs_without_replay_paths(tmp_pa
             "opponent_distillation_path": str(distillation),
         },
         active_target="rank15",
+        candidate_source_path=candidate_source,
     )
 
     value = json.loads(path.read_text(encoding="utf-8"))
@@ -212,6 +284,20 @@ def test_planner_input_packet_collapses_exact_inputs_without_replay_paths(tmp_pa
     assert value["context_manifest"]["bundle_hash"] == "frozen"
     assert value["research_state"]["open_questions"] == ["corner"]
     assert value["opponent_distillation"]["fine"]["chase"] == 0.8
+    assert value["candidate_code_index"] == [
+        {
+            "name": "ai_func",
+            "signature": "ai_func(game_state)",
+            "start_line": 1,
+            "end_line": 2,
+        },
+        {
+            "name": "helper",
+            "signature": "helper(game_state)",
+            "start_line": 4,
+            "end_line": 5,
+        },
+    ]
     assert value["replay_evidence"] == [
         {
             "ghosts_score": 100,

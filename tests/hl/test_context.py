@@ -548,6 +548,9 @@ def test_k4_role_prompts_use_digest_research_state_and_exact_branch_brief(tmp_pa
     assert "不得打开 replay 或 trace" in planner
     assert "完整 replay" in planner
     assert "activation_condition" in planner
+    assert "code_symbols" in planner
+    assert "2–8" in planner
+    assert "必须包含 `ai_func`" in planner
     assert "preservation_contract" in planner
     assert "time-expanded escape search" in candidate
     assert "候选 3/4" in candidate

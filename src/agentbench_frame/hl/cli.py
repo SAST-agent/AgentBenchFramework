@@ -1827,6 +1827,7 @@ def _run_real(
                 replay_evidence=candidate_evidence,
                 previous_measurements=previous_measurements,
                 active_target=active_target,
+                candidate_source_path=workspace / "ai.py",
             )
             return iteration_context.build_planner_prompt(
                 act_id=values["act_id"],
