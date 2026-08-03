@@ -221,6 +221,8 @@ def test_profile_prompt_uses_game_vocabulary_without_rollman_leak(tmp_path):
     assert "P0" in prompt and "P1" in prompt
     assert "antwar_sdk.PublicState" in prompt
     assert "list[AtomicOperation]" in prompt
+    assert "At least one branch must distill" in prompt
+    assert "public state → opponent atomic operation" in prompt
     for forbidden in ("Rollman", "Ghost", "pacman_pos", "rank15", "rank16"):
         assert forbidden not in prompt
 

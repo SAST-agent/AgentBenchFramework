@@ -304,6 +304,8 @@ Prohibited information and shortcuts:
 
 The atomic decision space in the frozen digest is authoritative for behavior measurement and KL. Do not invent tactical labels or latent hypothesis spaces. Source size and additional evidence-backed branches are not penalties. At least two branches must attempt proactive scoring, progress, resource acquisition, or direct suppression of the opponent rather than making all branches conservative.
 
+At least one branch must distill a reusable public state → opponent atomic operation pattern from the supplied replay evidence, then propose an observable counter-response or an interpretable imitation of that response. Distillation may use only public state and accepted atomic operations; it must not depend on opponent identity, seed, fixed replay coordinates, hidden intent, or opponent source.
+
 Write `workspace/.agentbench/branch_briefs.json` by the second tool call, validate its strict JSON shape once, and stop. Each of the four objects must use branch_index 0..3 and the fields diagnosis, mechanism, activation_condition, preservation_contract, expected_change, falsifier, and code_symbols. `code_symbols` must contain 2–8 unique names from candidate_code_index and include the public policy entry point. Scope contract: {"required" if scope_contract_required else "diagnostic-only"}.
 """
 
