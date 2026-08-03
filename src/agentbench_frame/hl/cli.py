@@ -26,7 +26,10 @@ from agentbench_frame.hl.config import HLRunConfig
 from agentbench_frame.hl.evaluator import CandidateEvaluation
 from agentbench_frame.hl.experience import ExperienceManager
 from agentbench_frame.hl.local_config import LocalHLConfig
-from agentbench_frame.hl.proposal import write_candidate_input_packet
+from agentbench_frame.hl.proposal import (
+    stratify_rollout_evidence,
+    write_candidate_input_packet,
+)
 
 
 _SECRET_LIKE = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}")
@@ -1680,6 +1683,9 @@ def _run_real(
                 "opponent": match.get("opponent"),
                 "seed": match.get("seed"),
                 "result": match.get("result"),
+                "phase": match.get("phase", "learning"),
+                "rollman_score": match.get("rollman_score"),
+                "ghosts_score": match.get("ghosts_score"),
                 "summary": (
                     None
                     if summary_path is None
@@ -1714,6 +1720,17 @@ def _run_real(
             else curriculum_manager.state.locked_opponents
         )
         phase = values.get("phase", "candidate")
+        candidate_evidence = evidence
+        if (
+            phase == "candidate"
+            and values.get("branch_brief") is not None
+            and int(values.get("branch_count") or 0) == 4
+        ):
+            candidate_evidence = list(
+                stratify_rollout_evidence(evidence)[
+                    int(values["branch_index"])
+                ]
+            )
         stagnation_count = int(
             previous_measurements["curriculum_stagnation_count"] or 0
         )
@@ -1758,7 +1775,7 @@ def _run_real(
                 workspace=workspace,
                 game_digest_path=game_digest_path,
                 research_state_path=research_state_path,
-                replay_evidence=evidence,
+                replay_evidence=candidate_evidence,
                 previous_measurements=previous_measurements,
                 active_target=active_target,
                 scope_contract_required=(
@@ -1805,7 +1822,7 @@ def _run_real(
                 game_digest_path=game_digest_path,
                 research_state_path=research_state_path,
                 experience_path=experience.path,
-                replay_evidence=evidence,
+                replay_evidence=candidate_evidence,
                 previous_measurements=previous_measurements,
                 active_target=active_target,
                 locked_opponents=tuple(locked_opponents),
@@ -1818,7 +1835,7 @@ def _run_real(
                 workspace=workspace,
                 game_digest_path=game_digest_path,
                 research_state_path=research_state_path,
-                replay_evidence=evidence,
+                replay_evidence=candidate_evidence,
                 previous_measurements=previous_measurements,
                 experience_path=experience.path,
                 branch_brief=values["branch_brief"],

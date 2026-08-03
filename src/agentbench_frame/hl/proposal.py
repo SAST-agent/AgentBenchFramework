@@ -13,6 +13,70 @@ _INLINE_SUMMARY_LIMIT = 12_000
 _INLINE_TEXT_LIMIT = 24_000
 
 
+def stratify_rollout_evidence(
+    replay_evidence: list[Mapping[str, Any]],
+    *,
+    hard_opponents: tuple[str, str] = ("rank15", "rank16"),
+) -> tuple[tuple[dict[str, Any], ...], ...]:
+    """Assign bounded, complementary failure evidence to four sibling acts."""
+
+    if len(hard_opponents) != 2 or len(set(hard_opponents)) != 2:
+        raise ValueError("k4 evidence routing requires two distinct hard opponents")
+
+    def severity(item: Mapping[str, Any]) -> tuple[Any, ...]:
+        rollman = item.get("rollman_score")
+        ghosts = item.get("ghosts_score")
+        margin = (
+            float(rollman) - float(ghosts)
+            if isinstance(rollman, (int, float))
+            and isinstance(ghosts, (int, float))
+            else float("inf")
+        )
+        result_order = {"loss": 0, "draw": 1, "win": 2}
+        return (
+            result_order.get(str(item.get("result")), 3),
+            margin,
+            int(item.get("seed", 0)),
+            str(item.get("summary") or ""),
+        )
+
+    eligible = [
+        dict(item)
+        for item in replay_evidence
+        if item.get("phase") != "certification"
+        and item.get("candidate_fault") is None
+        and str(item.get("opponent")) in hard_opponents
+    ]
+    by_opponent = {
+        opponent: sorted(
+            (
+                item
+                for item in eligible
+                if str(item.get("opponent")) == opponent
+            ),
+            key=severity,
+        )
+        for opponent in hard_opponents
+    }
+    first, second = hard_opponents
+    branch0 = by_opponent[first][:2]
+    branch1 = by_opponent[second][:2]
+    branch2 = [
+        *by_opponent[first][:1],
+        *by_opponent[second][:1],
+    ][:2]
+    branch3 = [
+        *by_opponent[first][2:3],
+        *by_opponent[second][2:3],
+    ]
+    if not branch3:
+        branch3 = sorted(eligible, key=severity, reverse=True)[:2]
+
+    packets = (branch0, branch1, branch2, branch3)
+    fallback = sorted(eligible, key=severity)[:2]
+    return tuple(tuple(packet or fallback) for packet in packets)
+
+
 @dataclasses.dataclass(frozen=True)
 class BranchBrief:
     branch_index: int

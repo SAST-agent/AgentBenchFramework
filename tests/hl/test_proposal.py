@@ -137,3 +137,51 @@ def test_candidate_input_packet_inlines_bounded_reusable_context(tmp_path):
     assert value["replay_evidence"][0]["summary_text"].endswith(
         "[summary truncated]"
     )
+
+
+def test_k4_evidence_packets_assign_complementary_hard_opponent_failures():
+    from agentbench_frame.hl.proposal import stratify_rollout_evidence
+
+    evidence = [
+        {
+            "opponent": opponent,
+            "seed": seed,
+            "result": "loss",
+            "rollman_score": rollman,
+            "ghosts_score": 100,
+            "phase": "learning",
+            "summary": f"{opponent}-{seed}.md",
+            "trace": f"{opponent}-{seed}.jsonl",
+        }
+        for opponent, seed, rollman in (
+            ("rank15", 101, -50),
+            ("rank15", 102, 10),
+            ("rank15", 103, 20),
+            ("rank16", 101, -40),
+            ("rank16", 102, 15),
+            ("rank16", 103, 25),
+        )
+    ]
+    evidence.append(
+        {
+            "opponent": "rank15",
+            "seed": 999,
+            "result": "loss",
+            "phase": "certification",
+            "summary": "sealed.md",
+            "trace": "sealed.jsonl",
+        }
+    )
+
+    packets = stratify_rollout_evidence(
+        evidence,
+        hard_opponents=("rank15", "rank16"),
+    )
+
+    assert len(packets) == 4
+    assert {row["opponent"] for row in packets[0]} == {"rank15"}
+    assert {row["opponent"] for row in packets[1]} == {"rank16"}
+    assert {row["opponent"] for row in packets[2]} == {"rank15", "rank16"}
+    assert packets[3] != packets[0] and packets[3] != packets[1]
+    assert all(len(packet) <= 2 for packet in packets)
+    assert all(row["seed"] != 999 for packet in packets for row in packet)

@@ -284,14 +284,15 @@ def test_planner_distillation_assigns_offensive_and_predictive_branch_roles(tmp_
         previous_measurements={},
     )
 
-    assert "branch 0：蒸馏预测 best response" in prompt
-    assert "branch 1：进攻得分或完成关卡" in prompt
-    assert "branch 2：对手得分来源反事实" in prompt
-    assert "branch 3：机制上不同的新方向" in prompt
+    assert "branch 0：rank15 对手得分来源抑制" in prompt
+    assert "branch 1：rank16 进攻得分或完成关卡" in prompt
+    assert "branch 2：跨回放 Ghost 蒸馏与 best response" in prompt
+    assert "branch 3：泛化与策略整合" in prompt
     assert "至少两支必须以推进、得分、完成关卡或压制对手得分为主目标" in prompt
     assert "不能直接复制 Ghost 动作" in prompt
     assert "不得重复运行蒸馏脚本" in prompt
-    assert "branch 0：蒸馏预测 best response" not in ordinary_prompt
+    assert "branch 0：rank15 对手得分来源抑制" in ordinary_prompt
+    assert "branch 1：rank16 进攻得分或完成关卡" in ordinary_prompt
 
 
 def test_planner_prompt_requires_early_durable_branch_briefs(tmp_path):
