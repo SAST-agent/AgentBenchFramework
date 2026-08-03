@@ -45,6 +45,7 @@ def run_planner_check(
 ) -> int:
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
+    correction_hint: dict[str, Any] | None = None
     try:
         packet = json.loads(Path(planner_input_path).read_text(encoding="utf-8"))
         index = packet.get("candidate_code_index")
@@ -100,6 +101,27 @@ def run_planner_check(
                     f"branch {brief.branch_index} cites no parent occupancy state"
                 )
             if not legal_pairs:
+                correction_hint = {
+                    "branch_index": brief.branch_index,
+                    "cited_states": [
+                        {
+                            "state_id": state,
+                            "legal_operations": [
+                                {"code": code, "name": name}
+                                for name, code in sorted(
+                                    action_codes.items(),
+                                    key=lambda item: (item[1], item[0]),
+                                )
+                                if code in legal_by_state[state]
+                            ],
+                        }
+                        for state in cited_states
+                    ],
+                    "requirement": (
+                        "Name one listed legal operation exactly in mechanism or "
+                        "activation_condition."
+                    ),
+                }
                 raise ValueError(
                     f"branch {brief.branch_index} has no cited state with its "
                     "proposed atomic operation in legal_operation_types"
@@ -113,6 +135,7 @@ def run_planner_check(
             "branch_count": len(briefs),
             "activation_evidence": evidence,
             "error": None,
+            "correction_hint": None,
         }
         returncode = 0
     except Exception as error:
@@ -122,6 +145,7 @@ def run_planner_check(
             "branch_count": 0,
             "activation_evidence": [],
             "error": " ".join(str(error).split()) or error.__class__.__name__,
+            "correction_hint": correction_hint,
         }
         returncode = 2
     output.write_text(

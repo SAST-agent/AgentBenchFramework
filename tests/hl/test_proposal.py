@@ -550,6 +550,70 @@ def test_planner_input_packet_collapses_exact_inputs_without_replay_paths(tmp_pa
     assert "/forbidden/" not in path.read_text(encoding="utf-8")
 
 
+def test_planner_input_names_legal_atomic_operations_in_each_state(tmp_path):
+    """Prevent planners from guessing the meaning of bare operation codes."""
+    from agentbench_frame.hl.proposal import write_planner_input_packet
+
+    digest = tmp_path / "game_digest.json"
+    manifest = tmp_path / "context-manifest.json"
+    research = tmp_path / "research_state.json"
+    candidate_source = tmp_path / "ai.py"
+    digest.write_text(
+        json.dumps(
+            {
+                "roles": {
+                    "P0": {
+                        "actions": [
+                            {"name": "HOLD", "code": None},
+                            {"name": "BUILD_TOWER", "code": 11},
+                            {"name": "DOWNGRADE_TOWER", "code": 13},
+                        ]
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest.write_text("{}", encoding="utf-8")
+    research.write_text("{}", encoding="utf-8")
+    candidate_source.write_text(
+        "class AI:\n"
+        "    def choose_operations(self, state):\n"
+        "        return []\n",
+        encoding="utf-8",
+    )
+
+    path = write_planner_input_packet(
+        output_path=tmp_path / "planner_input.json",
+        iteration_id="iter-000001",
+        parent_version_id="v000000",
+        game_digest_path=digest,
+        context_manifest_path=manifest,
+        research_state_path=research,
+        replay_evidence=[],
+        previous_measurements={},
+        active_target="rank01",
+        candidate_source_path=candidate_source,
+        parent_occupancy={
+            "state_count": 1,
+            "state_examples": [
+                {
+                    "state_id": "reference-0:23:P0",
+                    "legal_operation_types": [0, 13],
+                }
+            ],
+        },
+    )
+
+    value = json.loads(path.read_text(encoding="utf-8"))
+    assert value["parent_occupancy"]["state_examples"][0][
+        "legal_operations"
+    ] == [
+        {"code": 0, "name": "HOLD"},
+        {"code": 13, "name": "DOWNGRADE_TOWER"},
+    ]
+
+
 def test_k4_evidence_packets_assign_complementary_hard_opponent_failures():
     from agentbench_frame.hl.proposal import stratify_rollout_evidence
 

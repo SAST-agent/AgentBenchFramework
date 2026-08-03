@@ -17,6 +17,71 @@ _CANDIDATE_SOURCE_LIMIT = 24_000
 _BOOTSTRAP_TEXT_LIMIT = 40_000
 
 
+def _name_parent_occupancy_actions(
+    parent_occupancy: Mapping[str, Any] | None,
+    game_digest: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    if parent_occupancy is None:
+        return None
+    result = dict(parent_occupancy)
+    examples = parent_occupancy.get("state_examples")
+    if not isinstance(examples, list):
+        return result
+    names_by_code: dict[int, str] = {}
+    roles = game_digest.get("roles")
+    if isinstance(roles, Mapping):
+        for role in roles.values():
+            if not isinstance(role, Mapping):
+                continue
+            actions = role.get("actions")
+            if not isinstance(actions, list):
+                continue
+            for action in actions:
+                if not isinstance(action, Mapping):
+                    continue
+                name = action.get("name")
+                code = action.get("code", action.get("id"))
+                if code is None and name == "HOLD":
+                    code = 0
+                if (
+                    isinstance(name, str)
+                    and name
+                    and isinstance(code, int)
+                    and not isinstance(code, bool)
+                ):
+                    names_by_code.setdefault(code, name)
+    named_examples: list[Any] = []
+    for example in examples:
+        if not isinstance(example, Mapping):
+            named_examples.append(example)
+            continue
+        named = dict(example)
+        legal_types = example.get("legal_operation_types")
+        if isinstance(legal_types, list):
+            unknown = [
+                code
+                for code in legal_types
+                if isinstance(code, int)
+                and not isinstance(code, bool)
+                and code not in names_by_code
+            ]
+            if unknown:
+                raise ValueError(
+                    "game digest does not name legal operation codes: "
+                    + ", ".join(str(code) for code in sorted(set(unknown)))
+                )
+            named["legal_operations"] = [
+                {"code": code, "name": names_by_code[code]}
+                for code in legal_types
+                if isinstance(code, int)
+                and not isinstance(code, bool)
+                and code in names_by_code
+            ]
+        named_examples.append(named)
+    result["state_examples"] = named_examples
+    return result
+
+
 def stratify_rollout_evidence(
     replay_evidence: list[Mapping[str, Any]],
     *,
@@ -269,14 +334,15 @@ def write_planner_input_packet(
         except json.JSONDecodeError:
             distillation = raw
 
+    game_digest = json.loads(
+        Path(game_digest_path).read_text(encoding="utf-8")
+    )
     value = {
         "schema_version": "1.0",
         "iteration_id": iteration_id,
         "parent_version_id": parent_version_id,
         "active_target": active_target,
-        "game_digest": json.loads(
-            Path(game_digest_path).read_text(encoding="utf-8")
-        ),
+        "game_digest": game_digest,
         "context_manifest": json.loads(
             Path(context_manifest_path).read_text(encoding="utf-8")
         ),
@@ -290,7 +356,7 @@ def write_planner_input_packet(
             candidate_source_path
         ),
         "parent_occupancy": (
-            None if parent_occupancy is None else dict(parent_occupancy)
+            _name_parent_occupancy_actions(parent_occupancy, game_digest)
         ),
         "planner_contract": (
             None

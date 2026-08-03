@@ -96,3 +96,57 @@ def test_planner_check_rejects_unqualified_entry_symbol(tmp_path):
     assert "must include AI.choose_operations" in json.loads(
         output.read_text(encoding="utf-8")
     )["error"]
+
+
+def test_planner_check_failure_reports_exact_legal_names_for_correction(tmp_path):
+    """A numeric-only proposal must receive a bounded semantic correction hint."""
+    from agentbench_frame.hl.planner_check import run_planner_check
+
+    packet_value = _packet()
+    packet_value["game_digest"]["roles"]["P0"]["actions"].append(
+        {"name": "DOWNGRADE_TOWER", "code": 13}
+    )
+    packet_value["parent_occupancy"]["state_examples"][0][
+        "legal_operation_types"
+    ] = [0, 13]
+    packet = tmp_path / "planner.json"
+    briefs = tmp_path / "briefs.json"
+    output = tmp_path / "result.json"
+    packet.write_text(json.dumps(packet_value), encoding="utf-8")
+    briefs.write_text(
+        json.dumps(
+            [
+                _branch(index, action="atomic operation code 13")
+                for index in range(4)
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    returncode = run_planner_check(
+        briefs_path=briefs,
+        planner_input_path=packet,
+        output_path=output,
+        expected_count=4,
+        entry_symbol="AI.choose_operations",
+    )
+
+    assert returncode == 2
+    value = json.loads(output.read_text(encoding="utf-8"))
+    assert value["status"] == "failed"
+    assert value["correction_hint"] == {
+        "branch_index": 0,
+        "cited_states": [
+            {
+                "state_id": "reference-0:0:P0",
+                "legal_operations": [
+                    {"code": 0, "name": "HOLD"},
+                    {"code": 13, "name": "DOWNGRADE_TOWER"},
+                ],
+            }
+        ],
+        "requirement": (
+            "Name one listed legal operation exactly in mechanism or "
+            "activation_condition."
+        ),
+    }
