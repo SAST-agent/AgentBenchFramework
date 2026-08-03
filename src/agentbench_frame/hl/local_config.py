@@ -6,22 +6,30 @@ import dataclasses
 import os
 from collections.abc import Mapping
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 import yaml
 
 from agentbench_frame.hl.config import HLRunConfig
+from agentbench_frame.hl.game_profile import get_game_profile
 
 
 @dataclasses.dataclass(frozen=True)
 class LocalPaths:
-    agentbench_root: Path
-    official_logic_root: Path
-    pacman_sdk_root: Path
-    human_manifest: Path
-    workspace: Path
-    runs_root: Path
-    opponent_build_root: Path
+    values: Mapping[str, Path]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "values", MappingProxyType(dict(self.values)))
+
+    def require(self, name: str) -> Path:
+        try:
+            return self.values[name]
+        except KeyError as exc:
+            raise KeyError(f"local path is not configured: {name}") from exc
+
+    def __getattr__(self, name: str) -> Path:
+        return self.require(name)
 
     @classmethod
     def from_mapping(
@@ -29,8 +37,9 @@ class LocalPaths:
         raw: Mapping[str, Any],
         *,
         config_dir: Path,
+        required_names: tuple[str, ...],
     ) -> "LocalPaths":
-        allowed = {field.name for field in dataclasses.fields(cls)}
+        allowed = set(required_names)
         unknown = sorted(set(raw) - allowed)
         missing = sorted(allowed - set(raw))
         if unknown:
@@ -49,7 +58,7 @@ class LocalPaths:
             if not path.is_absolute():
                 path = (config_dir / path).resolve()
             values[name] = path
-        return cls(**values)
+        return cls(values=values)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -75,8 +84,7 @@ class LocalHLConfig:
         if not isinstance(value.get("paths"), Mapping):
             raise ValueError("paths config must be a mapping")
         run = HLRunConfig.from_mapping(value["run"])
-        if run.game != "29_rollman":
-            raise ValueError("this local harness currently supports 29_rollman")
+        profile = get_game_profile(run.game)
         if (
             run.origin.mode == "imported_version"
             and run.origin.source_run is not None
@@ -97,6 +105,7 @@ class LocalHLConfig:
             paths=LocalPaths.from_mapping(
                 value["paths"],
                 config_dir=source.parents[2],
+                required_names=profile.required_local_paths,
             ),
             source_path=source,
         )

@@ -197,6 +197,14 @@ class GameProfile(Protocol):
 _GAME_PROFILES: dict[str, GameProfile] = {}
 
 
+def _load_builtin_profile(game_id: str) -> GameProfile | None:
+    if game_id == "29_rollman":
+        from agentbench_frame.games.rollman.hl_profile import RollmanHLProfile
+
+        return RollmanHLProfile()
+    return None
+
+
 def register_game_profile(profile: GameProfile) -> None:
     """Register exactly one profile for a stable game identifier."""
 
@@ -218,6 +226,10 @@ def get_game_profile(game_id: str) -> GameProfile:
     """Resolve a registered profile or list the exact available identifiers."""
 
     key = _text(game_id, field="game_id")
+    if key not in _GAME_PROFILES:
+        builtin = _load_builtin_profile(key)
+        if builtin is not None:
+            register_game_profile(builtin)
     try:
         return _GAME_PROFILES[key]
     except KeyError as exc:

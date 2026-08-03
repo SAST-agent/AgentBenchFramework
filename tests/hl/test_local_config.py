@@ -1,5 +1,93 @@
 from pathlib import Path
 
+import pytest
+
+
+class _FakeProfile:
+    game_id = "fake_paths"
+    required_local_paths = ("backend", "human_pool", "workspace", "runs_root")
+
+    def prompt_profile(self):
+        raise AssertionError("not needed for path parsing")
+
+    def build_bindings(self, *, config, run_root):
+        raise AssertionError("not needed for path parsing")
+
+
+def _fake_config(tmp_path, *, paths):
+    from agentbench_frame.hl.game_profile import register_game_profile
+
+    try:
+        register_game_profile(_FakeProfile())
+    except ValueError as exc:
+        if "already registered" not in str(exc):
+            raise
+    source = tmp_path / "project" / "configs" / "hl" / "fake.yaml"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text(
+        "\n".join(
+            (
+                'schema_version: "1.0"',
+                "run:",
+                '  game: "fake_paths"',
+                "  provider:",
+                '    kind: "codex"',
+                "  origin:",
+                '    mode: "model_bootstrap"',
+                "  curriculum:",
+                '    mode: "weakest_failed"',
+                '    target_order: "lowest_rank_first"',
+                "    preserve_passed_opponents: true",
+                "    required_human_opponents: 1",
+                "    stagnation_patience: 4",
+                "paths:",
+                *(f'  {name}: "{value}"' for name, value in paths.items()),
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return source
+
+
+def test_local_config_accepts_exact_paths_declared_by_game_profile(tmp_path):
+    from agentbench_frame.hl.local_config import LocalHLConfig
+
+    source = _fake_config(
+        tmp_path,
+        paths={
+            "backend": "backend",
+            "human_pool": "humans.json",
+            "workspace": "candidate",
+            "runs_root": "runs",
+        },
+    )
+
+    config = LocalHLConfig.load(source)
+
+    assert config.paths.require("backend") == (
+        tmp_path / "project" / "backend"
+    ).resolve()
+    assert config.paths.workspace == (
+        tmp_path / "project" / "candidate"
+    ).resolve()
+
+
+def test_local_config_rejects_missing_profile_path(tmp_path):
+    from agentbench_frame.hl.local_config import LocalHLConfig
+
+    source = _fake_config(
+        tmp_path,
+        paths={
+            "backend": "backend",
+            "workspace": "candidate",
+            "runs_root": "runs",
+        },
+    )
+
+    with pytest.raises(ValueError, match="missing paths fields:.*human_pool"):
+        LocalHLConfig.load(source)
+
 
 def test_rollman_k4_repair_config_freezes_native_budget_and_deadlines(
     monkeypatch,
@@ -100,6 +188,15 @@ def test_machine_local_paths_expand_environment_variables(tmp_path, monkeypatch)
             "opponent_build_root": ".agentbench/opponents",
         },
         config_dir=tmp_path / "project",
+        required_names=(
+            "agentbench_root",
+            "official_logic_root",
+            "pacman_sdk_root",
+            "human_manifest",
+            "workspace",
+            "runs_root",
+            "opponent_build_root",
+        ),
     )
 
     assert paths.agentbench_root == external / "AgentBench"

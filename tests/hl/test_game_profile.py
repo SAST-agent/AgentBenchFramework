@@ -153,3 +153,26 @@ def test_public_hl_package_exports_profile_registry():
     register_game_profile(profile)
 
     assert get_game_profile(profile.game_id) is profile
+
+
+def test_builtin_rollman_profile_is_loaded_lazily_after_registry_reset():
+    from agentbench_frame.hl.game_profile import (
+        get_game_profile,
+        reset_game_profiles_for_testing,
+    )
+
+    reset_game_profiles_for_testing()
+
+    profile = get_game_profile("29_rollman")
+
+    assert profile.game_id == "29_rollman"
+    assert profile.prompt_profile().roles == ("rollman",)
+    assert profile.required_local_paths == (
+        "agentbench_root",
+        "official_logic_root",
+        "pacman_sdk_root",
+        "human_manifest",
+        "workspace",
+        "runs_root",
+        "opponent_build_root",
+    )
