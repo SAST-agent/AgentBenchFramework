@@ -5,12 +5,23 @@ policy_interface:
     - round_index
     - towers
     - ants
+    - bases
     - coins
-    - camps
-    - speed_level
-    - ant_hp_level
     - weapon_cooldowns
     - active_effects
+    - old_count
+    - die_count
+    - super_weapon_usage
+  field_access:
+    camp_hp: state.bases[player].hp
+    generation_level: state.bases[player].generation_level
+    ant_level: state.bases[player].ant_level
+    coins: state.coins[player]
+    weapon_cooldown: state.weapon_cooldowns[player, weapon_type]
+  replay_mapping:
+    round_state.camps[player]: state.bases[player].hp
+    round_state.speedLv[player]: state.bases[player].generation_level
+    round_state.anthpLv[player]: state.bases[player].ant_level
   canonical_normalization: BackendState public SDK state
   normalized_state_mapping: {}
 roles:

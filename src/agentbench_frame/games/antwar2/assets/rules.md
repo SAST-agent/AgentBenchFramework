@@ -19,6 +19,10 @@ map, tower deltas, ants, both coin balances and camp HP values, production and
 ant-HP levels, weapon cooldowns, and active effects. `towers` is a delta stream:
 an entry with `type == -1` deletes that global tower ID; another entry creates
 or updates it. The complete tower set must be reconstructed across rounds.
+Live policies read camp HP, production level, and ant-HP level from
+`state.bases[player].hp`, `.generation_level`, and `.ant_level`. The replay
+JSON names the corresponding arrays `camps`, `speedLv`, and `anthpLv`; those
+replay names are not fields on the live `BackendState` object.
 
 ## Terminal result
 

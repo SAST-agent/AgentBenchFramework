@@ -1119,6 +1119,13 @@ def _pending_repair_recoveries(
         evaluation = evaluations_by_version.get(version_id)
         if version_event is None or checkpoint_event is None or evaluation is None:
             continue
+        # A provider/tool failure that never produced an evaluable candidate is
+        # an interrupted repair attempt, not a scientifically terminal branch.
+        # Retry it on resume. Completed model edits remain terminal even when
+        # their smoke evaluation fails, so genuinely bad proposals are counted
+        # once instead of being regenerated indefinitely.
+        if event.get("status") != "completed" and evaluation.status != "complete":
+            continue
         checkpoint_path = Path(str(checkpoint_event["path"]))
         if not checkpoint_path.is_file():
             continue

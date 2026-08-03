@@ -24,6 +24,15 @@ helpers include `towers_of`, `ants_of`, `tower_at`, `tower_by_id`,
 `strategic_slots`, and `can_apply_operation`. A policy may maintain finite
 private memory derived from its observed public stream.
 
+Live camp state is accessed through `state.bases`: camp HP is
+`state.bases[player].hp`, production level is
+`state.bases[player].generation_level`, and generated-ant HP level is
+`state.bases[player].ant_level`. `state.camps` does not exist in the live
+Python policy interface. The replay-only JSON fields
+`round_state.camps[player]`, `round_state.speedLv[player]`, and
+`round_state.anthpLv[player]` map to those three `state.bases[player]`
+attributes respectively.
+
 Construct protocol operations with `Operation(OperationType, arg0, arg1)`:
 
 - build and weapon atoms use `arg0=x`, `arg1=y`;

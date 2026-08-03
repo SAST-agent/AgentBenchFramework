@@ -114,6 +114,29 @@ def test_atomic_decision_space_contains_only_protocol_operations():
         assert invented not in serialized
 
 
+def test_policy_interface_distinguishes_live_sdk_bases_from_replay_camps():
+    value = yaml.safe_load(
+        (ASSETS / "decision_space.yaml").read_text(encoding="utf-8")
+    )
+    interface = value["policy_interface"]
+
+    assert "bases" in interface["object_fields"]
+    assert "camps" not in interface["object_fields"]
+    assert interface["field_access"]["camp_hp"] == "state.bases[player].hp"
+    assert interface["field_access"]["generation_level"] == (
+        "state.bases[player].generation_level"
+    )
+    assert interface["field_access"]["ant_level"] == (
+        "state.bases[player].ant_level"
+    )
+    assert interface["replay_mapping"]["round_state.camps[player]"] == (
+        "state.bases[player].hp"
+    )
+    sdk = (ASSETS / "sdk_interface.md").read_text(encoding="utf-8")
+    assert "state.bases[player].hp" in sdk
+    assert "`state.camps` does not exist" in sdk
+
+
 def test_replay_skill_requires_atomic_causal_evidence_and_live_validation():
     text = (
         ASSETS / "replay-skill" / "antwar2-replay" / "SKILL.md"

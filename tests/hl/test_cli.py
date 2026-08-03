@@ -1011,6 +1011,74 @@ def test_pending_repair_is_recovered_from_checkpoint_and_immutable_version(tmp_p
     assert recovered[1].activation["details"]["changed_examples"][0]["state_id"] == "state-5"
 
 
+def test_failed_non_evaluable_repair_is_retried_after_resume(tmp_path):
+    from agentbench_frame.hl.cli import _pending_repair_recoveries
+    from agentbench_frame.hl.codebase import VersionStore
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    (workspace / "agent.py").write_text("VALUE = 1\n", encoding="utf-8")
+    store = VersionStore(workspace, tmp_path / "versions")
+    initial = store.snapshot(parent_version_id=None, act_id="act-initial")
+    repaired = store.snapshot(
+        parent_version_id=initial.version_id,
+        act_id="act-000006-activation-repair-b01",
+        edit_type="activation_repair",
+    )
+    checkpoint = tmp_path / "checkpoints" / f"{repaired.act_id}.json"
+    checkpoint.parent.mkdir()
+    checkpoint.write_text(
+        json.dumps(
+            {
+                "act_id": repaired.act_id,
+                "iteration_id": "iter-000012",
+                "branch_index": 1,
+                "provider_status": "failed",
+            }
+        ),
+        encoding="utf-8",
+    )
+    historical = [
+        {"event_type": "proposal_cycle_started", "iteration_id": "iter-000012"},
+        {
+            "event_type": "checkpoint_created",
+            "iteration_id": "iter-000012",
+            "act_id": repaired.act_id,
+            "path": str(checkpoint),
+        },
+        {
+            "event_type": "version_created",
+            "version_id": repaired.version_id,
+            "act_id": repaired.act_id,
+            "content_hash": repaired.content_hash,
+        },
+        {
+            "event_type": "repair_completed",
+            "iteration_id": "iter-000012",
+            "act_id": repaired.act_id,
+            "branch_index": 1,
+            "initial_version_id": initial.version_id,
+            "repaired_version_id": repaired.version_id,
+            "status": "failed",
+        },
+    ]
+
+    recovered = _pending_repair_recoveries(
+        historical,
+        version_store=store,
+        evaluations_by_version={
+            repaired.version_id: CandidateEvaluation(
+                status="failed",
+                score=None,
+                error="provider_tool_limit_exceeded",
+            )
+        },
+    )
+
+    assert recovered == {}
+
+
 def test_pending_candidate_recovery_preserves_activation_evidence(tmp_path):
     from agentbench_frame.hl.cli import _pending_candidate_recoveries
     from agentbench_frame.hl.codebase import VersionStore
