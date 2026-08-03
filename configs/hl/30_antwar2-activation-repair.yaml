@@ -1,0 +1,92 @@
+schema_version: "1.0"
+run:
+  game: "30_antwar2"
+  provider:
+    kind: "codex"
+    model: "gpt-5.5"
+    review_model: "gpt-5.5"
+    reasoning_effort: "xhigh"
+    env_key: "AGENTBENCH_API_KEY"
+    base_url: "https://lab.cs.tsinghua.edu.cn/ai-platform/sub2api"
+    wire_api: "responses"
+    requires_openai_auth: true
+    disable_response_storage: true
+    network_access: "enabled"
+    context_mode: "fresh"
+    structured_output_mode: "validated_file"
+    rollout_budget:
+      enabled: true
+      limit_tokens: 50000
+      reminder_at_remaining_tokens: [15000, 7500, 3000]
+      sampling_token_weight: 1.0
+      prefill_token_weight: 1.0
+    timeout_seconds: 600
+    idle_timeout_seconds: 180
+  origin:
+    mode: "imported_version"
+    source_run: ".agentbench/30_antwar2/runs/from-scratch-k4-net3-20260804"
+    source_version: "v000000"
+    reset_session: true
+    reset_experience: false
+    reset_research_state: false
+  curriculum:
+    mode: "weakest_failed"
+    target_order: "lowest_rank_first"
+    preserve_passed_opponents: true
+    required_human_opponents: 18
+    stagnation_patience: 4
+  iteration:
+    max_acts: null
+    candidates_per_cycle: 4
+    planner_enabled: true
+    reducer_enabled: true
+    scope_contract_required: true
+    repair_enabled: false
+    repair_top_k: 2
+    repair_rounds: 0
+    activation_repair_enabled: true
+    activation_repair_top_k: 4
+    activation_repair_rounds: 1
+    activation_min_changed_actions: 2
+    quick_screen_seeds: 1
+    finalist_count: 2
+    finalist_seeds: 1
+  selection:
+    mode: "linear_lexicographic"
+    exploration_debt_cycles: 3
+    source_size_penalty: false
+  context:
+    use_game_digest: true
+    research_state_max_bytes: 32768
+    reduction_token_threshold: 250000
+  rollback:
+    enabled: true
+    policy: "champion_on_sustained_degradation"
+    patience: 3
+    score_margin: 0.05
+  experience:
+    enabled: true
+    compress_every_acts: 5
+  measurement:
+    epsilon: 0.05
+    local_policy_kl: true
+    occupancy_shift: true
+  evaluation:
+    learning_opponent: "rank01"
+    fixed_gate_seeds: [1, 2]
+    certification_opponents: "all"
+    certification_seeds: [11, 12, 13]
+    certification_wins_required: 2
+    required_human_opponents: 18
+    required_win_rate: 0.5
+    full_pool_every_iteration: false
+    reporting_panel_every_cycle: true
+    reporting_seeds_per_opponent: 1
+    max_parallel_matches: 8
+    match_timeout_seconds: 45
+paths:
+  agentbench_root: "${AGENTBENCH_SAST_ROOT}/AgentBench"
+  workspace: ".agentbench/30_antwar2/candidate-net4"
+  runs_root: ".agentbench/30_antwar2/runs"
+  build_root: ".agentbench/30_antwar2/build"
+  positive_control_root: "${ANTWAR2_POSITIVE_CONTROL_ROOT}"

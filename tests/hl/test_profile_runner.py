@@ -2,6 +2,43 @@ import pytest
 import json
 
 
+def test_imported_profile_inherits_experience_and_research_when_requested(tmp_path):
+    from agentbench_frame.hl.config import ContextConfig, OriginConfig
+    from agentbench_frame.hl.profile_runner import _inherit_profile_semantic_state
+    from agentbench_frame.hl.research_state import ResearchState
+
+    source = tmp_path / "source-run"
+    (source / "experience").mkdir(parents=True)
+    (source / "experience/state.json").write_text(
+        '{"active_questions":[],"failed_hypotheses":[],"replay_evidence":[],"stable_knowledge":[]}\n',
+        encoding="utf-8",
+    )
+    (source / "experience/ledger.jsonl").write_text("", encoding="utf-8")
+    ResearchState.empty(max_bytes=16384).write(source / "research_state.json")
+    run = tmp_path / "child-run"
+    run.mkdir()
+
+    _inherit_profile_semantic_state(
+        run_dir=run,
+        origin=OriginConfig(
+            mode="imported_version",
+            source_run=str(source),
+            source_version="v000000",
+            reset_experience=False,
+            reset_research_state=False,
+        ),
+        context=ContextConfig(research_state_max_bytes=16384),
+    )
+
+    assert (run / "experience/state.json").read_bytes() == (
+        source / "experience/state.json"
+    ).read_bytes()
+    assert (run / "research_state.json").read_bytes() == (
+        source / "research_state.json"
+    ).read_bytes()
+    assert (run / "experience/ledger.jsonl").read_bytes() == b""
+
+
 def _frozen_config(*, mode=None, hash_value="hash-a", max_acts=None):
     provider = {"kind": "codex"}
     if mode is not None:

@@ -17,6 +17,7 @@ from agentbench_frame.hl.controller import HLController, ProposalCycleResult
 from agentbench_frame.hl.evaluator import CandidateEvaluation
 from agentbench_frame.hl.events import HLEventWriter, read_events
 from agentbench_frame.hl.experience import ExperienceManager
+from agentbench_frame.hl.experience_ledger import ExperienceLedger
 from agentbench_frame.hl.game_profile import HLGameBindings, get_game_profile
 from agentbench_frame.hl.lineage import LineageManager
 from agentbench_frame.hl.config import HLRunConfig
@@ -244,6 +245,49 @@ def _smoke_dict(bindings: HLGameBindings, workspace: Path) -> dict[str, Any]:
     }
 
 
+def _inherit_profile_semantic_state(
+    *,
+    run_dir: Path,
+    origin: Any,
+    context: Any,
+) -> None:
+    """Copy bounded Experience/Research checkpoints for an imported origin."""
+
+    if origin.mode != "imported_version":
+        return
+    assert origin.source_run is not None
+    source_run = Path(origin.source_run).resolve()
+    if not origin.reset_experience:
+        source = source_run / "experience" / "state.json"
+        if not source.is_file():
+            raise FileNotFoundError(
+                "imported profile requested experience continuation but source "
+                f"state is missing: {source}"
+            )
+        if source.stat().st_size > 1024 * 1024:
+            raise ValueError("source experience state exceeds 1 MiB")
+        destination = run_dir / "experience" / "state.json"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        source_ledger = source_run / "experience" / "ledger.jsonl"
+        if source_ledger.is_file():
+            if source_ledger.stat().st_size > 8 * 1024 * 1024:
+                raise ValueError("source experience ledger exceeds 8 MiB")
+            ExperienceLedger(source_ledger).load()
+            shutil.copy2(source_ledger, destination.with_name("ledger.jsonl"))
+    if not origin.reset_research_state:
+        source = source_run / "research_state.json"
+        if not source.is_file():
+            raise FileNotFoundError(
+                f"imported profile research state is missing: {source}"
+            )
+        limit = int(context.research_state_max_bytes)
+        if source.stat().st_size > limit:
+            raise ValueError(f"source research state exceeds max_bytes={limit}")
+        ResearchState.load_or_create(source, max_bytes=limit)
+        shutil.copy2(source, run_dir / "research_state.json")
+
+
 def validate_profile(config: LocalHLConfig) -> dict[str, Any]:
     profile = get_game_profile(config.run.game)
     missing = [
@@ -292,6 +336,11 @@ def prepare_profile_run(
             raise FileNotFoundError(run_dir)
     else:
         run_dir.mkdir(parents=True, exist_ok=False)
+        _inherit_profile_semantic_state(
+            run_dir=run_dir,
+            origin=config.run.origin,
+            context=config.run.context,
+        )
     bindings = profile.build_bindings(config=config, run_root=run_dir)
     _seed_candidate(workspace, bindings.candidate_template)
     bundle = ContextBundle.create(run_dir / "context", bindings.context_sources)
