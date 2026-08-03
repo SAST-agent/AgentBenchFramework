@@ -97,6 +97,31 @@ class FakeEvaluator:
         return CandidateEvaluation(status="complete", score=value)
 
 
+def test_zero_usage_transport_failure_is_not_a_coding_act():
+    from agentbench_frame.hl.controller import _counts_as_coding_act
+
+    assert not _counts_as_coding_act(
+        status="failed",
+        total_tokens=None,
+        tool_call_count=0,
+    )
+    assert _counts_as_coding_act(
+        status="completed",
+        total_tokens=None,
+        tool_call_count=0,
+    )
+    assert _counts_as_coding_act(
+        status="failed",
+        total_tokens=12,
+        tool_call_count=0,
+    )
+    assert _counts_as_coding_act(
+        status="failed",
+        total_tokens=None,
+        tool_call_count=1,
+    )
+
+
 def _controller(
     tmp_path,
     provider,

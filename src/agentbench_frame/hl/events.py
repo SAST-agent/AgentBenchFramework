@@ -150,7 +150,7 @@ _EVENT_FIELDS = {
         },
         set(),
     ),
-    "run_resumed": ({"coding_agent_acts", "iterations", "lineage_head_version_id"}, {"champion_version_id"}),
+    "run_resumed": ({"coding_agent_acts", "iterations", "lineage_head_version_id"}, {"champion_version_id", "provider_attempts"}),
     "act_completed": (
         {"act_id", "iteration_id", "status"},
         {
@@ -160,6 +160,7 @@ _EVENT_FIELDS = {
             "completion_tokens",
             "reasoning_output_tokens",
             "total_tokens",
+            "tool_call_count",
             "elapsed_time_s",
             "raw_output_ref",
             "thread_id",

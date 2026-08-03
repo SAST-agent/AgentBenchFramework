@@ -39,6 +39,21 @@ from agentbench_frame.hl.selection import (
 from agentbench_frame.tracking.provider import ProviderInvocation
 
 
+def _counts_as_coding_act(
+    *,
+    status: str,
+    total_tokens: int | None,
+    tool_call_count: int,
+) -> bool:
+    """Count model work, but not a zero-work infrastructure failure."""
+
+    return (
+        status == "completed"
+        or total_tokens is not None
+        or tool_call_count > 0
+    )
+
+
 @dataclasses.dataclass(frozen=True)
 class CandidateResult:
     act_id: str
@@ -269,6 +284,7 @@ class HLController:
         self.policy_entry_symbol = policy_entry_symbol.strip()
         self._iteration_count = 0
         self._coding_agent_acts = 0
+        self._provider_attempts = 0
         self._sessions: dict[str, str] = {}
         self._recorded_match_ids: set[str] = set()
         self._recorded_match_keys: set[
@@ -357,7 +373,14 @@ class HLController:
             prompt=prompt,
             invocation=invocation,
         )
-        self._coding_agent_acts = 1
+        self._provider_attempts = 1
+        self._coding_agent_acts = int(
+            _counts_as_coding_act(
+                status=invocation.status,
+                total_tokens=invocation.usage.total_tokens,
+                tool_call_count=invocation.tool_call_count,
+            )
+        )
         if invocation.status != "completed":
             self._write_provider_event(
                 act_id=act_id,
@@ -464,6 +487,7 @@ class HLController:
                 score=evaluation.score,
             )
         self._coding_agent_acts = 1
+        self._provider_attempts = 1
         self._started = True
         return version
 
@@ -582,9 +606,23 @@ class HLController:
                 seed=int(event["seed"]),
                 anchor_opponent=self.anchor_human_opponents,
             )
-        self._coding_agent_acts = sum(
-            event.get("event_type") == "act_completed"
+        act_events = [
+            event
             for event in historical_events
+            if event.get("event_type") == "act_completed"
+        ]
+        self._provider_attempts = len(act_events)
+        self._coding_agent_acts = sum(
+            _counts_as_coding_act(
+                status=str(event.get("status") or "failed"),
+                total_tokens=(
+                    int(event["total_tokens"])
+                    if isinstance(event.get("total_tokens"), int)
+                    else None
+                ),
+                tool_call_count=int(event.get("tool_call_count") or 0),
+            )
+            for event in act_events
         )
         if self.iteration.planner_enabled and self.iteration.reducer_enabled:
             completed_iterations = {
@@ -605,6 +643,7 @@ class HLController:
         self.events.write(
             "run_resumed",
             coding_agent_acts=self._coding_agent_acts,
+            provider_attempts=self._provider_attempts,
             iterations=self._iteration_count,
             lineage_head_version_id=self.lineage.lineage_head_version_id,
             champion_version_id=self.lineage.champion_version_id,
@@ -792,7 +831,14 @@ class HLController:
             prompt=prompt,
             invocation=invocation,
         )
-        self._coding_agent_acts += 1
+        self._provider_attempts += 1
+        self._coding_agent_acts += int(
+            _counts_as_coding_act(
+                status=invocation.status,
+                total_tokens=invocation.usage.total_tokens,
+                tool_call_count=invocation.tool_call_count,
+            )
+        )
         pending_path: Path | None = None
         if experience_update.is_file():
             pending_path = (
@@ -1059,7 +1105,7 @@ class HLController:
                     raise ValueError("recovered candidate lineage does not match")
                 results.append(recovered_candidate)
                 continue
-            act_id = f"act-{self._coding_agent_acts + 1:06d}-b{branch_index:02d}"
+            act_id = f"act-{self._provider_attempts + 1:06d}-b{branch_index:02d}"
             results.append(
                 self._run_coding_candidate(
                     iteration_id=iteration_id,
@@ -1150,7 +1196,7 @@ class HLController:
                     summary_resolver=self.summary_resolver,
                 )
                 act_id = (
-                    f"act-{self._coding_agent_acts + 1:06d}"
+                    f"act-{self._provider_attempts + 1:06d}"
                     f"-repair-b{initial.branch_index:02d}"
                 )
                 recovered = (repair_recoveries or {}).get(initial.branch_index)
@@ -1406,7 +1452,7 @@ class HLController:
             )
             if planner_output.exists():
                 planner_output.unlink()
-            planner_act_id = f"act-{self._coding_agent_acts + 1:06d}-planner"
+            planner_act_id = f"act-{self._provider_attempts + 1:06d}-planner"
             planner_prompt = self.prompt_factory(
                 phase="planner",
                 act_id=planner_act_id,
@@ -1472,7 +1518,14 @@ class HLController:
                     raw_output_path=planner_raw,
                     session_id=None,
                 )
-            self._coding_agent_acts += 1
+            self._provider_attempts += 1
+            self._coding_agent_acts += int(
+                _counts_as_coding_act(
+                    status=planner.status,
+                    total_tokens=planner.usage.total_tokens,
+                    tool_call_count=planner.tool_call_count,
+                )
+            )
             self._write_checkpoint(
                 act_id=planner_act_id,
                 iteration_id=iteration_id,
@@ -1651,7 +1704,7 @@ class HLController:
         reducer_output = control_root / "research_state_update.json"
         if reducer_output.exists():
             reducer_output.unlink()
-        reducer_act_id = f"act-{self._coding_agent_acts + 1:06d}-reducer"
+        reducer_act_id = f"act-{self._provider_attempts + 1:06d}-reducer"
         reducer_prompt = self.prompt_factory(
             phase="reducer",
             act_id=reducer_act_id,
@@ -1676,7 +1729,14 @@ class HLController:
                 else {}
             ),
         )
-        self._coding_agent_acts += 1
+        self._provider_attempts += 1
+        self._coding_agent_acts += int(
+            _counts_as_coding_act(
+                status=reducer.status,
+                total_tokens=reducer.usage.total_tokens,
+                tool_call_count=reducer.tool_call_count,
+            )
+        )
         self._write_checkpoint(
             act_id=reducer_act_id,
             iteration_id=iteration_id,
@@ -1848,6 +1908,7 @@ class HLController:
         ]
         return {
             "coding_agent_acts": self._coding_agent_acts,
+            "provider_attempts": self._provider_attempts,
             "iterations": self._iteration_count,
             "best_score": max(complete_scores) if complete_scores else None,
             "champion_version_id": self.lineage.champion_version_id,
@@ -1886,6 +1947,7 @@ class HLController:
             completion_tokens=usage.completion_tokens,
             reasoning_output_tokens=usage.reasoning_output_tokens,
             total_tokens=usage.total_tokens,
+            tool_call_count=invocation.tool_call_count,
             elapsed_time_s=invocation.elapsed_time_s,
             raw_output_ref=invocation.raw_output_ref,
             thread_id=invocation.metadata.get("thread_id"),

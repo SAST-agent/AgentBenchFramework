@@ -245,7 +245,19 @@ def derive_curve_rows(events: Iterable[Mapping[str, Any]]) -> list[dict[str, Any
     for event in records:
         event_type = event.get("event_type")
         if event_type == "act_completed":
-            act_count += 1
+            from agentbench_frame.hl.controller import _counts_as_coding_act
+
+            act_count += int(
+                _counts_as_coding_act(
+                    status=str(event.get("status") or "failed"),
+                    total_tokens=(
+                        int(event["total_tokens"])
+                        if isinstance(event.get("total_tokens"), int)
+                        else None
+                    ),
+                    tool_call_count=int(event.get("tool_call_count") or 0),
+                )
+            )
             prompt_tokens += int(event.get("prompt_tokens") or 0)
             completion_tokens += int(event.get("completion_tokens") or 0)
             total_tokens += int(event.get("total_tokens") or 0)

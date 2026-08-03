@@ -52,6 +52,62 @@ def test_curve_rows_keep_performance_information_and_budget_separate():
     assert rows[2]["cumulative_total_tokens"] == 230
 
 
+def test_curve_budget_excludes_zero_usage_transport_failures():
+    from agentbench_frame.hl.report import derive_curve_rows
+
+    events = [
+        {
+            "event_type": "version_created",
+            "version_id": "v0",
+            "act_id": "bootstrap",
+            "evaluation_status": "complete",
+            "benchmark_score": 0.0,
+        },
+        {
+            "event_type": "candidate_selected",
+            "iteration_id": "iter-000000",
+            "version_id": "v0",
+            "act_id": "bootstrap",
+        },
+        {
+            "event_type": "act_completed",
+            "act_id": "act-transport",
+            "iteration_id": "iter-000001",
+            "status": "failed",
+            "total_tokens": None,
+            "tool_call_count": 0,
+        },
+        {
+            "event_type": "act_completed",
+            "act_id": "act-candidate",
+            "iteration_id": "iter-000001",
+            "status": "completed",
+            "total_tokens": 20,
+            "prompt_tokens": 15,
+            "completion_tokens": 5,
+            "tool_call_count": 1,
+        },
+        {
+            "event_type": "version_created",
+            "version_id": "v1",
+            "act_id": "act-candidate",
+            "evaluation_status": "complete",
+            "benchmark_score": 0.25,
+        },
+        {
+            "event_type": "candidate_selected",
+            "iteration_id": "iter-000001",
+            "version_id": "v1",
+            "act_id": "act-candidate",
+        },
+    ]
+
+    rows = derive_curve_rows(events)
+
+    assert rows[1]["coding_agent_act"] == 1
+    assert rows[1]["cumulative_total_tokens"] == 20
+
+
 def test_generic_profile_report_uses_behavior_event_and_candidate_margin():
     from agentbench_frame.hl.report import derive_curve_rows
 
