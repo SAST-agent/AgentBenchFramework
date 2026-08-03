@@ -97,3 +97,15 @@ def test_replay_without_valid_terminal_winner_is_rejected(tmp_path):
             candidate_role="P0",
             seed=1,
         )
+
+
+def test_stderr_drain_treats_concurrent_stream_close_as_clean_shutdown(tmp_path):
+    from agentbench_frame.games.antwar2.match import _drain_stderr
+
+    class ClosedStream:
+        def read(self, _size):
+            raise ValueError("I/O operation on closed file")
+
+    _drain_stderr(ClosedStream(), tmp_path / "stderr.log", bytearray())
+
+    assert (tmp_path / "stderr.log").read_bytes() == b""

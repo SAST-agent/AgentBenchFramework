@@ -437,6 +437,16 @@ class HLConfigTests(unittest.TestCase):
                     certification_wins_required=4,
                 )
 
+    def test_evaluation_match_timeout_must_be_positive(self):
+        from agentbench_frame.hl.config import EvaluationConfig
+
+        self.assertEqual(
+            EvaluationConfig(match_timeout_seconds=45).match_timeout_seconds,
+            45,
+        )
+        with self.assertRaisesRegex(ValueError, "match_timeout_seconds"):
+            EvaluationConfig(match_timeout_seconds=0)
+
 
 if __name__ == "__main__":
     unittest.main()

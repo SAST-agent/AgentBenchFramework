@@ -98,7 +98,10 @@ def _drain_stderr(stream: BinaryIO, destination: Path, tail: bytearray) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
     with destination.open("wb") as handle:
         while True:
-            chunk = stream.read(65536)
+            try:
+                chunk = stream.read(65536)
+            except (OSError, ValueError):
+                return
             if not chunk:
                 return
             handle.write(chunk)

@@ -308,6 +308,7 @@ class EvaluationConfig:
     reporting_panel_every_cycle: bool = False
     reporting_seeds_per_opponent: int = 1
     max_parallel_matches: int = 1
+    match_timeout_seconds: float = 120.0
 
     def __post_init__(self) -> None:
         for field in (
@@ -376,6 +377,8 @@ class EvaluationConfig:
             )
         if self.max_parallel_matches < 1:
             raise ValueError("evaluation.max_parallel_matches must be >= 1")
+        if not math.isfinite(self.match_timeout_seconds) or self.match_timeout_seconds <= 0:
+            raise ValueError("evaluation.match_timeout_seconds must be finite and > 0")
 
 
 @dataclasses.dataclass(frozen=True)

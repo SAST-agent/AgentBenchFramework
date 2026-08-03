@@ -1441,7 +1441,6 @@ def _cmd_run(args: argparse.Namespace) -> int:
     if config.run.game != "29_rollman":
         from agentbench_frame.hl.profile_runner import run_profile
 
-        assert provider_environment is not None
         _json(
             run_profile(
                 config,
@@ -1481,7 +1480,6 @@ def _cmd_resume(args: argparse.Namespace) -> int:
     if config.run.game != "29_rollman":
         from agentbench_frame.hl.profile_runner import run_profile
 
-        assert provider_environment is not None
         _json(
             run_profile(
                 config,

@@ -15,6 +15,7 @@ from agentbench_frame.games.antwar2.runtime import (
     assemble_candidate,
     assemble_bootstrap_candidate,
     build_backend,
+    materialize_dependencies,
 )
 from agentbench_frame.games.antwar2 import smoke as smoke_module
 from agentbench_frame.games.antwar2.smoke import verify_candidate_smoke
@@ -77,15 +78,21 @@ class AntWar2HLProfile:
         name: str,
         destination: Path,
     ) -> dict[str, Any]:
-        if name != "v22":
-            raise ValueError("AntWar2 supports only the blinded v22 positive control")
+        if name not in {"v22", "v239"}:
+            raise ValueError("AntWar2 named origin must be v22 or v239")
         layout = self.layout(config)
         layout.validate(require_positive_control=True)
         assert layout.historical_versions_root is not None
+        dependencies = (
+            {"ifelse_v107": layout.historical_versions_root / "ifelse_v107"}
+            if name == "v239"
+            else None
+        )
         return assemble_candidate(
             destination=destination,
-            policy_root=layout.historical_versions_root / "ifelse_v22",
+            policy_root=layout.historical_versions_root / f"ifelse_{name}",
             sdk_root=layout.sdk_root,
+            dependencies=dependencies,
         )
 
     def build_bindings(
@@ -123,6 +130,10 @@ class AntWar2HLProfile:
 
         def candidate_factory(version):
             root = run_root / "versions" / "objects" / version.content_hash
+            materialize_dependencies(
+                candidate_root=root,
+                historical_versions_root=layout.historical_versions_root,
+            )
             return ProcessSpec((sys.executable, "main.py"), root)
 
         evaluator = AntWar2Evaluator(
@@ -133,7 +144,7 @@ class AntWar2HLProfile:
             fixed_gate_seeds=fixed_seeds,
             certification_seeds=certification_seeds,
             artifact_root=run_root / "matches",
-            timeout_s=120.0,
+            timeout_s=config.run.evaluation.match_timeout_seconds,
             max_parallel_matches=config.run.evaluation.max_parallel_matches,
             quick_screen_seed_count=config.run.iteration.quick_screen_seeds,
             finalist_seed_count=config.run.iteration.finalist_seeds,

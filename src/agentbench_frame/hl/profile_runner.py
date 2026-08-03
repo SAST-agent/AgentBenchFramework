@@ -305,7 +305,7 @@ def run_profile(
     workspace: Path,
     acts: int | None,
     resume: bool,
-    provider_environment: Mapping[str, str],
+    provider_environment: Mapping[str, str] | None,
 ) -> dict[str, Any]:
     validation = validate_profile(config)
     bindings, bundle, digest, experience, research = prepare_profile_run(
@@ -327,14 +327,19 @@ def run_profile(
 
     profile = get_game_profile(config.run.game)
     prompt_profile = bindings.prompt_profile
-    provider = CodexSessionProvider(
-        config.run.provider,
-        run_root=run_dir,
-        environ=dict(provider_environment),
-        timeout_s=config.run.provider.timeout_seconds,
-        idle_timeout_s=config.run.provider.idle_timeout_seconds,
+    provider = (
+        None
+        if provider_environment is None
+        else CodexSessionProvider(
+            config.run.provider,
+            run_root=run_dir,
+            environ=dict(provider_environment),
+            timeout_s=config.run.provider.timeout_seconds,
+            idle_timeout_s=config.run.provider.idle_timeout_seconds,
+        )
     )
-    provider.preflight()
+    if provider is not None:
+        provider.preflight()
     events_path = run_dir / "events.jsonl"
     historical = read_events(events_path)
     lineage = (
@@ -519,6 +524,8 @@ def run_profile(
         origin_evaluation = evaluations[origin_id]
         origin_version = store.get(origin_id)
     elif config.run.origin.mode == "model_bootstrap":
+        if provider is None:
+            raise ValueError("model bootstrap requires a provider credential")
         bootstrap = controller.bootstrap()
         current_evaluation = bootstrap.evaluation
         evaluations[bootstrap.version.version_id] = bootstrap.evaluation
@@ -555,6 +562,39 @@ def run_profile(
     stagnation = 0
     completed_cycles = 0
     certified = False
+    if not resume and config.run.origin.mode == "imported_version":
+        certification = bindings.evaluator.certify(origin_version)
+        controller.record_matches(
+            version=origin_version,
+            act_id=origin_version.act_id,
+            phase="certification",
+            matches=certification.matches,
+        )
+        best_passing = _passing_opponents(
+            certification.matches,
+            required_win_rate=config.run.evaluation.required_win_rate,
+        )
+        writer.write(
+            "certification_completed",
+            version_id=origin_version.version_id,
+            act_id=origin_version.act_id,
+            status=certification.status,
+            score=certification.score,
+            passing_human_opponents=best_passing,
+            required_human_opponents=config.run.evaluation.required_human_opponents,
+            matches=list(certification.matches),
+        )
+        certified = (
+            certification.status == "complete"
+            and best_passing >= config.run.evaluation.required_human_opponents
+        )
+        if certified:
+            writer.write(
+                "run_completed",
+                reason="human_pool_target_reached",
+                version_id=origin_version.version_id,
+                passing_human_opponents=best_passing,
+            )
     while not certified and (acts is None or completed_cycles < acts):
         if controller.reached_iteration_limit():
             break

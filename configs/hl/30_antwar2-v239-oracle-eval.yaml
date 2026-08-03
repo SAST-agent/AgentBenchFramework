@@ -17,21 +17,18 @@ run:
       enabled: true
       limit_tokens: 50000
       reminder_at_remaining_tokens: [15000, 7500, 3000]
-      sampling_token_weight: 1.0
-      prefill_token_weight: 1.0
     timeout_seconds: 600
     idle_timeout_seconds: 180
   origin:
-    mode: "model_bootstrap"
+    mode: "imported_version"
+    source_run: ".agentbench/30_antwar2/origins/v239"
+    source_version: "v000000"
     reset_session: true
     reset_experience: true
     reset_research_state: true
   curriculum:
-    mode: "weakest_failed"
-    target_order: "lowest_rank_first"
-    preserve_passed_opponents: true
+    mode: "fixed"
     required_human_opponents: 18
-    stagnation_patience: 4
   iteration:
     max_acts: null
     candidates_per_cycle: 4
@@ -39,22 +36,18 @@ run:
     reducer_enabled: true
     scope_contract_required: true
     repair_enabled: false
-    repair_top_k: 2
     repair_rounds: 0
     quick_screen_seeds: 1
     finalist_count: 2
     finalist_seeds: 1
   selection:
     mode: "linear_lexicographic"
-    exploration_debt_cycles: 3
     source_size_penalty: false
   context:
     use_game_digest: true
     research_state_max_bytes: 32768
-    reduction_token_threshold: 250000
   rollback:
     enabled: true
-    policy: "champion_on_sustained_degradation"
     patience: 3
     score_margin: 0.05
   experience:
@@ -69,17 +62,14 @@ run:
     fixed_gate_seeds: [1, 2]
     certification_opponents: "all"
     certification_seeds: [11, 12, 13]
-    certification_wins_required: 2
     required_human_opponents: 18
     required_win_rate: 0.5
     full_pool_every_iteration: false
-    reporting_panel_every_cycle: true
-    reporting_seeds_per_opponent: 1
     max_parallel_matches: 8
     match_timeout_seconds: 45
 paths:
   agentbench_root: "${AGENTBENCH_SAST_ROOT}/AgentBench"
-  workspace: ".agentbench/30_antwar2/candidate"
-  runs_root: ".agentbench/30_antwar2/runs"
+  workspace: ".agentbench/30_antwar2/candidate-v239-oracle"
+  runs_root: ".agentbench/30_antwar2/runs-v239-oracle"
   build_root: ".agentbench/30_antwar2/build"
   positive_control_root: "${ANTWAR2_POSITIVE_CONTROL_ROOT}"

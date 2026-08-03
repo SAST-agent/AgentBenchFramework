@@ -8,6 +8,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Mapping, Optional
@@ -844,6 +845,7 @@ class CodexSessionProvider:
                 self.run_root / "proposals",
                 self.run_root / "distillation",
                 self.run_root / "research_state.json",
+                Path(sys.executable),
             )
         )
         home = Path(self.environ.get("HOME", str(Path.home()))).resolve()

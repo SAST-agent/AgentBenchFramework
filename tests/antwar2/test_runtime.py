@@ -101,3 +101,29 @@ def test_bootstrap_assembly_uses_scaffold_not_historical_policy(tmp_path):
 
     assert (destination / "ai.py").read_text() == "BOOTSTRAP = True\n"
     assert "HISTORICAL" not in (destination / "ai.py").read_text()
+
+
+def test_materialize_declared_dependency_next_to_version_object(tmp_path):
+    import hashlib
+
+    from agentbench_frame.games.antwar2.runtime import materialize_dependencies
+
+    candidate = tmp_path / "versions" / "objects" / "hash"
+    candidate.mkdir(parents=True)
+    source = tmp_path / "historical" / "ifelse_v107"
+    source.mkdir(parents=True)
+    (source / "ai.py").write_text("VALUE = 107\n", encoding="utf-8")
+    expected = hashlib.sha256((source / "ai.py").read_bytes()).hexdigest()
+    (candidate / ".agentbench-package.json").write_text(
+        json.dumps({"dependencies": {"ifelse_v107": expected}}),
+        encoding="utf-8",
+    )
+
+    materialize_dependencies(
+        candidate_root=candidate,
+        historical_versions_root=tmp_path / "historical",
+    )
+
+    assert (candidate.parent / "ifelse_v107" / "ai.py").read_text(
+        encoding="utf-8"
+    ) == "VALUE = 107\n"

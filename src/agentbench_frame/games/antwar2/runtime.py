@@ -228,6 +228,43 @@ def assemble_bootstrap_candidate(
     return manifest
 
 
+def materialize_dependencies(
+    *,
+    candidate_root: str | Path,
+    historical_versions_root: str | Path | None,
+) -> None:
+    """Restore hash-declared sibling delegates omitted from a version snapshot."""
+
+    candidate = Path(candidate_root).resolve()
+    manifest_path = candidate / ".agentbench-package.json"
+    if not manifest_path.is_file():
+        return
+    value = json.loads(manifest_path.read_text(encoding="utf-8"))
+    dependencies = value.get("dependencies", {})
+    if not isinstance(dependencies, Mapping):
+        raise AntWarRuntimeError("candidate dependency manifest is invalid")
+    if not dependencies:
+        return
+    if historical_versions_root is None:
+        raise AntWarRuntimeError("candidate dependencies require historical sources")
+    historical = Path(historical_versions_root).resolve()
+    for name, expected_hash in sorted(dependencies.items()):
+        if not isinstance(name, str) or Path(name).name != name:
+            raise AntWarRuntimeError(f"invalid candidate dependency name: {name!r}")
+        if not isinstance(expected_hash, str) or len(expected_hash) != 64:
+            raise AntWarRuntimeError(f"invalid dependency hash for {name}")
+        source = historical / name / "ai.py"
+        if not source.is_file() or _sha256(source) != expected_hash:
+            raise AntWarRuntimeError(f"dependency source hash mismatch: {name}")
+        target = candidate.parent / name / "ai.py"
+        if target.is_file():
+            if _sha256(target) != expected_hash:
+                raise AntWarRuntimeError(f"materialized dependency hash mismatch: {name}")
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, target)
+
+
 def _safe_extract(archive: Path, destination: Path) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(archive) as package:
