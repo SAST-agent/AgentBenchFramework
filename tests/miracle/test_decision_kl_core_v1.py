@@ -1,3 +1,4 @@
+import copy
 import inspect
 import json
 import math
@@ -90,26 +91,35 @@ def test_wind_blessing_fails_closed_instead_of_claiming_finite_support():
         kl.build_trusted_action_support(empty_observation(artifact=wind))
 
 
-def test_local_kl_is_strict_unsmoothed_old_new_natural_log():
+def test_local_kl_is_smoothed_new_old_natural_log():
     record = local({"a": 0.52, "b": 0.48}, {"a": 0.5, "b": 0.5})
-    expected = 0.52 * math.log(0.52 / 0.5) + 0.48 * math.log(0.48 / 0.5)
+    new = [0.5, 0.5]
+    old = [(1 - kl.EPSILON) * value + kl.EPSILON / 2 for value in (0.52, 0.48)]
+    expected = sum(p * math.log(p / q) for p, q in zip(new, old, strict=True))
     reverse = local({"a": 0.5, "b": 0.5}, {"a": 0.52, "b": 0.48})
     assert record.status == "complete"
     assert record.trajectory_kl == pytest.approx(expected)
     assert record.trajectory_kl != pytest.approx(reverse.trajectory_kl)
-    assert record.direction == "old||new"
-    assert record.smoothing == "none"
+    assert record.direction == "new||old"
+    assert record.epsilon == 0.01
+    assert record.smoothing == "symmetric_epsilon_uniform_full_support"
     assert record.log_base == "e"
 
 
 def test_zero_probability_rules_are_structured_and_json_safe():
     zero_old = local({"a": 0.0, "b": 1.0}, {"a": 0.5, "b": 0.5})
-    assert zero_old.trajectory_kl == pytest.approx(math.log(2.0))
-    infinite = local({"a": 1.0, "b": 0.0}, {"a": 0.0, "b": 1.0})
-    assert infinite.status == "threshold_failed"
-    assert infinite.trajectory_kl is None
-    assert infinite.reason == "old_positive_new_zero"
-    json.dumps(infinite.to_dict(), allow_nan=False)
+    expected = sum(
+        p * math.log(p / q)
+        for p, q in zip((0.5, 0.5), (0.005, 0.995), strict=True)
+    )
+    assert zero_old.trajectory_kl == pytest.approx(expected)
+    changed = local({"a": 1.0, "b": 0.0}, {"a": 0.0, "b": 1.0})
+    assert changed.status == "complete"
+    assert changed.trajectory_kl == pytest.approx(
+        0.995 * math.log(0.995 / 0.005) + 0.005 * math.log(0.005 / 0.995)
+    )
+    assert changed.reason is None
+    json.dumps(changed.to_dict(), allow_nan=False)
 
 
 @pytest.mark.parametrize(
@@ -133,7 +143,7 @@ def test_zero_probability_rules_are_structured_and_json_safe():
     ],
     ids=["old-nonstrict", "new-nonstrict", "old-priority"],
 )
-def test_strict_mass_checks_precede_old_positive_new_zero(old, new, reason):
+def test_strict_mass_checks_precede_smoothed_kl(old, new, reason):
     summary = local(old, new)
     assert summary.status == "incomplete"
     assert summary.trajectory_kl is None
@@ -189,7 +199,7 @@ def test_multiple_large_finite_probabilities_are_structured_incomplete(
     json.dumps(summary.to_dict(), allow_nan=False)
 
 
-def test_strict_zero_failure_keeps_priority_over_mass_incomplete_step():
+def test_mass_incomplete_keeps_priority_over_finite_smoothed_change():
     state = empty_observation()
     support = kl.build_trusted_action_support(state)
     first, second = support.action_ids
@@ -208,11 +218,15 @@ def test_strict_zero_failure_keeps_priority_over_mass_incomplete_step():
         new_distribution={first: 0.0, second: 1.0},
     )
     summary = kl.compute_trajectory_kl([mass_incomplete, strict_zero])
-    assert summary.status == "threshold_failed"
+    assert summary.status == "incomplete"
     assert summary.trajectory_kl is None
-    assert summary.threshold_passed is False
-    assert summary.reason == "old_positive_new_zero"
-    assert summary.trace == (None, None)
+    assert summary.threshold_passed is None
+    assert summary.reason == "old_distribution_mass_not_strict"
+    assert summary.trace[0] is None
+    assert summary.trace[1] == pytest.approx(
+        0.995 * math.log(0.995 / 0.005)
+        + 0.005 * math.log(0.005 / 0.995)
+    )
 
 
 @pytest.mark.parametrize("forgery", ["schema", "action_id", "illegal_command"])
@@ -275,12 +289,15 @@ def test_tiny_nonzero_new_probability_has_finite_trajectory_kl():
             )
         ]
     )
-    expected = math.log(1.0) - math.log(5e-324)
+    expected = (
+        0.005 * math.log(0.005 / 0.995)
+        + 0.995 * math.log(0.995 / 0.005)
+    )
     assert math.isfinite(summary.trajectory_kl)
     assert summary.trajectory_kl == pytest.approx(expected)
     assert summary.trace == pytest.approx((expected,))
-    assert summary.status == "threshold_failed"
-    assert summary.reason == "trajectory_kl_above_threshold"
+    assert summary.status == "complete"
+    assert summary.reason is None
 
 
 @pytest.mark.parametrize("invalid", [True, False, "0.5", -0.1, math.nan, math.inf])
@@ -349,11 +366,24 @@ def trajectory_evidence(
     if old_distribution is None:
         old_distribution = {first: 0.5, second: 0.5}
     if new_distribution is None:
-        first_probability = (
-            0.5
-            if target_kl == 0.0
-            else (1 - math.sqrt(1 - math.exp(-2 * target_kl))) / 2
-        )
+        if target_kl == 0.0:
+            first_probability = 0.5
+        else:
+            lower, upper = 0.0, 0.5
+            for _ in range(100):
+                first_probability = (lower + upper) / 2
+                smoothed = (
+                    (1 - kl.EPSILON) * first_probability + kl.EPSILON / 2
+                )
+                measured = (
+                    smoothed * math.log(smoothed / 0.5)
+                    + (1 - smoothed) * math.log((1 - smoothed) / 0.5)
+                )
+                if measured > target_kl:
+                    lower = first_probability
+                else:
+                    upper = first_probability
+            first_probability = (lower + upper) / 2
         new_distribution = {
             first: first_probability,
             second: 1 - first_probability,
@@ -614,10 +644,11 @@ def test_exact_unit_mass_zero_kl_remains_complete():
     summary = local({"a": 0.5, "b": 0.5}, {"a": 0.5, "b": 0.5})
     assert summary.status == "complete"
     assert summary.trajectory_kl == 0.0
-    assert summary.threshold_passed is True
+    assert summary.threshold_passed is None
+    assert summary.acceptance_threshold is None
 
 
-def test_threshold_failure_has_priority_over_other_incomplete_decisions():
+def test_incomplete_decision_has_priority_over_finite_smoothed_change():
     state = empty_observation()
     support = kl.build_trusted_action_support(state)
     first, second = support.action_ids
@@ -640,11 +671,15 @@ def test_threshold_failure_has_priority_over_other_incomplete_decisions():
         new_distribution={first: 0.0, second: 1.0},
     )
     summary = kl.compute_trajectory_kl([incomplete, failed])
-    assert summary.status == "threshold_failed"
+    assert summary.status == "incomplete"
     assert summary.trajectory_kl is None
-    assert summary.threshold_passed is False
-    assert summary.reason == "old_positive_new_zero"
-    assert summary.trace == (None, None)
+    assert summary.threshold_passed is None
+    assert summary.reason == "action_support_not_finitely_enumerable"
+    assert summary.trace[0] is None
+    assert summary.trace[1] == pytest.approx(
+        0.995 * math.log(0.995 / 0.005)
+        + 0.005 * math.log(0.005 / 0.995)
+    )
 
 
 def test_trajectory_preserves_ordered_per_decision_provenance_and_priority():
@@ -679,9 +714,13 @@ def test_trajectory_preserves_ordered_per_decision_provenance_and_priority():
     summary = kl.compute_trajectory_kl(
         [unavailable, nonstrict_mass, strict_zero]
     )
-    assert summary.status == "threshold_failed"
-    assert summary.reason == "old_positive_new_zero"
-    assert summary.trace == (None, None, None)
+    assert summary.status == "incomplete"
+    assert summary.reason == "action_support_not_finitely_enumerable"
+    assert summary.trace[:2] == (None, None)
+    assert summary.trace[2] == pytest.approx(
+        0.995 * math.log(0.995 / 0.005)
+        + 0.005 * math.log(0.005 / 0.995)
+    )
     assert tuple(record.decision_step for record in summary.decision_records) == (1, 2, 3)
 
     records = summary.to_dict()["decision_records"]
@@ -715,9 +754,12 @@ def test_trajectory_preserves_ordered_per_decision_provenance_and_priority():
         },
         {
             "decision_step": 3,
-            "status": "threshold_failed",
-            "local_kl": None,
-            "reason": "old_positive_new_zero",
+            "status": "complete",
+            "local_kl": pytest.approx(
+                0.995 * math.log(0.995 / 0.005)
+                + 0.005 * math.log(0.005 / 0.995)
+            ),
+            "reason": None,
             "schema_version": support.schema_version,
             "support_id": support.support_id,
             "action_ids": list(support.action_ids),
@@ -768,34 +810,27 @@ def test_summary_fake_only_boundary_cannot_be_overridden(field, value):
         replace(summary, **{field: value})
 
 
-@pytest.mark.parametrize(
-    ("value", "passed"),
-    [(0.009999999, True), (0.01, True), (0.010000001, False)],
-)
-def test_threshold_is_exact_without_hidden_tolerance(value, passed):
-    assert kl._passes_acceptance_threshold(value) is passed
+@pytest.mark.parametrize("value", [0.009999999, 0.01, 0.010000001])
+def test_policy_change_magnitude_does_not_gate_measurement(value):
     summary = kl.compute_trajectory_kl([trajectory_evidence(value)])
-    assert summary.threshold_passed is (
-        summary.trajectory_kl <= summary.acceptance_threshold
-    )
-    assert summary.status == (
-        "complete" if summary.threshold_passed else "threshold_failed"
-    )
-    assert summary.acceptance_threshold == 0.01
+    assert summary.status == "complete"
+    assert summary.trajectory_kl == pytest.approx(value)
+    assert summary.threshold_passed is None
+    assert summary.acceptance_threshold is None
 
 
-def test_incomplete_or_infinite_decision_cannot_produce_partial_scalar():
+def test_incomplete_decision_cannot_produce_partial_scalar():
     state = empty_observation()
     support = kl.build_trusted_action_support(state)
     first, second = support.action_ids
     failed = trajectory_evidence(
         step=2,
         state_before=state,
-        old_distribution={first: 1.0, second: 0.0},
+        old_distribution={first: 1.0},
         new_distribution={first: 0.0, second: 1.0},
     )
     summary = kl.compute_trajectory_kl([trajectory_evidence(0.0, step=1), failed])
-    assert summary.status == "threshold_failed"
+    assert summary.status == "incomplete"
     assert summary.trajectory_kl is None
     assert summary.trace == (0.0, None)
     json.dumps(summary.to_dict(), allow_nan=False)
@@ -996,6 +1031,8 @@ def test_decision_records_are_issuer_bound_and_cannot_be_replaced_or_forged():
 
     with pytest.raises((TypeError, ValueError)):
         replace(record, local_kl=999.0)
+    with pytest.raises(TypeError, match="issued"):
+        copy.copy(record)
 
     forged = object.__new__(kl.DecisionKLRecord)
     for field_name in (
@@ -1048,7 +1085,7 @@ def test_unavailable_support_record_contract_is_bound_to_issuer_snapshot():
         ]
     )
     record = summary.decision_records[0]
-    object.__setattr__(record, "direction", "new||old")
+    object.__setattr__(record, "direction", "old||new")
 
     with pytest.raises(ValueError, match="issued"):
         summary.to_dict()

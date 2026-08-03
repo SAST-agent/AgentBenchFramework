@@ -12,13 +12,12 @@
 不同层级；后两者当前对被测策略一一对应，双方合计的 `ai_operation` 数不能
 替代被测策略 decision 数。
 
-本文其余 `KL(new||old)`、epsilon smoothing 和 episode local-KL sum 方法是
-当前 generic legacy 口径。24_miracle 的目标合同改为 `KL(old||new)`、自然
-对数、无 smoothing、new-policy occupancy、trajectory arithmetic mean、
-`nats / decision`、阈值 `0.01`；其动作表示是状态局部、完整、有序的
+24_miracle 的合同为 `KL(new||old)`、自然对数、双方固定 `epsilon=0.01`
+均匀 smoothing、new-policy occupancy、episode trace arithmetic mean、
+`nats / decision`，且没有 KL 阈值；其动作表示是状态局部、完整、有序的
 `ActionSupport + support_id`，不是固定全局 Boolean mask。权威裁决见
-[24_miracle KL contract authority v1](../games/24_miracle_kl_contract_authority.v1.md)。
-这不表示 schema、runtime、tracking、report 或真实执行已完成迁移。
+[24_miracle KL contract authority v2](../games/24_miracle_kl_contract_authority.v2.md)。
+这不授权真实执行或生产批准。
 
 ## 1. 研究对象与术语
 
@@ -183,7 +182,7 @@ epsilon-regularized 的 $\tilde\pi$。因此严格 estimand 是
 策略的精确 path KL。只有 rollout 也从同一个 $\tilde\pi^k$ 采样时，才能
 使用 regularized 策略 forward trajectory KL 的链式分解解释。
 
-长度归一化的辅助量为：
+主 episode 信息增益为：
 
 $$
 MeanLocalKL_{k,i}
@@ -191,9 +190,9 @@ MeanLocalKL_{k,i}
 \frac{TrajectoryKL_{k,i}}{T_{k,i}}.
 $$
 
-主分析保留每个 episode 的 $TrajectoryKL_{k,i}$；如果一轮有多个 episode，
-可以绘制散点、均值/中位数和置信区间。`MeanLocalKL` 单独展示，不与
-trajectory KL 共用名称或单位。不要把所有迭代过程先压成一个全局均值。
+主分析保留每个 episode 的 $MeanLocalKL_{k,i}$；如果一轮有多个 episode，
+可以绘制散点、均值/中位数和置信区间。trajectory sum 是单位不同的可选
+派生量。不要把所有迭代过程先压成一个全局均值。
 
 ## 5. 时间权重与 $M$ 的含义
 
@@ -417,13 +416,14 @@ local_policy_kl_trace = [local_policy_kl_k(z_0), ..., local_policy_kl_k(z_{T-1})
 `z_t` 只包括该 episode 中真实到达的目标 agent 决策点；不构造不可行的全局测量域，也不把 coding agent 的 act 次数当作策略决策点。主 episode 派生量定义为：
 
 ```text
-trajectory_kl_episode = Σ_t local_policy_kl_k(z_t)
+information_gain = mean_t local_policy_kl_k(z_t)
+local_policy_kl_sum = Σ_t local_policy_kl_k(z_t)
 ```
 
-其单位为 `nats / episode`。`mean_local_policy_kl =
-trajectory_kl_episode / T` 只作为 `nats / decision` 的长度归一化辅助量。
-CI 保留每个 episode 的 trajectory KL 并按 episode/迭代顺序绘图，不先
-压成整个实验的单一平均值。
+`information_gain`（兼容均值字段 `mean_local_policy_kl`）单位为
+`nats / decision`。`local_policy_kl_sum`（兼容 sum 字段
+`trajectory_kl_episode`）单位为 `nats / episode`。CI 保留每个 episode 的
+主 IG 并按 episode/迭代顺序绘图。
 
 `occupancy_shift` 描述同一评测上下文下的状态访问分布变化，可以按时间步保存分布差异，也可以保存 rollout 得到的规范化 state-ID 直方图。它反映策略变化经环境动力学和对手交互后的访问变化，不能与局部策略 KL 直接相加。
 
@@ -442,7 +442,7 @@ KL(q_k || q_{k-1})
   + E[s ~ d_k] KL(π_k(·|s) || π_{k-1}(·|s))
 ```
 
-因此，任意固定参考分布下的 `policy_kl`、occupancy KL 和 trajectory KL 不能被当成三个可独立相加的指标。RL/HL 使用同一合法动作集和概率分布；occupancy 使用规范化 state ID；HL 自己返回 one-hot 分布，framework 再对 RL/HL 统一使用固定 epsilon。优先保存原始 trace 和 occupancy 数据，trajectory KL 是主 episode 派生量。
+因此，任意固定参考分布下的 `policy_kl`、occupancy KL 和 trajectory KL 不能被当成三个可独立相加的指标。RL/HL 使用同一合法动作集和概率分布；occupancy 使用规范化 state ID；HL 自己返回 one-hot 分布，framework 再对 RL/HL 统一使用固定 epsilon。优先保存原始 trace 和 occupancy 数据，trace mean 是主 episode IG。
 
 ## 15.1 Replay-based KL 暂缓决策
 
@@ -452,7 +452,7 @@ KL(q_k || q_{k-1})
 冻结 replay/adapter/policy 身份，并提供跨语言只读查询协议。
 
 本轮不实现 replay-based KL，也不从历史动作推断概率。当前继续使用实际
-rollout 上的局部 KL trace，并按 episode 求和得到 trajectory KL。完整决策
+rollout 上的局部 KL trace、主 episode 算术平均和独立 sum。完整决策
 记录见 `docs/superpowers/specs/2026-07-25-trajectory-kl-replay-decision.md`。
 
 ## 15.2 在线 trajectory-KL 接口
@@ -497,7 +497,7 @@ created_at
 - provider-neutral 的 `ProviderAdapter`、`CodingAgentController` 和本地 workspace manifest/hash/diff snapshotter；
 - canonical state ID、严格 action-ID 支持集和在线新/旧策略对照 session；
 - 完整与 incomplete trajectory-KL 一手事件；
-- 正确区分 `nats / episode` 主值和 `nats / decision` 辅助值的报告，以及
+- 正确区分 `nats / decision` 主 IG 和 `nats / episode` 可选 sum 的报告，以及
   保留 incomplete 缺口的 episode 折线图。
 
 仍由接入方决定的部分：具体 benchmark 测试集内容，以及具体游戏 runtime

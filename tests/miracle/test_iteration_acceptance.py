@@ -9,6 +9,16 @@ import pytest
 from test_iteration_lifecycle import _candidate_strategy, _make_control_bundle
 
 
+@pytest.fixture(autouse=True)
+def _bind_test_only_internal_memory_evidence(monkeypatch):
+    protocol = _protocol()
+    monkeypatch.setattr(
+        protocol,
+        "CURRENT_INTERNAL_MEMORY_EVIDENCE",
+        protocol.INTERNAL_MEMORY_EVIDENCE_BOUND,
+    )
+
+
 def _protocol():
     from agentbench_frame.games.miracle import iteration_protocol
 
@@ -82,22 +92,29 @@ def _store_candidate(tmp_path, monkeypatch, *, audit=None):
 
 
 def _kl_result(protocol, *, episode=1, complete=True):
-    local = 0.02 if complete else None
+    local = 0.0 if complete else None
     return {
         "episode": episode,
         "version_before": "strategy-v0",
         "version_after": "strategy-v1",
         "epsilon": protocol.TRAJECTORY_KL_EPSILON,
+        "measurement_profile": "24_miracle_policy_information_gain_v2",
         "status": "complete" if complete else "incomplete",
         "measurement_status": "complete" if complete else "incomplete",
         "direction": protocol.KL_DIRECTION,
         "log_base": "e",
         "rollout_source": protocol.KL_ROLLOUT_SOURCE,
         "estimand": "epsilon_regularized_local_kl_sum_under_new_policy_occupancy",
+        "information_gain_estimand": "epsilon_regularized_mean_local_policy_kl_under_new_policy_occupancy",
+        "aggregation": "arithmetic_mean",
+        "information_gain_unit": "nats / decision",
+        "local_policy_kl_sum_unit": "nats / episode",
         "decision_steps": 1,
         "trace": [local],
         "trajectory_kl_episode": local,
         "mean_local_policy_kl": local,
+        "information_gain": local,
+        "local_policy_kl_sum": local,
         "errors": [] if complete else ["fake missing old distribution"],
         "metadata": {"fake_only": True},
         "decisions": [
@@ -117,6 +134,64 @@ def _kl_result(protocol, *, episode=1, complete=True):
             }
         ],
     }
+
+
+def test_iteration_rejects_forged_measurement_profile(tmp_path, monkeypatch):
+    protocol = _protocol()
+    monkeypatch.setattr(
+        protocol,
+        "CURRENT_INTERNAL_MEMORY_EVIDENCE",
+        "state_and_internal_memory_bound_to_policy_identity",
+        raising=False,
+    )
+    plan = type(
+        "Plan",
+        (),
+        {
+            "baseline_strategy_version": "strategy-v0",
+            "candidate_strategy_version": "strategy-v1",
+        },
+    )()
+    payload = _kl_result(protocol)
+    payload["measurement_profile"] = "generic_trajectory_kl"
+
+    with pytest.raises(protocol.IterationPreflightError, match="profile"):
+        protocol._validate_trajectory_kl(payload, plan)
+
+
+def test_not_collected_internal_memory_makes_formal_ig_incomplete(
+    tmp_path, monkeypatch
+):
+    protocol = _protocol()
+    monkeypatch.setattr(
+        protocol,
+        "CURRENT_INTERNAL_MEMORY_EVIDENCE",
+        "state_and_internal_memory_bound_to_policy_identity",
+        raising=False,
+    )
+    plan = type(
+        "Plan",
+        (),
+        {
+            "baseline_strategy_version": "strategy-v0",
+            "candidate_strategy_version": "strategy-v1",
+        },
+    )()
+    payload = _kl_result(protocol)
+    payload["measurement_profile"] = (
+        "24_miracle_policy_information_gain_v2"
+    )
+    monkeypatch.setattr(
+        protocol,
+        "CURRENT_INTERNAL_MEMORY_EVIDENCE",
+        "not_collected",
+        raising=False,
+    )
+
+    validated = protocol._validate_trajectory_kl(payload, plan)
+    assert not validated.complete
+    assert validated.information_gain is None
+    assert validated.local_policy_kl_sum is None
 
 
 def _evaluation_bundle(tmp_path, monkeypatch, *, candidate_score=0.75, kl_complete=True):
@@ -165,7 +240,7 @@ def _evaluation_bundle(tmp_path, monkeypatch, *, candidate_score=0.75, kl_comple
         candidate_score=candidate_score,
         terminal_status="complete",
         trajectory_kl=_kl_result(protocol, complete=kl_complete),
-        information_gain=0.1,
+        information_gain=(0.0 if kl_complete else None),
         failure_reason=None if kl_complete else "KL incomplete",
     )
     evidence_manifest = protocol.EvaluationEvidenceManifest.create(
@@ -463,6 +538,17 @@ def test_evaluation_evidence_never_enters_learning_payload_or_experience(
     ).training_evidence_sha256
 
 
+def test_case_information_gain_cannot_override_ordered_trajectory_evidence(
+    tmp_path, monkeypatch
+):
+    protocol = _protocol()
+    data = _evaluation_bundle(tmp_path, monkeypatch)
+    forged = replace(data["evidence"], information_gain=0.5, sha256="")
+
+    with pytest.raises(protocol.IterationPreflightError, match="authoritative ordered KL trace"):
+        forged.validate(data["plan"])
+
+
 def test_score_improvement_with_incomplete_kl_derives_incomplete(tmp_path, monkeypatch):
     protocol = _protocol()
     data = _evaluation_bundle(
@@ -492,6 +578,7 @@ def test_fake_complete_evidence_derives_fake_only_completed(tmp_path, monkeypatc
     assert summary["raw_score"] == 0.5
     assert summary["evo_score"] == 0.75
     assert summary["gain"] == 0.25
+    assert summary["information_gain"] == 0.0
     assert summary["research_manifest_sha256"] == protocol.research_manifest_sha256()
     assert summary["iteration_acceptance_sha256"] == data["acceptance"].sha256
     assert summary["iteration_protocol_version"] == protocol.ITERATION_PROTOCOL_VERSION
