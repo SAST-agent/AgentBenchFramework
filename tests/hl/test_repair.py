@@ -60,6 +60,7 @@ def _brief(branch_index=1):
         preservation_contract="ordinary portal and safety routing stays unchanged",
         expected_change="avoid the repeated capture edge",
         falsifier="the same-seed score margin does not improve",
+        code_symbols=("ai_func", "helper"),
     )
 
 

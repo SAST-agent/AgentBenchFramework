@@ -175,6 +175,9 @@ class HLController:
             Callable[[Mapping[str, Any]], Mapping[str, Any]] | None
         ) = None,
         activation_probe: Callable[..., Mapping[str, Any]] | None = None,
+        candidate_smoke_verifier: (
+            Callable[..., Mapping[str, Any]] | None
+        ) = None,
     ) -> None:
         self.workspace = Path(workspace)
         self.run_root = Path(run_root)
@@ -202,6 +205,7 @@ class HLController:
             }
         )
         self.activation_probe = activation_probe
+        self.candidate_smoke_verifier = candidate_smoke_verifier
         self._iteration_count = 0
         self._coding_agent_acts = 0
         self._sessions: dict[str, str] = {}
@@ -713,7 +717,7 @@ class HLController:
         budget_exhausted = bool(
             invocation.metadata.get("rollout_budget_exhausted")
         )
-        budget_candidate_eligible = (
+        budget_source_eligible = (
             invocation.status == "failed"
             and budget_exhausted
             and version.content_hash != parent_content_hash
@@ -721,8 +725,66 @@ class HLController:
         )
         if budget_exhausted:
             invocation.metadata["accepted_after_budget_exhaustion"] = False
+        provider_pre_smoke_eligible = (
+            invocation.status == "completed" or budget_source_eligible
+        )
+        candidate_smoke_error: str | None = None
+        if provider_pre_smoke_eligible and staged_evaluation:
+            smoke: dict[str, Any]
+            if self.candidate_smoke_verifier is None:
+                candidate_smoke_error = (
+                    "candidate_smoke_failed: framework smoke verifier is unavailable"
+                )
+                smoke = {
+                    "status": "failed",
+                    "error": "framework smoke verifier is unavailable",
+                }
+            else:
+                try:
+                    measured_smoke = dict(
+                        self.candidate_smoke_verifier(
+                            act_id=act_id,
+                            iteration_id=iteration_id,
+                            branch_index=branch_index,
+                            version=version,
+                            parent_version=self.version_store.get(
+                                parent_version_id
+                            ),
+                            workspace=self.workspace,
+                            run_root=self.run_root,
+                        )
+                    )
+                    if measured_smoke.get("status") != "complete":
+                        raise ValueError("verifier did not report complete")
+                    audit_root = self.run_root / "smoke" / act_id
+                    audit_root.mkdir(parents=True, exist_ok=True)
+                    smoke = dict(measured_smoke)
+                    for key, filename in (
+                        ("scenario_path", "smoke_scenario.json"),
+                        ("result_path", "candidate_smoke_result.json"),
+                    ):
+                        source = Path(str(measured_smoke.get(key, "")))
+                        if not source.is_file():
+                            raise ValueError(f"verifier {key} is missing")
+                        target = audit_root / filename
+                        shutil.copy2(source, target)
+                        smoke[key] = str(target)
+                    smoke["status"] = "complete"
+                except Exception as error:
+                    message = (
+                        " ".join(str(error).split())
+                        or error.__class__.__name__
+                    )
+                    candidate_smoke_error = (
+                        f"candidate_smoke_failed: {message}"
+                    )
+                    smoke = {"status": "failed", "error": message}
+            invocation.metadata["candidate_smoke"] = smoke
         provider_eligible = (
-            invocation.status == "completed" or budget_candidate_eligible
+            provider_pre_smoke_eligible and candidate_smoke_error is None
+        )
+        budget_candidate_eligible = (
+            budget_source_eligible and candidate_smoke_error is None
         )
         activation: dict[str, Any] | None = None
         activation_error: str | None = None
@@ -800,7 +862,11 @@ class HLController:
                     else "failed"
                 ),
                 score=None,
-                error=activation_error or invocation.error,
+                error=(
+                    candidate_smoke_error
+                    or activation_error
+                    or invocation.error
+                ),
             )
         )
         if budget_candidate_eligible:
@@ -1750,6 +1816,8 @@ class HLController:
         record = json.loads(path.read_text(encoding="utf-8"))
         record["provider_status"] = invocation.status
         record.update(self._provider_outcome_fields(invocation))
+        if "candidate_smoke" in invocation.metadata:
+            record["candidate_smoke"] = invocation.metadata["candidate_smoke"]
         path.write_text(
             json.dumps(
                 record,

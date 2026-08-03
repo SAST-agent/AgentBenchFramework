@@ -1,10 +1,46 @@
 from pathlib import Path
 
 
+_DEFAULT_SMOKE = object()
+
+
+def _passing_smoke(**values):
+    import json
+
+    scenario = Path(values["workspace"], ".agentbench/smoke_scenario.json")
+    result = Path(values["workspace"], ".agentbench/candidate_smoke_result.json")
+    scenario.parent.mkdir(parents=True, exist_ok=True)
+    scenario.write_text('{"schema_version":"1.0"}\n', encoding="utf-8")
+    result.write_text(
+        json.dumps(
+            {
+                "status": "complete",
+                "policy_sha256": "policy-hash",
+                "scenario_sha256": "scenario-hash",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return {
+        "status": "complete",
+        "scenario_path": str(scenario),
+        "result_path": str(result),
+        "policy_sha256": "policy-hash",
+        "scenario_sha256": "scenario-hash",
+    }
+
+
 def _workspace(root: Path) -> Path:
     workspace = root / "candidate"
     workspace.mkdir()
     (workspace / "agent.py").write_text("VALUE = 0\n", encoding="utf-8")
+    (workspace / "ai.py").write_text(
+        "def helper(state):\n    return 0\n\n"
+        "def ai_func(state):\n"
+        "    return {'action': helper(state), 'memory_id': 'test'}\n",
+        encoding="utf-8",
+    )
     return workspace
 
 
@@ -70,6 +106,7 @@ def _controller(
     patience=3,
     experience=None,
     activation_probe=None,
+    candidate_smoke_verifier=_DEFAULT_SMOKE,
     staged=False,
 ):
     from agentbench_frame.hl.codebase import VersionStore
@@ -82,6 +119,8 @@ def _controller(
     versions = VersionStore(workspace, tmp_path / "versions")
     writer = HLEventWriter(tmp_path / "events.jsonl", run_id="run-test")
     lineage = LineageManager(rollback_patience=patience, rollback_margin=0.05)
+    if candidate_smoke_verifier is _DEFAULT_SMOKE:
+        candidate_smoke_verifier = _passing_smoke
     controller = HLController(
         workspace=workspace,
         run_root=tmp_path,
@@ -102,6 +141,7 @@ def _controller(
         ),
         experience_manager=experience,
         activation_probe=activation_probe,
+        candidate_smoke_verifier=candidate_smoke_verifier,
     )
     return controller
 
@@ -151,6 +191,7 @@ def test_activation_probe_skips_paid_screen_when_parent_trace_actions_do_not_cha
         preservation_contract="other states stay unchanged",
         expected_change="one action changes",
         falsifier="zero action changes",
+        code_symbols=("ai_func", "helper"),
     )
 
     result = controller.run_act(
@@ -213,6 +254,7 @@ def test_activation_probe_allows_changed_candidate_to_reach_paid_screen(tmp_path
         preservation_contract="other states stay unchanged",
         expected_change="one action changes",
         falsifier="zero action changes",
+        code_symbols=("ai_func", "helper"),
     )
 
     result = controller.run_act(
@@ -224,6 +266,123 @@ def test_activation_probe_allows_changed_candidate_to_reach_paid_screen(tmp_path
     assert evaluator.quick_calls == 1
     assert result.candidates[0].evaluation.status == "complete"
     assert result.candidates[0].activation["changed_action_count"] == 2
+
+
+def test_staged_candidate_without_framework_smoke_never_reaches_activation_or_matches(
+    tmp_path,
+):
+    """Catch provider-completed candidates that only claim to have run smoke."""
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+    from agentbench_frame.hl.proposal import BranchBrief
+
+    class Evaluator:
+        def __init__(self):
+            self.calls = 0
+
+        def quick_screen(self, version):
+            self.calls += 1
+            return CandidateEvaluation(status="complete", score=1.0)
+
+        def evaluate_finalist(self, version):
+            return CandidateEvaluation(status="complete", score=1.0)
+
+        def combine_stages(self, quick, finalist):
+            return quick
+
+    activation_calls = []
+    evaluator = Evaluator()
+    controller = _controller(
+        tmp_path,
+        FakeProvider(["VALUE = 1\n"]),
+        evaluator,
+        staged=True,
+        candidate_smoke_verifier=None,
+        activation_probe=lambda **values: activation_calls.append(values),
+    )
+    origin = controller.initialize()
+    brief = BranchBrief(
+        branch_index=0,
+        diagnosis="activation must be proved",
+        mechanism="bounded escape",
+        activation_condition="visible danger",
+        preservation_contract="ordinary routing remains parent-equivalent",
+        expected_change="survive",
+        falsifier="no changed action",
+        code_symbols=("ai_func", "helper"),
+    )
+
+    result = controller.run_act(
+        parent_version_id=origin.version_id,
+        parent_evaluation=CandidateEvaluation(status="complete", score=0.25),
+        branch_briefs=(brief,),
+    )
+
+    candidate = result.candidates[0]
+    assert candidate.evaluation.status == "failed"
+    assert candidate.evaluation.error == (
+        "candidate_smoke_failed: framework smoke verifier is unavailable"
+    )
+    assert activation_calls == []
+    assert evaluator.calls == 0
+
+
+def test_staged_candidate_archives_framework_smoke_before_paid_screen(tmp_path):
+    """Catch successful smoke evidence that is lost or omitted from checkpoints."""
+    import json
+
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+    from agentbench_frame.hl.proposal import BranchBrief
+
+    class Evaluator:
+        def quick_screen(self, version):
+            return CandidateEvaluation(status="complete", score=0.75)
+
+        def evaluate_finalist(self, version):
+            return CandidateEvaluation(status="complete", score=0.75)
+
+        def combine_stages(self, quick, finalist):
+            return quick
+
+    controller = _controller(
+        tmp_path,
+        FakeProvider(["VALUE = 1\n"]),
+        Evaluator(),
+        staged=True,
+        activation_probe=lambda **values: {
+            "decision_count": 10,
+            "changed_action_count": 2,
+            "episodes": [],
+        },
+    )
+    origin = controller.initialize()
+    brief = BranchBrief(
+        branch_index=0,
+        diagnosis="activation must be proved",
+        mechanism="bounded escape",
+        activation_condition="visible danger",
+        preservation_contract="ordinary routing remains parent-equivalent",
+        expected_change="survive",
+        falsifier="no changed action",
+        code_symbols=("ai_func", "helper"),
+    )
+
+    result = controller.run_act(
+        parent_version_id=origin.version_id,
+        parent_evaluation=CandidateEvaluation(status="complete", score=0.25),
+        branch_briefs=(brief,),
+    )
+
+    candidate = result.candidates[0]
+    smoke_root = tmp_path / "smoke" / candidate.act_id
+    assert (smoke_root / "smoke_scenario.json").is_file()
+    assert (smoke_root / "candidate_smoke_result.json").is_file()
+    checkpoint = json.loads(
+        (tmp_path / "checkpoints" / f"{candidate.act_id}.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert checkpoint["candidate_smoke"]["status"] == "complete"
+    assert candidate.evaluation.status == "complete"
 
 
 def test_k_candidates_are_siblings_and_gate_selects_best_complete_score(tmp_path):
@@ -357,6 +516,87 @@ def test_budget_exhausted_candidate_requires_changed_safe_complete_quick_screen(
             ][0]
             assert act["termination_reason"] == "rollout_budget_exhausted"
             assert act["accepted_after_budget_exhaustion"] is True
+
+
+def test_budget_exhausted_staged_candidate_requires_framework_smoke(tmp_path):
+    """Catch partial adoption that bypasses the public-entry smoke gate."""
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+    from agentbench_frame.hl.proposal import BranchBrief
+    from agentbench_frame.tracking.provider import ProviderInvocation
+
+    class BudgetProvider:
+        def invoke(self, *, prompt, workspace, raw_output_path, session_id=None):
+            Path(workspace, "agent.py").write_text("VALUE = 9\n", encoding="utf-8")
+            Path(raw_output_path).parent.mkdir(parents=True, exist_ok=True)
+            Path(raw_output_path).write_text("{}\n", encoding="utf-8")
+            return ProviderInvocation(
+                status="failed",
+                error="SessionBudgetExceeded",
+                metadata={
+                    "rollout_budget_exhausted": True,
+                    "termination_reason": "rollout_budget_exhausted",
+                },
+            )
+
+    class Evaluator:
+        def __init__(self):
+            self.quick_calls = 0
+
+        def quick_screen(self, version):
+            self.quick_calls += 1
+            return CandidateEvaluation(status="complete", score=0.75)
+
+        def evaluate_finalist(self, version):
+            return CandidateEvaluation(status="complete", score=0.75)
+
+        def combine_stages(self, quick, finalist):
+            return quick
+
+    brief = BranchBrief(
+        branch_index=0,
+        diagnosis="provider ended after a valid patch",
+        mechanism="bounded escape",
+        activation_condition="visible danger",
+        preservation_contract="ordinary routing remains parent-equivalent",
+        expected_change="survive",
+        falsifier="no changed action",
+        code_symbols=("ai_func", "helper"),
+    )
+    for name, verifier, accepted in (
+        ("missing", None, False),
+        ("verified", _DEFAULT_SMOKE, True),
+    ):
+        root = tmp_path / name
+        root.mkdir()
+        evaluator = Evaluator()
+        controller = _controller(
+            root,
+            BudgetProvider(),
+            evaluator,
+            staged=True,
+            candidate_smoke_verifier=verifier,
+            activation_probe=lambda **values: {
+                "decision_count": 10,
+                "changed_action_count": 1,
+                "episodes": [],
+            },
+        )
+        origin = controller.initialize()
+
+        result = controller.run_act(
+            parent_version_id=origin.version_id,
+            parent_evaluation=CandidateEvaluation(status="complete", score=0.25),
+            branch_briefs=(brief,),
+        )
+        candidate = result.candidates[0]
+
+        assert candidate.provider.metadata[
+            "accepted_after_budget_exhaustion"
+        ] is accepted
+        assert candidate.provider.status == (
+            "completed" if accepted else "failed"
+        )
+        assert evaluator.quick_calls == (1 if accepted else 0)
 
 
 def test_stream_failed_bootstrap_can_be_recovered_without_second_provider_call(
@@ -521,7 +761,8 @@ def test_staged_k4_evaluation_gives_all_quick_feedback_and_only_two_finalists(tm
             finalist_count=2,
         ),
         rollback=RollbackConfig(),
-        prompt_factory=lambda **values: f"branch={values['branch_index']}",
+            prompt_factory=lambda **values: f"branch={values['branch_index']}",
+            candidate_smoke_verifier=_passing_smoke,
     )
     controller.initialize()
 
@@ -846,8 +1087,9 @@ def test_k4_proposal_cycle_uses_one_parent_and_reducer_sees_all_feedback(tmp_pat
                                     "mechanism": mechanism,
                                     "activation_condition": f"condition-{index}",
                                     "preservation_contract": f"preserve-{index}",
-                                    "expected_change": f"expected-{index}",
-                                    "falsifier": f"falsifier-{index}",
+                                        "expected_change": f"expected-{index}",
+                                        "falsifier": f"falsifier-{index}",
+                                        "code_symbols": ["ai_func", "helper"],
                                 }
                                 for index, mechanism in enumerate(
                                     ("planner", "predictor", "shield", "portal")
@@ -991,8 +1233,9 @@ def test_top_two_linear_repair_keeps_four_branches_and_two_descendants(tmp_path)
                                     "mechanism": ("route", "shield", "portal", "escape")[index],
                                     "activation_condition": f"condition-{index}",
                                     "preservation_contract": f"preserve-{index}",
-                                    "expected_change": f"expected-{index}",
-                                    "falsifier": f"falsifier-{index}",
+                                        "expected_change": f"expected-{index}",
+                                        "falsifier": f"falsifier-{index}",
+                                        "code_symbols": ["ai_func", "helper"],
                                 }
                                 for index in range(4)
                             ]
@@ -1090,8 +1333,9 @@ def test_top_two_linear_repair_keeps_four_branches_and_two_descendants(tmp_path)
             "replay": match.get("replay"),
             "trace": match.get("trace"),
         },
-        research_state_path=research_state_path,
-        research_state_max_bytes=4096,
+            research_state_path=research_state_path,
+            research_state_max_bytes=4096,
+            candidate_smoke_verifier=_passing_smoke,
     )
     origin = controller.initialize(evaluate=True)
     parent_evaluation = controller.evaluator.evaluate(origin)
@@ -1173,8 +1417,9 @@ def test_failed_reducer_output_cannot_mutate_research_state(tmp_path):
                                     "mechanism": ("planner", "predictor", "shield", "portal")[index],
                                     "activation_condition": f"condition-{index}",
                                     "preservation_contract": f"preserve-{index}",
-                                    "expected_change": f"expected-{index}",
-                                    "falsifier": f"falsifier-{index}",
+                                        "expected_change": f"expected-{index}",
+                                        "falsifier": f"falsifier-{index}",
+                                        "code_symbols": ["ai_func", "helper"],
                                 }
                                 for index in range(4)
                             ]
@@ -1305,6 +1550,7 @@ def test_k4_cycle_reuses_valid_persisted_planner_without_second_api_call(tmp_pat
                     "preservation_contract": f"preserve-{index}",
                     "expected_change": f"expected-{index}",
                     "falsifier": f"falsifier-{index}",
+                    "code_symbols": ["ai_func", "helper"],
                 }
                 for index, mechanism in enumerate(
                     ("adapter", "capture filter", "portal controller", "respawn memory")
@@ -1386,6 +1632,7 @@ def test_k4_cycle_keeps_current_parent_when_every_candidate_regresses(tmp_path):
                                     "preservation_contract": f"preserve-{index}",
                                     "expected_change": f"e-{index}",
                                     "falsifier": f"f-{index}",
+                                    "code_symbols": ["ai_func", "helper"],
                                 }
                                 for index in range(4)
                             ]
