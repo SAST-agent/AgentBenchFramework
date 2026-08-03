@@ -149,3 +149,86 @@ def test_dual_opponent_successor_accepts_pareto_dense_progress():
 
     assert decision.search_parent_version_id == "v1"
     assert decision.reason == "robust_dense_progress"
+
+
+def _generic_match(role, result, margin, *, live=True):
+    points = {"win": 1.0, "draw": 0.5, "loss": 0.0}[result]
+    return {
+        "schema_version": "1.0",
+        "game": "fake",
+        "candidate": "candidate",
+        "opponent": "human",
+        "candidate_role": role,
+        "seed": 7,
+        "status": "complete",
+        "result": result,
+        "points": points,
+        "candidate_score": margin,
+        "opponent_score": 0.0,
+        "dense_margin": margin,
+        "terminal_metrics": {},
+        "rounds": 20,
+        "replay": "replay.json",
+        "trace": "trace.jsonl",
+        "faults": [],
+        "live_opponent": live,
+    }
+
+
+def test_diagnostics_accept_generic_match_records_and_group_roles():
+    from agentbench_frame.hl.selection import CandidateDiagnostics
+
+    diagnostics = CandidateDiagnostics.from_matches(
+        version_id="v1",
+        branch_index=0,
+        matches=(
+            _generic_match("north", "win", 3.0),
+            _generic_match("south", "draw", -1.0),
+        ),
+    )
+
+    assert diagnostics.points == 0.75
+    assert diagnostics.mean_score_margin == 1.0
+    assert diagnostics.role_points == (("north", 1.0), ("south", 0.5))
+
+
+def test_successor_rejects_average_gain_that_regresses_one_role():
+    from agentbench_frame.hl.selection import (
+        CandidateDiagnostics,
+        select_linear_successor,
+    )
+
+    parent = CandidateDiagnostics.from_matches(
+        version_id="v0",
+        branch_index=0,
+        matches=(
+            _generic_match("north", "draw", 0.0),
+            _generic_match("south", "draw", 0.0),
+        ),
+    )
+    candidate = CandidateDiagnostics.from_matches(
+        version_id="v1",
+        branch_index=0,
+        matches=(
+            _generic_match("north", "win", 10.0),
+            _generic_match("south", "loss", 10.0),
+        ),
+    )
+
+    decision = select_linear_successor(parent, (candidate,))
+
+    assert decision.search_parent_version_id == "v0"
+    assert decision.reason == "no_progress"
+
+
+def test_replay_only_generic_match_cannot_enter_selection():
+    import pytest
+
+    from agentbench_frame.hl.selection import CandidateDiagnostics
+
+    with pytest.raises(ValueError, match="valid completed matches"):
+        CandidateDiagnostics.from_matches(
+            version_id="v1",
+            branch_index=0,
+            matches=(_generic_match("north", "win", 10.0, live=False),),
+        )
