@@ -296,6 +296,11 @@ class RollmanEvaluator:
             for seed in seeds
         )
 
+    def current_activation_seeds(self) -> tuple[int, ...]:
+        """Return only the rotating quick-screen seeds for action probes."""
+
+        return self._current_training_seeds()
+
     def _current_training_seeds(self) -> tuple[int, ...]:
         start = (
             (self.training_cycle - 1) * self.training_rotation_stride

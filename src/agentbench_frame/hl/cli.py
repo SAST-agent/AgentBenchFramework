@@ -40,22 +40,6 @@ def _json(value: Any) -> None:
     print(json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2))
 
 
-def _parent_activation_seeds(
-    evaluation: CandidateEvaluation,
-) -> tuple[int, ...] | None:
-    """Return the ordered seed set represented by this parent evaluation."""
-
-    seeds: list[int] = []
-    for match in evaluation.matches:
-        seed = match.get("seed")
-        if match.get("status", "complete") != "complete" or seed is None:
-            continue
-        normalized = int(seed)
-        if normalized not in seeds:
-            seeds.append(normalized)
-    return tuple(seeds) or None
-
-
 def _ensure_replay_summary(
     *,
     replay: str | Path,
@@ -1959,10 +1943,9 @@ def _run_real(
         }
 
     def activation_probe(**values: Any) -> dict[str, Any]:
-        parent_evaluation = values["parent_evaluation"]
         return measurement_runner.measure_activation(
             **values,
-            seeds=_parent_activation_seeds(parent_evaluation),
+            seeds=evaluator.current_activation_seeds(),
         )
 
     controller = HLController(
