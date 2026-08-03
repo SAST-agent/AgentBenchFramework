@@ -46,7 +46,11 @@ def _ensure_replay_summary(
 ) -> Path:
     replay_path = Path(replay).resolve()
     summary_path = replay_path.with_name("summary.md")
-    if summary_path.is_file():
+    if (
+        summary_path.is_file()
+        and replay_path.is_file()
+        and summary_path.stat().st_mtime_ns >= replay_path.stat().st_mtime_ns
+    ):
         return summary_path
     completed = subprocess.run(
         [
@@ -70,6 +74,29 @@ def _ensure_replay_summary(
         raise ValueError("replay summary exceeds 64 KiB")
     summary_path.write_text(completed.stdout, encoding="utf-8")
     return summary_path
+
+
+def _replay_summaries_ready(
+    matches: Any,
+    *,
+    summarizer: str | Path,
+) -> bool:
+    """Return whether every complete match has usable replay evidence."""
+
+    for match in matches:
+        if match.get("status") != "complete":
+            continue
+        replay = match.get("replay")
+        if replay is None:
+            return False
+        try:
+            _ensure_replay_summary(
+                replay=str(replay),
+                summarizer=summarizer,
+            )
+        except (OSError, ValueError, subprocess.SubprocessError):
+            return False
+    return True
 
 
 def _ensure_opponent_distillation(
@@ -2727,10 +2754,22 @@ def _run_real(
                     and match.get("seed") is not None
                 }
                 expected_cases = set(evaluator.current_learning_cases())
+                replay_summaries_ready = (
+                    rotating_parent_evaluation is not None
+                    and _replay_summaries_ready(
+                        rotating_parent_evaluation.matches,
+                        summarizer=(
+                            bundle.files["replay_skill"].parent
+                            / "scripts"
+                            / "summarize_replay.py"
+                        ),
+                    )
+                )
                 if (
                     rotating_parent_evaluation is None
                     or rotating_parent_evaluation.status != "complete"
                     or existing_cases != expected_cases
+                    or not replay_summaries_ready
                 ):
                     rotating_parent_evaluation = evaluator.evaluate(
                         rotating_parent

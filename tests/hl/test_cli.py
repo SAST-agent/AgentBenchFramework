@@ -472,6 +472,29 @@ def test_gate_saturated_selected_head_is_still_eligible_for_certification():
     assert eligible == "v000001"
 
 
+def test_replay_summary_readiness_rejects_corrupt_evidence(monkeypatch):
+    from agentbench_frame.hl import cli
+
+    calls = []
+
+    def summarize(*, replay, summarizer):
+        calls.append(str(replay))
+        if str(replay).endswith("broken.jsonl"):
+            raise ValueError("missing terminal frame")
+        return replay
+
+    monkeypatch.setattr(cli, "_ensure_replay_summary", summarize)
+
+    assert not cli._replay_summaries_ready(
+        (
+            {"status": "complete", "replay": "valid.jsonl"},
+            {"status": "complete", "replay": "broken.jsonl"},
+        ),
+        summarizer="summarize.py",
+    )
+    assert calls == ["valid.jsonl", "broken.jsonl"]
+
+
 def test_resume_accepts_zero_new_model_acts(monkeypatch):
     from agentbench_frame.hl import cli
 
