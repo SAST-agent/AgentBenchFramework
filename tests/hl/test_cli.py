@@ -648,6 +648,30 @@ def test_resume_accepts_zero_new_model_acts(monkeypatch):
     )
 
 
+def test_resume_parses_explicit_provider_compatibility_change(monkeypatch):
+    from agentbench_frame.hl import cli
+
+    monkeypatch.setattr(
+        cli,
+        "_cmd_resume",
+        lambda args: int(args.allow_provider_compatibility_change),
+    )
+
+    assert (
+        cli.main(
+            [
+                "resume",
+                "--config",
+                str(CONFIG),
+                "--run-dir",
+                "unused",
+                "--allow-provider-compatibility-change",
+            ]
+        )
+        == 1
+    )
+
+
 def test_resume_can_replan_an_interrupted_proposal_cycle(tmp_path, monkeypatch):
     from agentbench_frame.hl import cli
     from agentbench_frame.hl.local_config import LocalHLConfig

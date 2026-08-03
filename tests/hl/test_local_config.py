@@ -239,6 +239,7 @@ def test_antwar2_positive_control_config_is_k4_and_profile_driven(monkeypatch):
     assert config.run.game == "30_antwar2"
     assert config.run.iteration.candidates_per_cycle == 4
     assert config.run.iteration.planner_enabled is True
+    assert config.run.provider.structured_output_mode == "validated_file"
     assert config.run.selection.source_size_penalty is False
     assert config.run.rollback.enabled is True
     assert config.run.measurement.epsilon == 0.05

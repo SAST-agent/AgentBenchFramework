@@ -4,6 +4,34 @@ import unittest
 
 
 class HLEventTests(unittest.TestCase):
+    def test_provider_compatibility_selection_is_strict_and_auditable(self):
+        from agentbench_frame.hl.events import HLEventWriter, read_events
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as directory:
+            path = f"{directory}/events.jsonl"
+            writer = HLEventWriter(path, run_id="run-provider-mode")
+            writer.write(
+                "provider_compatibility_selected",
+                field="run.provider.structured_output_mode",
+                frozen_value="native_schema",
+                active_value="validated_file",
+                reason="provider_native_schema_incompatible",
+            )
+
+            event = read_events(path)[0]
+            self.assertEqual(event["frozen_value"], "native_schema")
+            self.assertEqual(event["active_value"], "validated_file")
+            with self.assertRaisesRegex(ValueError, "unknown fields"):
+                writer.write(
+                    "provider_compatibility_selected",
+                    field="run.provider.structured_output_mode",
+                    frozen_value="native_schema",
+                    active_value="validated_file",
+                    reason="provider_native_schema_incompatible",
+                    invented=True,
+                )
+
     def test_hard_opponent_certification_fields_are_schema_valid(self):
         from agentbench_frame.hl.events import HLEventWriter, read_events
         from tempfile import TemporaryDirectory

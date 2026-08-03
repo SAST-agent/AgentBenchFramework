@@ -166,6 +166,41 @@ def test_lineage_rebuild_applies_completed_retry_to_incomplete_version():
     assert lineage.champion_version_id == "v0"
 
 
+def test_lineage_rebuild_keeps_unselected_failed_sibling_off_head():
+    from agentbench_frame.hl.lineage import LineageManager
+
+    lineage = LineageManager.from_events(
+        [
+            {
+                "event_type": "version_created",
+                "version_id": "v0",
+                "parent_version_id": None,
+                "evaluation_status": "complete",
+                "benchmark_score": 0.0,
+            },
+            {"event_type": "candidate_selected", "version_id": "v0"},
+            {
+                "event_type": "version_created",
+                "version_id": "v1",
+                "parent_version_id": "v0",
+                "evaluation_status": "failed",
+                "benchmark_score": None,
+            },
+            {
+                "event_type": "evaluation_completed",
+                "version_id": "v1",
+                "status": "failed",
+                "benchmark_score": None,
+            },
+        ]
+    )
+
+    assert lineage.lineage_head_version_id == "v0"
+    assert lineage.champion_version_id == "v0"
+    assert lineage.latest_attempt_version_id == "v1"
+    assert lineage.versions["v1"].status == "failed"
+
+
 def test_finalized_rollback_event_restores_target_as_durable_lineage_head():
     from agentbench_frame.hl.lineage import LineageManager
 

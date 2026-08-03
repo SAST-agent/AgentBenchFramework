@@ -98,7 +98,7 @@ Expected: all tests pass.
 
 **Files:**
 - Modify: `configs/hl/30_antwar2-positive-control.yaml`
-- Test: `tests/hl/test_antwar2_profile.py`
+- Test: `tests/hl/test_local_config.py`
 - Test: `tests/hl/test_controller.py`
 
 **Interfaces:**
@@ -120,7 +120,7 @@ Use the existing fake non-structured provider fixture to assert that a valid wor
 
 - [ ] **Step 3: Run focused tests and confirm failure**
 
-Run: `.venv/bin/python -m pytest tests/hl/test_antwar2_profile.py tests/hl/test_controller.py -q`
+Run: `.venv/bin/python -m pytest tests/hl/test_local_config.py tests/hl/test_controller.py -q`
 
 Expected: AntWar2 mode assertion fails until YAML is configured; strict file-validation tests remain green or expose a regression.
 
@@ -134,7 +134,7 @@ structured_output_mode: "validated_file"
 
 - [ ] **Step 5: Run focused tests and confirm success**
 
-Run: `.venv/bin/python -m pytest tests/hl/test_antwar2_profile.py tests/hl/test_controller.py -q`
+Run: `.venv/bin/python -m pytest tests/hl/test_local_config.py tests/hl/test_controller.py -q`
 
 Expected: all tests pass.
 
@@ -155,13 +155,13 @@ Run: `.venv/bin/python -m pytest tests/hl -q`
 
 Expected: all tests pass.
 
-- [ ] **Step 2: Verify the frozen-run compatibility requirement**
+- [ ] **Step 2: Implement and verify the frozen-run compatibility requirement**
 
-Because the active run's frozen configuration predates the explicit field, normalize the default to `native_schema`. Create a dedicated resume override only if the CLI's exact frozen-config guard rejects the AntWar2 mode change; the override must be explicit, recorded, and tested rather than silently mutating `run-config.json`.
+Normalize a frozen run that lacks the field to `native_schema`. Add `resume --allow-provider-compatibility-change`; it permits only the `structured_output_mode` difference, rejects any additional difference, leaves `run-config.json` immutable, and appends a `provider_compatibility_selected` event with `field`, `frozen_value`, `active_value`, and `reason`.
 
 - [ ] **Step 3: Run one AntWar2 planner act**
 
-Run the existing `resume --acts 1` command with `AGENTBENCH_SAST_ROOT` and `ANTWAR2_POSITIVE_CONTROL_ROOT` set. Confirm the Codex command omits `--output-schema`, writes `.agentbench/branch_briefs.json`, and the controller persists four valid briefs.
+Run the existing `resume --acts 1 --allow-provider-compatibility-change` command with `AGENTBENCH_SAST_ROOT` and `ANTWAR2_POSITIVE_CONTROL_ROOT` set. Confirm the Codex command omits `--output-schema`, writes `.agentbench/branch_briefs.json`, and the controller persists four valid briefs.
 
 - [ ] **Step 4: Continue the k=4 cycle**
 
@@ -170,6 +170,6 @@ Track four candidate acts, smoke tests, learning matches, reducer selection, Exp
 - [ ] **Step 5: Commit implementation**
 
 ```bash
-git add src/agentbench_frame/hl/config.py src/agentbench_frame/hl/provider.py configs/hl/30_antwar2-positive-control.yaml tests/hl/test_config.py tests/hl/test_provider.py tests/hl/test_antwar2_profile.py tests/hl/test_controller.py
+git add src/agentbench_frame/hl/config.py src/agentbench_frame/hl/provider.py configs/hl/30_antwar2-positive-control.yaml tests/hl/test_config.py tests/hl/test_provider.py tests/hl/test_local_config.py tests/hl/test_controller.py
 git commit -m "fix: support validated-file provider outputs"
 ```

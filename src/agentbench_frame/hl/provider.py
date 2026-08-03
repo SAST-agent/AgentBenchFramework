@@ -43,7 +43,7 @@ def _tool_limits(prompt: str) -> tuple[int | None, int | None]:
             "candidate-context-contract: generic-v1",
         )
     ):
-        return 6, 12
+        return 3, 12
     if prompt.startswith((
         "# HL bootstrap",
         "# HL iteration",
@@ -143,7 +143,6 @@ class CodexSessionProvider:
     """Invoke official ``codex exec`` and resume its persisted session."""
 
     provider_name = "codex"
-    supports_structured_output = True
 
     def __init__(
         self,
@@ -164,6 +163,10 @@ class CodexSessionProvider:
         self.idle_timeout_s = idle_timeout_s
         self._rate_limit_resume_at = 0.0
         self._write_config()
+
+    @property
+    def supports_structured_output(self) -> bool:
+        return self.config.structured_output_mode == "native_schema"
 
     def _write_config(self) -> None:
         lines = [
@@ -242,11 +245,14 @@ class CodexSessionProvider:
         executable = self.config.executable
         model_args = ["-m", self.config.model] if self.config.model else []
         structured_args: list[str] = []
-        if output_schema_path is not None:
+        if self.supports_structured_output and output_schema_path is not None:
             structured_args.extend(
                 ["--output-schema", str(Path(output_schema_path))]
             )
-        if output_last_message_path is not None:
+        if (
+            self.supports_structured_output
+            and output_last_message_path is not None
+        ):
             structured_args.extend(
                 ["--output-last-message", str(Path(output_last_message_path))]
             )
@@ -354,6 +360,7 @@ class CodexSessionProvider:
             "cli_version": actual_version,
             "expected_cli_version": expected_version,
             "provider_fingerprint": self.fingerprint,
+            "structured_output_mode": self.config.structured_output_mode,
             "rollout_budget_enabled": budget_enabled,
             "rollout_budget": json.loads(
                 json.dumps(dataclasses.asdict(self.config.rollout_budget))
@@ -545,6 +552,7 @@ class CodexSessionProvider:
                 {
                     "command": command,
                     "provider_fingerprint": self.fingerprint,
+                    "structured_output_mode": self.config.structured_output_mode,
                     "partial_output_persisted": True,
                     "timeout_kind": timeout_kind,
                     "access_policy_violations": violations,
@@ -582,6 +590,7 @@ class CodexSessionProvider:
                 "return_code": completed.returncode,
                 "stderr": completed.stderr or "",
                 "provider_fingerprint": self.fingerprint,
+                "structured_output_mode": self.config.structured_output_mode,
                 "resumed_session_id": session_id,
             }
         )
@@ -822,6 +831,9 @@ class CodexSessionProvider:
         )
         result.metadata["access_policy_violations"] = violations
         result.metadata["provider_fingerprint"] = self.fingerprint
+        result.metadata["structured_output_mode"] = (
+            self.config.structured_output_mode
+        )
         result.metadata["recovered_from_persisted_output"] = True
         result.raw_output_ref = str(raw_path)
         if violations:

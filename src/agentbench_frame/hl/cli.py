@@ -925,6 +925,8 @@ def _pending_planner_recovery(
     *,
     provider: Any,
     workspace: str | Path,
+    expected_candidate_count: int = 4,
+    policy_entry_symbol: str = "ai_func",
 ) -> Any | None:
     """Recover a validated planner artifact from an interrupted proposal cycle."""
 
@@ -962,7 +964,11 @@ def _pending_planner_recovery(
         persisted = Path(str(completed_planner["branch_briefs"]))
         if not persisted.is_file():
             return None
-        load_branch_briefs(persisted, expected_count=4)
+        load_branch_briefs(
+            persisted,
+            expected_count=expected_candidate_count,
+            required_entry_symbol=policy_entry_symbol,
+        )
         workspace_briefs = Path(workspace) / ".agentbench" / "branch_briefs.json"
         workspace_briefs.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(persisted, workspace_briefs)
@@ -992,7 +998,11 @@ def _pending_planner_recovery(
     briefs_path = Path(workspace) / ".agentbench" / "branch_briefs.json"
     if raw_path is None or not raw_path.is_file() or not briefs_path.is_file():
         return None
-    load_branch_briefs(briefs_path, expected_count=4)
+    load_branch_briefs(
+        briefs_path,
+        expected_count=expected_candidate_count,
+        required_entry_symbol=policy_entry_symbol,
+    )
     recovered = provider.recover_completed_output(
         raw_output_path=raw_path,
         workspace=workspace,
@@ -1492,6 +1502,9 @@ def _cmd_resume(args: argparse.Namespace) -> int:
                 acts=args.acts,
                 resume=True,
                 provider_environment=provider_environment,
+                allow_provider_compatibility_change=(
+                    args.allow_provider_compatibility_change
+                ),
             )
         )
         return 0
@@ -3662,6 +3675,10 @@ def main(argv: list[str] | None = None) -> int:
     resume.add_argument("--workspace")
     resume.add_argument("--acts", type=int)
     resume.add_argument("--replan-pending", action="store_true")
+    resume.add_argument(
+        "--allow-provider-compatibility-change",
+        action="store_true",
+    )
     resume.set_defaults(handler=_cmd_resume)
     prepare = sub.add_parser("prepare-opponents")
     prepare.add_argument("--config", required=True)

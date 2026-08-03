@@ -30,6 +30,7 @@ The selected mode is included in the frozen run configuration, provider fingerpr
 - Transport errors remain provider attempts and do not consume a valid coding-agent act when no tokens or tools were used.
 - A completed model request with a missing or invalid JSON artifact is a coding-agent failure and is recorded as such.
 - Resume reconstructs the selected mode from the frozen run configuration and cannot silently switch protocols.
+- `resume --allow-provider-compatibility-change` permits only a `structured_output_mode` transition. Every other frozen-config difference remains an error, and the accepted transition is appended as a `provider_compatibility_selected` event.
 
 ## AntWar2 Configuration
 

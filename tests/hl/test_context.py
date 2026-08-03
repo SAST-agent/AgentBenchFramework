@@ -249,6 +249,46 @@ def _profile_context(tmp_path):
     )
 
 
+def test_profile_candidate_packet_requires_immediate_edit_without_duplicate_reads(
+    tmp_path,
+):
+    context = _profile_context(tmp_path)
+    packet = tmp_path / "candidate_input-b00.json"
+    packet.write_text("{}\n", encoding="utf-8")
+
+    prompt = context.build_candidate_prompt(
+        act_id="act-b00",
+        branch_index=0,
+        branch_count=4,
+        parent_version_id="v0",
+        workspace=tmp_path / "candidate",
+        game_digest_path=tmp_path / "digest.json",
+        research_state_path=tmp_path / "research.json",
+        replay_evidence=[],
+        previous_measurements={},
+        experience_path=tmp_path / "experience" / "SKILL.md",
+        branch_brief={
+            "branch_index": 0,
+            "diagnosis": "round 8 camp damage",
+            "mechanism": "visible counterattack",
+            "activation_condition": "camp hp decreased",
+            "preservation_contract": "retain parent otherwise",
+            "expected_change": "larger margin",
+            "falsifier": "no margin gain",
+            "code_symbols": ["AI.choose_operations", "AI.counterattack"],
+        },
+        candidate_input_path=packet,
+    )
+
+    assert "First tool call" in prompt
+    assert "Second tool call" in prompt
+    assert "Experience Skill is embedded" in prompt
+    assert "do not read Experience Skill separately" in prompt
+    assert "Do not run `sed`, `cat ai.py`, `rg`, `find`, or `ls`" in prompt
+    assert "candidate_code_slices" in prompt
+    assert "same file-change tool call" in prompt
+
+
 @pytest.mark.parametrize("kind", ["bootstrap", "candidate", "repair", "reducer"])
 def test_all_profile_prompts_are_game_neutral(tmp_path, kind):
     context = _profile_context(tmp_path)

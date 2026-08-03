@@ -13,6 +13,7 @@ run:
     disable_response_storage: true
     network_access: "enabled"
     context_mode: "fresh"
+    structured_output_mode: "validated_file"
     rollout_budget:
       enabled: true
       limit_tokens: 50000

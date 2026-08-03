@@ -1,3 +1,143 @@
+import pytest
+import json
+
+
+def _frozen_config(*, mode=None, hash_value="hash-a", max_acts=None):
+    provider = {"kind": "codex"}
+    if mode is not None:
+        provider["structured_output_mode"] = mode
+    return {
+        "schema_version": "1.0",
+        "source_config": "/experiment/config.yaml",
+        "source_config_sha256": hash_value,
+        "run": {
+            "game": "30_antwar2",
+            "provider": provider,
+            "iteration": {"max_acts": max_acts},
+        },
+        "paths": {"workspace": "/experiment/candidate"},
+    }
+
+
+def test_resume_provider_compatibility_allows_only_explicit_mode_change():
+    from agentbench_frame.hl.profile_runner import _resume_compatibility_transition
+
+    transition = _resume_compatibility_transition(
+        _frozen_config(mode=None, hash_value="hash-old"),
+        _frozen_config(mode="validated_file", hash_value="hash-new"),
+        allow_provider_compatibility_change=True,
+    )
+
+    assert transition == {
+        "field": "run.provider.structured_output_mode",
+        "frozen_value": "native_schema",
+        "active_value": "validated_file",
+        "reason": "provider_native_schema_incompatible",
+    }
+
+
+def test_resume_provider_compatibility_rejects_implicit_or_broader_change():
+    from agentbench_frame.hl.profile_runner import _resume_compatibility_transition
+
+    frozen = _frozen_config(mode=None, hash_value="hash-old")
+    current = _frozen_config(mode="validated_file", hash_value="hash-new")
+    with pytest.raises(ValueError, match="differs from frozen"):
+        _resume_compatibility_transition(
+            frozen,
+            current,
+            allow_provider_compatibility_change=False,
+        )
+
+    broader = _frozen_config(
+        mode="validated_file",
+        hash_value="hash-new",
+        max_acts=9,
+    )
+    with pytest.raises(ValueError, match="only permits"):
+        _resume_compatibility_transition(
+            frozen,
+            broader,
+            allow_provider_compatibility_change=True,
+        )
+
+
+def test_profile_pending_cycle_recovery_uses_latest_attempt_boundary(tmp_path):
+    from agentbench_frame.hl.profile_runner import _pending_cycle_recoveries
+
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    persisted = tmp_path / "run" / "proposals" / "iter-000001" / "new.json"
+    persisted.parent.mkdir(parents=True)
+    persisted.write_text(
+        json.dumps(
+            [
+                {
+                    "branch_index": index,
+                    "diagnosis": f"diagnosis-{index}",
+                    "mechanism": (
+                        "tower recycling",
+                        "opponent spell counter",
+                        "proactive attack lane",
+                        "resource conversion",
+                    )[index],
+                    "activation_condition": f"condition-{index}",
+                    "preservation_contract": f"preserve-{index}",
+                    "expected_change": f"expected-{index}",
+                    "falsifier": f"falsifier-{index}",
+                    "code_symbols": ["AI.choose_operations", "AI.choose_bundle"],
+                }
+                for index in range(4)
+            ]
+        ),
+        encoding="utf-8",
+    )
+    historical = [
+        {
+            "event_type": "proposal_cycle_started",
+            "iteration_id": "iter-000001",
+            "parent_version_id": "v000000",
+        },
+        {
+            "event_type": "planner_completed",
+            "iteration_id": "iter-000001",
+            "act_id": "act-old-planner",
+            "branch_briefs": str(tmp_path / "old.json"),
+        },
+        {
+            "event_type": "act_completed",
+            "iteration_id": "iter-000001",
+            "act_id": "act-old-b00",
+            "status": "failed",
+            "branch_index": 0,
+        },
+        {
+            "event_type": "proposal_cycle_started",
+            "iteration_id": "iter-000001",
+            "parent_version_id": "v000000",
+        },
+        {
+            "event_type": "planner_completed",
+            "iteration_id": "iter-000001",
+            "act_id": "act-new-planner",
+            "branch_briefs": str(persisted),
+        },
+    ]
+
+    recoveries = _pending_cycle_recoveries(
+        historical,
+        provider=object(),
+        workspace=workspace,
+        version_store=object(),
+        evaluations_by_version={},
+        expected_candidate_count=4,
+        policy_entry_symbol="AI.choose_operations",
+    )
+
+    assert recoveries["planner_recovery"].metadata["act_id"] == "act-new-planner"
+    assert recoveries["candidate_recoveries"] == {}
+    assert recoveries["repair_recoveries"] == {}
+
+
 def test_resume_progress_reconstructs_best_archive_and_stagnation():
     from agentbench_frame.hl.profile_runner import _resume_progress
 

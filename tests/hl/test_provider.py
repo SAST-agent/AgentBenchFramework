@@ -45,6 +45,7 @@ def test_structured_planner_command_uses_schema_output_and_phase_reasoning(tmp_p
     from agentbench_frame.hl.provider import CodexSessionProvider
 
     provider = CodexSessionProvider(_provider_config(), run_root=tmp_path)
+    assert provider.supports_structured_output is True
     schema = tmp_path / "planner.schema.json"
     output = tmp_path / "planner.json"
 
@@ -62,6 +63,31 @@ def test_structured_planner_command_uses_schema_output_and_phase_reasoning(tmp_p
     assert command[4] == "read-only"
     assert command[command.index("--output-schema") + 1] == str(schema)
     assert command[command.index("--output-last-message") + 1] == str(output)
+    assert "model_reasoning_effort=\"high\"" in command
+
+
+def test_validated_file_mode_omits_native_schema_output_arguments(tmp_path):
+    from agentbench_frame.hl.provider import CodexSessionProvider
+
+    provider = CodexSessionProvider(
+        _provider_config(structured_output_mode="validated_file"),
+        run_root=tmp_path,
+    )
+    schema = tmp_path / "planner.schema.json"
+    output = tmp_path / "planner.json"
+
+    command = provider.build_command(
+        "write the validated workspace artifact",
+        tmp_path / "candidate",
+        session_id=None,
+        output_schema_path=schema,
+        output_last_message_path=output,
+        reasoning_effort="high",
+    )
+
+    assert provider.supports_structured_output is False
+    assert "--output-schema" not in command
+    assert "--output-last-message" not in command
     assert "model_reasoning_effort=\"high\"" in command
 
 
@@ -162,6 +188,7 @@ def test_preflight_verifies_exact_cli_and_generated_feature_config(tmp_path):
 
     assert facts["cli_version"] == "codex-cli 0.146.0-alpha.9.2"
     assert facts["rollout_budget_enabled"] is True
+    assert facts["structured_output_mode"] == "native_schema"
     persisted = json.loads(
         (tmp_path / "run" / "provider-preflight.json").read_text(encoding="utf-8")
     )
@@ -365,6 +392,7 @@ def test_fake_codex_invocation_retains_jsonl_session_and_exact_usage(tmp_path):
 
     assert result.status == "completed"
     assert result.metadata["thread_id"] == "thread-fake"
+    assert result.metadata["structured_output_mode"] == "native_schema"
     assert result.usage.prompt_tokens == 20
     assert result.usage.cached_input_tokens == 15
     assert result.usage.completion_tokens == 7
@@ -507,7 +535,7 @@ def test_coding_provider_stops_before_edit_after_hard_tool_grace_limit(
     )
 
 
-def test_rollman_v2_candidate_stops_after_six_pre_edit_tool_calls(tmp_path):
+def test_candidate_packet_stops_after_three_pre_edit_tool_calls(tmp_path):
     """Catch packet acts that spend the saved context budget browsing again."""
     from agentbench_frame.hl.provider import CodexSessionProvider
 
@@ -542,7 +570,7 @@ def test_rollman_v2_candidate_stops_after_six_pre_edit_tool_calls(tmp_path):
     )
 
     assert result.status == "failed"
-    assert "pre-edit tool call limit 6" in str(result.error)
+    assert "pre-edit tool call limit 3" in str(result.error)
 
 
 def test_generic_profile_acts_use_bounded_tool_budgets():
@@ -550,7 +578,7 @@ def test_generic_profile_acts_use_bounded_tool_budgets():
 
     assert _tool_limits(
         "# Generic HL candidate act-b00\ncandidate-context-contract: generic-v1"
-    ) == (6, 12)
+    ) == (3, 12)
     assert _tool_limits("# Generic HL bootstrap act-bootstrap") == (20, 28)
     assert _tool_limits("# Generic HL scoped repair act-repair") == (14, 20)
     assert _tool_limits("# Generic HL hypothesis planner act-planner") == (None, 8)

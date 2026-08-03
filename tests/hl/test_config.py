@@ -2,6 +2,42 @@ import unittest
 
 
 class HLConfigTests(unittest.TestCase):
+    def test_structured_output_mode_is_strict_and_serializable(self):
+        from agentbench_frame.hl.config import HLRunConfig
+
+        native = HLRunConfig.from_mapping(
+            {"game": "29_rollman", "provider": {"kind": "codex"}}
+        )
+        file_mode = HLRunConfig.from_mapping(
+            {
+                "game": "30_antwar2",
+                "provider": {
+                    "kind": "codex",
+                    "structured_output_mode": "validated_file",
+                },
+            }
+        )
+
+        self.assertEqual(native.provider.structured_output_mode, "native_schema")
+        self.assertEqual(
+            file_mode.provider.structured_output_mode,
+            "validated_file",
+        )
+        self.assertEqual(
+            file_mode.to_dict()["provider"]["structured_output_mode"],
+            "validated_file",
+        )
+        with self.assertRaisesRegex(ValueError, "structured_output_mode"):
+            HLRunConfig.from_mapping(
+                {
+                    "game": "30_antwar2",
+                    "provider": {
+                        "kind": "codex",
+                        "structured_output_mode": "auto",
+                    },
+                }
+            )
+
     def test_native_rollout_budget_is_strict_and_serializable(self):
         from agentbench_frame.hl.config import HLRunConfig
 

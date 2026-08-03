@@ -57,6 +57,7 @@ KNOWN_EVENT_TYPES = frozenset(
         "repair_completed",
         "branch_representative_selected",
         "candidate_activation_measured",
+        "provider_compatibility_selected",
     }
 )
 _SECRET_KEYS = frozenset({"api_key", "authorization", "access_token", "secret"})
@@ -66,6 +67,10 @@ _COMMON_FIELDS = {
 }
 _EVENT_FIELDS = {
     "run_started": ({"iteration_config"}, {"game"}),
+    "provider_compatibility_selected": (
+        {"field", "frozen_value", "active_value", "reason"},
+        set(),
+    ),
     "origin_imported": (
         {
             "source_run_id",

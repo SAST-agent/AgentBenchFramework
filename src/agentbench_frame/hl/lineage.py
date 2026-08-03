@@ -94,6 +94,9 @@ class LineageManager:
                             if event.get("benchmark_score") is None
                             else float(event["benchmark_score"])
                         ),
+                        select=(
+                            manager.lineage_head_version_id == version_id
+                        ),
                     )
             elif event_type == "rollback_selected":
                 decision = manager.force_parent(
@@ -152,6 +155,7 @@ class LineageManager:
         *,
         status: str,
         score: Optional[float],
+        select: bool = True,
     ) -> bool:
         """Finalize a new evaluation attempt for an existing incomplete version."""
 
@@ -171,7 +175,7 @@ class LineageManager:
             status,
             score,
         )
-        return self.select_version(version_id)
+        return self.select_version(version_id) if select else False
 
     def select_version(self, version_id: str) -> bool:
         if version_id not in self.versions:

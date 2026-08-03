@@ -19,6 +19,7 @@ from agentbench_frame.hl.events import HLEventWriter, read_events
 from agentbench_frame.hl.experience import ExperienceManager
 from agentbench_frame.hl.game_profile import HLGameBindings, get_game_profile
 from agentbench_frame.hl.lineage import LineageManager
+from agentbench_frame.hl.config import HLRunConfig
 from agentbench_frame.hl.local_config import LocalHLConfig
 from agentbench_frame.hl.match_record import MatchRecord
 from agentbench_frame.hl.proposal import (
@@ -49,6 +50,115 @@ def frozen_config(config: LocalHLConfig) -> dict[str, Any]:
             },
         }
     )
+
+
+def _normalized_frozen_config(value: Mapping[str, Any]) -> dict[str, Any]:
+    normalized = _json_native(value)
+    normalized["run"] = _json_native(
+        HLRunConfig.from_mapping(normalized["run"]).to_dict()
+    )
+    return normalized
+
+
+def _resume_compatibility_transition(
+    frozen: Mapping[str, Any],
+    active: Mapping[str, Any],
+    *,
+    allow_provider_compatibility_change: bool,
+) -> dict[str, str] | None:
+    frozen_normalized = _normalized_frozen_config(frozen)
+    active_normalized = _normalized_frozen_config(active)
+    if frozen_normalized == active_normalized:
+        return None
+    if not allow_provider_compatibility_change:
+        raise ValueError("resume config differs from frozen run config")
+
+    frozen_mode = str(
+        frozen_normalized["run"]["provider"]["structured_output_mode"]
+    )
+    active_mode = str(
+        active_normalized["run"]["provider"]["structured_output_mode"]
+    )
+    if frozen_mode == active_mode:
+        raise ValueError(
+            "provider compatibility override only permits "
+            "run.provider.structured_output_mode"
+        )
+    comparable = _json_native(frozen_normalized)
+    comparable["run"]["provider"]["structured_output_mode"] = active_mode
+    comparable["source_config_sha256"] = active_normalized[
+        "source_config_sha256"
+    ]
+    if comparable != active_normalized:
+        raise ValueError(
+            "provider compatibility override only permits "
+            "run.provider.structured_output_mode"
+        )
+    return {
+        "field": "run.provider.structured_output_mode",
+        "frozen_value": frozen_mode,
+        "active_value": active_mode,
+        "reason": "provider_native_schema_incompatible",
+    }
+
+
+def _pending_cycle_recoveries(
+    historical: list[dict[str, Any]],
+    *,
+    provider: Any,
+    workspace: str | Path,
+    version_store: Any,
+    evaluations_by_version: dict[str, CandidateEvaluation],
+    expected_candidate_count: int,
+    policy_entry_symbol: str,
+) -> dict[str, Any]:
+    from agentbench_frame.hl.cli import (
+        _pending_candidate_recoveries,
+        _pending_planner_recovery,
+        _pending_repair_recoveries,
+    )
+
+    completed = {
+        str(event.get("iteration_id"))
+        for event in historical
+        if event.get("event_type") == "proposal_cycle_completed"
+    }
+    start_index = next(
+        (
+            index
+            for index in range(len(historical) - 1, -1, -1)
+            if historical[index].get("event_type")
+            == "proposal_cycle_started"
+            and str(historical[index].get("iteration_id")) not in completed
+        ),
+        None,
+    )
+    if start_index is None:
+        return {
+            "planner_recovery": None,
+            "candidate_recoveries": {},
+            "repair_recoveries": {},
+        }
+    pending = historical[start_index:]
+    return {
+        "planner_recovery": _pending_planner_recovery(
+            pending,
+            provider=provider,
+            workspace=workspace,
+            expected_candidate_count=expected_candidate_count,
+            policy_entry_symbol=policy_entry_symbol,
+        ),
+        "candidate_recoveries": _pending_candidate_recoveries(
+            pending,
+            version_store=version_store,
+            evaluations_by_version=evaluations_by_version,
+        ),
+        "repair_recoveries": _pending_repair_recoveries(
+            pending,
+            version_store=version_store,
+            evaluations_by_version=evaluations_by_version,
+        ),
+    }
 
 
 def _seed_candidate(workspace: Path, template: Path) -> None:
@@ -416,6 +526,7 @@ def run_profile(
     acts: int | None,
     resume: bool,
     provider_environment: Mapping[str, str] | None,
+    allow_provider_compatibility_change: bool = False,
 ) -> dict[str, Any]:
     validation = validate_profile(config)
     bindings, bundle, digest, experience, research = prepare_profile_run(
@@ -426,9 +537,15 @@ def run_profile(
     )
     snapshot = run_dir / "run-config.json"
     frozen = frozen_config(config)
+    compatibility_transition = None
     if resume:
-        if json.loads(snapshot.read_text(encoding="utf-8")) != frozen:
-            raise ValueError("resume config differs from frozen run config")
+        compatibility_transition = _resume_compatibility_transition(
+            json.loads(snapshot.read_text(encoding="utf-8")),
+            frozen,
+            allow_provider_compatibility_change=(
+                allow_provider_compatibility_change
+            ),
+        )
     else:
         snapshot.write_text(
             json.dumps(frozen, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
@@ -468,6 +585,11 @@ def run_profile(
     )
     store = VersionStore(workspace, run_dir / "versions")
     writer = HLEventWriter(events_path, run_id=run_dir.name)
+    if compatibility_transition is not None:
+        writer.write(
+            "provider_compatibility_selected",
+            **compatibility_transition,
+        )
     context = IterationContext(bundle, prompt_profile=prompt_profile)
     evaluations = _historical_evaluations(historical)
     current_evaluation: CandidateEvaluation | None = None
@@ -765,6 +887,23 @@ def run_profile(
                 version_id=origin_version.version_id,
             ),
         )
+    pending_recoveries = (
+        _pending_cycle_recoveries(
+            historical,
+            provider=provider,
+            workspace=workspace,
+            version_store=store,
+            evaluations_by_version=evaluations,
+            expected_candidate_count=config.run.iteration.candidates_per_cycle,
+            policy_entry_symbol=prompt_profile.policy_entry_symbol,
+        )
+        if resume
+        else {
+            "planner_recovery": None,
+            "candidate_recoveries": {},
+            "repair_recoveries": {},
+        }
+    )
     while not certified and (acts is None or cycles_this_invocation < acts):
         if controller.reached_iteration_limit():
             break
@@ -775,7 +914,13 @@ def run_profile(
         cycle = controller.run_proposal_cycle(
             parent_version_id=parent_id,
             parent_evaluation=parent_evaluation,
+            **pending_recoveries,
         )
+        pending_recoveries = {
+            "planner_recovery": None,
+            "candidate_recoveries": {},
+            "repair_recoveries": {},
+        }
         completed_cycles += 1
         cycles_this_invocation += 1
         for candidate in cycle.representatives:

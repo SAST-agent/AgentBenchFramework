@@ -79,6 +79,7 @@ class ProviderConfig:
     disable_response_storage: bool = True
     network_access: str = "enabled"
     context_mode: str = "resumable"
+    structured_output_mode: str = "native_schema"
     executable: str = "codex"
     expected_cli_version: Optional[str] = None
     rollout_budget: RolloutBudgetConfig = dataclasses.field(
@@ -99,6 +100,14 @@ class ProviderConfig:
             raise ValueError("provider.env_key must name one environment variable")
         if self.context_mode not in {"resumable", "fresh"}:
             raise ValueError("provider.context_mode must be resumable or fresh")
+        if self.structured_output_mode not in {
+            "native_schema",
+            "validated_file",
+        }:
+            raise ValueError(
+                "provider.structured_output_mode must be native_schema or "
+                "validated_file"
+            )
         if self.wire_api not in {"responses", "chat"}:
             raise ValueError("provider.wire_api must be responses or chat")
         if self.timeout_seconds < 1:
