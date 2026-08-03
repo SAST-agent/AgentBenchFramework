@@ -285,7 +285,71 @@ def test_hl_dry_run_needs_no_api_key_and_creates_no_provider_call(
     assert result["would_call_model"] is False
     assert result["context_mode"] == "resumable"
     assert (tmp_path / "candidate" / "ai.py").is_file()
+    manifest = json.loads(
+        Path(result["context_manifest"]).read_text(encoding="utf-8")
+    )
+    fixture = Path(manifest["files"]["smoke_fixture"]["path"])
+    assert fixture.name == "rollman_smoke_fixture.py"
+    assert fixture.is_file()
     assert not (tmp_path / "dry-run" / "provider").exists()
+
+
+def test_framework_smoke_callback_reexecutes_fixture_and_checks_hashes(tmp_path):
+    """Catch CLI wiring that trusts a provider-authored result file."""
+    from agentbench_frame.games.rollman import rollman_smoke_fixture
+    from agentbench_frame.hl.cli import _verify_rollman_candidate_smoke
+
+    workspace = tmp_path / "candidate"
+    control = workspace / ".agentbench"
+    control.mkdir(parents=True)
+    (workspace / "ai.py").write_text(
+        "calls = 0\n"
+        "def ai_func(state):\n"
+        "    global calls\n"
+        "    calls += 1\n"
+        "    prefix = 'new:' if calls == 1 else 'parent:'\n"
+        "    return {'action': 1, 'memory_id': prefix}\n",
+        encoding="utf-8",
+    )
+    scenario = control / "smoke_scenario.json"
+    state = {
+        "level": 1,
+        "round_id": 1,
+        "pacman": [2, 2],
+        "ghosts": [[3, 3], [4, 4], [5, 5]],
+        "board_size": 8,
+    }
+    scenario.write_text(
+        json.dumps(
+            {
+                "schema_version": "1.0",
+                "states": [state, state],
+                "activation_state_index": 0,
+                "preservation_state_index": 1,
+                "activation_memory_prefix": "new:",
+                "preservation_forbidden_prefix": "new:",
+                "preservation_memory_prefix": "parent:",
+            }
+        ),
+        encoding="utf-8",
+    )
+    result_path = control / "candidate_smoke_result.json"
+    result_path.write_text('{"status":"forged"}\n', encoding="utf-8")
+
+    result = _verify_rollman_candidate_smoke(
+        workspace=workspace,
+        fixture_path=Path(rollman_smoke_fixture.__file__),
+    )
+
+    assert result["status"] == "complete"
+    assert result["policy_sha256"] == rollman_smoke_fixture.sha256_file(
+        workspace / "ai.py"
+    )
+    assert result["scenario_sha256"] == rollman_smoke_fixture.sha256_file(
+        scenario
+    )
+    assert result["scenario_path"] == str(scenario.resolve())
+    assert result["result_path"] == str(result_path.resolve())
 
 
 def test_imported_run_can_inherit_bounded_research_state(tmp_path):
@@ -614,6 +678,7 @@ def test_pending_planner_is_recovered_from_valid_persisted_stream(tmp_path):
                     "preservation_contract": f"preserve-{index}",
                     "expected_change": f"expected-{index}",
                     "falsifier": f"falsifier-{index}",
+                    "code_symbols": ["ai_func", "helper"],
                 }
                 for index, mechanism in enumerate(
                     ("adapter", "capture filter", "portal controller", "respawn memory")
@@ -680,6 +745,7 @@ def test_completed_planner_artifact_resumes_without_provider_call(tmp_path):
                     "preservation_contract": f"preserve-{index}",
                     "expected_change": f"expected-{index}",
                     "falsifier": f"falsifier-{index}",
+                    "code_symbols": ["ai_func", "helper"],
                 }
                 for index, mechanism in enumerate(
                     ("route", "shield", "portal", "escape")

@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from agentbench_frame.games.rollman import rollman_smoke_fixture
 from agentbench_frame.games.rollman.contract import (
     RollmanContract,
     asset_path,
@@ -34,6 +35,60 @@ from agentbench_frame.hl.proposal import (
 
 
 _SECRET_LIKE = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}")
+
+
+def _verify_rollman_candidate_smoke(
+    *,
+    workspace: str | Path,
+    fixture_path: str | Path,
+    timeout_s: float = 30.0,
+) -> dict[str, Any]:
+    """Rerun the Framework-owned smoke verifier and bind its hashes."""
+
+    candidate = Path(workspace).resolve()
+    fixture = Path(fixture_path).resolve()
+    scenario = candidate / ".agentbench" / "smoke_scenario.json"
+    result_path = candidate / ".agentbench" / "candidate_smoke_result.json"
+    if not fixture.is_file():
+        raise FileNotFoundError(fixture)
+    if not scenario.is_file():
+        raise FileNotFoundError(scenario)
+    result_path.unlink(missing_ok=True)
+    completed = subprocess.run(
+        (
+            sys.executable,
+            str(fixture),
+            "--workspace",
+            str(candidate),
+            "--scenario",
+            str(scenario),
+            "--output",
+            str(result_path),
+        ),
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=float(timeout_s),
+    )
+    if completed.returncode != 0 or not result_path.is_file():
+        diagnostic = " ".join(
+            (completed.stderr or completed.stdout or "smoke verifier failed").split()
+        )
+        raise RuntimeError(diagnostic)
+    value = json.loads(result_path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict) or value.get("status") != "complete":
+        raise ValueError("smoke verifier did not produce a complete result")
+    policy_hash = hashlib.sha256((candidate / "ai.py").read_bytes()).hexdigest()
+    scenario_hash = hashlib.sha256(scenario.read_bytes()).hexdigest()
+    if value.get("policy_sha256") != policy_hash:
+        raise ValueError("smoke result policy hash does not match candidate")
+    if value.get("scenario_sha256") != scenario_hash:
+        raise ValueError("smoke result scenario hash does not match input")
+    return {
+        **value,
+        "scenario_path": str(scenario),
+        "result_path": str(result_path),
+    }
 
 
 def _json(value: Any) -> None:
@@ -696,6 +751,7 @@ def _dry_run(
         {
             "rules": asset_path("rules.md"),
             "decision_space": asset_path("decision_space.yaml"),
+            "smoke_fixture": Path(rollman_smoke_fixture.__file__),
             "replay_skill": asset_path(
                 "replay-skill/rollman-replay"
             ),
@@ -1562,6 +1618,7 @@ def _run_real(
         {
             "rules": asset_path("rules.md"),
             "decision_space": asset_path("decision_space.yaml"),
+            "smoke_fixture": Path(rollman_smoke_fixture.__file__),
             "replay_skill": asset_path(
                 "replay-skill/rollman-replay"
             ),
@@ -1828,6 +1885,8 @@ def _run_real(
                 previous_measurements=previous_measurements,
                 active_target=active_target,
                 candidate_source_path=workspace / "ai.py",
+                smoke_fixture_path=bundle.files["smoke_fixture"],
+                candidate_workspace=workspace,
             )
             return iteration_context.build_planner_prompt(
                 act_id=values["act_id"],
@@ -1949,6 +2008,12 @@ def _run_real(
             seeds=evaluator.current_activation_seeds(),
         )
 
+    def candidate_smoke_verifier(**values: Any) -> dict[str, Any]:
+        return _verify_rollman_candidate_smoke(
+            workspace=values["workspace"],
+            fixture_path=bundle.files["smoke_fixture"],
+        )
+
     controller = HLController(
         workspace=workspace,
         run_root=run_dir,
@@ -1967,6 +2032,7 @@ def _run_real(
         ),
         summary_resolver=repair_summary_resolver,
         activation_probe=activation_probe,
+        candidate_smoke_verifier=candidate_smoke_verifier,
     )
 
     def sync_research_state() -> None:

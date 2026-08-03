@@ -507,6 +507,44 @@ def test_coding_provider_stops_before_edit_after_hard_tool_grace_limit(
     )
 
 
+def test_rollman_v2_candidate_stops_after_six_pre_edit_tool_calls(tmp_path):
+    """Catch packet acts that spend the saved context budget browsing again."""
+    from agentbench_frame.hl.provider import CodexSessionProvider
+
+    executable = tmp_path / "browse-rollman-v2-codex"
+    executable.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json\n"
+        "print(json.dumps({'type':'thread.started','thread_id':'thread-v2'}))\n"
+        "for index in range(8):\n"
+        " print(json.dumps({'type':'item.started','item':{'id':str(index),'type':'command_execution','command':'true'}}))\n"
+        "print(json.dumps({'type':'turn.completed','usage':{'input_tokens':1,'output_tokens':1}}))\n",
+        encoding="utf-8",
+    )
+    executable.chmod(executable.stat().st_mode | stat.S_IXUSR)
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    provider = CodexSessionProvider(
+        _provider_config(executable=str(executable)),
+        run_root=tmp_path / "run",
+        environ={"AGENTBENCH_API_KEY": "sk-runtime-only"},
+        timeout_s=5,
+        idle_timeout_s=None,
+    )
+
+    result = provider.invoke(
+        prompt=(
+            "# HL iteration act-b00 — 候选 1/4\n"
+            "candidate-context-contract: rollman-v2\n"
+        ),
+        workspace=workspace,
+        raw_output_path=tmp_path / "run/provider/act-v2.jsonl",
+    )
+
+    assert result.status == "failed"
+    assert "pre-edit tool call limit 6" in str(result.error)
+
+
 def test_provider_retries_zero_usage_transport_failure_and_preserves_attempt(
     tmp_path, monkeypatch
 ):

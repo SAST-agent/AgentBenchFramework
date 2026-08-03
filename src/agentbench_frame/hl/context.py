@@ -643,11 +643,11 @@ candidate-context-contract: rollman-v2
 {scope_contract}
 
 候选 checkpoint-first 顺序：
-- 第一次调用必须直接执行 `{packet_command}`，完整读取一次后不得写脚本筛选或发现其中路径。顶层键为 `branch_brief`、`game_digest`、`research_state`、`experience_skill`、`replay_evidence`、`previous_measurements`、`opponent_distillation`、`candidate_code_index`、`candidate_code_slices`；禁止再次分别读取已内嵌内容。
+- 第一次调用必须直接执行 `{packet_command}`，完整读取一次后不得写脚本筛选或发现其中路径。顶层键为 `branch_brief`、`game_digest`、`research_state`、`experience_skill`、`replay_evidence`、`previous_measurements`、`opponent_distillation`、`candidate_code_index`、`candidate_code_slices`、`smoke_contract`；禁止再次分别读取已内嵌内容。
 - `candidate_code_slices` 已含 planner 选择的精确实现区间。只有某一 selected slice 明确 marked `truncated` 时，才允许再读一次该函数的精确行号范围；否则禁止再次读取 ai.py，且任何情况下不得顺序打印完整 ai.py。
 - `candidate_code_index` 与 slices 已给出模块级函数行号和 signature。新增代码调用前必须核对每个既有 helper 的 signature；不得凭函数名猜参数。
 - 最多读取两个 packet 授权的定点 trace 窗口；第 5 次工具调用结束前必须已完成 `ai.py` 的首次可编译修改并写入 experience_update.json。
-- 首次修改落盘后，只允许编译、一次对象 smoke，以及为修复验证失败所必需的一次更正；对象 smoke 必须命中新机制的 activation_condition，并断言公开入口 `ai_func` 返回新增分支的 `memory_id`；直接调用内部 helper 不算，不能只验证父代 fallback；不得把实现留到长推理末尾。
+- 首次修改落盘后，只允许编译、一次 smoke，以及为修复验证失败所必需的一次更正。必须写 `smoke_contract.scenario_path` 的 JSON，然后执行 packet 中 exact `smoke_contract.command`；不得另写 Python fixture。smoke 必须命中新机制的 activation_condition，并断言公开入口 `ai_func` 返回新增分支的 `memory_id`，同时证明 preservation state 未进入新分支；直接调用内部 helper 不算，不能只验证父代 fallback；不得把实现留到长推理末尾。
 - 命令必须直接引用白名单中的完整文件路径；不得把 run 根目录或父目录保存为变量后再拼接，也不得列举这些目录。
 """
 

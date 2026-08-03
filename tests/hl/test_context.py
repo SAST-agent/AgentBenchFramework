@@ -668,6 +668,8 @@ def test_candidate_prompt_uses_one_prebuilt_context_packet(tmp_path):
     assert "第一次调用只读取 candidate input packet" in prompt
     assert "candidate-context-contract: rollman-v2" in prompt
     assert "candidate_code_slices" in prompt
+    assert "smoke_contract" in prompt
+    assert "exact `smoke_contract.command`" in prompt
     assert "marked `truncated`" in prompt
     assert "第 5 次工具调用" in prompt
     assert "不得顺序打印完整 ai.py" in prompt
