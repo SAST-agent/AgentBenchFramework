@@ -286,6 +286,16 @@ class RollmanEvaluator:
             raise ValueError("training cycle must be positive")
         self.training_cycle = int(cycle)
 
+    def current_learning_cases(self) -> tuple[tuple[str, int], ...]:
+        """Return the exact opponent/seed gate for the current cycle."""
+
+        seeds = (*self._current_training_seeds(), *self._finalist_seeds())
+        return tuple(
+            (opponent.opponent_id, seed)
+            for opponent in self.learning_opponents
+            for seed in seeds
+        )
+
     def _current_training_seeds(self) -> tuple[int, ...]:
         start = (
             (self.training_cycle - 1) * self.training_rotation_stride

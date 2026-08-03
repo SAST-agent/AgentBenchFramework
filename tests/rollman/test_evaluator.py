@@ -603,6 +603,15 @@ def test_dual_opponent_stages_share_rotating_training_and_validation_cases(tmp_p
     )
     evaluator.set_training_cycle(2)
 
+    assert evaluator.current_learning_cases() == (
+        ("rank15", 102),
+        ("rank15", 201),
+        ("rank15", 202),
+        ("rank16", 102),
+        ("rank16", 201),
+        ("rank16", 202),
+    )
+
     evaluator.quick_screen(_version())
     assert calls == [("ghost-15", 102), ("ghost-16", 102)]
 

@@ -2712,9 +2712,37 @@ def _run_real(
                     controller.summary()["iterations"] + 1
                 )
                 rotating_parent = version_store.get(next_parent)
-                rotating_parent_evaluation = evaluator.evaluate(
-                    rotating_parent
+                rotating_parent_evaluation = evaluations_by_version.get(
+                    next_parent
                 )
+                existing_cases = {
+                    (str(match.get("opponent")), int(match["seed"]))
+                    for match in (
+                        ()
+                        if rotating_parent_evaluation is None
+                        else rotating_parent_evaluation.matches
+                    )
+                    if match.get("status") == "complete"
+                    and match.get("opponent") is not None
+                    and match.get("seed") is not None
+                }
+                expected_cases = set(evaluator.current_learning_cases())
+                if (
+                    rotating_parent_evaluation is None
+                    or rotating_parent_evaluation.status != "complete"
+                    or existing_cases != expected_cases
+                ):
+                    rotating_parent_evaluation = evaluator.evaluate(
+                        rotating_parent
+                    )
+                    controller.record_matches(
+                        version=rotating_parent,
+                        act_id=rotating_parent.act_id,
+                        phase="learning",
+                        matches=rotating_parent_evaluation.matches,
+                    )
+                else:
+                    evaluator.last_evaluation = rotating_parent_evaluation
                 if rotating_parent_evaluation.status != "complete":
                     _json(
                         {
@@ -2727,12 +2755,6 @@ def _run_real(
                     return 2
                 evaluations_by_version[next_parent] = (
                     rotating_parent_evaluation
-                )
-                controller.record_matches(
-                    version=rotating_parent,
-                    act_id=rotating_parent.act_id,
-                    phase="learning",
-                    matches=rotating_parent_evaluation.matches,
                 )
             parent_evaluation_for_cycle = evaluations_by_version.get(
                 next_parent
