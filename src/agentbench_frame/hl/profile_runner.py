@@ -796,8 +796,11 @@ def run_profile(
                     store.objects / parent_version.content_hash,
                     references=_references(current_evaluation),
                 )
+            planner_input = proposal_root / "planner_input.json"
+            planner_output = workspace / ".agentbench/branch_briefs.json"
+            planner_check_output = workspace / ".agentbench/planner_check_result.json"
             packet = write_planner_input_packet(
-                output_path=proposal_root / "planner_input.json",
+                output_path=planner_input,
                 iteration_id=values["iteration_id"],
                 parent_version_id=values["parent_version_id"],
                 game_digest_path=digest,
@@ -808,6 +811,21 @@ def run_profile(
                 active_target=config.run.evaluation.learning_opponent,
                 candidate_source_path=source,
                 parent_occupancy=parent_occupancy,
+                planner_command=(
+                    sys.executable,
+                    "-m",
+                    "agentbench_frame.hl.planner_check",
+                    "--briefs",
+                    str(planner_output.resolve()),
+                    "--planner-input",
+                    str(planner_input.resolve()),
+                    "--output",
+                    str(planner_check_output.resolve()),
+                    "--expected-count",
+                    str(config.run.iteration.candidates_per_cycle),
+                    "--entry-symbol",
+                    prompt_profile.policy_entry_symbol,
+                ),
             )
             return context.build_planner_prompt(
                 act_id=values["act_id"],

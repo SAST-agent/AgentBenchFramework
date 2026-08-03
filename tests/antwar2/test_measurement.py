@@ -135,6 +135,11 @@ def test_parent_occupancy_summary_reports_raw_ranges_and_atomic_counts():
         {"atom": [0, -1, -1], "count": 1},
         {"atom": [11, 4, 5], "count": 1},
     ]
+    assert value["roles"]["P0"]["legal_operation_type_state_counts"] == [
+        {"operation_type": 0, "state_count": 2},
+        {"operation_type": 11, "state_count": 2},
+    ]
+    assert value["state_examples"][0]["legal_operation_types"] == [0, 11]
 
 
 def test_terminal_replay_snapshot_is_not_a_valid_decision_state():

@@ -504,6 +504,7 @@ def test_planner_input_packet_collapses_exact_inputs_without_replay_paths(tmp_pa
             "state_count": 128,
             "roles": {"attacker": {"self_coins": {"min": 0, "max": 50}}},
         },
+        planner_command=("python", "-m", "agentbench_frame.hl.planner_check"),
     )
 
     value = json.loads(path.read_text(encoding="utf-8"))
@@ -515,6 +516,9 @@ def test_planner_input_packet_collapses_exact_inputs_without_replay_paths(tmp_pa
     assert value["research_state"]["open_questions"] == ["corner"]
     assert value["opponent_distillation"]["fine"]["chase"] == 0.8
     assert value["parent_occupancy"]["state_count"] == 128
+    assert value["planner_contract"]["command"][-1] == (
+        "agentbench_frame.hl.planner_check"
+    )
     assert value["candidate_code_index"] == [
         {
             "name": "ai_func",

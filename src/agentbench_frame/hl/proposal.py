@@ -224,6 +224,7 @@ def write_planner_input_packet(
     active_target: str | None,
     candidate_source_path: str | Path,
     parent_occupancy: Mapping[str, Any] | None = None,
+    planner_command: Sequence[str] | None = None,
 ) -> Path:
     """Collapse bounded planner evidence into one read-only artifact."""
 
@@ -290,6 +291,11 @@ def write_planner_input_packet(
         ),
         "parent_occupancy": (
             None if parent_occupancy is None else dict(parent_occupancy)
+        ),
+        "planner_contract": (
+            None
+            if planner_command is None
+            else {"command": [str(item) for item in planner_command]}
         ),
     }
     destination = Path(output_path)

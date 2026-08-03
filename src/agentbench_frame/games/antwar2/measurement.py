@@ -59,6 +59,7 @@ def summarize_probe_occupancy(
     )
     values_by_role: dict[str, dict[str, list[int]]] = {}
     actions_by_role: dict[str, dict[tuple[int, int, int], int]] = {}
+    legal_types_by_role: dict[str, dict[int, int]] = {}
     examples: list[dict[str, Any]] = []
     for index, case in enumerate(ordered):
         summary = case.get("public_summary")
@@ -78,12 +79,28 @@ def summarize_probe_occupancy(
         selected, _ = _step(case, 0)
         counts = actions_by_role.setdefault(role, {})
         counts[selected] = counts.get(selected, 0) + 1
+        legal_types: set[int] = set()
+        steps = case.get("steps")
+        if isinstance(steps, list):
+            for step in steps[:1]:
+                if not isinstance(step, Mapping):
+                    continue
+                support = step.get("support")
+                if isinstance(support, list):
+                    legal_types.update(_atom(atom)[0] for atom in support)
+        terminal_support = case.get("terminal_support")
+        if isinstance(terminal_support, list):
+            legal_types.update(_atom(atom)[0] for atom in terminal_support)
+        type_counts = legal_types_by_role.setdefault(role, {})
+        for operation_type in legal_types:
+            type_counts[operation_type] = type_counts.get(operation_type, 0) + 1
         if index in positions:
             examples.append(
                 {
                     "state_id": str(case.get("state_id") or ""),
                     "public_summary": dict(summary),
                     "parent_selected": list(selected),
+                    "legal_operation_types": sorted(legal_types),
                 }
             )
     return {
@@ -100,6 +117,12 @@ def summarize_probe_occupancy(
                     {"atom": list(atom), "count": count}
                     for atom, count in sorted(
                         actions_by_role.get(role, {}).items()
+                    )
+                ],
+                "legal_operation_type_state_counts": [
+                    {"operation_type": operation_type, "state_count": count}
+                    for operation_type, count in sorted(
+                        legal_types_by_role.get(role, {}).items()
                     )
                 ],
             }
