@@ -69,6 +69,7 @@ def run_planner_check(
         if not isinstance(examples, list) or not examples:
             raise ValueError("parent_occupancy requires state_examples")
         legal_by_state: dict[str, set[int]] = {}
+        parent_type_by_state: dict[str, int] = {}
         for example in examples:
             if not isinstance(example, Mapping):
                 continue
@@ -80,6 +81,14 @@ def run_planner_check(
                     for code in legal
                     if isinstance(code, int) and not isinstance(code, bool)
                 }
+                parent_selected = example.get("parent_selected")
+                if (
+                    isinstance(parent_selected, list)
+                    and parent_selected
+                    and isinstance(parent_selected[0], int)
+                    and not isinstance(parent_selected[0], bool)
+                ):
+                    parent_type_by_state[state_id] = int(parent_selected[0])
         action_codes = _action_codes(packet.get("game_digest") or {})
 
         def named_legal_operations(state: str) -> list[dict[str, Any]]:
@@ -144,8 +153,45 @@ def run_planner_check(
                     f"branch {brief.branch_index} has no cited state with its "
                     "proposed atomic operation in legal_operation_types"
                 )
+            divergent_pairs = [
+                pair
+                for pair in legal_pairs
+                if parent_type_by_state.get(pair["state_id"])
+                != pair["operation_type"]
+            ]
+            if not divergent_pairs:
+                correction_hint = {
+                    "branch_index": brief.branch_index,
+                    "cited_states": [
+                        {
+                            "state_id": state,
+                            "parent_operation_type": parent_type_by_state.get(
+                                state
+                            ),
+                            "divergent_legal_operations": [
+                                operation
+                                for operation in named_legal_operations(state)
+                                if operation["code"]
+                                != parent_type_by_state.get(state)
+                            ],
+                        }
+                        for state in cited_states
+                    ],
+                    "requirement": (
+                        "Propose one listed operation whose code differs from "
+                        "the parent operation on the same state."
+                    ),
+                }
+                raise ValueError(
+                    f"branch {brief.branch_index} only repeats the parent "
+                    "atomic operation on its cited states"
+                )
             evidence.append(
-                {"branch_index": brief.branch_index, "legal_pairs": legal_pairs}
+                {
+                    "branch_index": brief.branch_index,
+                    "legal_pairs": legal_pairs,
+                    "divergent_legal_pairs": divergent_pairs,
+                }
             )
         payload = {
             "schema_version": "1.0",

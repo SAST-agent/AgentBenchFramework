@@ -526,6 +526,63 @@ def write_candidate_input_packet(
     return destination
 
 
+def enrich_reducer_input_packet(
+    path: str | Path,
+    *,
+    game_digest_path: str | Path,
+    research_state_path: str | Path,
+) -> Path:
+    """Embed static reducer context and discard repeated occupancy samples."""
+
+    destination = Path(path)
+    value = json.loads(destination.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError("reducer input must be an object")
+
+    def compact_activation(raw: Any) -> Any:
+        if not isinstance(raw, Mapping):
+            return raw
+        activation = dict(raw)
+        details = raw.get("details")
+        if isinstance(details, Mapping):
+            compact_details = dict(details)
+            compact_details.pop("state_examples", None)
+            changed = compact_details.get("changed_examples")
+            if isinstance(changed, list):
+                compact_details["changed_examples"] = changed[:16]
+            activation["details"] = compact_details
+        return activation
+
+    for key in ("candidates", "initial_candidates", "representatives"):
+        rows = value.get(key)
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if isinstance(row, dict) and "activation" in row:
+                row["activation"] = compact_activation(row["activation"])
+    repairs = value.get("repairs")
+    if isinstance(repairs, list):
+        for repair in repairs:
+            if not isinstance(repair, dict):
+                continue
+            for key in ("initial", "repaired"):
+                row = repair.get(key)
+                if isinstance(row, dict) and "activation" in row:
+                    row["activation"] = compact_activation(row["activation"])
+
+    value["game_digest"] = json.loads(
+        Path(game_digest_path).read_text(encoding="utf-8")
+    )
+    value["research_state"] = json.loads(
+        Path(research_state_path).read_text(encoding="utf-8")
+    )
+    destination.write_text(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    return destination
+
+
 def branch_briefs_json_schema(
     *,
     expected_count: int,

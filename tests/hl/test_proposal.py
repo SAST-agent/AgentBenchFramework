@@ -614,6 +614,61 @@ def test_planner_input_names_legal_atomic_operations_in_each_state(tmp_path):
     ]
 
 
+def test_reducer_packet_embeds_static_context_and_compacts_activation_details(
+    tmp_path,
+):
+    from agentbench_frame.hl.proposal import enrich_reducer_input_packet
+
+    reducer = tmp_path / "reducer.json"
+    digest = tmp_path / "digest.json"
+    research = tmp_path / "research.json"
+    reducer.write_text(
+        json.dumps(
+            {
+                "candidates": [
+                    {
+                        "activation": {
+                            "changed_action_count": 3,
+                            "decision_count": 256,
+                            "details": {
+                                "mean_kl_nats_per_decision": 0.2,
+                                "changed_examples": [
+                                    {"state_id": "reference-0:3:P0"}
+                                ],
+                                "state_examples": [
+                                    {"state_id": "large-unneeded-sample"}
+                                ],
+                            },
+                        }
+                    }
+                ],
+                "initial_candidates": [],
+                "repairs": [],
+                "representatives": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    digest.write_text('{"roles":{"P0":{}}}', encoding="utf-8")
+    research.write_text('{"open_questions":["tempo"]}', encoding="utf-8")
+
+    path = enrich_reducer_input_packet(
+        reducer,
+        game_digest_path=digest,
+        research_state_path=research,
+    )
+
+    value = json.loads(path.read_text(encoding="utf-8"))
+    assert value["game_digest"] == {"roles": {"P0": {}}}
+    assert value["research_state"] == {"open_questions": ["tempo"]}
+    activation = value["candidates"][0]["activation"]
+    assert activation["changed_action_count"] == 3
+    assert activation["details"]["changed_examples"] == [
+        {"state_id": "reference-0:3:P0"}
+    ]
+    assert "state_examples" not in activation["details"]
+
+
 def test_k4_evidence_packets_assign_complementary_hard_opponent_failures():
     from agentbench_frame.hl.proposal import stratify_rollout_evidence
 

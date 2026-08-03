@@ -24,6 +24,7 @@ from agentbench_frame.hl.config import HLRunConfig
 from agentbench_frame.hl.local_config import LocalHLConfig
 from agentbench_frame.hl.match_record import MatchRecord
 from agentbench_frame.hl.proposal import (
+    enrich_reducer_input_packet,
     write_bootstrap_input_packet,
     write_candidate_input_packet,
     write_planner_input_packet,
@@ -954,7 +955,11 @@ def run_profile(
                 experience_path=experience.path,
             )
         if phase == "reducer":
-            reducer_path = Path(values["reducer_input"])
+            reducer_path = enrich_reducer_input_packet(
+                values["reducer_input"],
+                game_digest_path=digest,
+                research_state_path=research,
+            )
             reducer = json.loads(reducer_path.read_text(encoding="utf-8"))
             return context.build_reducer_prompt(
                 act_id=values["act_id"],

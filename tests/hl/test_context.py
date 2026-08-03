@@ -324,6 +324,43 @@ def test_profile_candidate_packet_requires_immediate_edit_without_duplicate_read
     assert "exact `smoke_contract.command`" in prompt
     assert "host-side result serialization" in prompt
     assert "do not inspect, shim, or patch the fixture" in prompt
+    assert "game_digest.policy_interface.field_access" in prompt
+    assert "candidate_code_index entry signature" in prompt
+
+
+def test_profile_repair_requires_direct_entry_edit_and_frozen_field_access(tmp_path):
+    prompt = _profile_context(tmp_path).build_repair_prompt(
+        act_id="act-repair",
+        iteration_id="iter-000003",
+        branch_index=0,
+        workspace=tmp_path / "candidate",
+        game_digest_path=tmp_path / "digest.json",
+        research_state_path=tmp_path / "research.json",
+        repair_input_path=tmp_path / "repair.json",
+        experience_path=tmp_path / "experience" / "SKILL.md",
+    )
+
+    assert "game_digest.policy_interface.field_access" in prompt
+    assert "scope.activation_condition" in prompt
+    assert "candidate.activation.details.state_examples" in prompt
+    assert "Do not monkey-patch, rebind, or wrap the public entry" in prompt
+
+
+def test_profile_reducer_reads_one_enriched_packet_without_discovery(tmp_path):
+    reducer = tmp_path / "reducer.json"
+    prompt = _profile_context(tmp_path).build_reducer_prompt(
+        act_id="act-reducer",
+        iteration_id="iter-000003",
+        selected_version_id="v0",
+        workspace=tmp_path / "candidate",
+        game_digest_path=tmp_path / "digest.json",
+        research_state_path=tmp_path / "research.json",
+        reducer_input_path=reducer,
+    )
+
+    assert f"Single bounded input: {reducer.resolve()}" in prompt
+    assert "It embeds game_digest and research_state" in prompt
+    assert "Do not run `wc`, `rg`, `find`, `ls`, or exploratory `jq keys`" in prompt
 
 
 @pytest.mark.parametrize("kind", ["bootstrap", "candidate", "repair", "reducer"])

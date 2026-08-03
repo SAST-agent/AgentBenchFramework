@@ -37,6 +37,7 @@ def _packet():
                 {
                     "state_id": "reference-0:0:P0",
                     "legal_operation_types": [0, 11],
+                    "parent_selected": [0, -1, -1],
                 }
             ]
         },
@@ -188,5 +189,47 @@ def test_planner_check_missing_state_reports_bounded_reachable_examples(tmp_path
         "requirement": (
             "Cite one listed state_id and name one of its legal operations "
             "exactly."
+        ),
+    }
+
+
+def test_planner_check_rejects_branch_that_only_repeats_parent_action(tmp_path):
+    """A branch must predict an observable atomic change on its cited state."""
+    from agentbench_frame.hl.planner_check import run_planner_check
+
+    packet = tmp_path / "planner.json"
+    briefs = tmp_path / "briefs.json"
+    output = tmp_path / "result.json"
+    packet.write_text(json.dumps(_packet()), encoding="utf-8")
+    briefs.write_text(
+        json.dumps([_branch(index, action="HOLD") for index in range(4)]),
+        encoding="utf-8",
+    )
+
+    returncode = run_planner_check(
+        briefs_path=briefs,
+        planner_input_path=packet,
+        output_path=output,
+        expected_count=4,
+        entry_symbol="AI.choose_operations",
+    )
+
+    assert returncode == 2
+    value = json.loads(output.read_text(encoding="utf-8"))
+    assert "only repeats the parent atomic operation" in value["error"]
+    assert value["correction_hint"] == {
+        "branch_index": 0,
+        "cited_states": [
+            {
+                "state_id": "reference-0:0:P0",
+                "parent_operation_type": 0,
+                "divergent_legal_operations": [
+                    {"code": 11, "name": "BUILD_TOWER"}
+                ],
+            }
+        ],
+        "requirement": (
+            "Propose one listed operation whose code differs from the "
+            "parent operation on the same state."
         ),
     }
