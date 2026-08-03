@@ -335,6 +335,74 @@ def test_candidate_code_slices_reject_unknown_symbol_and_oversized_entry(
         )
 
 
+def test_candidate_code_index_and_briefs_support_qualified_class_entry(tmp_path):
+    from agentbench_frame.hl.proposal import (
+        branch_briefs_json_schema,
+        build_candidate_code_index,
+        build_candidate_code_slices,
+        load_branch_briefs,
+    )
+
+    source = tmp_path / "ai.py"
+    source.write_text(
+        "class AI:\n"
+        "    def choose_operations(self, state, player, bundles=None):\n"
+        "        return self._economy(state, player)\n"
+        "\n"
+        "    def _economy(self, state, player):\n"
+        "        return []\n",
+        encoding="utf-8",
+    )
+    symbols = {item["name"] for item in build_candidate_code_index(source)}
+    briefs = tmp_path / "briefs.json"
+    briefs.write_text(
+        json.dumps(
+            {
+                "branches": [
+                    {
+                        "branch_index": index,
+                        "diagnosis": f"evidence {index}",
+                        "mechanism": ("economy", "defense", "timing", "counterplay")[index],
+                        "activation_condition": f"condition {index}",
+                        "preservation_contract": f"preserve {index}",
+                        "expected_change": f"change {index}",
+                        "falsifier": f"falsifier {index}",
+                        "code_symbols": [
+                            "AI.choose_operations",
+                            "AI._economy",
+                        ],
+                    }
+                    for index in range(4)
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert symbols == {"AI.choose_operations", "AI._economy"}
+    assert load_branch_briefs(
+        briefs,
+        expected_count=4,
+        known_code_symbols=symbols,
+        required_entry_symbol="AI.choose_operations",
+    )[0].code_symbols[0] == "AI.choose_operations"
+    assert (
+        branch_briefs_json_schema(
+            expected_count=4,
+            required_entry_symbol="AI.choose_operations",
+        )["properties"]["branches"]["items"]["properties"]["code_symbols"][
+            "contains"
+        ]["const"]
+        == "AI.choose_operations"
+    )
+    slices = build_candidate_code_slices(
+        source,
+        code_symbols=("AI.choose_operations", "AI._economy"),
+        entry_symbol="AI.choose_operations",
+    )
+    assert slices[0]["source"].lstrip().startswith("def choose_operations")
+
+
 def test_planner_input_packet_collapses_exact_inputs_without_replay_paths(tmp_path):
     """Catch planner contexts that require one tool call per summary file."""
     from agentbench_frame.hl.proposal import write_planner_input_packet

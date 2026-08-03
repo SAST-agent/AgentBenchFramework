@@ -106,20 +106,34 @@ def _bounded_text(path: str | Path, *, limit: int) -> str:
 def build_candidate_code_index(
     source_path: str | Path,
 ) -> list[dict[str, Any]]:
-    """Index exact module-level policy functions without embedding source."""
+    """Index exact module functions and qualified policy class methods."""
 
     source = Path(source_path).read_text(encoding="utf-8")
     module = ast.parse(source)
+    nodes = _policy_nodes(module)
     return [
         {
-            "name": node.name,
-            "signature": f"{node.name}({ast.unparse(node.args)})",
+            "name": name,
+            "signature": f"{name}({ast.unparse(node.args)})",
             "start_line": node.lineno,
             "end_line": node.end_lineno,
         }
-        for node in module.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        for name, node in nodes.items()
     ]
+
+
+def _policy_nodes(
+    module: ast.Module,
+) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
+    nodes: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+    for node in module.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            nodes[node.name] = node
+        elif isinstance(node, ast.ClassDef):
+            for child in node.body:
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    nodes[f"{node.name}.{child.name}"] = child
+    return nodes
 
 
 def _truncate_source(source: str, *, limit: int) -> str:
@@ -137,6 +151,7 @@ def build_candidate_code_slices(
     *,
     code_symbols: tuple[str, ...],
     source_limit: int = _CANDIDATE_SOURCE_LIMIT,
+    entry_symbol: str = "ai_func",
 ) -> list[dict[str, Any]]:
     """Resolve selected module functions into deterministic bounded source."""
 
@@ -145,18 +160,14 @@ def build_candidate_code_slices(
     source = Path(source_path).read_text(encoding="utf-8")
     lines = source.splitlines(keepends=True)
     module = ast.parse(source)
-    nodes = {
-        node.name: node
-        for node in module.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-    }
+    nodes = _policy_nodes(module)
     unknown = set(code_symbols) - set(nodes)
     if unknown:
         raise ValueError(
             "unknown code symbol: " + ", ".join(sorted(unknown))
         )
-    if "ai_func" not in code_symbols:
-        raise ValueError("code_symbols must include ai_func")
+    if entry_symbol not in code_symbols:
+        raise ValueError(f"code_symbols must include {entry_symbol}")
 
     def item_for(name: str, body: str, completeness: str) -> dict[str, Any]:
         node = nodes[name]
@@ -173,16 +184,16 @@ def build_candidate_code_slices(
         name: "".join(lines[nodes[name].lineno - 1 : nodes[name].end_lineno])
         for name in code_symbols
     }
-    entry = bodies["ai_func"]
+    entry = bodies[entry_symbol]
     if len(entry) > source_limit:
         raise ValueError(
-            f"ai_func exceeds candidate source limit {source_limit}"
+            f"{entry_symbol} exceeds candidate source limit {source_limit}"
         )
     remaining = source_limit - len(entry)
     rendered: dict[str, dict[str, Any]] = {
-        "ai_func": item_for("ai_func", entry, "complete")
+        entry_symbol: item_for(entry_symbol, entry, "complete")
     }
-    helpers = [name for name in code_symbols if name != "ai_func"]
+    helpers = [name for name in code_symbols if name != entry_symbol]
     for position, name in enumerate(helpers):
         helpers_left = len(helpers) - position
         allowance = remaining // helpers_left
@@ -300,6 +311,7 @@ def write_candidate_input_packet(
     candidate_source_path: str | Path | None = None,
     smoke_fixture_path: str | Path | None = None,
     candidate_workspace: str | Path | None = None,
+    policy_entry_symbol: str = "ai_func",
 ) -> Path:
     """Write one bounded candidate context artifact for a single first read."""
 
@@ -334,6 +346,7 @@ def write_candidate_input_packet(
         else build_candidate_code_slices(
             candidate_source_path,
             code_symbols=tuple(str(item) for item in raw_symbols),
+            entry_symbol=policy_entry_symbol,
         )
     )
     if (smoke_fixture_path is None) != (candidate_workspace is None):
@@ -393,7 +406,11 @@ def write_candidate_input_packet(
     return destination
 
 
-def branch_briefs_json_schema(*, expected_count: int) -> dict[str, Any]:
+def branch_briefs_json_schema(
+    *,
+    expected_count: int,
+    required_entry_symbol: str = "ai_func",
+) -> dict[str, Any]:
     """Return the strict Codex final-output schema for one planner cycle."""
 
     if expected_count < 1:
@@ -433,7 +450,7 @@ def branch_briefs_json_schema(*, expected_count: int) -> dict[str, Any]:
                     "minItems": 2,
                     "maxItems": 8,
                     "uniqueItems": True,
-                    "contains": {"const": "ai_func"},
+                    "contains": {"const": required_entry_symbol},
                     "items": {
                         "type": "string",
                         "minLength": 1,
@@ -471,6 +488,7 @@ def load_branch_briefs(
     *,
     expected_count: int,
     known_code_symbols: set[str] | None = None,
+    required_entry_symbol: str = "ai_func",
 ) -> tuple[BranchBrief, ...]:
     value = json.loads(Path(path).read_text(encoding="utf-8"))
     if isinstance(value, list):
@@ -506,8 +524,10 @@ def load_branch_briefs(
         symbols = tuple(raw_symbols)
         if len(set(symbols)) != len(symbols):
             raise ValueError("code_symbols must be unique")
-        if "ai_func" not in symbols:
-            raise ValueError("code_symbols must include ai_func")
+        if required_entry_symbol not in symbols:
+            raise ValueError(
+                f"code_symbols must include {required_entry_symbol}"
+            )
         if known_code_symbols is not None and set(symbols) - known_code_symbols:
             raise ValueError("code_symbols contain unknown module functions")
         briefs.append(
