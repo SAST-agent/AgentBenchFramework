@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import dataclasses
 import hashlib
 import json
 import os
@@ -113,7 +112,16 @@ def main(argv: list[str] | None = None) -> int:
     output = Path(args.output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
-        json.dumps(dataclasses.asdict(result), sort_keys=True, indent=2) + "\n",
+        json.dumps(
+            {
+                "status": result.status,
+                "error": result.error,
+                "artifacts": dict(result.artifacts),
+            },
+            sort_keys=True,
+            indent=2,
+        )
+        + "\n",
         encoding="utf-8",
     )
     return 0 if result.status == "complete" else 2

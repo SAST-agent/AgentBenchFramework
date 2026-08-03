@@ -289,6 +289,8 @@ def test_profile_candidate_packet_requires_immediate_edit_without_duplicate_read
     assert "same file-change tool call" in prompt
     assert "must print `smoke_contract`" in prompt
     assert "exact `smoke_contract.command`" in prompt
+    assert "host-side result serialization" in prompt
+    assert "do not inspect, shim, or patch the fixture" in prompt
 
 
 @pytest.mark.parametrize("kind", ["bootstrap", "candidate", "repair", "reducer"])
