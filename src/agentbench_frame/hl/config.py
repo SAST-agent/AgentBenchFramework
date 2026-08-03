@@ -279,9 +279,9 @@ class CurriculumConfig:
             raise ValueError(
                 "curriculum.target_order must be lowest_rank_first"
             )
-        if not 1 <= self.required_human_opponents <= 16:
+        if self.required_human_opponents < 1:
             raise ValueError(
-                "curriculum.required_human_opponents must be in [1, 16]"
+                "curriculum.required_human_opponents must be >= 1"
             )
         if self.stagnation_patience < 1:
             raise ValueError("curriculum.stagnation_patience must be >= 1")

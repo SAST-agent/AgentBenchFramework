@@ -32,15 +32,12 @@ def test_builtin_antwar2_profile_declares_portable_policy_contract():
     assert prompt.candidate_source_relative == "ai.py"
     assert "ordered list[Operation]" in prompt.output_contract
     assert profile.required_local_paths == (
-        "backend_source_archive",
-        "backend_executable",
-        "backend_workdir",
-        "sdk_root",
-        "human_pool_root",
-        "human_manifest",
+        "agentbench_root",
         "workspace",
         "runs_root",
+        "build_root",
     )
+    assert profile.optional_local_paths == ("positive_control_root",)
 
 
 def test_rules_match_frozen_backend_terminal_and_operation_contracts():

@@ -6,6 +6,7 @@ import pytest
 class _FakeProfile:
     game_id = "fake_paths"
     required_local_paths = ("backend", "human_pool", "workspace", "runs_root")
+    optional_local_paths = ("historical_root",)
 
     def prompt_profile(self):
         raise AssertionError("not needed for path parsing")
@@ -70,6 +71,27 @@ def test_local_config_accepts_exact_paths_declared_by_game_profile(tmp_path):
     ).resolve()
     assert config.paths.workspace == (
         tmp_path / "project" / "candidate"
+    ).resolve()
+
+
+def test_local_config_accepts_but_does_not_require_optional_profile_paths(tmp_path):
+    from agentbench_frame.hl.local_config import LocalHLConfig
+
+    source = _fake_config(
+        tmp_path,
+        paths={
+            "backend": "backend",
+            "human_pool": "humans.json",
+            "workspace": "candidate",
+            "runs_root": "runs",
+            "historical_root": "positive-control",
+        },
+    )
+
+    config = LocalHLConfig.load(source)
+
+    assert config.paths.historical_root == (
+        tmp_path / "project" / "positive-control"
     ).resolve()
 
 
@@ -201,3 +223,24 @@ def test_machine_local_paths_expand_environment_variables(tmp_path, monkeypatch)
 
     assert paths.agentbench_root == external / "AgentBench"
     assert paths.official_logic_root == external / "PacmanLogic"
+
+
+def test_antwar2_positive_control_config_is_k4_and_profile_driven(monkeypatch):
+    from agentbench_frame.hl.local_config import LocalHLConfig
+
+    root = Path(__file__).parents[2]
+    monkeypatch.setenv("AGENTBENCH_SAST_ROOT", "/fixtures/sast")
+    monkeypatch.setenv("ANTWAR2_POSITIVE_CONTROL_ROOT", "/fixtures/handoff")
+
+    config = LocalHLConfig.load(
+        root / "configs/hl/30_antwar2-positive-control.yaml"
+    )
+
+    assert config.run.game == "30_antwar2"
+    assert config.run.iteration.candidates_per_cycle == 4
+    assert config.run.iteration.planner_enabled is True
+    assert config.run.selection.source_size_penalty is False
+    assert config.run.rollback.enabled is True
+    assert config.run.measurement.epsilon == 0.05
+    assert config.paths.agentbench_root == Path("/fixtures/sast/AgentBench")
+    assert config.paths.positive_control_root == Path("/fixtures/handoff")

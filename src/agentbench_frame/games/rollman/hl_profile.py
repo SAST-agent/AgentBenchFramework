@@ -19,6 +19,7 @@ class RollmanHLProfile:
         "runs_root",
         "opponent_build_root",
     )
+    optional_local_paths = ()
 
     def prompt_profile(self) -> PromptProfile:
         return PromptProfile(

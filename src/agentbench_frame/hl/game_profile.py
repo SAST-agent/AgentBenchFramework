@@ -188,6 +188,7 @@ class HLGameBindings:
 class GameProfile(Protocol):
     game_id: str
     required_local_paths: tuple[str, ...]
+    optional_local_paths: tuple[str, ...]
 
     def prompt_profile(self) -> PromptProfile:
         ...
@@ -224,6 +225,14 @@ def register_game_profile(profile: GameProfile) -> None:
     if not isinstance(required_paths, tuple):
         raise ValueError("required_local_paths must be a tuple")
     _texts(required_paths, field="required_local_paths", unique=True)
+    optional_paths = getattr(profile, "optional_local_paths", ())
+    if not isinstance(optional_paths, tuple):
+        raise ValueError("optional_local_paths must be a tuple")
+    if optional_paths:
+        _texts(optional_paths, field="optional_local_paths", unique=True)
+    overlap = sorted(set(required_paths) & set(optional_paths))
+    if overlap:
+        raise ValueError(f"local paths cannot be both required and optional: {overlap}")
     if not callable(getattr(profile, "prompt_profile", None)):
         raise ValueError("game profile must define prompt_profile()")
     if not callable(getattr(profile, "build_bindings", None)):

@@ -234,7 +234,7 @@ class HLConfigTests(unittest.TestCase):
             },
             {
                 "mode": "weakest_failed",
-                "required_human_opponents": 17,
+                "required_human_opponents": 0,
             },
             {
                 "mode": "weakest_failed",
@@ -249,6 +249,18 @@ class HLConfigTests(unittest.TestCase):
                 HLRunConfig.from_mapping(
                     {**base, "curriculum": curriculum}
                 )
+
+        antwar = HLRunConfig.from_mapping(
+            {
+                **base,
+                "game": "30_antwar2",
+                "curriculum": {
+                    "mode": "weakest_failed",
+                    "required_human_opponents": 20,
+                },
+            }
+        )
+        self.assertEqual(antwar.curriculum.required_human_opponents, 20)
 
     def test_weakest_failed_curriculum_accepts_bootstrap_or_clean_import(self):
         from agentbench_frame.hl.config import HLRunConfig

@@ -38,16 +38,17 @@ class LocalPaths:
         *,
         config_dir: Path,
         required_names: tuple[str, ...],
+        optional_names: tuple[str, ...] = (),
     ) -> "LocalPaths":
-        allowed = set(required_names)
+        allowed = set(required_names) | set(optional_names)
         unknown = sorted(set(raw) - allowed)
-        missing = sorted(allowed - set(raw))
+        missing = sorted(set(required_names) - set(raw))
         if unknown:
             raise ValueError(f"unknown paths fields: {unknown}")
         if missing:
             raise ValueError(f"missing paths fields: {missing}")
         values = {}
-        for name in allowed:
+        for name in set(raw):
             raw_path = str(raw[name])
             expanded = os.path.expandvars(raw_path)
             if "$" in expanded:
@@ -106,6 +107,7 @@ class LocalHLConfig:
                 value["paths"],
                 config_dir=source.parents[2],
                 required_names=profile.required_local_paths,
+                optional_names=getattr(profile, "optional_local_paths", ()),
             ),
             source_path=source,
         )
