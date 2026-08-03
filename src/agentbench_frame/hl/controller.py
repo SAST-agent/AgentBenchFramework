@@ -1473,9 +1473,15 @@ class HLController:
                 sorted(completed, key=selection_key, reverse=True)[
                     : self.iteration.finalist_count
                 ]
-            ) or (selected,)
-        search_parent_version_id = selected.version.version_id
-        if not promote_champion and parent_evaluation is not None:
+            )
+        search_parent_version_id = (
+            selected.version.version_id if completed else parent_id
+        )
+        if (
+            completed
+            and not promote_champion
+            and parent_evaluation is not None
+        ):
             try:
                 parent_diagnostics = CandidateDiagnostics.from_matches(
                     version_id=parent_id,
@@ -1709,7 +1715,10 @@ class HLController:
             repair_recoveries=repair_recoveries,
         )
         finalists = iteration.finalists
-        if iteration.selected not in finalists:
+        if (
+            iteration.selected.evaluation.status == "complete"
+            and iteration.selected not in finalists
+        ):
             finalists = (iteration.selected, *finalists)[: self.iteration.finalist_count]
         self.events.write(
             "finalists_selected",
@@ -1731,6 +1740,8 @@ class HLController:
                     "selected_version_id": iteration.search_parent_version_id,
                     "best_candidate_version_id": (
                         iteration.selected.version.version_id
+                        if iteration.selected.evaluation.status == "complete"
+                        else None
                     ),
                     "parent_evaluation": (
                         None
@@ -1750,6 +1761,12 @@ class HLController:
                             "version_id": candidate.version.version_id,
                             "status": candidate.evaluation.status,
                             "score": candidate.evaluation.score,
+                            "error": candidate.evaluation.error,
+                            "activation": (
+                                None
+                                if candidate.activation is None
+                                else dict(candidate.activation)
+                            ),
                             "brief": briefs[candidate.branch_index].to_dict(),
                             "matches": list(candidate.evaluation.matches),
                         }
@@ -1762,6 +1779,12 @@ class HLController:
                             "version_id": candidate.version.version_id,
                             "status": candidate.evaluation.status,
                             "score": candidate.evaluation.score,
+                            "error": candidate.evaluation.error,
+                            "activation": (
+                                None
+                                if candidate.activation is None
+                                else dict(candidate.activation)
+                            ),
                             "brief": briefs[candidate.branch_index].to_dict(),
                             "matches": list(candidate.evaluation.matches),
                         }
@@ -1776,6 +1799,12 @@ class HLController:
                                 "version_id": repair.initial.version.version_id,
                                 "status": repair.initial.evaluation.status,
                                 "score": repair.initial.evaluation.score,
+                                "error": repair.initial.evaluation.error,
+                                "activation": (
+                                    None
+                                    if repair.initial.activation is None
+                                    else dict(repair.initial.activation)
+                                ),
                                 "matches": list(repair.initial.evaluation.matches),
                             },
                             "repaired": (
@@ -1786,6 +1815,12 @@ class HLController:
                                     "version_id": repair.repaired.version.version_id,
                                     "status": repair.repaired.evaluation.status,
                                     "score": repair.repaired.evaluation.score,
+                                    "error": repair.repaired.evaluation.error,
+                                    "activation": (
+                                        None
+                                        if repair.repaired.activation is None
+                                        else dict(repair.repaired.activation)
+                                    ),
                                     "matches": list(
                                         repair.repaired.evaluation.matches
                                     ),
@@ -1804,6 +1839,12 @@ class HLController:
                             "version_id": candidate.version.version_id,
                             "status": candidate.evaluation.status,
                             "score": candidate.evaluation.score,
+                            "error": candidate.evaluation.error,
+                            "activation": (
+                                None
+                                if candidate.activation is None
+                                else dict(candidate.activation)
+                            ),
                             "matches": list(candidate.evaluation.matches),
                         }
                         for candidate in iteration.representatives

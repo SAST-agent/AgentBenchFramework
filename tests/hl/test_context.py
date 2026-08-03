@@ -358,6 +358,10 @@ def test_all_profile_prompts_are_game_neutral(tmp_path, kind):
     assert "P0" in prompt and "P1" in prompt
     assert "AI.choose_operations" in prompt
     assert "grid search" in prompt
+    if kind == "reducer":
+        assert "changed_action_count=0" in prompt
+        assert "集成失败" in prompt
+        assert "至少一个原子动作" in prompt
     for forbidden in ("Rollman", "Ghost", "pacman", "rank15", "rank16"):
         assert forbidden not in prompt
 

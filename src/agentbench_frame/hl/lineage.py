@@ -207,6 +207,8 @@ class LineageManager:
 
         if version_id not in self.versions:
             raise KeyError(version_id)
+        if self.versions[version_id].status != "complete":
+            return False
         self.lineage_head_version_id = version_id
         self._degradation_streak = 0
         self._rollback_pending = False

@@ -939,6 +939,100 @@ def test_pending_repair_is_recovered_from_checkpoint_and_immutable_version(tmp_p
     assert recovered[1].provider.metadata["recovered_from_persisted_output"] is True
 
 
+def test_pending_candidate_recovery_preserves_activation_evidence(tmp_path):
+    from agentbench_frame.hl.cli import _pending_candidate_recoveries
+    from agentbench_frame.hl.codebase import VersionStore
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+
+    workspace = tmp_path / "candidate"
+    workspace.mkdir()
+    (workspace / "agent.py").write_text("VALUE = 1\n", encoding="utf-8")
+    store = VersionStore(workspace, tmp_path / "versions")
+    parent = store.snapshot(parent_version_id=None, act_id="act-origin")
+    (workspace / "agent.py").write_text("VALUE = 2\n", encoding="utf-8")
+    candidate = store.snapshot(
+        parent_version_id=parent.version_id,
+        act_id="act-000006-b01",
+        edit_type="candidate",
+    )
+    checkpoint = tmp_path / "checkpoints" / "act-000006-b01.json"
+    checkpoint.parent.mkdir()
+    checkpoint.write_text(
+        json.dumps(
+            {
+                "act_id": candidate.act_id,
+                "iteration_id": "iter-000012",
+                "branch_index": 1,
+                "parent_version_id": parent.version_id,
+                "provider_status": "completed",
+                "raw_output_ref": str(tmp_path / "provider.jsonl"),
+            }
+        ),
+        encoding="utf-8",
+    )
+    evaluation = CandidateEvaluation(
+        status="failed",
+        score=None,
+        error="no_parent_trace_action_change",
+    )
+    historical = [
+        {
+            "event_type": "proposal_cycle_started",
+            "iteration_id": "iter-000012",
+            "parent_version_id": parent.version_id,
+        },
+        {
+            "event_type": "act_completed",
+            "iteration_id": "iter-000012",
+            "act_id": candidate.act_id,
+            "branch_index": 1,
+            "status": "completed",
+        },
+        {
+            "event_type": "checkpoint_created",
+            "iteration_id": "iter-000012",
+            "act_id": candidate.act_id,
+            "path": str(checkpoint),
+        },
+        {
+            "event_type": "candidate_activation_measured",
+            "iteration_id": "iter-000012",
+            "act_id": candidate.act_id,
+            "branch_index": 1,
+            "version_id": candidate.version_id,
+            "status": "complete",
+            "decision_count": 256,
+            "changed_action_count": 0,
+            "changed_fraction": 0.0,
+            "episodes": [],
+            "error": None,
+        },
+        {
+            "event_type": "version_created",
+            "version_id": candidate.version_id,
+            "act_id": candidate.act_id,
+            "edit_type": "candidate",
+            "parent_version_id": parent.version_id,
+            "content_hash": candidate.content_hash,
+        },
+    ]
+
+    recovered = _pending_candidate_recoveries(
+        historical,
+        version_store=store,
+        evaluations_by_version={candidate.version_id: evaluation},
+    )
+
+    assert recovered[1].activation == {
+        "status": "complete",
+        "decision_count": 256,
+        "changed_action_count": 0,
+        "changed_fraction": 0.0,
+        "episodes": [],
+        "error": None,
+    }
+
+
 def test_interrupted_bootstrap_with_clean_file_change_is_recoverable(tmp_path):
     from agentbench_frame.hl.cli import _bootstrap_recovery_candidate
     from agentbench_frame.tracking.provider import ProviderInvocation

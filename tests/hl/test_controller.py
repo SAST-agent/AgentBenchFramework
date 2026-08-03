@@ -1836,6 +1836,114 @@ def test_k4_cycle_keeps_current_parent_when_every_candidate_regresses(tmp_path):
     assert result.selected.version.version_id != origin.version_id
 
 
+def test_k4_cycle_keeps_parent_and_reduces_evidence_when_all_candidates_invalid(
+    tmp_path,
+):
+    import json
+
+    from agentbench_frame.hl.codebase import VersionStore
+    from agentbench_frame.hl.config import IterationConfig, RollbackConfig
+    from agentbench_frame.hl.controller import HLController
+    from agentbench_frame.hl.events import HLEventWriter, read_events
+    from agentbench_frame.hl.lineage import LineageManager
+
+    class Provider(FakeProvider):
+        def invoke(self, *, prompt, workspace, raw_output_path, session_id=None):
+            control = Path(workspace, ".agentbench")
+            control.mkdir(parents=True, exist_ok=True)
+            if "planner" in prompt:
+                (control / "branch_briefs.json").write_text(
+                    json.dumps(
+                        {
+                            "branches": [
+                                {
+                                    "branch_index": index,
+                                    "diagnosis": f"d-{index}",
+                                    "mechanism": (
+                                        "economy",
+                                        "suppression",
+                                        "map control",
+                                        "convoy preservation",
+                                    )[index],
+                                    "activation_condition": f"condition-{index}",
+                                    "preservation_contract": f"preserve-{index}",
+                                    "expected_change": f"e-{index}",
+                                    "falsifier": f"f-{index}",
+                                    "code_symbols": ["ai_func", "helper"],
+                                }
+                                for index in range(4)
+                            ]
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            elif "candidate" in prompt:
+                Path(workspace, "agent.py").write_text(
+                    f"VALUE = {len(self.calls) + 1}\n", encoding="utf-8"
+                )
+            elif "reducer" in prompt:
+                (control / "research_state_update.json").write_text(
+                    json.dumps(
+                        {
+                            "stable_knowledge": [],
+                            "failed_hypotheses": [
+                                "all candidate changes failed activation"
+                            ],
+                            "open_questions": [],
+                            "recent_comparisons": [],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+            return super().invoke(
+                prompt=prompt,
+                workspace=workspace,
+                raw_output_path=raw_output_path,
+                session_id=session_id,
+            )
+
+    workspace = _workspace(tmp_path)
+    provider = Provider(["", "", "", "", "", ""])
+    controller = HLController(
+        workspace=workspace,
+        run_root=tmp_path,
+        provider=provider,
+        evaluator=FakeEvaluator([None, None, None, None]),
+        version_store=VersionStore(workspace, tmp_path / "versions"),
+        lineage=LineageManager(),
+        events=HLEventWriter(tmp_path / "events.jsonl", run_id="run-k4-invalid"),
+        iteration=IterationConfig(
+            candidates_per_cycle=4,
+            planner_enabled=True,
+            reducer_enabled=True,
+            finalist_count=2,
+        ),
+        rollback=RollbackConfig(),
+        prompt_factory=lambda **values: f"phase={values['phase']}",
+    )
+    origin = controller.initialize()
+
+    result = controller.run_proposal_cycle(parent_version_id=origin.version_id)
+
+    assert result.search_parent_version_id == origin.version_id
+    assert controller.lineage.lineage_head_version_id == origin.version_id
+    assert result.finalists == ()
+    assert len(provider.calls) == 6
+    reducer = json.loads(result.reducer_input_path.read_text(encoding="utf-8"))
+    assert reducer["selected_version_id"] == origin.version_id
+    assert reducer["best_candidate_version_id"] is None
+    assert [row["error"] for row in reducer["candidates"]] == [
+        "fixture failure"
+    ] * 4
+    assert [row["activation"] for row in reducer["candidates"]] == [None] * 4
+    finalists_event = next(
+        event
+        for event in read_events(tmp_path / "events.jsonl")
+        if event["event_type"] == "finalists_selected"
+    )
+    assert finalists_event["version_ids"] == []
+
+
 def test_curriculum_can_defer_experience_until_candidate_validation(tmp_path):
     from agentbench_frame.hl.events import read_events
     from agentbench_frame.hl.experience import ExperienceManager
