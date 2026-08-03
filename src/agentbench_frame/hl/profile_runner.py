@@ -686,6 +686,7 @@ def run_profile(
     resume: bool,
     provider_environment: Mapping[str, str] | None,
     allow_provider_compatibility_change: bool = False,
+    replan_pending: bool = False,
 ) -> dict[str, Any]:
     validation = validate_profile(config)
     bindings, bundle, digest, experience, research = prepare_profile_run(
@@ -1183,7 +1184,7 @@ def run_profile(
             expected_candidate_count=config.run.iteration.candidates_per_cycle,
             policy_entry_symbol=prompt_profile.policy_entry_symbol,
         )
-        if resume
+        if resume and not replan_pending
         else {
             "planner_recovery": None,
             "candidate_recoveries": {},

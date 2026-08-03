@@ -1540,6 +1540,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 acts=args.acts,
                 resume=False,
                 provider_environment=provider_environment,
+                replan_pending=False,
             )
         )
         return 0
@@ -1586,6 +1587,7 @@ def _cmd_resume(args: argparse.Namespace) -> int:
                 allow_provider_compatibility_change=(
                     args.allow_provider_compatibility_change
                 ),
+                replan_pending=args.replan_pending,
             )
         )
         return 0
