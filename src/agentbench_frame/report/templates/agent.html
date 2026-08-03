@@ -26,7 +26,7 @@
 
 <h2>Performance History</h2>
 <table>
-    <tr><th>Run</th><th>Game</th><th>Episodes</th><th>Steps</th><th>Win Rate</th><th>Avg Reward</th><th>Duration</th></tr>
+    <tr><th>Run</th><th>Game</th><th>Episodes</th><th>Steps</th><th>Win Rate</th><th>Avg Reward</th><th>Duration</th><th>Figures</th></tr>
     {% for run in agent.runs[:50] %}
     <tr>
         <td><code>{{ run._dir }}</code></td>
@@ -34,12 +34,17 @@
         <td>{{ run.total_episodes }}</td>
         <td>{{ run.total_steps }}</td>
         <td>
-            <span class="{% if run.win_rate > 0.5 %}win{% elif run.win_rate < 0.5 %}loss{% else %}draw{% endif %}">
-                {{ "%.1f"|format(run.win_rate * 100) }}%
+            <span class="{% if (run.get('win_rate') or 0) > 0.5 %}win{% elif (run.get('win_rate') or 0) < 0.5 %}loss{% else %}draw{% endif %}">
+                {{ "%.1f"|format((run.get('win_rate') or 0) * 100) }}%
             </span>
         </td>
-        <td>{{ "%.2f"|format(run.avg_reward_per_episode) }}</td>
-        <td>{{ "%.0f"|format(run.duration_s) }}s</td>
+        <td>{{ "%.2f"|format(run.get('avg_reward_per_episode', 0) or 0) }}</td>
+        <td>{{ "%.0f"|format(run.get('duration_s', 0) or 0) }}s</td>
+        <td>
+            {% for fig in run.get('_figures', []) %}
+            <a href="{{ fig }}"><img src="{{ fig }}" width="140" alt="{{ fig }}" style="vertical-align:middle;margin:2px;border:1px solid #ddd;"></a>
+            {% endfor %}
+        </td>
     </tr>
     {% endfor %}
 </table>

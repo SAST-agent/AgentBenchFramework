@@ -14,6 +14,7 @@ Usage:
 
 import json
 import os
+import shutil
 from typing import Any, Dict, List, Optional
 
 try:
@@ -55,6 +56,11 @@ class ReportBuilder:
         self._load_registry()
         self._load_runs()
         self._aggregate()
+
+        # Embed per-run figures (copied into the site) so templates can
+        # reference them without depending on AGENTBENCH_DATA at serve time.
+        # Must run before _render so run["_figures"] is set for templates.
+        self._collect_figures()
 
         if HAS_JINJA2:
             self._render()
@@ -106,6 +112,7 @@ class ReportBuilder:
                         run_dir = os.path.basename(dirpath)
                         data["_dir"] = run_dir
                         data["_path"] = full_path
+                        data["_run_dir"] = dirpath
                         self.runs.append(data)
                     except (json.JSONDecodeError, IOError):
                         continue
@@ -196,6 +203,36 @@ class ReportBuilder:
         out_path = os.path.join(self.output_dir, "index.html")
         with open(out_path, "w") as f:
             f.write(html)
+
+    def _collect_figures(self):
+        """Copy each run's ``figures/*.png`` into the site.
+
+        Site layout: ``_site/figures/{game}/{agent}/{run_id}/<name>.png``.
+        Sets ``run["_figures"]`` to the site-relative paths (HTML-safe forward
+        slashes) so templates can render ``<img>`` tags; runs without figures
+        keep no key.
+        """
+        for run in self.runs:
+            run_dir = run.get("_run_dir")
+            if not run_dir:
+                continue
+            figs_dir = os.path.join(run_dir, "figures")
+            if not os.path.isdir(figs_dir):
+                continue
+            game = run.get("game", "unknown")
+            agent = run.get("agent", "unknown")
+            run_id = run.get("_dir", "unknown")
+            rel_root = os.path.join("figures", game, agent, run_id)
+            dest = os.path.join(self.output_dir, rel_root)
+            os.makedirs(dest, exist_ok=True)
+            rel_figs = []
+            for name in sorted(os.listdir(figs_dir)):
+                if not name.lower().endswith(".png"):
+                    continue
+                shutil.copy2(os.path.join(figs_dir, name), os.path.join(dest, name))
+                rel_figs.append(os.path.join(rel_root, name).replace("\\", "/"))
+            if rel_figs:
+                run["_figures"] = rel_figs
 
     def _build_context(self) -> Dict[str, Any]:
         return {

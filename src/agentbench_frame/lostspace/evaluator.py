@@ -28,6 +28,7 @@ from typing import Any, Callable, Sequence
 
 from agentbench_frame.lostspace.match import LostSpaceMatchError, run_match
 from agentbench_frame.tracking import Run
+from agentbench_frame.tracking.run import _data_root
 
 
 MatchRunner = Callable[..., dict[str, Any]]
@@ -287,6 +288,16 @@ class LostSpaceEvaluator:
         summary_path.write_text(
             json.dumps(summary, ensure_ascii=False, indent=2) + "\n"
         )
+        # Auto-visualization: per-run figures + refreshed report site. Best-effort
+        # — a viz failure must never break the eval (mirrors hl/cli.py figures guard).
+        try:
+            from agentbench_frame.lostspace.viz import auto_visualize
+            auto_visualize(
+                run_dir,
+                Path(self.data_dir or _data_root()),
+            )
+        except Exception as e:
+            print(f"[lostspace] viz     : skipped ({type(e).__name__})")
         return LostSpaceEvaluationResult(
             run_dir=run_dir,
             summary=summary,

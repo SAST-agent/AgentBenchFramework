@@ -33,8 +33,8 @@
         <td><a href="agent_{{ run.agent|replace('/', '_')|replace(' ', '_') }}.html">{{ run.agent }}</a></td>
         <td>{{ run.total_episodes }}</td>
         <td>{{ run.total_steps }}</td>
-        <td>{{ "%.1f"|format(run.win_rate * 100) }}%</td>
-        <td>{{ "%.0f"|format(run.duration_s) }}s</td>
+        <td>{{ "%.1f"|format((run.get('win_rate') or 0) * 100) }}%</td>
+        <td>{{ "%.0f"|format(run.get('duration_s', 0) or 0) }}s</td>
     </tr>
     {% endfor %}
 </table>
