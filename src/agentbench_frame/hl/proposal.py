@@ -223,6 +223,7 @@ def write_planner_input_packet(
     previous_measurements: Mapping[str, Any],
     active_target: str | None,
     candidate_source_path: str | Path,
+    parent_occupancy: Mapping[str, Any] | None = None,
 ) -> Path:
     """Collapse bounded planner evidence into one read-only artifact."""
 
@@ -286,6 +287,9 @@ def write_planner_input_packet(
         "opponent_distillation": distillation,
         "candidate_code_index": build_candidate_code_index(
             candidate_source_path
+        ),
+        "parent_occupancy": (
+            None if parent_occupancy is None else dict(parent_occupancy)
         ),
     }
     destination = Path(output_path)

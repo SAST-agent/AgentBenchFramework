@@ -785,6 +785,17 @@ def run_profile(
         proposal_root = run_dir / "proposals" / values["iteration_id"]
         source = workspace / prompt_profile.candidate_source_relative
         if phase == "planner":
+            parent_occupancy = None
+            if bindings.occupancy_summarizer is not None:
+                if current_evaluation is None:
+                    raise ValueError(
+                        "parent occupancy requires a complete parent evaluation"
+                    )
+                parent_version = store.get(str(values["parent_version_id"]))
+                parent_occupancy = bindings.occupancy_summarizer(
+                    store.objects / parent_version.content_hash,
+                    references=_references(current_evaluation),
+                )
             packet = write_planner_input_packet(
                 output_path=proposal_root / "planner_input.json",
                 iteration_id=values["iteration_id"],
@@ -796,6 +807,7 @@ def run_profile(
                 previous_measurements=previous_measurements,
                 active_target=config.run.evaluation.learning_opponent,
                 candidate_source_path=source,
+                parent_occupancy=parent_occupancy,
             )
             return context.build_planner_prompt(
                 act_id=values["act_id"],

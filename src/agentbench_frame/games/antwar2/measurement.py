@@ -17,6 +17,113 @@ from agentbench_frame.hl.game_profile import BehaviorComparison
 HOLD = (0, -1, -1)
 
 
+def summarize_probe_occupancy(
+    probe: Mapping[str, Any],
+    *,
+    max_examples: int = 16,
+) -> dict[str, Any]:
+    """Summarize raw public occupancy without inventing tactical features."""
+
+    cases = probe.get("cases")
+    if not isinstance(cases, list) or not cases:
+        raise ValueError("probe output must contain cases")
+    ordered = sorted(
+        (case for case in cases if isinstance(case, Mapping)),
+        key=lambda case: str(case.get("state_id") or ""),
+    )
+    if not ordered:
+        raise ValueError("probe output has no valid cases")
+    count = min(max(1, int(max_examples)), len(ordered))
+    positions = (
+        set(range(len(ordered)))
+        if count == len(ordered)
+        else {
+            round(offset * (len(ordered) - 1) / (count - 1))
+            for offset in range(count)
+        }
+    )
+    range_fields = (
+        ("round_index", ("round_index",)),
+        ("self_coins", ("coins", "self")),
+        ("enemy_coins", ("coins", "enemy")),
+        ("self_camp_hp", ("camp_hp", "self")),
+        ("enemy_camp_hp", ("camp_hp", "enemy")),
+        ("self_generation_level", ("generation_level", "self")),
+        ("enemy_generation_level", ("generation_level", "enemy")),
+        ("self_ant_level", ("ant_level", "self")),
+        ("enemy_ant_level", ("ant_level", "enemy")),
+        ("self_tower_count", ("tower_count", "self")),
+        ("enemy_tower_count", ("tower_count", "enemy")),
+        ("self_ant_count", ("ant_count", "self")),
+        ("enemy_ant_count", ("ant_count", "enemy")),
+    )
+    values_by_role: dict[str, dict[str, list[int]]] = {}
+    actions_by_role: dict[str, dict[tuple[int, int, int], int]] = {}
+    examples: list[dict[str, Any]] = []
+    for index, case in enumerate(ordered):
+        summary = case.get("public_summary")
+        if not isinstance(summary, Mapping):
+            summary = {}
+        role = str(case.get("role") or summary.get("role") or "unknown")
+        role_values = values_by_role.setdefault(role, {})
+        for label, path in range_fields:
+            current: Any = summary
+            for key in path:
+                if not isinstance(current, Mapping):
+                    current = None
+                    break
+                current = current.get(key)
+            if isinstance(current, int) and not isinstance(current, bool):
+                role_values.setdefault(label, []).append(current)
+        selected, _ = _step(case, 0)
+        counts = actions_by_role.setdefault(role, {})
+        counts[selected] = counts.get(selected, 0) + 1
+        if index in positions:
+            examples.append(
+                {
+                    "state_id": str(case.get("state_id") or ""),
+                    "public_summary": dict(summary),
+                    "parent_selected": list(selected),
+                }
+            )
+    return {
+        "schema_version": "1.0",
+        "state_count": len(ordered),
+        "roles": {
+            role: {
+                "observed_ranges": {
+                    label: {"min": min(items), "max": max(items)}
+                    for label, items in sorted(values.items())
+                    if items
+                },
+                "first_atomic_action_counts": [
+                    {"atom": list(atom), "count": count}
+                    for atom, count in sorted(
+                        actions_by_role.get(role, {}).items()
+                    )
+                ],
+            }
+            for role, values in sorted(values_by_role.items())
+        },
+        "state_examples": examples,
+    }
+
+
+def summarize_occupancy(
+    *,
+    candidate_root: str | Path,
+    references: Sequence[tuple[str | Path, str]],
+    max_states_per_reference: int = 64,
+) -> dict[str, Any]:
+    return summarize_probe_occupancy(
+        probe_policy(
+            candidate_root=candidate_root,
+            references=references,
+            max_states_per_reference=max_states_per_reference,
+        )
+    )
+
+
 def _atom(value: Any) -> tuple[int, int, int]:
     if (
         not isinstance(value, (list, tuple))

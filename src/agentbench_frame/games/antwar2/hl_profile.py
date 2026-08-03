@@ -12,7 +12,10 @@ from agentbench_frame.games.antwar2.activation_check import (
 )
 from agentbench_frame.games.antwar2.evidence import build_replay_evidence
 from agentbench_frame.games.antwar2.match import ProcessSpec
-from agentbench_frame.games.antwar2.measurement import compare_behavior
+from agentbench_frame.games.antwar2.measurement import (
+    compare_behavior,
+    summarize_occupancy,
+)
 from agentbench_frame.games.antwar2.runtime import (
     AntWarLayout,
     assemble_candidate,
@@ -202,5 +205,9 @@ class AntWar2HLProfile:
             ),
             activation_contract_builder=lambda **kwargs: (
                 build_activation_check_command(**kwargs)
+            ),
+            occupancy_summarizer=lambda parent, **kwargs: summarize_occupancy(
+                candidate_root=parent,
+                references=kwargs["references"],
             ),
         )

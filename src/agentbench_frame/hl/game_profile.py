@@ -152,6 +152,7 @@ ReplayEvidenceBuilder = Callable[
 ]
 BehaviorComparator = Callable[..., BehaviorComparison]
 ActivationContractBuilder = Callable[..., Sequence[str]]
+OccupancySummarizer = Callable[..., Mapping[str, Any]]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -167,6 +168,7 @@ class HLGameBindings:
     replay_evidence_builder: ReplayEvidenceBuilder
     behavior_comparator: BehaviorComparator
     activation_contract_builder: ActivationContractBuilder | None = None
+    occupancy_summarizer: OccupancySummarizer | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.context_sources, Mapping) or not self.context_sources:
@@ -186,6 +188,10 @@ class HLGameBindings:
             self.activation_contract_builder
         ):
             raise ValueError("activation_contract_builder must be callable")
+        if self.occupancy_summarizer is not None and not callable(
+            self.occupancy_summarizer
+        ):
+            raise ValueError("occupancy_summarizer must be callable")
         if not callable(getattr(self.evaluator, "evaluate", None)):
             raise ValueError("evaluator must define evaluate(version)")
 

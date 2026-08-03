@@ -96,6 +96,47 @@ def test_extra_bundle_atom_is_compared_against_hold_at_same_frozen_state():
     assert result.details["state_count"] == 1
 
 
+def test_parent_occupancy_summary_reports_raw_ranges_and_atomic_counts():
+    from agentbench_frame.games.antwar2.measurement import summarize_probe_occupancy
+
+    first = _case(
+        _step([0, -1, -1]),
+        state_id="reference-0:0:P0",
+        public_summary={
+            "round_index": 1,
+            "role": "P0",
+            "coins": {"self": 5, "enemy": 50},
+            "tower_count": {"self": 2, "enemy": 0},
+        },
+    )
+    second = _case(
+        _step([11, 4, 5]),
+        state_id="reference-0:20:P0",
+        public_summary={
+            "round_index": 21,
+            "role": "P0",
+            "coins": {"self": 41, "enemy": 42},
+            "tower_count": {"self": 3, "enemy": 2},
+        },
+    )
+
+    value = summarize_probe_occupancy({"cases": [first, second]})
+
+    assert value["state_count"] == 2
+    assert value["roles"]["P0"]["observed_ranges"]["self_coins"] == {
+        "min": 5,
+        "max": 41,
+    }
+    assert value["roles"]["P0"]["observed_ranges"]["self_tower_count"] == {
+        "min": 2,
+        "max": 3,
+    }
+    assert value["roles"]["P0"]["first_atomic_action_counts"] == [
+        {"atom": [0, -1, -1], "count": 1},
+        {"atom": [11, 4, 5], "count": 1},
+    ]
+
+
 def test_terminal_replay_snapshot_is_not_a_valid_decision_state():
     from agentbench_frame.games.antwar2.policy_probe import _is_terminal_state
 

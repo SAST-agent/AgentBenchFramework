@@ -300,9 +300,9 @@ Bounded inputs:
 - replay evidence: {evidence}
 - previous measurements: {measurements}
 
-Read the packet once when present. It embeds the digest, manifest index, research state, bounded replay summaries, measurements and candidate code index. Consult an authoritative context file only when a precise rule or API question remains. Never print a complete replay, trace, board stream, or policy source.
+Read the packet once when present. It embeds the digest, manifest index, research state, bounded replay summaries, measurements, candidate code index, and a game-owned `parent_occupancy` summary of raw public states and observed atomic actions. Consult an authoritative context file only when a precise rule or API question remains. Never print a complete replay, trace, board stream, or policy source.
 
-Produce exactly four sibling hypotheses from the same parent. Each must contain a replay-grounded causal diagnosis, an observable activation condition, a mechanism, a preservation contract, an expected measurable change, a falsifier, and exact code symbols. The branches must differ in mechanism, not merely thresholds, weights, or parameter values. Do not perform grid search.
+Produce exactly four sibling hypotheses from the same parent. Each must contain a replay-grounded causal diagnosis, an observable activation condition, a mechanism, a preservation contract, an expected measurable change, a falsifier, and exact code symbols. Every activation condition must cite at least one reachable `parent_occupancy.state_examples` state or an observed per-role range, and the proposed atomic operation must be affordable and legal in at least one such state. Do not propose a condition contradicted by the observed maxima (for example, a minimum coin or tower-count gate above the recorded maximum). The branches must differ in mechanism, not merely thresholds, weights, or parameter values. Do not perform grid search.
 
 Required diversity axes:
 {diversity}
