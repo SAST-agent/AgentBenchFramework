@@ -3698,6 +3698,32 @@ def _cmd_aggregate_report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_control_matrix(args: argparse.Namespace) -> int:
+    from agentbench_frame.hl.control_matrix import run_control_matrix
+
+    result = run_control_matrix(
+        _load(args.config),
+        matrix_path=args.matrix,
+        run_dir=args.run_dir,
+    )
+    _json(
+        {
+            "run_dir": str(Path(args.run_dir).resolve()),
+            "provider_used": False,
+            "source_version": result["source_version"],
+            "source_content_hash": result["source_content_hash"],
+            "results": [
+                {
+                    "group": item["group"],
+                    "summary": item["summary"],
+                }
+                for item in result["results"]
+            ],
+        }
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="agentbench hl")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -3743,6 +3769,11 @@ def main(argv: list[str] | None = None) -> int:
     aggregate.add_argument("--origin-iteration", required=True, type=int)
     aggregate.add_argument("--output-dir")
     aggregate.set_defaults(handler=_cmd_aggregate_report)
+    control_matrix = sub.add_parser("control-matrix")
+    control_matrix.add_argument("--config", required=True)
+    control_matrix.add_argument("--matrix", required=True)
+    control_matrix.add_argument("--run-dir", required=True)
+    control_matrix.set_defaults(handler=_cmd_control_matrix)
     args = parser.parse_args(argv)
     if getattr(args, "acts", None) is not None:
         minimum = 0

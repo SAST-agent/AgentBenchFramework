@@ -1,0 +1,48 @@
+{
+  "schema_version": "1.0",
+  "groups": [
+    {
+      "name": "human-pool-seed7",
+      "opponent_ids": [
+        "rank01",
+        "rank02",
+        "rank04",
+        "rank05",
+        "rank06",
+        "rank07",
+        "rank08",
+        "rank10",
+        "rank11",
+        "rank12",
+        "rank13",
+        "rank14",
+        "rank15",
+        "rank16",
+        "rank17",
+        "rank18",
+        "rank19",
+        "rank20"
+      ],
+      "roles": ["P0", "P1"],
+      "seeds": [7]
+    },
+    {
+      "name": "rank01-robustness",
+      "opponent_ids": ["rank01"],
+      "roles": ["P0", "P1"],
+      "seeds": [1, 2, 3, 5, 7, 11, 19, 43]
+    },
+    {
+      "name": "rank02-historical",
+      "opponent_ids": ["rank02"],
+      "roles": ["P0", "P1"],
+      "seeds": [7, 19, 43]
+    },
+    {
+      "name": "rank05-historical",
+      "opponent_ids": ["rank05"],
+      "roles": ["P0", "P1"],
+      "seeds": [7]
+    }
+  ]
+}

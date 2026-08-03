@@ -88,6 +88,62 @@ def test_evaluation_covers_both_roles_and_uses_generic_match_records(tmp_path):
     assert all(match["schema_version"] == "1.0" for match in result.matches)
 
 
+def test_control_matrix_selects_exact_opponents_roles_and_seeds(tmp_path):
+    from agentbench_frame.games.antwar2.evaluator import (
+        AntWar2Evaluator,
+        AntWarOpponent,
+    )
+    from agentbench_frame.games.antwar2.match import ProcessSpec
+
+    calls = []
+
+    def runner(**kwargs):
+        calls.append(
+            (kwargs["opponent"], kwargs["candidate_role"], kwargs["seed"])
+        )
+        return _Artifacts(
+            _record(
+                role=kwargs["candidate_role"],
+                seed=kwargs["seed"],
+                result="win",
+            )
+        )
+
+    process = ProcessSpec((sys.executable, "main.py"), tmp_path)
+    pool = tuple(
+        AntWarOpponent(
+            f"rank{rank:02d}", rank, tmp_path / f"rank{rank:02d}.zip", process
+        )
+        for rank in (1, 2, 3)
+    )
+    evaluator = AntWar2Evaluator(
+        game=ProcessSpec(("game",), tmp_path),
+        candidate_factory=lambda _version: process,
+        learning_opponents=(pool[0],),
+        human_pool=pool,
+        fixed_gate_seeds=(7,),
+        certification_seeds=(11,),
+        artifact_root=tmp_path / "runs",
+        match_runner=runner,
+    )
+
+    result = evaluator.evaluate_matrix(
+        _version(),
+        opponent_ids=("rank01", "rank03"),
+        roles=("P1",),
+        seeds=(1, 7),
+        phase="rank01-rank03-audit",
+    )
+
+    assert result.status == "complete"
+    assert calls == [
+        ("rank01", "P1", 1),
+        ("rank01", "P1", 7),
+        ("rank03", "P1", 1),
+        ("rank03", "P1", 7),
+    ]
+
+
 def test_transport_failure_is_fault_record_not_strategy_loss(tmp_path):
     from agentbench_frame.games.antwar2.evaluator import (
         AntWar2Evaluator,

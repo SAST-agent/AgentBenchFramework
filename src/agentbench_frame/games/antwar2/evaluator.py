@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import dataclasses
+import re
 import sys
 from collections.abc import Callable, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -236,6 +237,50 @@ class AntWar2Evaluator:
             phase="reporting",
         )
 
+    def evaluate_matrix(
+        self,
+        version: Version,
+        *,
+        opponent_ids: Sequence[str],
+        roles: Sequence[str],
+        seeds: Sequence[int],
+        phase: str,
+    ) -> CandidateEvaluation:
+        """Evaluate one explicit, reproducible Cartesian case matrix."""
+
+        requested = tuple(str(value) for value in opponent_ids)
+        active_roles = tuple(str(value) for value in roles)
+        active_seeds = tuple(int(value) for value in seeds)
+        if not requested or len(set(requested)) != len(requested):
+            raise ValueError("matrix opponent_ids must be non-empty and unique")
+        if (
+            not active_roles
+            or len(set(active_roles)) != len(active_roles)
+            or any(role not in {"P0", "P1"} for role in active_roles)
+        ):
+            raise ValueError("matrix roles must be unique P0/P1 values")
+        if not active_seeds or len(set(active_seeds)) != len(active_seeds):
+            raise ValueError("matrix seeds must be non-empty and unique")
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,79}", phase):
+            raise ValueError("matrix phase must be a safe lowercase artifact name")
+        by_id = {item.opponent_id: item for item in self.human_pool}
+        missing = sorted(set(requested) - set(by_id))
+        if missing:
+            raise ValueError(f"unknown matrix opponents: {missing}")
+        opponents = tuple(by_id[value] for value in requested)
+        if any(item.process is None for item in opponents):
+            unrunnable = [
+                item.opponent_id for item in opponents if item.process is None
+            ]
+            raise ValueError(f"matrix opponents are not runnable: {unrunnable}")
+        return self._evaluate_cases(
+            version,
+            opponents=opponents,
+            seeds=active_seeds,
+            phase=phase,
+            roles=active_roles,
+        )
+
     def set_learning_opponent(self, opponent: AntWarOpponent) -> None:
         if opponent.process is None:
             raise ValueError("learning opponent has no runnable main.py")
@@ -288,12 +333,14 @@ class AntWar2Evaluator:
         opponents: Sequence[AntWarOpponent],
         seeds: Sequence[int],
         phase: str,
+        roles: Sequence[str] | None = None,
     ) -> CandidateEvaluation:
         candidate_process = self.candidate_factory(version)
+        active_roles = self.roles if roles is None else tuple(roles)
         cases = [
             (opponent, role, seed)
             for opponent in opponents
-            for role in self.roles
+            for role in active_roles
             for seed in seeds
         ]
 
