@@ -139,6 +139,92 @@ def test_game_digest_is_deterministic_and_contains_primitive_actions(tmp_path):
     }
 
 
+def test_game_digest_accepts_game_defined_atomic_operations(tmp_path):
+    from agentbench_frame.hl.context import ContextBundle, compile_game_digest
+
+    files = _digest_files(tmp_path / "assets")
+    files["rules"].write_text("# Ant colony rules\n", encoding="utf-8")
+    files["replay_skill"].write_text(
+        "---\nname: colony-replay\ndescription: Diagnose colony JSONL.\n---\n",
+        encoding="utf-8",
+    )
+    files["decision_space"].write_text(
+        """
+policy_interface:
+  input_type: antwar_sdk.PublicState
+  object_fields: [round, camps, towers, ants, cooldowns]
+  normalized_state_mapping: {}
+roles:
+  P0:
+    role_id: 0
+    output_shape: list[AtomicOperation]
+    actions:
+      - {name: HOLD, arguments: []}
+      - {name: BUILD_TOWER, arguments: [cell]}
+  P1:
+    role_id: 1
+    output_shape: list[AtomicOperation]
+    actions:
+      - {name: HOLD, arguments: []}
+      - {name: UPGRADE_TOWER, arguments: [tower_id, target_type]}
+""".lstrip(),
+        encoding="utf-8",
+    )
+    bundle = ContextBundle.create(tmp_path / "bundle", files)
+
+    value = json.loads(
+        compile_game_digest(bundle, tmp_path / "digest.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert tuple(value["roles"]) == ("P0", "P1")
+    assert value["roles"]["P0"]["actions"][1] == {
+        "arguments": ["cell"],
+        "name": "BUILD_TOWER",
+    }
+    assert "rollman" not in json.dumps(value).lower()
+
+
+def test_profile_prompt_uses_game_vocabulary_without_rollman_leak(tmp_path):
+    from agentbench_frame.hl.context import ContextBundle, IterationContext
+    from agentbench_frame.hl.game_profile import PromptProfile
+
+    bundle = ContextBundle.create(
+        tmp_path / "bundle", _static_files(tmp_path / "assets")
+    )
+    context = IterationContext(
+        bundle,
+        prompt_profile=PromptProfile(
+            candidate_label="colony policy",
+            opponent_label="human colony",
+            roles=("P0", "P1"),
+            policy_input="antwar_sdk.PublicState",
+            output_contract="list[AtomicOperation]",
+            planner_diversity=("economy", "defense", "timing", "counterplay"),
+            prohibited_information=("opponent source", "seed lookup"),
+        ),
+    )
+
+    prompt = context.build_planner_prompt(
+        act_id="act-000001-planner",
+        iteration_id="iter-000001",
+        parent_version_id="v0",
+        workspace=tmp_path / "candidate",
+        game_digest_path=tmp_path / "digest.json",
+        research_state_path=tmp_path / "research.json",
+        replay_evidence=[],
+        previous_measurements={},
+    )
+
+    assert "colony policy" in prompt
+    assert "P0" in prompt and "P1" in prompt
+    assert "antwar_sdk.PublicState" in prompt
+    assert "list[AtomicOperation]" in prompt
+    for forbidden in ("Rollman", "Ghost", "pacman_pos", "rank15", "rank16"):
+        assert forbidden not in prompt
+
+
 def test_prompt_requires_replay_grounded_causal_change_and_blocks_grid_search(tmp_path):
     from agentbench_frame.hl.context import ContextBundle, IterationContext
 

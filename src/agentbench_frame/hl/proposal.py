@@ -27,12 +27,13 @@ def stratify_rollout_evidence(
         raise ValueError("k4 evidence routing requires two distinct hard opponents")
 
     def severity(item: Mapping[str, Any]) -> tuple[Any, ...]:
-        rollman = item.get("rollman_score")
-        ghosts = item.get("ghosts_score")
-        margin = (
-            float(rollman) - float(ghosts)
-            if isinstance(rollman, (int, float))
-            and isinstance(ghosts, (int, float))
+        raw_margin = item.get("dense_margin")
+        candidate_score = item.get("candidate_score")
+        opponent_score = item.get("opponent_score")
+        margin = float(raw_margin) if isinstance(raw_margin, (int, float)) else (
+            float(candidate_score) - float(opponent_score)
+            if isinstance(candidate_score, (int, float))
+            and isinstance(opponent_score, (int, float))
             else float("inf")
         )
         result_order = {"loss": 0, "draw": 1, "win": 2}
@@ -215,11 +216,15 @@ def write_planner_input_packet(
 
     evidence_fields = (
         "opponent",
+        "candidate_role",
         "seed",
+        "status",
         "result",
         "phase",
-        "rollman_score",
-        "ghosts_score",
+        "points",
+        "candidate_score",
+        "opponent_score",
+        "dense_margin",
     )
     evidence = []
     for item in replay_evidence:

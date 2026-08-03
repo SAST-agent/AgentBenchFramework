@@ -369,10 +369,14 @@ def test_planner_input_packet_collapses_exact_inputs_without_replay_paths(tmp_pa
         replay_evidence=[
             {
                 "opponent": "rank15",
+                "candidate_role": "attacker",
                 "seed": 1103,
                 "result": "loss",
-                "rollman_score": 10,
-                "ghosts_score": 100,
+                "phase": "learning",
+                "points": 0.0,
+                "candidate_score": 10,
+                "opponent_score": 100,
+                "dense_margin": -90,
                 "summary": str(summary),
                 "replay": "/forbidden/replay.jsonl",
                 "trace": "/forbidden/trace.jsonl",
@@ -410,10 +414,14 @@ def test_planner_input_packet_collapses_exact_inputs_without_replay_paths(tmp_pa
     ]
     assert value["replay_evidence"] == [
         {
-            "ghosts_score": 100,
+            "candidate_role": "attacker",
+            "candidate_score": 10,
+            "dense_margin": -90,
             "opponent": "rank15",
+            "opponent_score": 100,
+            "phase": "learning",
+            "points": 0.0,
             "result": "loss",
-            "rollman_score": 10,
             "seed": 1103,
             "summary_text": "rank15 evidence",
         }
@@ -427,10 +435,12 @@ def test_k4_evidence_packets_assign_complementary_hard_opponent_failures():
     evidence = [
         {
             "opponent": opponent,
+            "candidate_role": "attacker",
             "seed": seed,
             "result": "loss",
-            "rollman_score": rollman,
-            "ghosts_score": 100,
+            "candidate_score": rollman,
+            "opponent_score": 100,
+            "dense_margin": rollman - 100,
             "phase": "learning",
             "summary": f"{opponent}-{seed}.md",
             "trace": f"{opponent}-{seed}.jsonl",

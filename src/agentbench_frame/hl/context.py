@@ -12,6 +12,8 @@ from typing import Any, Mapping, Optional, Sequence
 
 import yaml
 
+from agentbench_frame.hl.game_profile import PromptProfile
+
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -129,8 +131,9 @@ def compile_game_digest(
     policy_interface = decision_value.get("policy_interface")
     if not isinstance(policy_interface, Mapping):
         raise ValueError("decision space must define policy_interface")
-    if policy_interface.get("input_type") != "core.gamedata.GameState":
-        raise ValueError("Rollman policy input must be core.gamedata.GameState")
+    input_type = policy_interface.get("input_type")
+    if not isinstance(input_type, str) or not input_type.strip():
+        raise ValueError("policy_interface.input_type must be a non-empty string")
     object_fields = policy_interface.get("object_fields")
     if not isinstance(object_fields, list) or not all(
         isinstance(field, str) and field for field in object_fields
@@ -142,19 +145,36 @@ def compile_game_digest(
     roles = decision_value.get("roles")
     if not isinstance(roles, Mapping):
         raise ValueError("decision space must define roles")
-    rollman = roles.get("rollman")
-    ghosts = roles.get("ghosts")
-    if not isinstance(rollman, Mapping) or not isinstance(ghosts, Mapping):
-        raise ValueError("decision space must define rollman and ghosts")
-    actions = rollman.get("actions")
-    if not isinstance(actions, list) or not all(
-        isinstance(item, Mapping) and isinstance(item.get("id"), int)
-        for item in actions
-    ):
-        raise ValueError("rollman actions must be structured mappings")
-    normalized_actions = [dict(item) for item in actions]
-    if [item["id"] for item in normalized_actions] != [0, 1, 2, 3, 4]:
-        raise ValueError("Rollman primitive action support must be exactly 0..4")
+    if not roles:
+        raise ValueError("decision space roles cannot be empty")
+    normalized_roles: dict[str, dict[str, Any]] = {}
+    for role_name, raw_role in roles.items():
+        if not isinstance(role_name, str) or not role_name.strip():
+            raise ValueError("decision space role names must be non-empty strings")
+        if not isinstance(raw_role, Mapping):
+            raise ValueError(f"decision space role {role_name} must be a mapping")
+        role_id = raw_role.get("role_id")
+        output_shape = raw_role.get("output_shape")
+        if isinstance(role_id, bool) or not isinstance(role_id, int):
+            raise ValueError(f"decision space role {role_name} requires integer role_id")
+        if not isinstance(output_shape, str) or not output_shape.strip():
+            raise ValueError(f"decision space role {role_name} requires output_shape")
+        normalized_role = dict(raw_role)
+        actions = raw_role.get("actions")
+        component_support = raw_role.get("component_support")
+        if actions is not None:
+            if not isinstance(actions, list) or not actions or not all(
+                isinstance(item, Mapping) for item in actions
+            ):
+                raise ValueError(
+                    f"decision space role {role_name} actions must be structured mappings"
+                )
+            normalized_role["actions"] = [dict(item) for item in actions]
+        elif not isinstance(component_support, list) or not component_support:
+            raise ValueError(
+                f"decision space role {role_name} requires actions or component_support"
+            )
+        normalized_roles[role_name] = normalized_role
 
     rules_text = bundle.files["rules"].read_text(encoding="utf-8")
     headings = [
@@ -175,25 +195,14 @@ def compile_game_digest(
         "context_bundle_hash": bundle.bundle_hash,
         "context_manifest": str(bundle.manifest_path),
         "policy_interface": {
-            "input_type": str(policy_interface["input_type"]),
+            "input_type": input_type,
             "object_fields": list(object_fields),
             "canonical_normalization": str(
                 policy_interface.get("canonical_normalization") or ""
             ),
             "normalized_state_mapping": dict(normalized_mapping),
         },
-        "roles": {
-            "rollman": {
-                "role_id": int(rollman["role_id"]),
-                "output_shape": str(rollman["output_shape"]),
-                "actions": normalized_actions,
-            },
-            "ghosts": {
-                "role_id": int(ghosts["role_id"]),
-                "output_shape": str(ghosts["output_shape"]),
-                "component_support": list(ghosts["component_support"]),
-            },
-        },
+        "roles": normalized_roles,
         "rule_sections": headings,
         "replay_skill": {
             "name": str(skill_metadata.get("name") or ""),
@@ -213,8 +222,90 @@ def compile_game_digest(
 class IterationContext:
     """Build small act prompts that point at versioned files and artifacts."""
 
-    def __init__(self, bundle: ContextBundle) -> None:
+    def __init__(
+        self,
+        bundle: ContextBundle,
+        *,
+        prompt_profile: PromptProfile | None = None,
+    ) -> None:
         self.bundle = bundle
+        self.prompt_profile = prompt_profile
+
+    def _build_profile_planner_prompt(
+        self,
+        *,
+        act_id: str,
+        iteration_id: str,
+        parent_version_id: str,
+        workspace: str | Path,
+        game_digest_path: str | Path,
+        research_state_path: str | Path,
+        replay_evidence: list[Mapping[str, Any]],
+        previous_measurements: Mapping[str, Any],
+        active_target: Optional[str],
+        scope_contract_required: bool,
+        planner_input_path: str | Path | None,
+    ) -> str:
+        profile = self.prompt_profile
+        assert profile is not None
+        roles = ", ".join(profile.roles)
+        diversity = "\n".join(
+            f"- {item}" for item in profile.planner_diversity
+        )
+        prohibited = "\n".join(
+            f"- {item}" for item in profile.prohibited_information
+        )
+        packet = (
+            str(Path(planner_input_path).resolve())
+            if planner_input_path is not None
+            else "not provided; use the bounded paths below"
+        )
+        evidence = json.dumps(
+            replay_evidence,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        measurements = json.dumps(
+            previous_measurements,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return f"""# Generic HL hypothesis planner {act_id}
+
+proposal cycle: {iteration_id}
+common parent: {parent_version_id}
+candidate: {profile.candidate_label}
+opponent: {profile.opponent_label}
+candidate roles: {roles}
+active target: {active_target or "none"}
+policy input: {profile.policy_input}
+output contract: {profile.output_contract}
+
+Bounded inputs:
+- planner packet: {packet}
+- compact game digest: {Path(game_digest_path).resolve()}
+- context manifest: {self.bundle.manifest_path.resolve()}
+- research state: {Path(research_state_path).resolve()}
+- candidate workspace: {Path(workspace).resolve()}
+- replay evidence: {evidence}
+- previous measurements: {measurements}
+
+Read the packet once when present. It embeds the digest, manifest index, research state, bounded replay summaries, measurements and candidate code index. Consult an authoritative context file only when a precise rule or API question remains. Never print a complete replay, trace, board stream, or policy source.
+
+Produce exactly four sibling hypotheses from the same parent. Each must contain a replay-grounded causal diagnosis, an observable activation condition, a mechanism, a preservation contract, an expected measurable change, a falsifier, and exact code symbols. The branches must differ in mechanism, not merely thresholds, weights, or parameter values. Do not perform grid search.
+
+Required diversity axes:
+{diversity}
+
+Prohibited information and shortcuts:
+{prohibited}
+
+The atomic decision space in the frozen digest is authoritative for behavior measurement and KL. Do not invent tactical labels or latent hypothesis spaces. Source size and additional evidence-backed branches are not penalties. At least two branches must attempt proactive scoring, progress, resource acquisition, or direct suppression of the opponent rather than making all branches conservative.
+
+Write `workspace/.agentbench/branch_briefs.json` by the second tool call, validate its strict JSON shape once, and stop. Each of the four objects must use branch_index 0..3 and the fields diagnosis, mechanism, activation_condition, preservation_contract, expected_change, falsifier, and code_symbols. `code_symbols` must contain 2–8 unique names from candidate_code_index and include the public policy entry point. Scope contract: {"required" if scope_contract_required else "diagnostic-only"}.
+"""
 
     def build_bootstrap_prompt(
         self,
@@ -408,6 +499,20 @@ Act 预算：
         scope_contract_required: bool = True,
         planner_input_path: str | Path | None = None,
     ) -> str:
+        if self.prompt_profile is not None:
+            return self._build_profile_planner_prompt(
+                act_id=act_id,
+                iteration_id=iteration_id,
+                parent_version_id=parent_version_id,
+                workspace=workspace,
+                game_digest_path=game_digest_path,
+                research_state_path=research_state_path,
+                replay_evidence=replay_evidence,
+                previous_measurements=previous_measurements,
+                active_target=active_target,
+                scope_contract_required=scope_contract_required,
+                planner_input_path=planner_input_path,
+            )
         evidence = json.dumps(
             replay_evidence,
             ensure_ascii=False,
