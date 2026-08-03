@@ -320,6 +320,46 @@ def test_planner_prompt_requires_early_durable_branch_briefs(tmp_path):
     assert "不要逐个读取四个 summary" in prompt
 
 
+def test_planner_prompt_emits_exact_read_allowlist_and_forbids_discovery(tmp_path):
+    """Catch planners adding globs after the framework supplied exact inputs."""
+    from agentbench_frame.hl.context import ContextBundle, IterationContext
+
+    bundle = ContextBundle.create(
+        tmp_path / "bundle",
+        _static_files(tmp_path / "assets"),
+    )
+    digest = tmp_path / "digest.json"
+    research = tmp_path / "research.json"
+    summary = tmp_path / "matches" / "rank15" / "summary.md"
+    shared = tmp_path / "shared-distillation.json"
+    prompt = IterationContext(bundle).build_planner_prompt(
+        act_id="act-planner",
+        iteration_id="iter-000002",
+        parent_version_id="v000000",
+        workspace=tmp_path / "candidate",
+        game_digest_path=digest,
+        research_state_path=research,
+        replay_evidence=[{"summary": str(summary)}],
+        previous_measurements={"opponent_distillation_path": str(shared)},
+        active_target="rank15",
+    )
+
+    expected_allowlist = json.dumps(
+        [
+            str(digest.resolve()),
+            str(bundle.manifest_path.resolve()),
+            str(research.resolve()),
+            str(summary.resolve()),
+            str(shared.resolve()),
+        ],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    assert f"planner 精确只读白名单：{expected_allowlist}" in prompt
+    assert "禁止使用 glob、通配符、find、目录列举或路径发现" in prompt
+    assert "白名单没有共享蒸馏文件时，视为该输入不存在" in prompt
+
+
 def test_curriculum_prompt_names_target_and_locked_pool(tmp_path):
     from agentbench_frame.hl.context import ContextBundle, IterationContext
 

@@ -425,6 +425,25 @@ Act 预算：
         shared_distillation = previous_measurements.get(
             "opponent_distillation_path"
         )
+        planner_read_paths = [
+            str(Path(game_digest_path).resolve()),
+            str(self.bundle.manifest_path.resolve()),
+            str(Path(research_state_path).resolve()),
+        ]
+        planner_read_paths.extend(
+            str(Path(str(item["summary"])).resolve())
+            for item in replay_evidence
+            if item.get("summary")
+        )
+        if shared_distillation:
+            planner_read_paths.append(
+                str(Path(str(shared_distillation)).resolve())
+            )
+        planner_read_allowlist = json.dumps(
+            list(dict.fromkeys(planner_read_paths)),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
         distillation = ""
         if shared_distillation:
             distillation = f"""
@@ -455,6 +474,9 @@ active target: {active_target or "none"}
 - bounded replay evidence: {evidence}
 {distillation}
 {branch_roles}
+
+planner 精确只读白名单：{planner_read_allowlist}
+第一次工具调用只能逐项直接引用上述完整文件路径并批量读取。禁止使用 glob、通配符、find、目录列举或路径发现，也不得扫描 run/context/workspace。白名单没有共享蒸馏文件时，视为该输入不存在，不得自行搜索替代文件。
 
 这是压缩假设规划，不是代码审查。禁止读取 ai.py、禁止列举 workspace、禁止运行符号搜索；候选 act 负责核对代码并实现机制。Planner 只需从框架已经筛选的摘要、研究状态和坐标无关蒸馏中提出新假设。
 
