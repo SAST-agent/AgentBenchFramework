@@ -57,6 +57,10 @@ def test_activation_check_command_freezes_reference_manifest(tmp_path):
     )
 
     assert command[0]
+    assert command[1:3] == (
+        "-m",
+        "agentbench_frame.games.antwar2.activation_check",
+    )
     assert "--minimum-changed-actions" in command
     assert command[-1] == "2"
     assert json.loads((tmp_path / "references.json").read_text(encoding="utf-8"))[0][

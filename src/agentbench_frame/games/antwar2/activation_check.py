@@ -41,7 +41,8 @@ def build_activation_check_command(
     )
     return (
         sys.executable,
-        str(Path(__file__).resolve()),
+        "-m",
+        "agentbench_frame.games.antwar2.activation_check",
         "--parent",
         str(Path(parent_root).resolve()),
         "--candidate",

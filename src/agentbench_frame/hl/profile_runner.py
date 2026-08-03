@@ -245,6 +245,19 @@ def _smoke_dict(bindings: HLGameBindings, workspace: Path) -> dict[str, Any]:
     }
 
 
+def _materialize_activation_parent(
+    *,
+    source: Path,
+    run_dir: Path,
+    content_hash: str,
+) -> Path:
+    """Expose one immutable parent copy under the provider-audited measurement root."""
+
+    destination = run_dir / "measurement" / "activation-parents" / content_hash
+    shutil.copytree(source, destination, dirs_exist_ok=True)
+    return destination
+
+
 def _inherit_profile_semantic_state(
     *,
     run_dir: Path,
@@ -860,9 +873,14 @@ def run_profile(
                     raise ValueError("repair packet requires parent metadata")
                 parent_version_id = str(parent_value.get("version_id") or "")
                 parent_version = store.get(parent_version_id)
+                activation_parent = _materialize_activation_parent(
+                    source=store.objects / parent_version.content_hash,
+                    run_dir=run_dir,
+                    content_hash=parent_version.content_hash,
+                )
                 branch_index = int(values["branch_index"])
                 activation_command = bindings.activation_contract_builder(
-                    parent_root=store.objects / parent_version.content_hash,
+                    parent_root=activation_parent,
                     candidate_root=workspace,
                     references=_references(current_evaluation),
                     references_path=(
