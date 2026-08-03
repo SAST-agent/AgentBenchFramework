@@ -406,6 +406,7 @@ Act 预算：
         previous_measurements: Mapping[str, Any],
         active_target: Optional[str] = None,
         scope_contract_required: bool = True,
+        planner_input_path: str | Path | None = None,
     ) -> str:
         evidence = json.dumps(
             replay_evidence,
@@ -425,19 +426,42 @@ Act 预算：
         shared_distillation = previous_measurements.get(
             "opponent_distillation_path"
         )
-        planner_read_paths = [
-            str(Path(game_digest_path).resolve()),
-            str(self.bundle.manifest_path.resolve()),
-            str(Path(research_state_path).resolve()),
-        ]
-        planner_read_paths.extend(
-            str(Path(str(item["summary"])).resolve())
-            for item in replay_evidence
-            if item.get("summary")
-        )
-        if shared_distillation:
-            planner_read_paths.append(
-                str(Path(str(shared_distillation)).resolve())
+        if planner_input_path is not None:
+            resolved_planner_input = Path(planner_input_path).resolve()
+            planner_read_paths = [str(resolved_planner_input)]
+            read_inputs = f"- bounded planner packet: {resolved_planner_input}"
+            packet_boundary = """
+planner packet 已内嵌全部 summary_text、game digest、context manifest、research state、previous measurements 与可选 Ghost 蒸馏。只运行一次 `cat planner_input.json` 等价的单文件读取；不得再读取 packet 内提到或暗示的任何路径。
+"""
+            first_read_instruction = (
+                "1. 第一次且唯一一次工具调用读取 planner_input.json；"
+                "不要拆成多个并行 cat。"
+            )
+        else:
+            planner_read_paths = [
+                str(Path(game_digest_path).resolve()),
+                str(self.bundle.manifest_path.resolve()),
+                str(Path(research_state_path).resolve()),
+            ]
+            planner_read_paths.extend(
+                str(Path(str(item["summary"])).resolve())
+                for item in replay_evidence
+                if item.get("summary")
+            )
+            if shared_distillation:
+                planner_read_paths.append(
+                    str(Path(str(shared_distillation)).resolve())
+                )
+            read_inputs = f"""- compact game digest: {Path(game_digest_path).resolve()}
+- authoritative context manifest: {self.bundle.manifest_path}
+- explicit research state: {Path(research_state_path).resolve()}
+- previous measurements: {measurements}
+- bounded replay evidence: {evidence}"""
+            packet_boundary = ""
+            first_read_instruction = (
+                "1. 第一次工具调用批量读取 game digest、research state、"
+                "全部 evidence summary，以及存在时的共享 Ghost 蒸馏；"
+                "不要逐个读取四个 summary。"
             )
         planner_read_allowlist = json.dumps(
             list(dict.fromkeys(planner_read_paths)),
@@ -445,10 +469,14 @@ Act 预算：
             separators=(",", ":"),
         )
         distillation = ""
-        if shared_distillation:
+        if shared_distillation and planner_input_path is None:
             distillation = f"""
 共享 Ghost 蒸馏：{Path(str(shared_distillation)).resolve()}
 先读取该坐标无关统计；不得重复运行蒸馏脚本。Rollman 只能预测 Ghost 行为后选择自身动作，不能直接复制 Ghost 动作。
+"""
+        elif shared_distillation:
+            distillation = """
+共享 Ghost 蒸馏已内嵌在 planner packet；不得读取外部蒸馏路径或重复运行蒸馏脚本。Rollman 只能预测 Ghost 行为后选择自身动作，不能直接复制 Ghost 动作。
 """
         branch_roles = """
 四分支探索职责：
@@ -466,24 +494,20 @@ common parent: {parent_version_id}
 active target: {active_target or "none"}
 
 只读输入：
-- compact game digest: {Path(game_digest_path).resolve()}
-- authoritative context manifest: {self.bundle.manifest_path}
-- explicit research state: {Path(research_state_path).resolve()}
-- candidate workspace: {Path(workspace).resolve()}
-- previous measurements: {measurements}
-- bounded replay evidence: {evidence}
+{read_inputs}
 {distillation}
 {branch_roles}
 
 planner 精确只读白名单：{planner_read_allowlist}
 第一次工具调用只能逐项直接引用上述完整文件路径并批量读取。禁止使用 glob、通配符、find、目录列举或路径发现，也不得扫描 run/context/workspace。白名单没有共享蒸馏文件时，视为该输入不存在，不得自行搜索替代文件。
+{packet_boundary}
 
 这是压缩假设规划，不是代码审查。禁止读取 ai.py、禁止列举 workspace、禁止运行符号搜索；候选 act 负责核对代码并实现机制。Planner 只需从框架已经筛选的摘要、研究状态和坐标无关蒸馏中提出新假设。
 
 先落盘：第 2 次工具调用结束前，必须已经写出一份结构合法、含恰好四项的 `workspace/.agentbench/branch_briefs.json`。第一次读取完成后立即完成有限推理并写文件；不得在写文件前继续浏览、长时间扩展分析或调用第三个工具。
 
 读取顺序：
-1. 第一次工具调用批量读取 game digest、research state、全部 evidence summary，以及存在时的共享 Ghost 蒸馏；不要逐个读取四个 summary。
+{first_read_instruction}
 2. 第二次工具调用直接写入 branch_briefs.json；四项都必须引用摘要中的具体证据，并避开 research state 已否定的机制。
 3. 写出后只允许一次 JSON 结构校验，然后立即结束。禁止补读代码、规则、replay 或 trace。
 

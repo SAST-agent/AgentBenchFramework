@@ -29,6 +29,7 @@ from agentbench_frame.hl.local_config import LocalHLConfig
 from agentbench_frame.hl.proposal import (
     stratify_rollout_evidence,
     write_candidate_input_packet,
+    write_planner_input_packet,
 )
 
 
@@ -1811,6 +1812,22 @@ def _run_real(
                     shared_distillation_path
                 )
         if phase == "planner":
+            planner_input = write_planner_input_packet(
+                output_path=(
+                    run_dir
+                    / "proposals"
+                    / values["iteration_id"]
+                    / "planner_input.json"
+                ),
+                iteration_id=values["iteration_id"],
+                parent_version_id=values["parent_version_id"],
+                game_digest_path=game_digest_path,
+                context_manifest_path=bundle.manifest_path,
+                research_state_path=research_state_path,
+                replay_evidence=candidate_evidence,
+                previous_measurements=previous_measurements,
+                active_target=active_target,
+            )
             return iteration_context.build_planner_prompt(
                 act_id=values["act_id"],
                 iteration_id=values["iteration_id"],
@@ -1824,6 +1841,7 @@ def _run_real(
                 scope_contract_required=(
                     config.run.iteration.scope_contract_required
                 ),
+                planner_input_path=planner_input,
             )
         if phase == "repair":
             return iteration_context.build_repair_prompt(
