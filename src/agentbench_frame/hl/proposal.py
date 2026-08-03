@@ -12,6 +12,7 @@ from typing import Any, Mapping
 
 _INLINE_SUMMARY_LIMIT = 12_000
 _INLINE_TEXT_LIMIT = 24_000
+_CANDIDATE_SOURCE_LIMIT = 24_000
 
 
 def stratify_rollout_evidence(
@@ -117,6 +118,83 @@ def build_candidate_code_index(
         for node in module.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     ]
+
+
+def _truncate_source(source: str, *, limit: int) -> str:
+    marker = "\n[source truncated]\n"
+    if limit < len(marker):
+        return marker[:limit]
+    body_limit = limit - len(marker)
+    head = (body_limit + 1) // 2
+    tail = body_limit - head
+    return source[:head] + marker + (source[-tail:] if tail else "")
+
+
+def build_candidate_code_slices(
+    source_path: str | Path,
+    *,
+    code_symbols: tuple[str, ...],
+    source_limit: int = _CANDIDATE_SOURCE_LIMIT,
+) -> list[dict[str, Any]]:
+    """Resolve selected module functions into deterministic bounded source."""
+
+    if source_limit < 1:
+        raise ValueError("source_limit must be positive")
+    source = Path(source_path).read_text(encoding="utf-8")
+    lines = source.splitlines(keepends=True)
+    module = ast.parse(source)
+    nodes = {
+        node.name: node
+        for node in module.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    unknown = set(code_symbols) - set(nodes)
+    if unknown:
+        raise ValueError(
+            "unknown code symbol: " + ", ".join(sorted(unknown))
+        )
+    if "ai_func" not in code_symbols:
+        raise ValueError("code_symbols must include ai_func")
+
+    def item_for(name: str, body: str, completeness: str) -> dict[str, Any]:
+        node = nodes[name]
+        return {
+            "name": name,
+            "signature": f"{name}({ast.unparse(node.args)})",
+            "start_line": node.lineno,
+            "end_line": node.end_lineno,
+            "completeness": completeness,
+            "source": body,
+        }
+
+    bodies = {
+        name: "".join(lines[nodes[name].lineno - 1 : nodes[name].end_lineno])
+        for name in code_symbols
+    }
+    entry = bodies["ai_func"]
+    if len(entry) > source_limit:
+        raise ValueError(
+            f"ai_func exceeds candidate source limit {source_limit}"
+        )
+    remaining = source_limit - len(entry)
+    rendered: dict[str, dict[str, Any]] = {
+        "ai_func": item_for("ai_func", entry, "complete")
+    }
+    helpers = [name for name in code_symbols if name != "ai_func"]
+    for position, name in enumerate(helpers):
+        helpers_left = len(helpers) - position
+        allowance = remaining // helpers_left
+        body = bodies[name]
+        if len(body) <= allowance:
+            rendered[name] = item_for(name, body, "complete")
+        else:
+            rendered[name] = item_for(
+                name,
+                _truncate_source(body, limit=allowance),
+                "truncated",
+            )
+        remaining -= len(rendered[name]["source"])
+    return [rendered[name] for name in code_symbols]
 
 
 def write_planner_input_packet(
@@ -241,6 +319,15 @@ def write_candidate_input_packet(
         if candidate_source_path is None
         else build_candidate_code_index(candidate_source_path)
     )
+    raw_symbols = branch_brief.get("code_symbols", ())
+    code_slices = (
+        []
+        if candidate_source_path is None or not raw_symbols
+        else build_candidate_code_slices(
+            candidate_source_path,
+            code_symbols=tuple(str(item) for item in raw_symbols),
+        )
+    )
     value = {
         "schema_version": "1.0",
         "iteration_id": iteration_id,
@@ -259,6 +346,7 @@ def write_candidate_input_packet(
         "previous_measurements": measurements,
         "opponent_distillation": distillation,
         "candidate_code_index": code_index,
+        "candidate_code_slices": code_slices,
     }
     destination = Path(output_path)
     destination.parent.mkdir(parents=True, exist_ok=True)

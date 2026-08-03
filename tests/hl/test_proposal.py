@@ -166,7 +166,7 @@ def test_candidate_input_packet_inlines_bounded_reusable_context(tmp_path):
     summary.write_text("s" * 13000, encoding="utf-8")
     distillation.write_text('{"fine":{"stay":0.5}}', encoding="utf-8")
     candidate_source.write_text(
-        "def decide(state):\n"
+        "def ai_func(state):\n"
         "    return helper(state)\n"
         "\n"
         "def helper(state):\n"
@@ -177,7 +177,11 @@ def test_candidate_input_packet_inlines_bounded_reusable_context(tmp_path):
     path = write_candidate_input_packet(
         output_path=tmp_path / "candidate_input.json",
         iteration_id="iter-000008",
-        branch_brief={"branch_index": 2, "mechanism": "corner embargo"},
+        branch_brief={
+            "branch_index": 2,
+            "mechanism": "corner embargo",
+            "code_symbols": ["ai_func", "helper"],
+        },
         game_digest_path=digest,
         research_state_path=research,
         experience_path=experience,
@@ -206,8 +210,8 @@ def test_candidate_input_packet_inlines_bounded_reusable_context(tmp_path):
     assert value["opponent_distillation"]["fine"]["stay"] == 0.5
     assert value["candidate_code_index"] == [
         {
-            "name": "decide",
-            "signature": "decide(state)",
+            "name": "ai_func",
+            "signature": "ai_func(state)",
             "start_line": 1,
             "end_line": 2,
         },
@@ -218,11 +222,92 @@ def test_candidate_input_packet_inlines_bounded_reusable_context(tmp_path):
             "end_line": 5,
         },
     ]
+    assert value["candidate_code_slices"] == [
+        {
+            "name": "ai_func",
+            "signature": "ai_func(state)",
+            "start_line": 1,
+            "end_line": 2,
+            "completeness": "complete",
+            "source": "def ai_func(state):\n    return helper(state)\n",
+        },
+        {
+            "name": "helper",
+            "signature": "helper(state)",
+            "start_line": 4,
+            "end_line": 5,
+            "completeness": "complete",
+            "source": "def helper(state):\n    return 0\n",
+        },
+    ]
     assert value["replay_evidence"][0]["trace"].endswith("trace.jsonl")
     assert len(value["replay_evidence"][0]["summary_text"]) <= 12032
     assert value["replay_evidence"][0]["summary_text"].endswith(
         "[summary truncated]"
     )
+
+
+def test_candidate_code_slices_preserve_entry_and_bound_truncated_helpers(
+    tmp_path,
+):
+    """Catch packets that reintroduce a full-policy read through selected helpers."""
+    from agentbench_frame.hl.proposal import build_candidate_code_slices
+
+    source = tmp_path / "ai.py"
+    source.write_text(
+        "def large_helper(state):\n"
+        + "".join(f"    value_{index} = {index}\n" for index in range(80))
+        + "    return 1\n\n"
+        + "def ai_func(state):\n    return large_helper(state)\n\n"
+        + "def small_helper(state):\n    return 0\n",
+        encoding="utf-8",
+    )
+
+    slices = build_candidate_code_slices(
+        source,
+        code_symbols=("large_helper", "ai_func", "small_helper"),
+        source_limit=700,
+    )
+
+    assert [item["name"] for item in slices] == [
+        "large_helper",
+        "ai_func",
+        "small_helper",
+    ]
+    assert slices[0]["completeness"] == "truncated"
+    assert "[source truncated]" in slices[0]["source"]
+    assert slices[1]["completeness"] == "complete"
+    assert slices[1]["source"] == (
+        "def ai_func(state):\n    return large_helper(state)\n"
+    )
+    assert slices[2]["completeness"] == "complete"
+    assert sum(len(item["source"]) for item in slices) <= 700
+
+
+def test_candidate_code_slices_reject_unknown_symbol_and_oversized_entry(
+    tmp_path,
+):
+    """Catch silent partial entry functions and planner/source mismatches."""
+    from agentbench_frame.hl.proposal import build_candidate_code_slices
+
+    source = tmp_path / "ai.py"
+    source.write_text(
+        "def ai_func(state):\n" + "    state += 1\n" * 50 + "    return 0\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="unknown code symbol"):
+        build_candidate_code_slices(
+            source,
+            code_symbols=("ai_func", "invented"),
+            source_limit=2000,
+        )
+    with pytest.raises(ValueError, match="ai_func exceeds"):
+        build_candidate_code_slices(
+            source,
+            code_symbols=("ai_func",),
+            source_limit=100,
+        )
 
 
 def test_planner_input_packet_collapses_exact_inputs_without_replay_paths(tmp_path):

@@ -558,7 +558,7 @@ def test_k4_role_prompts_use_digest_research_state_and_exact_branch_brief(tmp_pa
     assert "触发条件外" in candidate
     assert "保持父代" in candidate
     assert "不得修改全局 scorer" in candidate
-    assert "第 6 次工具调用结束前" in candidate
+    assert "第 5 次工具调用结束前" in candidate
     assert "首次可编译修改" in candidate
     assert "不得顺序打印完整 ai.py" in candidate
     assert "命令必须直接引用白名单中的完整文件路径" in candidate
@@ -614,6 +614,7 @@ def test_scope_contract_ablation_logs_scope_without_enforcing_it(tmp_path):
             "preservation_contract": "ordinary routing stays unchanged",
             "expected_change": "survive",
             "falsifier": "capture time does not improve",
+            "code_symbols": ["ai_func", "_junction_escape"],
         },
         active_target="rank15",
         scope_contract_required=False,
@@ -665,8 +666,11 @@ def test_candidate_prompt_uses_one_prebuilt_context_packet(tmp_path):
 
     assert str(packet) in prompt
     assert "第一次调用只读取 candidate input packet" in prompt
-    assert "candidate_code_index" in prompt
-    assert "每个既有 helper 的 signature" in prompt
+    assert "candidate-context-contract: rollman-v2" in prompt
+    assert "candidate_code_slices" in prompt
+    assert "marked `truncated`" in prompt
+    assert "第 5 次工具调用" in prompt
+    assert "不得顺序打印完整 ai.py" in prompt
     assert "必须命中新机制的 activation_condition" in prompt
     assert "公开入口 `ai_func` 返回新增分支的 `memory_id`" in prompt
     assert "直接调用内部 helper 不算" in prompt
