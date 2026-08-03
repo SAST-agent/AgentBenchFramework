@@ -142,6 +142,12 @@ def compile_game_digest(
     normalized_mapping = policy_interface.get("normalized_state_mapping")
     if not isinstance(normalized_mapping, Mapping):
         raise ValueError("policy_interface must define normalized_state_mapping")
+    field_access = policy_interface.get("field_access", {})
+    if not isinstance(field_access, Mapping):
+        raise ValueError("policy_interface.field_access must be a mapping")
+    replay_mapping = policy_interface.get("replay_mapping", {})
+    if not isinstance(replay_mapping, Mapping):
+        raise ValueError("policy_interface.replay_mapping must be a mapping")
     roles = decision_value.get("roles")
     if not isinstance(roles, Mapping):
         raise ValueError("decision space must define roles")
@@ -201,6 +207,8 @@ def compile_game_digest(
                 policy_interface.get("canonical_normalization") or ""
             ),
             "normalized_state_mapping": dict(normalized_mapping),
+            "field_access": dict(field_access),
+            "replay_mapping": dict(replay_mapping),
         },
         "roles": normalized_roles,
         "rule_sections": headings,

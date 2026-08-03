@@ -28,6 +28,10 @@ def _digest_files(root: Path) -> dict[str, Path]:
 policy_interface:
   input_type: core.gamedata.GameState
   object_fields: [level, round, board, pacman_pos, ghosts_pos]
+  field_access:
+    score: state.score
+  replay_mapping:
+    "frame.score": state.score
   normalized_state_mapping:
     pacman_coord: pacman_pos
     ghosts_coord: ghosts_pos
@@ -136,6 +140,12 @@ def test_game_digest_is_deterministic_and_contains_primitive_actions(tmp_path):
     assert value["policy_interface"]["normalized_state_mapping"] == {
         "ghosts_coord": "ghosts_pos",
         "pacman_coord": "pacman_pos",
+    }
+    assert value["policy_interface"]["field_access"] == {
+        "score": "state.score"
+    }
+    assert value["policy_interface"]["replay_mapping"] == {
+        "frame.score": "state.score"
     }
 
 
