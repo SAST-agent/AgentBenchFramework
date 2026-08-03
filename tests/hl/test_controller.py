@@ -133,6 +133,9 @@ def _controller(
     activation_probe=None,
     candidate_smoke_verifier=_DEFAULT_SMOKE,
     staged=False,
+    activation_repair_enabled=False,
+    activation_repair_top_k=4,
+    activation_min_changed_actions=1,
 ):
     from agentbench_frame.hl.codebase import VersionStore
     from agentbench_frame.hl.config import IterationConfig, RollbackConfig
@@ -159,6 +162,9 @@ def _controller(
             candidates_per_act=k,
             planner_enabled=staged,
             finalist_count=1,
+            activation_repair_enabled=activation_repair_enabled,
+            activation_repair_top_k=activation_repair_top_k,
+            activation_min_changed_actions=activation_min_changed_actions,
         ),
         rollback=RollbackConfig(patience=patience),
         prompt_factory=lambda **values: (
@@ -373,6 +379,73 @@ def test_activation_probe_allows_changed_candidate_to_reach_paid_screen(tmp_path
     assert evaluator.quick_calls == 1
     assert result.candidates[0].evaluation.status == "complete"
     assert result.candidates[0].activation["changed_action_count"] == 2
+
+
+def test_activation_repair_gets_one_bounded_chance_before_match_screen(tmp_path):
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+    from agentbench_frame.hl.proposal import BranchBrief
+
+    class StagedEvaluator:
+        def __init__(self):
+            self.quick_calls = 0
+
+        def quick_screen(self, version):
+            self.quick_calls += 1
+            return CandidateEvaluation(status="complete", score=0.5)
+
+        def evaluate_finalist(self, version):
+            return CandidateEvaluation(status="complete", score=0.5)
+
+        def combine_stages(self, quick, finalist):
+            return quick
+
+    evaluator = StagedEvaluator()
+    provider = FakeProvider(["VALUE = 1\n", "VALUE = 2\n"])
+    controller = _controller(
+        tmp_path,
+        provider,
+        evaluator,
+        activation_probe=lambda **values: {
+            "status": "complete",
+            "decision_count": 256,
+            "changed_action_count": (
+                4 if values["new_version"].edit_type == "activation_repair" else 0
+            ),
+            "episodes": [],
+            "details": {"changed_examples": []},
+        },
+        staged=True,
+        activation_repair_enabled=True,
+        activation_repair_top_k=1,
+        activation_min_changed_actions=2,
+    )
+    origin = controller.initialize()
+    brief = BranchBrief(
+        branch_index=0,
+        diagnosis="candidate must alter a failed decision",
+        mechanism="one bounded action rule",
+        activation_condition="visible danger",
+        preservation_contract="other states stay unchanged",
+        expected_change="at least two observed actions change",
+        falsifier="fewer than two action changes",
+        code_symbols=("ai_func", "helper"),
+    )
+
+    result = controller.run_act(
+        parent_version_id=origin.version_id,
+        parent_evaluation=CandidateEvaluation(status="complete", score=0.25),
+        branch_briefs=(brief,),
+    )
+
+    assert len(provider.calls) == 2
+    assert result.candidates[0].evaluation.error == "no_parent_trace_action_change"
+    assert len(result.repairs) == 1
+    repaired = result.repairs[0].repaired
+    assert repaired is not None
+    assert repaired.version.edit_type == "activation_repair"
+    assert repaired.activation["changed_action_count"] == 4
+    assert result.representatives[0].version.version_id == repaired.version.version_id
+    assert evaluator.quick_calls == 1
 
 
 def test_staged_candidate_without_framework_smoke_never_reaches_activation_or_matches(

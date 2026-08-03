@@ -24,6 +24,7 @@ from agentbench_frame.hl.proposal import (
 )
 from agentbench_frame.hl.repair import (
     RepairSelection,
+    build_activation_repair_packet,
     build_repair_packet,
     select_branch_representative,
 )
@@ -52,6 +53,21 @@ def _counts_as_coding_act(
         or total_tokens is not None
         or tool_call_count > 0
     )
+
+
+def _activation_failure(
+    changed_action_count: int,
+    *,
+    minimum_changed_actions: int,
+) -> str | None:
+    if changed_action_count == 0:
+        return "no_parent_trace_action_change"
+    if changed_action_count < minimum_changed_actions:
+        return (
+            "insufficient_parent_trace_action_change: "
+            f"{changed_action_count} < {minimum_changed_actions}"
+        )
+    return None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -720,10 +736,11 @@ class HLController:
                 "changed_fraction": changed_action_count / decision_count,
                 "episodes": list(measured.get("episodes", ())),
             }
-            activation_error = (
-                "no_parent_trace_action_change"
-                if changed_action_count == 0
-                else None
+            activation_error = _activation_failure(
+                changed_action_count,
+                minimum_changed_actions=(
+                    self.iteration.activation_min_changed_actions
+                ),
             )
         except Exception as exception:
             message = (
@@ -751,6 +768,7 @@ class HLController:
             changed_action_count=int(activation["changed_action_count"]),
             changed_fraction=float(activation["changed_fraction"]),
             episodes=list(activation["episodes"]),
+            details=dict(activation.get("details", {})),
             error=activation.get("error"),
         )
         if activation_error is None:
@@ -905,6 +923,7 @@ class HLController:
         edit_type: str,
         staged_evaluation: bool,
         parent_evaluation: CandidateEvaluation | None = None,
+        activation_parent_version_id: str | None = None,
         session_id: str | None = None,
     ) -> CandidateResult:
         """Invoke, snapshot, quick-screen, and register one immutable edit."""
@@ -1051,10 +1070,15 @@ class HLController:
             and parent_evaluation.status == "complete"
         ):
             try:
+                activation_parent_id = (
+                    parent_version_id
+                    if activation_parent_version_id is None
+                    else activation_parent_version_id
+                )
                 measured = dict(
                     self.activation_probe(
                         new_version=version,
-                        old_version=self.version_store.get(parent_version_id),
+                        old_version=self.version_store.get(activation_parent_id),
                         version_store=self.version_store,
                         parent_evaluation=parent_evaluation,
                     )
@@ -1075,8 +1099,12 @@ class HLController:
                     "changed_fraction": changed_action_count / decision_count,
                     "episodes": list(measured.get("episodes", ())),
                 }
-                if changed_action_count == 0:
-                    activation_error = "no_parent_trace_action_change"
+                activation_error = _activation_failure(
+                    changed_action_count,
+                    minimum_changed_actions=(
+                        self.iteration.activation_min_changed_actions
+                    ),
+                )
             except Exception as error:
                 message = " ".join(str(error).split()) or error.__class__.__name__
                 activation_error = f"activation_probe_failed: {message}"
@@ -1094,12 +1122,17 @@ class HLController:
                 act_id=act_id,
                 branch_index=branch_index,
                 version_id=version.version_id,
-                parent_version_id=parent_version_id,
+                parent_version_id=(
+                    parent_version_id
+                    if activation_parent_version_id is None
+                    else activation_parent_version_id
+                ),
                 status=str(activation["status"]),
                 decision_count=int(activation["decision_count"]),
                 changed_action_count=int(activation["changed_action_count"]),
                 changed_fraction=float(activation["changed_fraction"]),
                 episodes=list(activation["episodes"]),
+                details=dict(activation.get("details", {})),
                 error=activation.get("error"),
             )
         evaluation = (
@@ -1268,6 +1301,139 @@ class HLController:
 
         repairs: list[RepairSelection] = []
         representatives: list[CandidateResult] = list(results)
+        if (
+            self.iteration.activation_repair_enabled
+            and self.iteration.activation_repair_rounds
+        ):
+            if branch_briefs is None:
+                raise ValueError("activation repair requires branch briefs")
+            if parent_evaluation is None:
+                raise ValueError("activation repair requires the parent evaluation")
+            parent_result = CandidateResult(
+                act_id=self.version_store.get(parent_id).act_id,
+                branch_index=-1,
+                version=self.version_store.get(parent_id),
+                evaluation=parent_evaluation,
+                provider=ProviderInvocation(status="completed"),
+            )
+            repairable_errors = {
+                "no_parent_trace_action_change",
+            }
+            activation_targets = [
+                result
+                for result in results
+                if result.activation is not None
+                and (
+                    str(result.evaluation.error or "") in repairable_errors
+                    or str(result.evaluation.error or "").startswith(
+                        "insufficient_parent_trace_action_change:"
+                    )
+                )
+            ][: self.iteration.activation_repair_top_k]
+            self.events.write(
+                "activation_repairs_selected",
+                iteration_id=iteration_id,
+                branch_indices=[target.branch_index for target in activation_targets],
+                version_ids=[target.version.version_id for target in activation_targets],
+                minimum_changed_actions=(
+                    self.iteration.activation_min_changed_actions
+                ),
+            )
+            proposal_root = self.run_root / "proposals" / iteration_id
+            for initial in activation_targets:
+                repair_input = build_activation_repair_packet(
+                    output_path=(
+                        proposal_root
+                        / f"activation_repair_input-b{initial.branch_index:02d}.json"
+                    ),
+                    iteration_id=iteration_id,
+                    branch_brief=branch_briefs[initial.branch_index],
+                    parent=parent_result,
+                    candidate=initial,
+                    minimum_changed_actions=(
+                        self.iteration.activation_min_changed_actions
+                    ),
+                )
+                act_id = (
+                    f"act-{self._provider_attempts + 1:06d}"
+                    f"-activation-repair-b{initial.branch_index:02d}"
+                )
+                recovered = (repair_recoveries or {}).get(initial.branch_index)
+                if recovered is not None:
+                    recovered_parent_id = recovered.version.parent_version_id
+                    if (
+                        recovered.branch_index != initial.branch_index
+                        or recovered_parent_id is None
+                        or self.version_store.get(
+                            recovered_parent_id
+                        ).content_hash != initial.version.content_hash
+                    ):
+                        recovered = None
+                if recovered is None:
+                    self.events.write(
+                        "repair_started",
+                        repair_kind="activation_integration",
+                        iteration_id=iteration_id,
+                        act_id=act_id,
+                        branch_index=initial.branch_index,
+                        initial_version_id=initial.version.version_id,
+                        repair_input_path=str(repair_input),
+                    )
+                    repaired = self._run_coding_candidate(
+                        iteration_id=iteration_id,
+                        act_id=act_id,
+                        branch_index=initial.branch_index,
+                        branch_count=branch_count,
+                        parent_version_id=initial.version.version_id,
+                        activation_parent_version_id=parent_id,
+                        phase="repair",
+                        prompt_values={
+                            "branch_brief": branch_briefs[
+                                initial.branch_index
+                            ].to_dict(),
+                            "repair_input": str(repair_input),
+                        },
+                        edit_type="activation_repair",
+                        staged_evaluation=staged_evaluation,
+                        parent_evaluation=parent_evaluation,
+                    )
+                    self.events.write(
+                        "repair_completed",
+                        repair_kind="activation_integration",
+                        iteration_id=iteration_id,
+                        act_id=act_id,
+                        branch_index=initial.branch_index,
+                        initial_version_id=initial.version.version_id,
+                        repaired_version_id=repaired.version.version_id,
+                        status=repaired.provider.status,
+                    )
+                else:
+                    repaired = recovered
+                representative = select_branch_representative(initial, repaired)
+                representatives[initial.branch_index] = representative
+                repairs.append(
+                    RepairSelection(
+                        branch_index=initial.branch_index,
+                        initial=initial,
+                        repaired=repaired,
+                        representative=representative,
+                        repair_input_path=repair_input,
+                    )
+                )
+                self.events.write(
+                    "branch_representative_selected",
+                    iteration_id=iteration_id,
+                    branch_index=initial.branch_index,
+                    initial_version_id=initial.version.version_id,
+                    repaired_version_id=repaired.version.version_id,
+                    representative_version_id=representative.version.version_id,
+                    reason=(
+                        "repair_strictly_improved"
+                        if representative.version.version_id
+                        == repaired.version.version_id
+                        else "initial_retained"
+                    ),
+                )
         if self.iteration.repair_enabled and self.iteration.repair_rounds:
             if branch_briefs is None:
                 raise ValueError("repair cycle requires branch briefs")
@@ -1283,8 +1449,10 @@ class HLController:
             eligible = sorted(
                 (
                     result
-                    for result in results
+                    for result in representatives
                     if result.evaluation.status == "complete"
+                    and result.branch_index
+                    not in {repair.branch_index for repair in repairs}
                 ),
                 key=selection_key,
                 reverse=True,

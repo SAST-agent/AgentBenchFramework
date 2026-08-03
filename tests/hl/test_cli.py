@@ -926,6 +926,18 @@ def test_pending_repair_is_recovered_from_checkpoint_and_immutable_version(tmp_p
             "repaired_version_id": repaired.version_id,
             "status": "completed",
         },
+        {
+            "event_type": "candidate_activation_measured",
+            "iteration_id": "iter-000012",
+            "version_id": repaired.version_id,
+            "status": "complete",
+            "decision_count": 256,
+            "changed_action_count": 5,
+            "changed_fraction": 5 / 256,
+            "episodes": [],
+            "details": {"changed_examples": [{"state_id": "state-5"}]},
+            "error": None,
+        },
     ]
 
     recovered = _pending_repair_recoveries(
@@ -937,6 +949,8 @@ def test_pending_repair_is_recovered_from_checkpoint_and_immutable_version(tmp_p
     assert recovered[1].version == repaired
     assert recovered[1].evaluation is evaluation
     assert recovered[1].provider.metadata["recovered_from_persisted_output"] is True
+    assert recovered[1].activation["changed_action_count"] == 5
+    assert recovered[1].activation["details"]["changed_examples"][0]["state_id"] == "state-5"
 
 
 def test_pending_candidate_recovery_preserves_activation_evidence(tmp_path):
@@ -1005,6 +1019,7 @@ def test_pending_candidate_recovery_preserves_activation_evidence(tmp_path):
             "changed_action_count": 0,
             "changed_fraction": 0.0,
             "episodes": [],
+            "details": {},
             "error": None,
         },
         {
@@ -1029,6 +1044,7 @@ def test_pending_candidate_recovery_preserves_activation_evidence(tmp_path):
         "changed_action_count": 0,
         "changed_fraction": 0.0,
         "episodes": [],
+        "details": {},
         "error": None,
     }
 

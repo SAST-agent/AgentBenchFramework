@@ -133,6 +133,54 @@ def build_repair_packet(
     return path
 
 
+def build_activation_repair_packet(
+    *,
+    output_path: str | Path,
+    iteration_id: str,
+    branch_brief: BranchBrief,
+    parent: CandidateResult,
+    candidate: CandidateResult,
+    minimum_changed_actions: int,
+) -> Path:
+    """Write bounded evidence for a candidate that did not reach policy output."""
+
+    if candidate.branch_index != branch_brief.branch_index:
+        raise ValueError("candidate and repair brief must belong to the same branch")
+    if minimum_changed_actions < 1:
+        raise ValueError("minimum_changed_actions must be >= 1")
+    if candidate.activation is None:
+        raise ValueError("activation repair requires activation evidence")
+    packet = {
+        "schema_version": "1.0",
+        "repair_kind": "activation_integration",
+        "iteration_id": iteration_id,
+        "branch_index": branch_brief.branch_index,
+        "minimum_changed_actions": minimum_changed_actions,
+        "scope": branch_brief.to_dict(),
+        "parent": {
+            "version_id": parent.version.version_id,
+            "status": parent.evaluation.status,
+            "score": parent.evaluation.score,
+            "matches": [],
+        },
+        "candidate": {
+            "version_id": candidate.version.version_id,
+            "status": candidate.evaluation.status,
+            "score": candidate.evaluation.score,
+            "error": candidate.evaluation.error,
+            "activation": dict(candidate.activation),
+            "matches": [],
+        },
+    }
+    path = Path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
 def _diagnostics(result: CandidateResult) -> CandidateDiagnostics:
     return CandidateDiagnostics.from_matches(
         version_id=result.version.version_id,

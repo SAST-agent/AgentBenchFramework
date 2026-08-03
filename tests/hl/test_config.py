@@ -396,6 +396,10 @@ class HLConfigTests(unittest.TestCase):
         self.assertFalse(value.repair_enabled)
         self.assertEqual(value.repair_top_k, 2)
         self.assertEqual(value.repair_rounds, 1)
+        self.assertFalse(value.activation_repair_enabled)
+        self.assertEqual(value.activation_repair_top_k, 4)
+        self.assertEqual(value.activation_repair_rounds, 1)
+        self.assertEqual(value.activation_min_changed_actions, 1)
 
     def test_enabled_repair_requires_valid_top_k(self):
         from agentbench_frame.hl.config import IterationConfig
@@ -425,6 +429,21 @@ class HLConfigTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "repair_rounds"):
             IterationConfig(candidates_per_cycle=4, repair_rounds=2)
+
+    def test_activation_repair_config_is_strict_and_ablatable(self):
+        from agentbench_frame.hl.config import IterationConfig
+
+        with self.assertRaisesRegex(ValueError, "activation_repair_top_k"):
+            IterationConfig(
+                candidates_per_cycle=4,
+                planner_enabled=True,
+                activation_repair_enabled=True,
+                activation_repair_top_k=5,
+            )
+        with self.assertRaisesRegex(ValueError, "activation_repair_rounds"):
+            IterationConfig(candidates_per_cycle=4, activation_repair_rounds=2)
+        with self.assertRaisesRegex(ValueError, "activation_min_changed_actions"):
+            IterationConfig(candidates_per_cycle=4, activation_min_changed_actions=0)
 
     def test_source_size_penalty_is_forbidden_for_linear_search(self):
         from agentbench_frame.hl.config import SelectionConfig

@@ -455,7 +455,7 @@ Bounded inputs:
 - Experience Skill: {Path(experience_path).resolve()}
 - candidate workspace: {Path(workspace).resolve()}
 
-Read the bounded repair packet first. Compare parent and candidate on the same opponent, role, and seed. Classify failure as a wrong causal diagnosis, an over-broad activation condition, or an integration error. Repair only this mechanism and preserve the parent path outside the brief's activation condition. The initial sibling remains immutable, so a failed repair cannot erase it.
+Read the bounded repair packet first and obey its `repair_kind`. For gameplay feedback, compare parent and candidate on the same opponent, role, and seed. For `activation_integration`, the candidate has not earned a match: its mechanism failed to change enough final protocol actions on frozen parent states. Make the scoped mechanism penetrate the final action-selection path and reach `minimum_changed_actions`; do not reinterpret zero/insufficient activation as gameplay evidence. Repair only this mechanism and preserve the parent path outside the brief's activation condition. The initial sibling remains immutable, so a failed repair cannot erase it.
 
 Use only literal protocol atomic operations. Do not run grid search, threshold enumeration, seed/coordinate/opponent-identity memorization, or inspect {profile.opponent_label} source. At most two trace windows may be inspected through the Replay Skill. Compile `{profile.candidate_source_relative}`, run one smoke validation, and write the four condition-scoped Experience arrays to `workspace/.agentbench/experience_update.json`. Stop after success.
 """

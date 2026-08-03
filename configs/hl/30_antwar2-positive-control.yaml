@@ -42,6 +42,10 @@ run:
     repair_enabled: false
     repair_top_k: 2
     repair_rounds: 0
+    activation_repair_enabled: true
+    activation_repair_top_k: 4
+    activation_repair_rounds: 1
+    activation_min_changed_actions: 2
     quick_screen_seeds: 1
     finalist_count: 2
     finalist_seeds: 1

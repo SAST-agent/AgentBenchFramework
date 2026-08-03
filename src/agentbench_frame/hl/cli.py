@@ -1057,6 +1057,23 @@ def _pending_repair_recoveries(
         if event.get("event_type") == "checkpoint_created"
         and str(event.get("iteration_id")) == iteration_id
     }
+    activations = {
+        str(event["version_id"]): {
+            "status": str(event["status"]),
+            "decision_count": int(event.get("decision_count") or 0),
+            "changed_action_count": int(
+                event.get("changed_action_count") or 0
+            ),
+            "changed_fraction": float(event.get("changed_fraction") or 0.0),
+            "episodes": list(event.get("episodes") or []),
+            "details": dict(event.get("details") or {}),
+            "error": event.get("error"),
+        }
+        for event in historical
+        if event.get("event_type") == "candidate_activation_measured"
+        and str(event.get("iteration_id")) == iteration_id
+        and event.get("version_id") is not None
+    }
     recovered: dict[int, CandidateResult] = {}
     for event in historical:
         if (
@@ -1106,6 +1123,7 @@ def _pending_repair_recoveries(
                     "recovered_from_persisted_output": True,
                 },
             ),
+            activation=activations.get(version_id),
         )
     return recovered
 
@@ -1162,6 +1180,7 @@ def _pending_candidate_recoveries(
             ),
             "changed_fraction": float(event.get("changed_fraction") or 0.0),
             "episodes": list(event.get("episodes") or []),
+            "details": dict(event.get("details") or {}),
             "error": event.get("error"),
         }
         for event in historical

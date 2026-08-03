@@ -151,6 +151,39 @@ def test_repair_packet_includes_candidate_activation_evidence(tmp_path):
     assert value["candidate"]["activation"]["changed_action_count"] == 3
 
 
+def test_activation_repair_packet_needs_no_match_and_preserves_scope(tmp_path):
+    from dataclasses import replace
+
+    from agentbench_frame.hl.repair import build_activation_repair_packet
+
+    candidate = replace(
+        _result(version_id="v000041", branch_index=1, status="failed"),
+        activation={
+            "status": "complete",
+            "decision_count": 256,
+            "changed_action_count": 0,
+            "changed_fraction": 0.0,
+            "episodes": [],
+            "details": {"changed_examples": []},
+        },
+    )
+    path = build_activation_repair_packet(
+        output_path=tmp_path / "activation-repair.json",
+        iteration_id="iter-000012",
+        branch_brief=_brief(),
+        parent=_result(version_id="v000037", branch_index=-1),
+        candidate=candidate,
+        minimum_changed_actions=2,
+    )
+
+    value = json.loads(path.read_text(encoding="utf-8"))
+    assert value["repair_kind"] == "activation_integration"
+    assert value["minimum_changed_actions"] == 2
+    assert value["candidate"]["activation"]["decision_count"] == 256
+    assert value["candidate"]["matches"] == []
+    assert value["scope"]["preservation_contract"].startswith("ordinary portal")
+
+
 def test_repair_packet_rejects_feedback_without_shared_seed(tmp_path):
     from agentbench_frame.hl.repair import build_repair_packet
 

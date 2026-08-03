@@ -141,6 +141,10 @@ class IterationConfig:
     repair_enabled: bool = False
     repair_top_k: int = 2
     repair_rounds: int = 1
+    activation_repair_enabled: bool = False
+    activation_repair_top_k: int = 4
+    activation_repair_rounds: int = 1
+    activation_min_changed_actions: int = 1
     quick_screen_seeds: int = 1
     finalist_count: int = 1
     finalist_seeds: int = 1
@@ -167,12 +171,27 @@ class IterationConfig:
             raise ValueError("iteration.candidates_per_cycle must be >= 1")
         if self.repair_rounds not in {0, 1}:
             raise ValueError("iteration.repair_rounds must be 0 or 1")
+        if self.activation_repair_rounds not in {0, 1}:
+            raise ValueError("iteration.activation_repair_rounds must be 0 or 1")
+        if self.activation_min_changed_actions < 1:
+            raise ValueError(
+                "iteration.activation_min_changed_actions must be >= 1"
+            )
         if self.repair_enabled:
             if not self.planner_enabled:
                 raise ValueError("iteration repair requires planner_enabled")
             if not 1 <= self.repair_top_k <= resolved_candidates:
                 raise ValueError(
                     "iteration.repair_top_k must be within candidate count"
+                )
+        if self.activation_repair_enabled:
+            if not self.planner_enabled:
+                raise ValueError(
+                    "iteration activation repair requires planner_enabled"
+                )
+            if not 1 <= self.activation_repair_top_k <= resolved_candidates:
+                raise ValueError(
+                    "iteration.activation_repair_top_k must be within candidate count"
                 )
         if self.quick_screen_seeds < 1:
             raise ValueError("iteration.quick_screen_seeds must be >= 1")

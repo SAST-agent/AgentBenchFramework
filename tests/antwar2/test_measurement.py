@@ -41,6 +41,14 @@ def test_different_atomic_actions_have_positive_epsilon_smoothed_kl():
     assert result.decision_count == 1
     assert math.isfinite(result.details["mean_kl_nats_per_decision"])
     assert result.details["mean_kl_nats_per_decision"] > 0
+    assert result.details["changed_examples"] == [
+        {
+            "state_id": "replay-a:0:P0",
+            "step_index": 0,
+            "parent_selected": [0, -1, -1],
+            "candidate_selected": [11, 4, 5],
+        }
+    ]
 
 
 def test_extra_bundle_atom_is_compared_against_hold_at_same_frozen_state():

@@ -53,6 +53,7 @@ KNOWN_EVENT_TYPES = frozenset(
         "reporting_panel_completed",
         "bootstrap_recovered",
         "repairs_selected",
+        "activation_repairs_selected",
         "repair_started",
         "repair_completed",
         "branch_representative_selected",
@@ -323,6 +324,15 @@ _EVENT_FIELDS = {
         {"iteration_id", "branch_indices", "version_ids"},
         set(),
     ),
+    "activation_repairs_selected": (
+        {
+            "iteration_id",
+            "branch_indices",
+            "version_ids",
+            "minimum_changed_actions",
+        },
+        set(),
+    ),
     "repair_started": (
         {
             "iteration_id",
@@ -331,7 +341,7 @@ _EVENT_FIELDS = {
             "initial_version_id",
             "repair_input_path",
         },
-        set(),
+        {"repair_kind"},
     ),
     "repair_completed": (
         {
@@ -342,7 +352,7 @@ _EVENT_FIELDS = {
             "repaired_version_id",
             "status",
         },
-        set(),
+        {"repair_kind"},
     ),
     "branch_representative_selected": (
         {
@@ -367,7 +377,7 @@ _EVENT_FIELDS = {
             "changed_fraction",
             "episodes",
         },
-        {"error"},
+        {"error", "details"},
     ),
 }
 

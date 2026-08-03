@@ -90,6 +90,7 @@ def compare_probe_outputs(
         raise ValueError("parent and candidate probes use different frozen states")
     values: list[float] = []
     changed = 0
+    changed_examples: list[dict[str, Any]] = []
     role_values: dict[str, list[float]] = {}
     for state_id in sorted(parent_by_id):
         parent_case = parent_by_id[state_id]
@@ -121,7 +122,17 @@ def compare_probe_outputs(
             kl = sum(p[action] * math.log(p[action] / q[action]) for action in support)
             values.append(kl)
             role_values.setdefault(role, []).append(kl)
-            changed += candidate_selected != parent_selected
+            action_changed = candidate_selected != parent_selected
+            changed += action_changed
+            if action_changed and len(changed_examples) < 16:
+                changed_examples.append(
+                    {
+                        "state_id": state_id,
+                        "step_index": index,
+                        "parent_selected": list(parent_selected),
+                        "candidate_selected": list(candidate_selected),
+                    }
+                )
     mean = sum(values) / len(values) if values else 0.0
     return BehaviorComparison(
         status="complete",
@@ -137,6 +148,7 @@ def compare_probe_outputs(
                 role: sum(items) / len(items)
                 for role, items in sorted(role_values.items())
             },
+            "changed_examples": changed_examples,
         },
     )
 
