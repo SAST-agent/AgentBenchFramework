@@ -1,12 +1,15 @@
 import json
 
 
-def _branch(index, *, symbols=None, action="BUILD_TOWER"):
+def _branch(index, *, symbols=None, action="BUILD_TOWER", atom=(11, 4, 5)):
     labels = ("alpha", "beta", "gamma", "delta")
     return {
         "branch_index": index,
         "diagnosis": "parent holds on a reachable public state",
-        "mechanism": f"{labels[index]} emits {action} through the public entry",
+        "mechanism": (
+            f"{labels[index]} emits {action} with proposed atom {list(atom)} "
+            "through the public entry"
+        ),
         "activation_condition": "activate at reference-0:0:P0",
         "preservation_contract": "preserve all other public states",
         "expected_change": "change at least two atomic decisions",
@@ -37,6 +40,11 @@ def _packet():
                 {
                     "state_id": "reference-0:0:P0",
                     "legal_operation_types": [0, 11],
+                    "legal_atomic_actions": [
+                        [0, -1, -1],
+                        [11, 4, 5],
+                        [11, 6, 7],
+                    ],
                     "parent_selected": [0, -1, -1],
                 }
             ]
@@ -71,7 +79,43 @@ def test_planner_check_requires_valid_symbols_and_reachable_legal_action(tmp_pat
         "state_id": "reference-0:0:P0",
         "action": "BUILD_TOWER",
         "operation_type": 11,
+        "atom": [11, 4, 5],
     }
+
+
+def test_planner_check_accepts_same_operation_type_with_different_arguments(tmp_path):
+    from agentbench_frame.hl.planner_check import run_planner_check
+
+    packet_value = _packet()
+    example = packet_value["parent_occupancy"]["state_examples"][0]
+    example["parent_selected"] = [11, 4, 5]
+    packet = tmp_path / "planner.json"
+    briefs = tmp_path / "briefs.json"
+    output = tmp_path / "result.json"
+    packet.write_text(json.dumps(packet_value), encoding="utf-8")
+    briefs.write_text(
+        json.dumps(
+            [
+                _branch(index, action="BUILD_TOWER", atom=(11, 6, 7))
+                for index in range(4)
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    returncode = run_planner_check(
+        briefs_path=briefs,
+        planner_input_path=packet,
+        output_path=output,
+        expected_count=4,
+        entry_symbol="AI.choose_operations",
+    )
+
+    assert returncode == 0
+    evidence = json.loads(output.read_text(encoding="utf-8"))[
+        "activation_evidence"
+    ][0]
+    assert evidence["divergent_legal_pairs"][0]["atom"] == [11, 6, 7]
 
 
 def test_planner_check_rejects_unqualified_entry_symbol(tmp_path):
@@ -110,6 +154,9 @@ def test_planner_check_failure_reports_exact_legal_names_for_correction(tmp_path
     packet_value["parent_occupancy"]["state_examples"][0][
         "legal_operation_types"
     ] = [0, 13]
+    packet_value["parent_occupancy"]["state_examples"][0][
+        "legal_atomic_actions"
+    ] = [[0, -1, -1], [13, 2, -1]]
     packet = tmp_path / "planner.json"
     briefs = tmp_path / "briefs.json"
     output = tmp_path / "result.json"
@@ -117,7 +164,11 @@ def test_planner_check_failure_reports_exact_legal_names_for_correction(tmp_path
     briefs.write_text(
         json.dumps(
             [
-                _branch(index, action="atomic operation code 13")
+                _branch(
+                    index,
+                    action="atomic operation code 13",
+                    atom=(13, 2, -1),
+                )
                 for index in range(4)
             ]
         ),
@@ -140,15 +191,19 @@ def test_planner_check_failure_reports_exact_legal_names_for_correction(tmp_path
         "cited_states": [
             {
                 "state_id": "reference-0:0:P0",
-                "legal_operations": [
-                    {"code": 0, "name": "HOLD"},
-                    {"code": 13, "name": "DOWNGRADE_TOWER"},
-                ],
+                    "legal_operations": [
+                        {"code": 0, "name": "HOLD"},
+                        {"code": 13, "name": "DOWNGRADE_TOWER"},
+                    ],
+                    "legal_atomic_actions": [
+                        {"atom": [0, -1, -1], "name": "HOLD"},
+                        {"atom": [13, 2, -1], "name": "DOWNGRADE_TOWER"},
+                    ],
             }
         ],
         "requirement": (
-            "Name one listed legal operation exactly in mechanism or "
-            "activation_condition."
+                "Name one listed legal operation and its exact atomic action "
+                "[code,arg0,arg1] in mechanism or activation_condition."
         ),
     }
 
@@ -180,10 +235,15 @@ def test_planner_check_missing_state_reports_bounded_reachable_examples(tmp_path
         "available_states": [
             {
                 "state_id": "reference-0:0:P0",
-                "legal_operations": [
-                    {"code": 0, "name": "HOLD"},
-                    {"code": 11, "name": "BUILD_TOWER"},
-                ],
+                    "legal_operations": [
+                        {"code": 0, "name": "HOLD"},
+                        {"code": 11, "name": "BUILD_TOWER"},
+                    ],
+                    "legal_atomic_actions": [
+                        {"atom": [0, -1, -1], "name": "HOLD"},
+                        {"atom": [11, 4, 5], "name": "BUILD_TOWER"},
+                        {"atom": [11, 6, 7], "name": "BUILD_TOWER"},
+                    ],
             }
         ],
         "requirement": (
@@ -202,7 +262,12 @@ def test_planner_check_rejects_branch_that_only_repeats_parent_action(tmp_path):
     output = tmp_path / "result.json"
     packet.write_text(json.dumps(_packet()), encoding="utf-8")
     briefs.write_text(
-        json.dumps([_branch(index, action="HOLD") for index in range(4)]),
+        json.dumps(
+            [
+                _branch(index, action="HOLD", atom=(0, -1, -1))
+                for index in range(4)
+            ]
+        ),
         encoding="utf-8",
     )
 
@@ -220,16 +285,17 @@ def test_planner_check_rejects_branch_that_only_repeats_parent_action(tmp_path):
     assert value["correction_hint"] == {
         "branch_index": 0,
         "cited_states": [
-            {
-                "state_id": "reference-0:0:P0",
-                "parent_operation_type": 0,
-                "divergent_legal_operations": [
-                    {"code": 11, "name": "BUILD_TOWER"}
-                ],
+                {
+                    "state_id": "reference-0:0:P0",
+                    "parent_atomic_action": [0, -1, -1],
+                    "divergent_legal_atomic_actions": [
+                        {"atom": [11, 4, 5], "name": "BUILD_TOWER"},
+                        {"atom": [11, 6, 7], "name": "BUILD_TOWER"},
+                    ],
             }
         ],
         "requirement": (
-            "Propose one listed operation whose code differs from the "
-            "parent operation on the same state."
+                "Propose one listed atomic action [code,arg0,arg1] that differs "
+                "from the full parent action on the same state."
         ),
     }

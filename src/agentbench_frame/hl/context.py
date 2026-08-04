@@ -153,6 +153,9 @@ def compile_game_digest(
         raise ValueError("decision space must define roles")
     if not roles:
         raise ValueError("decision space roles cannot be empty")
+    atomization = decision_value.get("atomization", {})
+    if not isinstance(atomization, Mapping):
+        raise ValueError("decision space atomization must be a mapping")
     normalized_roles: dict[str, dict[str, Any]] = {}
     for role_name, raw_role in roles.items():
         if not isinstance(role_name, str) or not role_name.strip():
@@ -211,6 +214,7 @@ def compile_game_digest(
             "replay_mapping": dict(replay_mapping),
         },
         "roles": normalized_roles,
+        "atomization": dict(atomization),
         "rule_sections": headings,
         "replay_skill": {
             "name": str(skill_metadata.get("name") or ""),
@@ -302,7 +306,7 @@ Bounded inputs:
 
 Read the packet once when present. It embeds the digest, manifest index, research state, bounded replay summaries, measurements, candidate code index, and a game-owned `parent_occupancy` summary of raw public states and observed atomic actions. Consult an authoritative context file only when a precise rule or API question remains. Never print a complete replay, trace, board stream, or policy source.
 
-Produce exactly four sibling hypotheses from the same parent. Each must contain a replay-grounded causal diagnosis, an observable activation condition, a mechanism, a preservation contract, an expected measurable change, a falsifier, and exact code symbols. Every branch must cite at least one exact state_id from parent_occupancy.state_examples. An observed per-role range is supplementary and never replaces that exact state citation. For each cited state, name the proposed atomic operation exactly as listed in that example's `legal_operations` and include its matching code; that code must differ from the same example's `parent_selected` first operation, so a branch cannot propose HOLD when the parent already selected HOLD. Do not reinterpret a bare numeric code or infer affordability from coins alone. Do not propose a condition contradicted by the observed maxima (for example, a minimum coin or tower-count gate above the recorded maximum). The branches must differ in mechanism, not merely thresholds, weights, or parameter values. Do not perform grid search.
+Produce exactly four sibling hypotheses from the same parent. Each must contain a replay-grounded causal diagnosis, an observable activation condition, a mechanism, a preservation contract, an expected measurable change, a falsifier, and exact code symbols. Every branch must cite at least one exact state_id from parent_occupancy.state_examples. An observed per-role range is supplementary and never replaces that exact state citation. For each cited state, copy one literal decision from `legal_atomic_actions`: name its operation and write `proposed atom [code,arg0,arg1]`. The full triple must differ from that example's full `parent_selected` triple; a different BUILD_TOWER coordinate is therefore a valid atomic change even when the operation code is unchanged. Treat the cited literal atom only as reachability evidence: implementation must derive arguments from current public state and must never memorize the cited coordinates, state_id, seed, replay id, or opponent identity. Do not reinterpret a bare numeric code or infer affordability from coins alone. Do not propose a condition contradicted by the observed maxima (for example, a minimum coin or tower-count gate above the recorded maximum). The branches must differ in mechanism, not merely thresholds, weights, or parameter values. Do not perform grid search.
 
 Required diversity axes:
 {diversity}
@@ -424,7 +428,7 @@ Bounded inputs:
 - candidate workspace: {Path(workspace).resolve()}
 - bounded trace inspector: {trace_tool.resolve()}
 
-First tool call: read the candidate packet exactly once and must print `smoke_contract`, `game_digest.policy_interface.field_access`, the selected branch, code slices, and the candidate_code_index entry signature for the public policy entry. It contains the compact digest, accumulated condition-scoped experience, bounded replay summaries, previous measurements, the branch brief, selected code slices, and the exact `smoke_contract.command`. Use the frozen field_access expressions verbatim when implementing an activation predicate; never guess aliases such as camp_hp or base_hp. Experience Skill is embedded; do not read Experience Skill separately. Complete `candidate_code_slices` are authoritative for the first edit. Do not run `sed`, `cat ai.py`, `rg`, `find`, or `ls` before the first edit, and do not create directories that the framework already created. A slice explicitly marked truncated permits one exact-range source read; the following tool call must edit. Never print a complete replay, trace, board stream, or source file.
+First tool call: read the candidate packet exactly once and must print `smoke_contract`, `game_digest.policy_interface.field_access`, `game_digest.atomization`, the selected branch, code slices, and the candidate_code_index entry signature for the public policy entry. It contains the compact digest, accumulated condition-scoped experience, bounded replay summaries, previous measurements, the branch brief, selected code slices, and the exact `smoke_contract.command`. Use the frozen field_access expressions verbatim when implementing an activation predicate; never guess aliases such as camp_hp or base_hp. Follow `game_digest.atomization` literally, including the encoded output for HOLD; never invent an enum member or operation constructor for a pseudo-atom. Experience Skill is embedded; do not read Experience Skill separately. Complete `candidate_code_slices` are authoritative for the first edit. Do not run `sed`, `cat ai.py`, `rg`, `find`, or `ls` before the first edit, and do not create directories that the framework already created. A slice explicitly marked truncated permits one exact-range source read; the following tool call must edit. Never print a complete replay, trace, board stream, or source file.
 
 The only branch brief is: {brief}
 Implement this mechanism rather than switching branches. Ground the diagnosis in the supplied replay summary and, only when necessary, inspect at most two small trace windows with the supplied Replay Skill tool. {scope}
@@ -459,7 +463,7 @@ branch index: {branch_index}
 Single bounded input: {Path(repair_input_path).resolve()}
 Candidate workspace: {Path(workspace).resolve()}
 
-The first tool call must read the bounded repair packet exactly once and print only `game_digest.policy_interface.field_access`, `scope.activation_condition`, `candidate.activation.details.state_examples`, `candidate_code_slices`, the public-entry candidate_code_index signature, and both contracts. It embeds the compact digest, research state, Experience Skill, branch scope, activation measurement, authoritative `candidate_code_slices`, exact activation check command, exact smoke command, and Experience update contract. Use frozen field_access expressions verbatim and compare the gate against the cited state before editing. Do not read the digest, research state, Experience Skill, SDK, protocol files, or complete policy separately. Do not run `rg`, `find`, `ls`, `git status`, or directory discovery.
+The first tool call must read the bounded repair packet exactly once and print only `game_digest.policy_interface.field_access`, `game_digest.atomization`, `scope.activation_condition`, `candidate.activation.details.state_examples`, `candidate_code_slices`, the public-entry candidate_code_index signature, and both contracts. It embeds the compact digest, research state, Experience Skill, branch scope, activation measurement, authoritative `candidate_code_slices`, exact activation check command, exact smoke command, and Experience update contract. Use frozen field_access expressions verbatim, follow the atomization output encoding literally, and compare the gate against the cited state before editing. Do not read the digest, research state, Experience Skill, SDK, protocol files, or complete policy separately. Do not run `rg`, `find`, `ls`, `git status`, or directory discovery.
 
 Obey `repair_kind`. For `activation_integration`, the candidate has not earned a match: its mechanism failed to change enough final protocol actions on frozen parent states. Make the scoped mechanism penetrate the final action-selection path and reach `minimum_changed_actions`; do not reinterpret zero/insufficient activation as gameplay evidence. Repair only this mechanism and preserve the parent path outside the brief's activation condition. The initial sibling remains immutable, so a failed repair cannot erase it.
 

@@ -140,6 +140,42 @@ def test_parent_occupancy_summary_reports_raw_ranges_and_atomic_counts():
         {"operation_type": 11, "state_count": 2},
     ]
     assert value["state_examples"][0]["legal_operation_types"] == [0, 11]
+    assert value["state_examples"][0]["legal_atomic_actions"] == [
+        [0, -1, -1],
+        [11, 4, 5],
+    ]
+
+
+def test_parent_occupancy_examples_preserve_rare_parent_action_types():
+    from agentbench_frame.games.antwar2.measurement import summarize_probe_occupancy
+
+    cases = []
+    for index in range(20):
+        step = (
+            _step(
+                [11, 8, 9],
+                support=[[0, -1, -1], [11, 4, 5], [11, 8, 9]],
+            )
+            if index == 10
+            else _step([0, -1, -1])
+        )
+        cases.append(
+            _case(step, state_id=f"reference-0:{index:03d}:P0")
+        )
+
+    value = summarize_probe_occupancy({"cases": cases}, max_examples=4)
+
+    assert any(
+        example["parent_selected"] == [11, 8, 9]
+        for example in value["state_examples"]
+    )
+    rare = next(
+        example
+        for example in value["state_examples"]
+        if example["parent_selected"] == [11, 8, 9]
+    )
+    assert [11, 4, 5] in rare["legal_atomic_actions"]
+    assert [11, 8, 9] in rare["legal_atomic_actions"]
 
 
 def test_terminal_replay_snapshot_is_not_a_valid_decision_state():

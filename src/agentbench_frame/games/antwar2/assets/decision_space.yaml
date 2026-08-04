@@ -57,4 +57,6 @@ atomization:
   support: state.can_apply_operation(player, operation, accepted_prefix)
   sequence: preserve accepted execution order
   empty_bundle: HOLD
+  hold_output: []
+  hold_operation_constructor: null
   rejected_operations: log separately and exclude from behavioral sequence

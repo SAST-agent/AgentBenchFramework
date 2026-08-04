@@ -77,6 +77,30 @@ def _name_parent_occupancy_actions(
                 and not isinstance(code, bool)
                 and code in names_by_code
             ]
+        legal_atoms = example.get("legal_atomic_actions")
+        if isinstance(legal_atoms, list):
+            named_atoms = []
+            for raw_atom in legal_atoms:
+                if (
+                    not isinstance(raw_atom, list)
+                    or len(raw_atom) != 3
+                    or any(
+                        not isinstance(item, int) or isinstance(item, bool)
+                        for item in raw_atom
+                    )
+                ):
+                    raise ValueError(
+                        f"invalid legal atomic action in occupancy: {raw_atom!r}"
+                    )
+                code = raw_atom[0]
+                if code not in names_by_code:
+                    raise ValueError(
+                        f"game digest does not name legal operation code: {code}"
+                    )
+                named_atoms.append(
+                    {"atom": list(raw_atom), "name": names_by_code[code]}
+                )
+            named["legal_atomic_actions"] = named_atoms
         named_examples.append(named)
     result["state_examples"] = named_examples
     return result

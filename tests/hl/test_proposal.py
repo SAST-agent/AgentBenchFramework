@@ -600,6 +600,10 @@ def test_planner_input_names_legal_atomic_operations_in_each_state(tmp_path):
                 {
                     "state_id": "reference-0:23:P0",
                     "legal_operation_types": [0, 13],
+                    "legal_atomic_actions": [
+                        [0, -1, -1],
+                        [13, 7, -1],
+                    ],
                 }
             ],
         },
@@ -611,6 +615,12 @@ def test_planner_input_names_legal_atomic_operations_in_each_state(tmp_path):
     ] == [
         {"code": 0, "name": "HOLD"},
         {"code": 13, "name": "DOWNGRADE_TOWER"},
+    ]
+    assert value["parent_occupancy"]["state_examples"][0][
+        "legal_atomic_actions"
+    ] == [
+        {"atom": [0, -1, -1], "name": "HOLD"},
+        {"atom": [13, 7, -1], "name": "DOWNGRADE_TOWER"},
     ]
 
 

@@ -17,6 +17,93 @@ from agentbench_frame.hl.game_profile import BehaviorComparison
 HOLD = (0, -1, -1)
 
 
+def _evenly_spaced(items: Sequence[Any], count: int) -> list[Any]:
+    if count >= len(items):
+        return list(items)
+    if count <= 1:
+        return [items[0]]
+    return [
+        items[round(offset * (len(items) - 1) / (count - 1))]
+        for offset in range(count)
+    ]
+
+
+def _bounded_atomic_actions(
+    support: set[tuple[int, int, int]],
+    *,
+    parent_selected: tuple[int, int, int],
+    max_atoms: int = 16,
+    max_per_type: int = 4,
+) -> list[list[int]]:
+    """Keep a bounded literal support while retaining argument alternatives."""
+
+    grouped: dict[int, list[tuple[int, int, int]]] = {}
+    for atom in sorted(support | {parent_selected}):
+        grouped.setdefault(atom[0], []).append(atom)
+    sampled = {
+        operation_type: _evenly_spaced(
+            atoms,
+            min(max_per_type, len(atoms)),
+        )
+        for operation_type, atoms in sorted(grouped.items())
+    }
+    priority = [parent_selected]
+    priority.extend(
+        atoms[0]
+        for atoms in sampled.values()
+        if atoms and atoms[0] != parent_selected
+    )
+    priority.extend(
+        atom
+        for atoms in sampled.values()
+        for atom in atoms[1:]
+        if atom != parent_selected
+    )
+    bounded: list[tuple[int, int, int]] = []
+    for atom in priority:
+        if atom not in bounded:
+            bounded.append(atom)
+        if len(bounded) >= max_atoms:
+            break
+    return [list(atom) for atom in sorted(bounded)]
+
+
+def _example_positions(
+    ordered: Sequence[Mapping[str, Any]],
+    *,
+    count: int,
+) -> set[int]:
+    """Stratify examples by role and rare selected/legal operation types."""
+
+    selected_type_first: dict[tuple[str, int], int] = {}
+    legal_type_first: dict[tuple[str, int], int] = {}
+    for index, case in enumerate(ordered):
+        summary = case.get("public_summary")
+        if not isinstance(summary, Mapping):
+            summary = {}
+        role = str(case.get("role") or summary.get("role") or "unknown")
+        selected, support = _step(case, 0)
+        selected_type_first.setdefault((role, selected[0]), index)
+        for operation_type in sorted({atom[0] for atom in support}):
+            legal_type_first.setdefault((role, operation_type), index)
+    priority = list(selected_type_first.values()) + list(legal_type_first.values())
+    priority.extend(
+        range(len(ordered))
+        if count == len(ordered)
+        else {
+            round(offset * (len(ordered) - 1) / (count - 1))
+            for offset in range(count)
+        }
+    )
+    positions: list[int] = []
+    for index in priority:
+        if index not in positions:
+            positions.append(index)
+        if len(positions) >= count:
+            break
+    return set(positions)
+
+
 def summarize_probe_occupancy(
     probe: Mapping[str, Any],
     *,
@@ -34,14 +121,7 @@ def summarize_probe_occupancy(
     if not ordered:
         raise ValueError("probe output has no valid cases")
     count = min(max(1, int(max_examples)), len(ordered))
-    positions = (
-        set(range(len(ordered)))
-        if count == len(ordered)
-        else {
-            round(offset * (len(ordered) - 1) / (count - 1))
-            for offset in range(count)
-        }
-    )
+    positions = _example_positions(ordered, count=count)
     range_fields = (
         ("round_index", ("round_index",)),
         ("self_coins", ("coins", "self")),
@@ -76,7 +156,7 @@ def summarize_probe_occupancy(
                 current = current.get(key)
             if isinstance(current, int) and not isinstance(current, bool):
                 role_values.setdefault(label, []).append(current)
-        selected, _ = _step(case, 0)
+        selected, first_support = _step(case, 0)
         counts = actions_by_role.setdefault(role, {})
         counts[selected] = counts.get(selected, 0) + 1
         legal_types: set[int] = set()
@@ -101,6 +181,10 @@ def summarize_probe_occupancy(
                     "public_summary": dict(summary),
                     "parent_selected": list(selected),
                     "legal_operation_types": sorted(legal_types),
+                    "legal_atomic_actions": _bounded_atomic_actions(
+                        first_support,
+                        parent_selected=selected,
+                    ),
                 }
             )
     return {

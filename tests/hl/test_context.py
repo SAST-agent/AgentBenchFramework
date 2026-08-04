@@ -49,6 +49,9 @@ roles:
     role_id: 1
     output_shape: ordered triple
     component_support: [0, 1, 2, 3, 4]
+atomization:
+  empty_bundle: STAY
+  hold_output: 0
 """.lstrip(),
         encoding="utf-8",
     )
@@ -146,6 +149,10 @@ def test_game_digest_is_deterministic_and_contains_primitive_actions(tmp_path):
     }
     assert value["policy_interface"]["replay_mapping"] == {
         "frame.score": "state.score"
+    }
+    assert value["atomization"] == {
+        "empty_bundle": "STAY",
+        "hold_output": 0,
     }
 
 
@@ -325,6 +332,7 @@ def test_profile_candidate_packet_requires_immediate_edit_without_duplicate_read
     assert "host-side result serialization" in prompt
     assert "do not inspect, shim, or patch the fixture" in prompt
     assert "game_digest.policy_interface.field_access" in prompt
+    assert "game_digest.atomization" in prompt
     assert "candidate_code_index entry signature" in prompt
 
 
@@ -341,6 +349,7 @@ def test_profile_repair_requires_direct_entry_edit_and_frozen_field_access(tmp_p
     )
 
     assert "game_digest.policy_interface.field_access" in prompt
+    assert "game_digest.atomization" in prompt
     assert "scope.activation_condition" in prompt
     assert "candidate.activation.details.state_examples" in prompt
     assert "Do not monkey-patch, rebind, or wrap the public entry" in prompt

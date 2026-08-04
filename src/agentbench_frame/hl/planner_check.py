@@ -4,11 +4,24 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
 from agentbench_frame.hl.proposal import load_branch_briefs
+
+
+_ATOMIC_ACTION = re.compile(
+    r"\[\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\]"
+)
+
+
+def _atoms_in_text(value: str) -> set[tuple[int, int, int]]:
+    return {
+        (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+        for match in _ATOMIC_ACTION.finditer(value)
+    }
 
 
 def _action_codes(game_digest: Mapping[str, Any]) -> dict[str, int]:
@@ -69,7 +82,8 @@ def run_planner_check(
         if not isinstance(examples, list) or not examples:
             raise ValueError("parent_occupancy requires state_examples")
         legal_by_state: dict[str, set[int]] = {}
-        parent_type_by_state: dict[str, int] = {}
+        legal_atoms_by_state: dict[str, set[tuple[int, int, int]]] = {}
+        parent_atom_by_state: dict[str, tuple[int, int, int]] = {}
         for example in examples:
             if not isinstance(example, Mapping):
                 continue
@@ -81,14 +95,36 @@ def run_planner_check(
                     for code in legal
                     if isinstance(code, int) and not isinstance(code, bool)
                 }
+                raw_atoms = example.get("legal_atomic_actions")
+                if not isinstance(raw_atoms, list) or not raw_atoms:
+                    raise ValueError(
+                        f"occupancy state {state_id} requires legal_atomic_actions"
+                    )
+                atoms = {
+                    tuple(atom)
+                    for atom in raw_atoms
+                    if isinstance(atom, list)
+                    and len(atom) == 3
+                    and all(
+                        isinstance(item, int) and not isinstance(item, bool)
+                        for item in atom
+                    )
+                }
+                if not atoms:
+                    raise ValueError(
+                        f"occupancy state {state_id} has no valid legal atomic actions"
+                    )
+                legal_atoms_by_state[state_id] = atoms
                 parent_selected = example.get("parent_selected")
                 if (
                     isinstance(parent_selected, list)
-                    and parent_selected
-                    and isinstance(parent_selected[0], int)
-                    and not isinstance(parent_selected[0], bool)
+                    and len(parent_selected) == 3
+                    and all(
+                        isinstance(item, int) and not isinstance(item, bool)
+                        for item in parent_selected
+                    )
                 ):
-                    parent_type_by_state[state_id] = int(parent_selected[0])
+                    parent_atom_by_state[state_id] = tuple(parent_selected)
         action_codes = _action_codes(packet.get("game_digest") or {})
 
         def named_legal_operations(state: str) -> list[dict[str, Any]]:
@@ -101,6 +137,14 @@ def run_planner_check(
                 if code in legal_by_state[state]
             ]
 
+        def named_legal_atoms(state: str) -> list[dict[str, Any]]:
+            names_by_code = {code: name for name, code in action_codes.items()}
+            return [
+                {"atom": list(atom), "name": names_by_code[atom[0]]}
+                for atom in sorted(legal_atoms_by_state[state])
+                if atom[0] in names_by_code
+            ]
+
         evidence: list[dict[str, Any]] = []
         for brief in briefs:
             text = " ".join(
@@ -110,11 +154,18 @@ def run_planner_check(
             cited_actions = {
                 name: code for name, code in action_codes.items() if name in text
             }
+            cited_atoms = _atoms_in_text(text)
             legal_pairs = [
-                {"state_id": state, "action": name, "operation_type": code}
+                {
+                    "state_id": state,
+                    "action": name,
+                    "operation_type": code,
+                    "atom": list(atom),
+                }
                 for state in cited_states
                 for name, code in cited_actions.items()
-                if code in legal_by_state[state]
+                for atom in cited_atoms
+                if atom in legal_atoms_by_state[state] and atom[0] == code
             ]
             if not cited_states:
                 correction_hint = {
@@ -123,6 +174,7 @@ def run_planner_check(
                         {
                             "state_id": state,
                             "legal_operations": named_legal_operations(state),
+                            "legal_atomic_actions": named_legal_atoms(state),
                         }
                         for state in sorted(legal_by_state)[:8]
                     ],
@@ -141,12 +193,13 @@ def run_planner_check(
                         {
                             "state_id": state,
                             "legal_operations": named_legal_operations(state),
+                            "legal_atomic_actions": named_legal_atoms(state),
                         }
                         for state in cited_states
                     ],
                     "requirement": (
-                        "Name one listed legal operation exactly in mechanism or "
-                        "activation_condition."
+                        "Name one listed legal operation and its exact atomic "
+                        "action [code,arg0,arg1] in mechanism or activation_condition."
                     ),
                 }
                 raise ValueError(
@@ -156,8 +209,8 @@ def run_planner_check(
             divergent_pairs = [
                 pair
                 for pair in legal_pairs
-                if parent_type_by_state.get(pair["state_id"])
-                != pair["operation_type"]
+                if parent_atom_by_state.get(pair["state_id"])
+                != tuple(pair["atom"])
             ]
             if not divergent_pairs:
                 correction_hint = {
@@ -165,21 +218,21 @@ def run_planner_check(
                     "cited_states": [
                         {
                             "state_id": state,
-                            "parent_operation_type": parent_type_by_state.get(
-                                state
+                            "parent_atomic_action": list(
+                                parent_atom_by_state[state]
                             ),
-                            "divergent_legal_operations": [
+                            "divergent_legal_atomic_actions": [
                                 operation
-                                for operation in named_legal_operations(state)
-                                if operation["code"]
-                                != parent_type_by_state.get(state)
+                                for operation in named_legal_atoms(state)
+                                if tuple(operation["atom"])
+                                != parent_atom_by_state.get(state)
                             ],
                         }
                         for state in cited_states
                     ],
                     "requirement": (
-                        "Propose one listed operation whose code differs from "
-                        "the parent operation on the same state."
+                        "Propose one listed atomic action [code,arg0,arg1] that "
+                        "differs from the full parent action on the same state."
                     ),
                 }
                 raise ValueError(
