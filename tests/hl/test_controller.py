@@ -1343,7 +1343,7 @@ def test_k4_proposal_cycle_uses_one_parent_and_reducer_sees_all_feedback(tmp_pat
     from agentbench_frame.hl.codebase import VersionStore
     from agentbench_frame.hl.config import IterationConfig, RollbackConfig
     from agentbench_frame.hl.controller import HLController
-    from agentbench_frame.hl.events import HLEventWriter
+    from agentbench_frame.hl.events import HLEventWriter, read_events
     from agentbench_frame.hl.experience import ExperienceManager
     from agentbench_frame.hl.experience_ledger import ExperienceLedger
     from agentbench_frame.hl.lineage import LineageManager
@@ -1483,6 +1483,12 @@ def test_k4_proposal_cycle_uses_one_parent_and_reducer_sees_all_feedback(tmp_pat
     }
     skill = experience.path.read_text(encoding="utf-8")
     assert result.search_parent_version_id in skill
+    event_types = [
+        event["event_type"] for event in read_events(tmp_path / "events.jsonl")
+    ]
+    assert event_types.index("experience_cycle_consolidated") < event_types.index(
+        "proposal_cycle_completed"
+    )
 
 
 def test_top_two_linear_repair_keeps_four_branches_and_two_descendants(tmp_path):

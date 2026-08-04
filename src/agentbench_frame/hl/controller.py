@@ -2127,15 +2127,6 @@ class HLController:
             input_path=str(reducer_input),
             output_path=persisted_reducer_output,
         )
-        self.events.write(
-            "proposal_cycle_completed",
-            iteration_id=iteration_id,
-            parent_version_id=parent_id,
-            selected_version_id=iteration.search_parent_version_id,
-            candidate_version_ids=[
-                candidate.version.version_id for candidate in iteration.candidates
-            ],
-        )
         if not defer_experience:
             self.consolidate_experience_cycle(
                 iteration_id=iteration_id,
@@ -2145,6 +2136,15 @@ class HLController:
                 branch_briefs=briefs,
                 selected_version_id=iteration.search_parent_version_id,
             )
+        self.events.write(
+            "proposal_cycle_completed",
+            iteration_id=iteration_id,
+            parent_version_id=parent_id,
+            selected_version_id=iteration.search_parent_version_id,
+            candidate_version_ids=[
+                candidate.version.version_id for candidate in iteration.candidates
+            ],
+        )
         return ProposalCycleResult(
             iteration_id=iteration_id,
             parent_version_id=parent_id,
