@@ -588,13 +588,19 @@ class AIClient:
                 if not self.root["success"]:
                     return copy.deepcopy(self.root)
                 else:
-                    if tool_type == "key":
+                    # 回复字段不一定齐全（Box/Materials 内容不同），全部防御性读取
+                    if "keys" in self.root:
                         self.player.keys = self.root["keys"]
-                    else:
-                        self.player.tools.landmine_number[0] = self.root["tools"]["LandMine"]
-                        self.player.tools.sticky_number[0] = self.root["tools"]["Sticky"]
-                        self.player.tools.transport = self.root["tools"]["Transport"]
-                        self.player.tools.kit = self.root["tools"]["Kit"]
+                    t = self.root.get("tools")
+                    if t:
+                        if "LandMine" in t:
+                            self.player.tools.landmine_number[0] = t["LandMine"]
+                        if "Sticky" in t:
+                            self.player.tools.sticky_number[0] = t["Sticky"]
+                        if "Transport" in t:
+                            self.player.tools.transport = t["Transport"]
+                        if "Kit" in t:
+                            self.player.tools.kit = t["Kit"]
                     return copy.deepcopy(self.root)
 
     def put_trap(self, trap_type):
