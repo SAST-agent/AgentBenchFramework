@@ -266,10 +266,10 @@ def enrich_activation_repair_packet(
                     ).resolve()
                 ),
                 "required_arrays": [
-                    "positive_patterns",
-                    "negative_patterns",
-                    "open_questions",
-                    "compression_notes",
+                    "stable_knowledge",
+                    "failed_hypotheses",
+                    "replay_evidence",
+                    "active_questions",
                 ],
             },
         }

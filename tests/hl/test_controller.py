@@ -1235,6 +1235,108 @@ def test_controller_ingests_structured_experience_update_outside_version(tmp_pat
     assert ".agentbench/experience_update.json" not in result.selected.version.files
 
 
+def test_controller_rejects_invalid_experience_update_without_aborting_act(tmp_path):
+    from agentbench_frame.hl.events import read_events
+    from agentbench_frame.hl.experience import ExperienceManager
+
+    experience = ExperienceManager(tmp_path / "experience")
+    provider = FakeProvider(
+        ["VALUE = 1\n"],
+        experience_updates=[
+            {
+                "positive_patterns": ["legacy schema"],
+                "negative_patterns": [],
+                "open_questions": [],
+                "compression_notes": [],
+            }
+        ],
+    )
+    controller = _controller(
+        tmp_path,
+        provider,
+        FakeEvaluator([0.5]),
+        experience=experience,
+    )
+    controller.initialize()
+
+    result = controller.run_act()
+
+    assert result.selected.evaluation.status == "complete"
+    assert result.selected.pending_experience_path is None
+    rejected = [
+        event
+        for event in read_events(tmp_path / "events.jsonl")
+        if event["event_type"] == "experience_update_rejected"
+    ]
+    assert len(rejected) == 1
+    assert rejected[0]["act_id"] == result.selected.act_id
+    assert "unknown experience fields" in rejected[0]["error"]
+
+
+def test_cycle_consolidation_skips_invalid_recovered_experience_update(tmp_path):
+    import dataclasses
+    import json
+
+    from agentbench_frame.hl.events import read_events
+    from agentbench_frame.hl.experience import ExperienceManager
+    from agentbench_frame.hl.proposal import BranchBrief
+
+    experience = ExperienceManager(tmp_path / "experience")
+    controller = _controller(
+        tmp_path,
+        FakeProvider(["VALUE = 1\n"]),
+        FakeEvaluator([0.5]),
+        experience=experience,
+    )
+    origin = controller.initialize()
+    result = controller.run_act(defer_experience=True)
+    invalid = tmp_path / "recovered-invalid-experience.json"
+    invalid.write_text(
+        json.dumps(
+            {
+                "positive_patterns": ["legacy schema"],
+                "negative_patterns": [],
+                "open_questions": [],
+                "compression_notes": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    recovered = dataclasses.replace(
+        result.selected,
+        pending_experience_path=invalid,
+    )
+    brief = BranchBrief(
+        branch_index=0,
+        diagnosis="measured branch",
+        mechanism="bounded action",
+        activation_condition="visible state",
+        preservation_contract="preserve other states",
+        expected_change="improve margin",
+        falsifier="margin regresses",
+        code_symbols=("ai_func",),
+    )
+
+    path = controller.consolidate_experience_cycle(
+        iteration_id="iter-recovered",
+        parent_version_id=origin.version_id,
+        parent_evaluation=None,
+        representatives=(recovered,),
+        branch_briefs=(brief,),
+        selected_version_id=recovered.version.version_id,
+    )
+
+    assert path == experience.path
+    rejected = [
+        event
+        for event in read_events(tmp_path / "events.jsonl")
+        if event["event_type"] == "experience_update_rejected"
+        and event["iteration_id"] == "iter-recovered"
+    ]
+    assert len(rejected) == 1
+    assert rejected[0]["path"] == str(invalid)
+
+
 def test_k4_proposal_cycle_uses_one_parent_and_reducer_sees_all_feedback(tmp_path):
     import json
 

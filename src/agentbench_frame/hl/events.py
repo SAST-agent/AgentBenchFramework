@@ -42,6 +42,7 @@ KNOWN_EVENT_TYPES = frozenset(
         "champion_promoted",
         "rollback_selected",
         "experience_updated",
+        "experience_update_rejected",
         "experience_rebuilt",
         "experience_cycle_consolidated",
         "checkpoint_created",
@@ -182,6 +183,10 @@ _EVENT_FIELDS = {
     "version_created": ({"version_id", "parent_version_id", "act_id", "content_hash", "edit_type", "evaluation_status", "benchmark_score", "selected"}, set()),
     "candidate_selected": ({"iteration_id", "version_id", "act_id"}, set()),
     "search_parent_selected": ({"iteration_id", "version_id", "act_id"}, set()),
+    "experience_update_rejected": (
+        {"act_id", "iteration_id", "error", "path"},
+        {"branch_index"},
+    ),
     "match_completed": (
         {
             "match_id",

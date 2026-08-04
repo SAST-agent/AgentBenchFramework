@@ -251,10 +251,10 @@ def test_activation_repair_packet_embeds_bounded_edit_context(tmp_path):
     assert value["activation_contract"]["command"][1] == "activation_check.py"
     assert value["activation_contract"]["minimum_changed_actions"] == 2
     assert value["experience_update_contract"]["required_arrays"] == [
-        "positive_patterns",
-        "negative_patterns",
-        "open_questions",
-        "compression_notes",
+        "stable_knowledge",
+        "failed_hypotheses",
+        "replay_evidence",
+        "active_questions",
     ]
 
 

@@ -972,11 +972,27 @@ class HLController:
         )
         pending_path: Path | None = None
         if experience_update.is_file():
-            pending_path = (
-                self.run_root / "experience" / "pending" / f"{act_id}.json"
-            )
-            pending_path.parent.mkdir(parents=True, exist_ok=True)
-            pending_path.write_bytes(experience_update.read_bytes())
+            validation_error: str | None = None
+            if self.experience_manager is not None:
+                try:
+                    self.experience_manager.read_file(experience_update)
+                except (OSError, ValueError) as error:
+                    validation_error = str(error)
+            if validation_error is None:
+                pending_path = (
+                    self.run_root / "experience" / "pending" / f"{act_id}.json"
+                )
+                pending_path.parent.mkdir(parents=True, exist_ok=True)
+                pending_path.write_bytes(experience_update.read_bytes())
+            else:
+                self.events.write(
+                    "experience_update_rejected",
+                    act_id=act_id,
+                    iteration_id=iteration_id,
+                    branch_index=branch_index,
+                    error=validation_error,
+                    path=str(experience_update),
+                )
         parent_content_hash = self.version_store.get(
             parent_version_id
         ).content_hash
@@ -2199,11 +2215,21 @@ class HLController:
                 or candidate.pending_experience_path is None
             ):
                 continue
-            selected_notes.append(
-                self.experience_manager.read_file(
-                    candidate.pending_experience_path
+            try:
+                selected_notes.append(
+                    self.experience_manager.read_file(
+                        candidate.pending_experience_path
+                    )
                 )
-            )
+            except (OSError, ValueError) as error:
+                self.events.write(
+                    "experience_update_rejected",
+                    act_id=candidate.act_id,
+                    iteration_id=iteration_id,
+                    branch_index=candidate.branch_index,
+                    error=str(error),
+                    path=str(candidate.pending_experience_path),
+                )
         path = self.experience_manager.consolidate_cycle(
             iteration_id,
             records=records,
