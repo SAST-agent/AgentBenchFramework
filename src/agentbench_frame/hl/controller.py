@@ -55,6 +55,12 @@ def _counts_as_coding_act(
     )
 
 
+def _reducer_artifact_status(status: str, *, output_exists: bool) -> str:
+    if status == "completed" and not output_exists:
+        return "failed"
+    return status
+
+
 def _activation_failure(
     changed_action_count: int,
     *,
@@ -2093,7 +2099,11 @@ class HLController:
             invocation=reducer,
         )
         persisted_reducer_output: str | None = None
-        if reducer.status == "completed" and reducer_output.is_file():
+        reducer_status = _reducer_artifact_status(
+            reducer.status,
+            output_exists=reducer_output.is_file(),
+        )
+        if reducer_status == "completed":
             target = proposal_root / "research_state_update.json"
             shutil.copy2(reducer_output, target)
             persisted_reducer_output = str(target)
@@ -2123,7 +2133,7 @@ class HLController:
             "reducer_completed",
             act_id=reducer_act_id,
             iteration_id=iteration_id,
-            status=reducer.status,
+            status=reducer_status,
             input_path=str(reducer_input),
             output_path=persisted_reducer_output,
         )

@@ -169,6 +169,97 @@ def test_resume_provider_compatibility_rejects_implicit_or_broader_change():
         )
 
 
+def test_profile_archive_rollback_is_disabled_for_planner_cycles():
+    from agentbench_frame.hl.config import IterationConfig, RollbackConfig
+    from agentbench_frame.hl.profile_runner import _profile_archive_rollback_enabled
+
+    rollback = RollbackConfig(enabled=True)
+
+    assert not _profile_archive_rollback_enabled(
+        IterationConfig(planner_enabled=True),
+        rollback,
+    )
+    assert _profile_archive_rollback_enabled(
+        IterationConfig(planner_enabled=False),
+        rollback,
+    )
+    assert not _profile_archive_rollback_enabled(
+        IterationConfig(planner_enabled=False),
+        RollbackConfig(enabled=False),
+    )
+
+
+def test_resume_restores_search_parent_from_obsolete_profile_rollback(tmp_path):
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+    from agentbench_frame.hl.profile_runner import _obsolete_archive_restore
+    from agentbench_frame.hl.research_state import ResearchState
+
+    research = tmp_path / "research_state.json"
+    ResearchState.empty(max_bytes=4096).advance(
+        proposal_cycle=5,
+        search_parent_version_id="v000028",
+    ).write(research)
+    historical = [
+        {
+            "event_type": "search_parent_selected",
+            "version_id": "v000028",
+        },
+        {
+            "event_type": "rollback_selected",
+            "from_version_id": "v000028",
+            "to_version_id": "v000000",
+            "reason": "stagnation_to_best_archive",
+        },
+    ]
+
+    restore = _obsolete_archive_restore(
+        historical,
+        research_state_path=research,
+        research_state_max_bytes=4096,
+        evaluations={
+            "v000000": CandidateEvaluation(status="complete", score=0.0),
+            "v000028": CandidateEvaluation(status="complete", score=0.0),
+        },
+        planner_enabled=True,
+    )
+
+    assert restore == {
+        "iteration_id": "iter-000005",
+        "version_id": "v000028",
+    }
+
+
+def test_resume_does_not_override_an_explicit_later_search_parent(tmp_path):
+    from agentbench_frame.hl.evaluator import CandidateEvaluation
+    from agentbench_frame.hl.profile_runner import _obsolete_archive_restore
+    from agentbench_frame.hl.research_state import ResearchState
+
+    research = tmp_path / "research_state.json"
+    ResearchState.empty(max_bytes=4096).advance(
+        proposal_cycle=5,
+        search_parent_version_id="v000028",
+    ).write(research)
+
+    assert _obsolete_archive_restore(
+        [
+            {
+                "event_type": "rollback_selected",
+                "reason": "stagnation_to_best_archive",
+            },
+            {
+                "event_type": "search_parent_selected",
+                "version_id": "v000009",
+            },
+        ],
+        research_state_path=research,
+        research_state_max_bytes=4096,
+        evaluations={
+            "v000028": CandidateEvaluation(status="complete", score=0.0)
+        },
+        planner_enabled=True,
+    ) is None
+
+
 def test_profile_pending_cycle_recovery_uses_latest_attempt_boundary(tmp_path):
     from agentbench_frame.hl.profile_runner import _pending_cycle_recoveries
 

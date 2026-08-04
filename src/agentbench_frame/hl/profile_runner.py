@@ -37,6 +37,57 @@ def _json_native(value: Any) -> Any:
     return json.loads(json.dumps(value, ensure_ascii=False, sort_keys=True))
 
 
+def _profile_archive_rollback_enabled(iteration: Any, rollback: Any) -> bool:
+    """Keep legacy archive rollback out of planner-controlled search lineage."""
+
+    return bool(rollback.enabled and not iteration.planner_enabled)
+
+
+def _obsolete_archive_restore(
+    historical: Sequence[Mapping[str, Any]],
+    *,
+    research_state_path: str | Path,
+    research_state_max_bytes: int,
+    evaluations: Mapping[str, CandidateEvaluation],
+    planner_enabled: bool,
+) -> dict[str, str] | None:
+    """Recover a planner search parent overwritten by the retired outer rollback."""
+
+    if not planner_enabled:
+        return None
+    latest_selection = next(
+        (
+            event
+            for event in reversed(historical)
+            if event.get("event_type")
+            in {"search_parent_selected", "rollback_selected"}
+        ),
+        None,
+    )
+    if (
+        latest_selection is None
+        or latest_selection.get("event_type") != "rollback_selected"
+        or latest_selection.get("reason") != "stagnation_to_best_archive"
+    ):
+        return None
+    state = ResearchState.load_or_create(
+        research_state_path,
+        max_bytes=research_state_max_bytes,
+    )
+    version_id = state.search_parent_version_id
+    evaluation = None if version_id is None else evaluations.get(version_id)
+    if (
+        version_id is None
+        or evaluation is None
+        or evaluation.status != "complete"
+    ):
+        return None
+    return {
+        "iteration_id": f"iter-{state.proposal_cycle:06d}",
+        "version_id": version_id,
+    }
+
+
 def _behavior_comparison_payload(comparison: Any) -> dict[str, Any]:
     return _json_native(
         {
@@ -1010,6 +1061,23 @@ def run_profile(
 
     if resume:
         controller.resume(historical)
+        restore = _obsolete_archive_restore(
+            historical,
+            research_state_path=research,
+            research_state_max_bytes=config.run.context.research_state_max_bytes,
+            evaluations=evaluations,
+            planner_enabled=config.run.iteration.planner_enabled,
+        )
+        if restore is not None:
+            restored_version = store.get(restore["version_id"])
+            controller.lineage.select_search_parent(restored_version.version_id)
+            store.checkout(restored_version.version_id)
+            writer.write(
+                "search_parent_selected",
+                iteration_id=restore["iteration_id"],
+                version_id=restored_version.version_id,
+                act_id=restored_version.act_id,
+            )
         head = controller.lineage.lineage_head_version_id
         if head is None or head not in evaluations:
             raise ValueError("resumed profile run lacks a complete head evaluation")
@@ -1343,7 +1411,10 @@ def run_profile(
 
         if (
             not certified
-            and config.run.rollback.enabled
+            and _profile_archive_rollback_enabled(
+                config.run.iteration,
+                config.run.rollback,
+            )
             and stagnation >= config.run.rollback.patience
             and best_version.version_id != selected_id
         ):

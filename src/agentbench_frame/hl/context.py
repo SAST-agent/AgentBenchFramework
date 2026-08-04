@@ -485,6 +485,9 @@ After the edit, compile `{profile.candidate_source_relative}` and run `activatio
     ) -> str:
         profile = self.prompt_profile
         assert profile is not None
+        reducer_output = (
+            Path(workspace) / ".agentbench" / "research_state_update.json"
+        ).resolve()
         return f"""# Generic HL comparative reducer {act_id}
 
 proposal cycle: {iteration_id}
@@ -498,7 +501,7 @@ Compare all sibling mechanisms using framework-recorded outcomes for the same op
 
 若候选的 `changed_action_count=0`，应把它归类为机制没有穿透最终决策路径的集成失败，而不是把尚未进入比赛的玩法假设判为无效。把这一事实写入 failed_hypotheses，并在 open_questions 中要求后续候选通过可观察状态上的直接决策干预，确保相对父版本至少一个原子动作发生变化后再进入比赛。
 
-Do not modify policy code, version pointers, curriculum, or certification facts. Do not run grid search or inspect {profile.opponent_label} source. Second tool call: write exactly one `workspace/.agentbench/research_state_update.json` object with four arrays: stable_knowledge, failed_hypotheses, open_questions, recent_comparisons. The first three contain non-empty strings; comparisons are concise objects. Third tool call: validate that JSON once, then stop.
+Do not modify policy code, version pointers, curriculum, or certification facts. Do not run grid search or inspect {profile.opponent_label} source. Second tool call: write exactly one `{reducer_output}` object with four arrays: stable_knowledge, failed_hypotheses, open_questions, recent_comparisons. The first three contain non-empty strings; comparisons are concise objects. Third tool call: validate that exact JSON path once, then stop.
 """
 
     def build_bootstrap_prompt(

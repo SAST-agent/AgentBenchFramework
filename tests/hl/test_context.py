@@ -368,6 +368,10 @@ def test_profile_reducer_reads_one_enriched_packet_without_discovery(tmp_path):
     )
 
     assert f"Single bounded input: {reducer.resolve()}" in prompt
+    assert str(
+        (tmp_path / "candidate/.agentbench/research_state_update.json").resolve()
+    ) in prompt
+    assert "`workspace/.agentbench/research_state_update.json`" not in prompt
     assert "It embeds game_digest and research_state" in prompt
     assert "Do not run `wc`, `rg`, `find`, `ls`, or exploratory `jq keys`" in prompt
 

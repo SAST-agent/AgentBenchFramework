@@ -122,6 +122,14 @@ def test_zero_usage_transport_failure_is_not_a_coding_act():
     )
 
 
+def test_completed_reducer_requires_its_exact_artifact():
+    from agentbench_frame.hl.controller import _reducer_artifact_status
+
+    assert _reducer_artifact_status("completed", output_exists=True) == "completed"
+    assert _reducer_artifact_status("completed", output_exists=False) == "failed"
+    assert _reducer_artifact_status("timeout", output_exists=True) == "timeout"
+
+
 def _controller(
     tmp_path,
     provider,
