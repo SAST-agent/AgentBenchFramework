@@ -100,9 +100,13 @@ def run_planner_check(
                     raise ValueError(
                         f"occupancy state {state_id} requires legal_atomic_actions"
                     )
+                atomic_values = [
+                    atom.get("atom") if isinstance(atom, Mapping) else atom
+                    for atom in raw_atoms
+                ]
                 atoms = {
                     tuple(atom)
-                    for atom in raw_atoms
+                    for atom in atomic_values
                     if isinstance(atom, list)
                     and len(atom) == 3
                     and all(

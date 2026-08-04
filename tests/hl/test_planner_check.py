@@ -41,9 +41,9 @@ def _packet():
                     "state_id": "reference-0:0:P0",
                     "legal_operation_types": [0, 11],
                     "legal_atomic_actions": [
-                        [0, -1, -1],
-                        [11, 4, 5],
-                        [11, 6, 7],
+                        {"atom": [0, -1, -1], "name": "HOLD"},
+                        {"atom": [11, 4, 5], "name": "BUILD_TOWER"},
+                        {"atom": [11, 6, 7], "name": "BUILD_TOWER"},
                     ],
                     "parent_selected": [0, -1, -1],
                 }
@@ -156,7 +156,10 @@ def test_planner_check_failure_reports_exact_legal_names_for_correction(tmp_path
     ] = [0, 13]
     packet_value["parent_occupancy"]["state_examples"][0][
         "legal_atomic_actions"
-    ] = [[0, -1, -1], [13, 2, -1]]
+    ] = [
+        {"atom": [0, -1, -1], "name": "HOLD"},
+        {"atom": [13, 2, -1], "name": "DOWNGRADE_TOWER"},
+    ]
     packet = tmp_path / "planner.json"
     briefs = tmp_path / "briefs.json"
     output = tmp_path / "result.json"

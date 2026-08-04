@@ -130,6 +130,26 @@ def test_completed_reducer_requires_its_exact_artifact():
     assert _reducer_artifact_status("timeout", output_exists=True) == "timeout"
 
 
+def test_framework_rejects_planner_artifact_when_hard_contract_failed(tmp_path):
+    import pytest
+
+    from agentbench_frame.hl.controller import _enforce_planner_contract
+
+    planner_input = tmp_path / "planner_input.json"
+    briefs = tmp_path / "branch_briefs.json"
+    planner_input.write_text("{}\n", encoding="utf-8")
+    briefs.write_text("[]\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="planner hard contract failed"):
+        _enforce_planner_contract(
+            planner_input_path=planner_input,
+            briefs_path=briefs,
+            output_path=tmp_path / "framework_planner_check.json",
+            expected_count=4,
+            entry_symbol="AI.choose_operations",
+        )
+
+
 def _controller(
     tmp_path,
     provider,

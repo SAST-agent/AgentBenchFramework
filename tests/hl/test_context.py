@@ -450,6 +450,9 @@ def test_all_profile_prompts_are_game_neutral(tmp_path, kind):
         assert "Do not read the digest, research state, Experience Skill" in prompt
         assert "next tool call must edit" in prompt
         assert "smoke_contract.command" in prompt
+        assert "never invert its value function" in prompt
+        assert "arbitrary divergence solely to satisfy `changed_action_count`" in prompt
+        assert "report the mechanism as redundant" in prompt
     for forbidden in ("Rollman", "Ghost", "pacman", "rank15", "rank16"):
         assert forbidden not in prompt
 

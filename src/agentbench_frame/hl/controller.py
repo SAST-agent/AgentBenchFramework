@@ -16,6 +16,7 @@ from agentbench_frame.hl.events import HLEventWriter
 from agentbench_frame.hl.experience import ExperienceManager
 from agentbench_frame.hl.experience_ledger import derive_experience_record
 from agentbench_frame.hl.lineage import LineageManager, ParentDecision
+from agentbench_frame.hl.planner_check import run_planner_check
 from agentbench_frame.hl.proposal import (
     BranchBrief,
     build_candidate_code_index,
@@ -59,6 +60,30 @@ def _reducer_artifact_status(status: str, *, output_exists: bool) -> str:
     if status == "completed" and not output_exists:
         return "failed"
     return status
+
+
+def _enforce_planner_contract(
+    *,
+    planner_input_path: str | Path,
+    briefs_path: str | Path,
+    output_path: str | Path,
+    expected_count: int,
+    entry_symbol: str,
+) -> Path:
+    result = Path(output_path)
+    returncode = run_planner_check(
+        briefs_path=briefs_path,
+        planner_input_path=planner_input_path,
+        output_path=result,
+        expected_count=expected_count,
+        entry_symbol=entry_symbol,
+    )
+    if returncode != 0:
+        payload = json.loads(result.read_text(encoding="utf-8"))
+        raise RuntimeError(
+            "planner hard contract failed: " + str(payload.get("error"))
+        )
+    return result
 
 
 def _activation_failure(
@@ -1883,6 +1908,15 @@ class HLController:
             },
             required_entry_symbol=self.policy_entry_symbol,
         )
+        planner_input = proposal_root / "planner_input.json"
+        if planner_input.is_file():
+            _enforce_planner_contract(
+                planner_input_path=planner_input,
+                briefs_path=persisted_briefs,
+                output_path=proposal_root / "planner_framework_check.json",
+                expected_count=4,
+                entry_symbol=self.policy_entry_symbol,
+            )
         self.events.write(
             "planner_completed",
             act_id=planner_act_id,
