@@ -265,6 +265,8 @@ def test_profile_planner_requires_exact_state_for_every_branch(tmp_path):
         "An observed per-role range is supplementary and never replaces "
         "that exact state citation" in prompt
     )
+    assert "inside `mechanism` or `activation_condition`" in prompt
+    assert "citations that appear only in `diagnosis` are ignored" in prompt
 
 
 def _profile_context(tmp_path):

@@ -250,8 +250,9 @@ def test_planner_check_missing_state_reports_bounded_reachable_examples(tmp_path
             }
         ],
         "requirement": (
-            "Cite one listed state_id and name one of its legal operations "
-            "exactly."
+            "Put one listed state_id, one of its legal operation names, and its "
+            "exact proposed atom [code,arg0,arg1] together in mechanism or "
+            "activation_condition; diagnosis-only citations are ignored."
         ),
     }
 

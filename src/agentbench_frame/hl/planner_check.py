@@ -183,8 +183,10 @@ def run_planner_check(
                         for state in sorted(legal_by_state)[:8]
                     ],
                     "requirement": (
-                        "Cite one listed state_id and name one of its legal "
-                        "operations exactly."
+                        "Put one listed state_id, one of its legal operation "
+                        "names, and its exact proposed atom [code,arg0,arg1] "
+                        "together in mechanism or activation_condition; "
+                        "diagnosis-only citations are ignored."
                     ),
                 }
                 raise ValueError(
