@@ -212,3 +212,160 @@ def prepend_framework_comparisons(
                 raise
             rows.pop()
     return current
+
+
+def apply_framework_reducer_fallback(
+    current: ResearchState,
+    reducer_input_path: str | Path,
+    output_path: str | Path,
+    *,
+    proposal_cycle: int,
+    search_parent_version_id: str,
+    official_champion_version_id: Optional[str],
+    exploration_debt: int,
+) -> ResearchState:
+    """Persist exact cycle facts when the model reducer produces no valid artifact."""
+
+    value = json.loads(Path(reducer_input_path).read_text(encoding="utf-8"))
+    if not isinstance(value, Mapping):
+        raise ValueError("reducer input must be an object")
+    parent_version_id = str(value.get("parent_version_id") or "unknown")
+    representatives = value.get("representatives")
+    initial_candidates = value.get("initial_candidates")
+    if not isinstance(representatives, list):
+        representatives = []
+    if not isinstance(initial_candidates, list):
+        initial_candidates = []
+    mechanisms: dict[int, str] = {}
+    for candidate in initial_candidates:
+        if not isinstance(candidate, Mapping):
+            continue
+        branch_index = candidate.get("branch_index")
+        brief = candidate.get("brief")
+        if not isinstance(branch_index, int) or not isinstance(brief, Mapping):
+            continue
+        mechanism = brief.get("mechanism")
+        if isinstance(mechanism, str) and mechanism.strip():
+            mechanisms[branch_index] = mechanism.strip()
+
+    def short(value: Any, limit: int = 180) -> str:
+        compact = " ".join(str(value).split())
+        return compact if len(compact) <= limit else compact[: limit - 1] + "…"
+
+    comparisons: list[dict[str, Any]] = []
+    failures: list[str] = []
+    for candidate in representatives[:4]:
+        if not isinstance(candidate, Mapping):
+            continue
+        branch_index = candidate.get("branch_index")
+        version_id = str(candidate.get("version_id") or "unknown")
+        status = str(candidate.get("status") or "unknown")
+        activation = candidate.get("activation")
+        activation = activation if isinstance(activation, Mapping) else {}
+        activation_details = activation.get("details")
+        activation_details = (
+            activation_details if isinstance(activation_details, Mapping) else {}
+        )
+        matches = candidate.get("matches")
+        matches = matches if isinstance(matches, list) else []
+        margins = []
+        for match in matches[:4]:
+            if not isinstance(match, Mapping):
+                continue
+            margins.append(
+                {
+                    "role": match.get("role", match.get("candidate_role")),
+                    "seed": match.get("seed"),
+                    "result": match.get("result"),
+                    "dense_margin": match.get("dense_margin"),
+                }
+            )
+        changed = activation.get("changed_action_count")
+        comparisons.append(
+            {
+                "source": "framework_reducer_fallback",
+                "proposal_cycle": proposal_cycle,
+                "branch_index": branch_index,
+                "version_id": version_id,
+                "selected": version_id == search_parent_version_id,
+                "status": status,
+                "score": candidate.get("score"),
+                "error": candidate.get("error"),
+                "changed_action_count": changed,
+                "mean_kl_nats_per_decision": activation.get(
+                    "mean_kl_nats_per_decision",
+                    activation_details.get("mean_kl_nats_per_decision"),
+                ),
+                "matches": margins,
+            }
+        )
+        if version_id == search_parent_version_id:
+            continue
+        mechanism = short(mechanisms.get(branch_index, "unnamed mechanism"), 120)
+        if status != "complete":
+            conclusion = "integration/screening failure; gameplay hypothesis not falsified"
+        else:
+            conclusion = "activated and evaluated but did not displace the search parent"
+        failures.append(
+            f"cycle {proposal_cycle} branch {branch_index} ({version_id}), "
+            f"mechanism={mechanism!r}, changed_action_count={changed}, "
+            f"status={status}: {conclusion}."
+        )
+
+    if search_parent_version_id == parent_version_id:
+        selection_fact = (
+            f"cycle {proposal_cycle}: retained search parent {parent_version_id}; "
+            "no evaluated sibling produced a strictly better paired result."
+        )
+        question = (
+            f"cycle {proposal_cycle}: parent {parent_version_id} remains below the "
+            "active target; propose a replay-grounded mechanism not covered by this "
+            "cycle's failed branches."
+        )
+    else:
+        selection_fact = (
+            f"cycle {proposal_cycle}: advanced search parent from {parent_version_id} "
+            f"to {search_parent_version_id} using framework-recorded paired results."
+        )
+        question = (
+            f"cycle {proposal_cycle}: test whether {search_parent_version_id}'s paired "
+            "gain generalizes to additional seeds and locked opponents."
+        )
+
+    payload: dict[str, Any] = {
+        "stable_knowledge": [selection_fact, *current.stable_knowledge[:3]],
+        "failed_hypotheses": [*failures, *current.failed_hypotheses[:2]],
+        "open_questions": [question, *current.open_questions[:1]],
+        "recent_comparisons": comparisons,
+    }
+    destination = Path(output_path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    while True:
+        destination.write_text(
+            json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        try:
+            return apply_reducer_update(
+                current,
+                destination,
+                proposal_cycle=proposal_cycle,
+                search_parent_version_id=search_parent_version_id,
+                official_champion_version_id=official_champion_version_id,
+                exploration_debt=exploration_debt,
+            )
+        except ValueError as error:
+            if "exceeds max_bytes" not in str(error):
+                raise
+            for field in (
+                "failed_hypotheses",
+                "recent_comparisons",
+                "stable_knowledge",
+                "open_questions",
+            ):
+                rows = payload[field]
+                if len(rows) > 1:
+                    rows.pop()
+                    break
+            else:
+                raise

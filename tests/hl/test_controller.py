@@ -1800,15 +1800,21 @@ def test_failed_reducer_output_cannot_mutate_research_state(tmp_path):
     controller.run_proposal_cycle(parent_version_id=origin.version_id)
 
     research = ResearchState.load_or_create(research_path, max_bytes=4096)
-    assert research.proposal_cycle == 0
+    assert research.proposal_cycle == 1
+    assert research.search_parent_version_id is not None
     assert "tainted update" not in research.stable_knowledge
+    assert any(item.startswith("cycle 1:") for item in research.stable_knowledge)
+    assert any(
+        row.get("source") == "framework_reducer_fallback"
+        for row in research.recent_comparisons
+    )
     reducer = [
         event
         for event in read_events(tmp_path / "events.jsonl")
         if event["event_type"] == "reducer_completed"
     ][0]
     assert reducer["status"] == "failed"
-    assert reducer["output_path"] is None
+    assert reducer["output_path"].endswith("research_state_fallback.json")
 
 
 def test_k4_cycle_reuses_valid_persisted_planner_without_second_api_call(tmp_path):

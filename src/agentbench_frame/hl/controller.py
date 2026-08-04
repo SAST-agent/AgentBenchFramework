@@ -31,6 +31,7 @@ from agentbench_frame.hl.repair import (
 )
 from agentbench_frame.hl.research_state import (
     ResearchState,
+    apply_framework_reducer_fallback,
     apply_reducer_update,
     prepend_framework_comparisons,
 )
@@ -2163,6 +2164,27 @@ class HLController:
                     positive_margin_deltas,
                 )
                 next_state.write(self.research_state_path)
+        elif self.research_state_path is not None:
+            target = proposal_root / "research_state_fallback.json"
+            current_state = ResearchState.load_or_create(
+                self.research_state_path,
+                max_bytes=self.research_state_max_bytes,
+            )
+            next_state = apply_framework_reducer_fallback(
+                current_state,
+                reducer_input,
+                target,
+                proposal_cycle=self._iteration_count,
+                search_parent_version_id=iteration.search_parent_version_id,
+                official_champion_version_id=self.lineage.champion_version_id,
+                exploration_debt=current_state.exploration_debt + 1,
+            )
+            next_state = prepend_framework_comparisons(
+                next_state,
+                positive_margin_deltas,
+            )
+            next_state.write(self.research_state_path)
+            persisted_reducer_output = str(target)
         self.events.write(
             "reducer_completed",
             act_id=reducer_act_id,
