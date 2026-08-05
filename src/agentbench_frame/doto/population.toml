@@ -1,26 +1,391 @@
+schema_version = 2
+benchmark_version = "doto-human-43-v1"
+seed = 11
+seats = [0, 1]
+game = "23_doto"
+
 [[policies]]
-name = "official-sample"
+name = "sample"
 source = "logic/public_Arena-Doto-AI/Arena-Doto-AI-master/client"
-origin = "public_Arena-Doto-AI"
+origin = "Arena-Doto-AI sample client"
 split = "train"
-expected_sha256 = "56807a49406cb24a135fae3c85e9d7e302422f90c9778f6c8a2fcb5815bfe792"
-leaderboard = "sample"
+sha256 = "56807a49406cb24a135fae3c85e9d7e302422f90c9778f6c8a2fcb5815bfe792"
+leaderboard = true
+enabled = true
+[[policies]]
+name = "3GA"
+source = "logic/public_DOTO/DOTO-master/bak/3GA"
+origin = "public_DOTO historical version"
+split = "train"
+sha256 = "b620af6f6f25165c71ddccea6da85b00002d9408a0554455a0db86da4af026bc"
+leaderboard = true
 enabled = true
 
 [[policies]]
-name = "doto-final"
-source = "logic/public_DOTO/DOTO-master/AI"
-origin = "public_DOTO"
-split = "validation"
-expected_sha256 = "7dee77d25950f12113205e835ca5c0e71249d2d99e8cc6206ca6d06d47f54751"
-leaderboard = "final"
+name = "3GB"
+source = "logic/public_DOTO/DOTO-master/bak/3GB"
+origin = "public_DOTO historical version"
+split = "train"
+sha256 = "ac9cf017507a60c2b7aa47b517c628137c60debd1a4408dc2d3f59442cec0c53"
+leaderboard = false
 enabled = true
 
 [[policies]]
-name = "doto-3ge"
+name = "3GC"
+source = "logic/public_DOTO/DOTO-master/bak/3GC"
+origin = "public_DOTO historical version"
+split = "train"
+sha256 = "df661a562bd33f8aa054fa270dab4ce0b07a177bb35b1aefa4eb0fa743d39a75"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "3GCT"
+source = "logic/public_DOTO/DOTO-master/bak/3GCT"
+origin = "public_DOTO historical version"
+split = "train"
+sha256 = "f7b99e799583af64fb33bba27f01c60a032d167951c53b98868b09ff6b7247c5"
+leaderboard = true
+enabled = true
+
+[[policies]]
+name = "3GD"
+source = "logic/public_DOTO/DOTO-master/bak/3GD"
+origin = "public_DOTO historical version"
+split = "train"
+sha256 = "f6d222902495c0702e95c2bc8ef533ca7acc39d09ede44f23a8e5e516a0e146b"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "3GE"
 source = "logic/public_DOTO/DOTO-master/bak/3GE"
-origin = "public_DOTO"
+origin = "public_DOTO historical version"
 split = "train"
-expected_sha256 = "4e33354143805d77f51de0467e4d575a89cc5ea1d0fd1b8ca5479f91a914c4f8"
-leaderboard = "historical"
+sha256 = "4e33354143805d77f51de0467e4d575a89cc5ea1d0fd1b8ca5479f91a914c4f8"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "3GF"
+source = "logic/public_DOTO/DOTO-master/bak/3GF"
+origin = "public_DOTO historical version"
+split = "train"
+sha256 = "55989a55bacab04808c391972061e70c195feb50b756d3b32c99f891a6f8ee4f"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "3GG"
+source = "logic/public_DOTO/DOTO-master/bak/3GG"
+origin = "public_DOTO historical version"
+split = "train"
+sha256 = "8c6ed88561a64eaa060322ecacef34623ea6bb2fdbee108195b8aa5643ceffd4"
+leaderboard = true
+enabled = true
+
+[[policies]]
+name = "astar"
+source = "logic/public_DOTO/DOTO-master/bak/astar"
+origin = "public_DOTO historical version"
+split = "train"
+sha256 = "0f156ec60a4201092ca4c8a12a5031803e65dcfc2f587b7f3773bfb01f837f47"
+leaderboard = true
+enabled = true
+
+[[policies]]
+name = "fireflee"
+source = "logic/public_DOTO/DOTO-master/bak/fireflee"
+origin = "public_DOTO historical version"
+split = "train"
+sha256 = "3cb05121135ce9555a77bb683246311fc2933289f2b959d3783a1c193d143e35"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "fix"
+source = "logic/public_DOTO/DOTO-master/bak/fix"
+origin = "public_DOTO historical version"
+split = "train"
+sha256 = "2d605b8bf4b0e04c509e379dfe6b708a9182675a8f2d95cb69f8da9bdc2d0377"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "flee"
+source = "logic/public_DOTO/DOTO-master/bak/flee"
+origin = "public_DOTO historical version"
+split = "train"
+sha256 = "4493b901ea3bdeb84d435bd8bcbc6733cb6e43c8b01d2498e48121b11c1eec69"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "new"
+source = "logic/public_DOTO/DOTO-master/bak/new"
+origin = "public_DOTO historical version"
+split = "train"
+sha256 = "24a25d39dff2b2b33df7944ce03484e54e3c621327d020531b1f65bf188aecbe"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "seer"
+source = "logic/public_DOTO/DOTO-master/bak/seer"
+origin = "public_DOTO historical version"
+split = "train"
+sha256 = "181a9bd5d80efaa1e9658d5ef551b6f85e802eb02f1068293023a1d6054090df"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "DstCache"
+source = "logic/public_DOTO/DOTO-master/bak/DstCache"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "56431ff05d211e981870cc276f866b91c7ca5b4c75ab34f05b0446d7bfe89f7b"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "NG3"
+source = "logic/public_DOTO/DOTO-master/bak/NG3"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "3fd702093540f4972673de2bc4bc203bc7ef9f72f8cc50216291831026fd09f6"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "NxtGen"
+source = "logic/public_DOTO/DOTO-master/bak/NxtGen"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "dbb8a22d873be8bab9f0650d86537c9a389e8b78431ad74026ad1132c008cadf"
+leaderboard = true
+enabled = true
+
+[[policies]]
+name = "NG-Bonus"
+source = "logic/public_DOTO/DOTO-master/bak/NG-Bonus"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "2c624a98496fd0f43ba17ef0378171075343768144265382411e0cd77ac71e4b"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "NG-FixFlee"
+source = "logic/public_DOTO/DOTO-master/bak/NG-FixFlee"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "a1d702cdf882846461206a42b1b920ec05a401c616978c2193aab42cf18b59e1"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "NG-FixSche"
+source = "logic/public_DOTO/DOTO-master/bak/NG-FixSche"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "b1bd36a317a1dd13e41b521959f6c1bf3c8b2efbac49e7c0e38d6d37e6759d96"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "NG-Many"
+source = "logic/public_DOTO/DOTO-master/bak/NG-Many"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "bac383dc7b0f8f118cb1636dbf134c29eef01f790afa4fd00a4cc62bd9fc850d"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "NG-NB2"
+source = "logic/public_DOTO/DOTO-master/bak/NG-NB2"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "5e4643e49992e8e033196b141cd0d95e48917b1e30be632db0c718e7190740ca"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "NG-NB2G"
+source = "logic/public_DOTO/DOTO-master/bak/NG-NB2G"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "b738ef129b23b87eb19b2a07b103316e5bf894c8154d5a4cca7c13baefba6181"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "NG-NB3"
+source = "logic/public_DOTO/DOTO-master/bak/NG-NB3"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "5a9bcf69a8d854a99626153b4a231d7ecd5e32caafa723302e81d4efb6c0c21b"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "NG-NB4"
+source = "logic/public_DOTO/DOTO-master/bak/NG-NB4"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "a855559778e21dc9b7be9349479ee6886c913388ab5f582d71d2df12fd5cf0ab"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "NG-NB5"
+source = "logic/public_DOTO/DOTO-master/bak/NG-NB5"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "74d5ece0be81296a38443f62c0ee74881b117ea7edc407f51c4ca64614c46850"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "NG-NB6"
+source = "logic/public_DOTO/DOTO-master/bak/NG-NB6"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "96e4899cef8dd362fc085048dcc56b9fb2309c6f787c2b2c72d9cdcef976f271"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "NG-NB7"
+source = "logic/public_DOTO/DOTO-master/bak/NG-NB7"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "a580af651ff679d573875d2dff68edaa4fc0d18fdeaf0c4feede4470d8caff08"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "NG-NB8"
+source = "logic/public_DOTO/DOTO-master/bak/NG-NB8"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "7aa676c8b404b398e5a84bd3f7d9a62ab43764b4990c97be0ced371aeb9baf2d"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "NG-NB9"
+source = "logic/public_DOTO/DOTO-master/bak/NG-NB9"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "cbb9847e37b70d40224dc1e002fae047c1998a9ca9bcf195aa18eefc3d50a4c8"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "NG-NB10"
+source = "logic/public_DOTO/DOTO-master/bak/NG-NB10"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "398342c3bf885ec27c3205f2fcfd5b340251093712a079cea7b86adf35e8fffa"
+leaderboard = true
+enabled = true
+
+[[policies]]
+name = "NG-NF2"
+source = "logic/public_DOTO/DOTO-master/bak/NG-NF2"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "c063d22de149cc43b8600629acd01370677ef17f4c11dff03111625c17a1c9b0"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "NG-NF3"
+source = "logic/public_DOTO/DOTO-master/bak/NG-NF3"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "cc0caa5a8b555cb4a6181108b0b8a2e4a38611206b76eda826fb6424a60ff418"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "NG-NF4"
+source = "logic/public_DOTO/DOTO-master/bak/NG-NF4"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "5d6df43a1c83aaec4fadfd00909dab62b201767252c0238f2dfbc3e4fb92140b"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "NG-NewBonus"
+source = "logic/public_DOTO/DOTO-master/bak/NG-NewBonus"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "b25c915ee8075ebbf57fe6ad0e90cbc5e4e2f26a0605d313cb9825f97a7809d3"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "NG-NewFire"
+source = "logic/public_DOTO/DOTO-master/bak/NG-NewFire"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "ec0146263aaf77ee57f1c0204491a51e598fdce2fc1cd0351334290684b6a25a"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "NG-NewFlee"
+source = "logic/public_DOTO/DOTO-master/bak/NG-NewFlee"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "2a9d2926b06aa5faa97fee4b115cf920da9bab4edc879e114ac2caac0cc2dbe0"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "NG-NewMeteor"
+source = "logic/public_DOTO/DOTO-master/bak/NG-NewMeteor"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "105a21974a15a88d5d8fa3721e4d0ed1f0f1ffcf6e8ed95ea0effdb109cccbd3"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "NG-NoSeer"
+source = "logic/public_DOTO/DOTO-master/bak/NG-NoSeer"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "82babd2f476b0f05642580a8574f4606ef1aaf174b0579305fdc790ac561cc19"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "NG-Safe"
+source = "logic/public_DOTO/DOTO-master/bak/NG-Safe"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "d0cb876f4a7d184d5c1f410fe0d1161aa5a0df79c5e1a84432d54acb7eb6899b"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "NG-Sche"
+source = "logic/public_DOTO/DOTO-master/bak/NG-Sche"
+origin = "public_DOTO historical version"
+split = "validation"
+sha256 = "60218e31289b71be618d70db8c9b5e8f102ca98241f4e5750f3d94328642cd25"
+leaderboard = false
+enabled = true
+
+[[policies]]
+name = "strong"
+source = "logic/public_DOTO/DOTO-master/AI"
+origin = "public_DOTO final version"
+split = "test"
+sha256 = "7dee77d25950f12113205e835ca5c0e71249d2d99e8cc6206ca6d06d47f54751"
+leaderboard = true
 enabled = true

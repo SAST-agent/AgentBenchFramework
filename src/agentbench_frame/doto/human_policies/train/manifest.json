@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "benchmark_version": "doto-human-43-v1",
+  "policy_ids": [
+    "doto-00-sample",
+    "doto-01-3ga",
+    "doto-02-3gb",
+    "doto-03-3gc",
+    "doto-04-3gct",
+    "doto-05-3gd",
+    "doto-06-3ge",
+    "doto-07-3gf",
+    "doto-08-3gg",
+    "doto-09-astar",
+    "doto-10-fireflee",
+    "doto-11-fix",
+    "doto-12-flee",
+    "doto-13-new",
+    "doto-14-seer"
+  ]
+}

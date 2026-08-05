@@ -1,105 +1,208 @@
-# DOTO benchmark harness
+# Codex-orchestrated DOTO benchmark
 
-## Scope and prerequisites
+## What orchestrates the benchmark
 
-This harness keeps the 23rd DOTO official server/map and original native
-`playerAI.cpp` protocol. It requires Python 3.11+, `uv`, `g++`, `make`, and ZIP
-support. The only command surface is:
+AgentBenchFramework exposes deterministic atomic tools; it does not own an LLM
+loop. **Codex decides** which training replay to inspect, what complete
+`playerAI.cpp` change to make, which explicit parent to use, whether another
+iteration is justified, and which complete training version enters the final
+test. No iteration, token, or wall-time budget is imposed by the DOTO workflow.
 
-```bash
-uv run python -m agentbench_frame.doto <build|match|replay|ig|loop>
-```
+The complete authority is stored in `DotoResults`. The unchanged
+AgentBenchResults repository receives only the five-file **AgentBenchResults projection**
+after the Run is sealed and validated.
 
-The policy maintained by the evaluated LLM is exactly one complete
-`playerAI.cpp`; the harness supplies the fixed SDK. See
-[`doto-harness`](../skills/doto-harness/SKILL.md),
-[`doto-replay-reader`](../skills/doto-replay-reader/SKILL.md), and the
-[design](superpowers/specs/2026-08-02-doto-benchmark-harness-design.md).
-
-## Build, population, match, and replay
+Requirements: Python 3.11+, `uv`, `g++`, `make`, ZIP support, and:
 
 ```bash
-uv run python -m agentbench_frame.doto build \
-  --player-ai examples/doto-initial-playerAI.cpp \
-  --output-dir agentbench_data/builds/23_doto/candidate
-
-uv run python -m agentbench_frame.doto build \
-  --population-manifest src/agentbench_frame/doto/population.toml \
-  --corpus-root ../AgentBench/backend_sources/corpus/23_doto \
-  --output-dir agentbench_data/population/23_doto
-
-uv run python -m agentbench_frame.doto match \
-  --agent0 agentbench_data/builds/23_doto/candidate/main.out \
-  --agent1 agentbench_data/population/23_doto/official-sample/main.out \
-  --seed 11 --tag candidate-seat0 \
-  --output-dir agentbench_data/replays/23_doto
-
-uv run python -m agentbench_frame.doto replay \
-  --path agentbench_data/replays/23_doto/candidate-seat0_seed11.zip \
-  --jsonl agentbench_data/replays/23_doto/candidate-seat0.events.jsonl
+uv sync --extra doto
 ```
 
-Swap `--agent0` and `--agent1` with the same seed for seat balance. A formal
-match is valid only with normal final frame, two scores, no error, a parseable
-replay, `realtime_scale=1.0`, and recorded server/map/policy hashes. Population
-entries become `ready` only after hash verification, build, and native protocol
-smoke; all failures remain in `population-build.json`.
+## Four required Skills
 
-## Strict deterministic KL/IG
+Every Run snapshots and hashes exactly these packages:
 
-```bash
-uv run python -m agentbench_frame.doto ig \
-  --trace agentbench_data/replays/23_doto/candidate-seat0_seed11.trace.jsonl \
-  --old agentbench_data/builds/23_doto/old/main.out \
-  --new agentbench_data/builds/23_doto/candidate/main.out \
-  --faction 0 --iteration 1 --old-version v0 --new-version v1 \
-  --output-dir agentbench_data/ig/23_doto
-```
+- [`doto-benchmark-run`](../skills/doto-benchmark-run/SKILL.md): lifecycle,
+  training selection, finalization, validation, and export.
+- [`doto-game-rules`](../skills/doto-game-rules/SKILL.md): authoritative rules,
+  observation, joint action, action mask, terminal, and strict KL support.
+- [`doto-agent-authoring`](../skills/doto-agent-authoring/SKILL.md): fixed SDK and
+  complete C++ candidate contract.
+- [`doto-replay-reader`](../skills/doto-replay-reader/SKILL.md): replay/trace
+  fields, events, evidence joins, and diagnosis.
 
-On the same observations, equal deterministic joint actions give KL 0;
-different actions give infinite KL; crashes, invalid actions, timeouts, and
-misalignment are missing with reasons. The curve reports
-`unchanged_ratio`, `infinite_ratio`, `missing_ratio`, and `finite_kl_mean`.
-Distance or score gain is never relabeled as KL.
+Read rules and authoring before the baseline. Read replay-reader before drawing
+any conclusion from a replay or trace. The workflow Skill governs every state
+transition.
 
-## LLM loop and visible context
+## Recommended Codex launch prompt
 
-Copy `examples/doto-loop.toml`, update model/opponent paths and budgets, then:
-
-```bash
-export OPENAI_API_KEY='<secret>'
-uv run python -m agentbench_frame.doto loop \
-  --config examples/doto-loop.toml \
-  --data-dir ../AgentBenchResults
-```
-
-Chat Completions SSE is default. `max_context_tokens` defaults to 1,000,000;
-no `max_tokens` is sent unless configured. The API key is read from the named
-environment variable and never saved. The model receives the two exact Skills,
-fixed SDK reference, current accepted source, immediately previous metrics,
-deterministically budgeted observation/action evidence, and cumulative budget.
-It must return one JSON object with nonempty `analysis` and complete
-`player_ai_cpp` strings.
-
-Budgets are cumulative across the Run: iterations, builds, rollouts, episode
-reads, frame reads, provider tokens, context tokens, compile/battle/API time,
-and wall time. Failed API, build, protocol, or evaluation attempts remain in
-their iteration directories and curves; rejected code is not promoted.
-
-## Results and interpretation
-
-Output is written directly to:
+Initialize the authoritative Run before starting Codex, then replace the three
+path placeholders in this lean prompt. Rules, schemas, commands, and failure
+semantics stay in the versioned Skills rather than being duplicated here.
 
 ```text
-AgentBenchResults/runs/23_doto/<agent>/<run_id>/
-├── run.toml, config.json, events.jsonl, summary.json
-├── score_curve.json, ig_curve.json, skills/
-└── iterations/iteration-NNNN/
+Use $doto-benchmark-run, $doto-game-rules, $doto-agent-authoring, and
+$doto-replay-reader to autonomously improve a native DOTO playerAI.cpp.
+
+Authoritative Run: <RUN_DIR>
+Public training bundle: <TRAIN_BUNDLE>
+AgentBenchResults projection root: <AGENTBENCH_RESULTS>
+
+Goal: use only public training evidence to maximize the number of human
+policies defeated under the benchmark's two-seat rule. Start by inspecting the
+durable Run status. Complete and close the baseline if needed. For every child,
+inspect selected normal replay and trace evidence, save a specific analysis,
+create a complete non-identical playerAI.cpp from an explicit closed parent,
+build it, run the full 30-cell training matrix, record strict IG or its exact
+missing reason, close the iteration, and inspect the aligned score/IG curves.
+
+Decide yourself whether evidence justifies another child and which complete
+training version to select. Do not ask for confirmation between ordinary atomic
+steps. Do not use a fixed iteration count, token budget, or wall-time budget.
+Never inspect or infer sealed policies, and never use hidden-test evidence to
+change a candidate. Preserve every failure and incomplete result; do not edit
+authoritative result files by hand and do not substitute another metric for
+strict KL/IG.
+
+If no sealed-bundle descriptor is available, stop after durably selecting and
+reporting the training candidate for evaluator finalization. If the evaluator
+provides the descriptor, finalize exactly once, make no further candidate
+changes, validate DotoResults, export the five-file AgentBenchResults
+projection, verify it, and report artifact paths plus explicit failures.
 ```
 
-Score is mean seat-balanced candidate score difference. Each point preserves
-raw, evo, gain (`evo-raw`), win/completion rates, source version, budget state,
-and failure/null status. AUC is reported independently over iteration,
-rollouts, tokens, episode/frame reads, and wall time using measured points only.
-The run directory is already the AgentBenchResults export; commit that directory
-in the Results repository after checking that no credential is present.
+For an API-driven Codex session, pass this as the user task after mounting the
+repository and prepared Run. The evaluator, not the prompt, owns the sealed
+bundle descriptor and the one-shot transition into hidden evaluation.
+
+## Prepare human pools
+
+Verify all 43 frozen complete snapshots, then build the 15-policy public train
+bundle. The evaluator separately builds and owns the 28-policy sealed bundle.
+
+```bash
+uv run --extra doto python -m agentbench_frame.doto population verify \
+  --manifest src/agentbench_frame/doto/population.toml \
+  --source-root ../AgentBench/backend_sources/corpus/23_doto
+uv run --extra doto python -m agentbench_frame.doto population build-train \
+  --manifest src/agentbench_frame/doto/population.toml \
+  --source-root src/agentbench_frame/doto/human_policies/train \
+  --output-dir /workspace/doto-train-bundle
+```
+
+Require 43/43 identities verified and 15/15 public policies ready. Do not expose
+sealed source, policy names, paths, binaries, or old test outcomes to Codex.
+
+## Initialize an authoritative Run
+
+The evaluator briefly opens the sealed bundle to capture its hash, creates the
+Run, and closes that descriptor before Codex begins training:
+
+```bash
+uv run --extra doto python -m agentbench_frame.doto run init \
+  --agent codex --initial-player-ai examples/doto-initial-playerAI.cpp \
+  --doto-results ../DotoResults --run-id <run-id> \
+  --train-bundle /workspace/doto-train-bundle \
+  --test-bundle /proc/self/fd/<evaluator-fd> --skills-root skills
+uv run --extra doto python -m agentbench_frame.doto run status \
+  --run-dir ../DotoResults/runs/23_doto/codex/<run-id>
+```
+
+Initialization snapshots the initial source, four complete Skills, pool hashes,
+and benchmark version. Never hand-edit the new Run.
+
+## Complete one training iteration
+
+Build the baseline, run/resume the full **30-cell** matrix (15 humans × both
+candidate seats, seed 11), record baseline IG as missing, and close:
+
+```bash
+uv run --extra doto python -m agentbench_frame.doto iteration build \
+  --run-dir <run-dir> --iteration 0
+uv run --extra doto python -m agentbench_frame.doto iteration evaluate \
+  --run-dir <run-dir> --iteration 0 --pool /workspace/doto-train-bundle \
+  --cpu-target 70
+uv run --extra doto python -m agentbench_frame.doto iteration compare \
+  --run-dir <run-dir> --iteration 0
+uv run --extra doto python -m agentbench_frame.doto iteration close \
+  --run-dir <run-dir> --iteration 0
+```
+
+The adaptive multi-process scheduler targets **70%** aggregate CPU, grows below
+65%, holds at 65–75%, and pauses new launches above 75%. `--workers` is an
+optional hard ceiling. Running matches are never cancelled.
+
+A formal score exists only after 30 normal cells. Failed build, timeout, crash,
+protocol error, corrupt replay, and missing cell remain explicit and produce a
+null formal score. Close failed/incomplete iterations; do not erase them.
+
+## Diagnose, change, and create a child
+
+Use `match` only for diagnostics. Use the official ZIP for events/scores and the
+trace for observations/actions:
+
+```bash
+uv run --extra doto python -m agentbench_frame.doto match \
+  --agent0 <candidate> --agent1 <training-opponent> --seed 11 \
+  --output-dir /workspace/doto-diagnostics --tag candidate-seat0
+uv run --extra doto python -m agentbench_frame.doto replay \
+  --path /workspace/doto-diagnostics/candidate-seat0_seed11.zip \
+  --jsonl /workspace/doto-diagnostics/candidate-seat0.events.jsonl
+```
+
+After evidence review, save a nonempty analysis and a non-identical complete
+source, then create the explicit child:
+
+```bash
+uv run --extra doto python -m agentbench_frame.doto iteration begin \
+  --run-dir <run-dir> --parent 0 --source /workspace/child-playerAI.cpp \
+  --analysis-file /workspace/iteration-analysis.md
+```
+
+Build, evaluate all 30 cells, compare strict deterministic KL on recorded
+observations, and close the returned iteration. Equal actions give strict KL 0;
+different deterministic support gives infinity with numeric null; missing or
+invalid output stays missing with a reason. Never call distance, change rate, or
+score gain IG.
+
+After each close, Codex inspects `run status`, aligned score/IG curves, failures,
+and selected evidence. It either justifies another explicit child or stops and
+selects among complete training versions. There is no automatic repetition.
+
+## Finalize the hidden matrix once
+
+The evaluator opens the sealed bundle only after training selection:
+
+```bash
+uv run --extra doto python -m agentbench_frame.doto run finalize \
+  --run-dir <run-dir> --candidate-iteration <selected-training-iteration> \
+  --sealed-bundle-fd <evaluator-fd> --cpu-target 70
+```
+
+Candidate and pool identities are durably fixed before the **56-cell** matrix
+(28 policies × both seats) starts. An interruption resumes only missing cells
+for the same identities. The final Run seals even if incomplete; final evidence
+must never create another candidate.
+
+A human policy counts as defeated only when both seats terminate normally and
+their candidate-oriented mean score difference is strictly positive.
+
+## Validate, report, and export
+
+```bash
+uv --directory ../DotoResults run doto-results validate \
+  runs/23_doto/codex/<run-id>
+uv --directory ../DotoResults run doto-results aggregate .
+uv --directory ../DotoResults run doto-results build-report . --output _site
+uv run --extra doto python -m agentbench_frame.doto run export \
+  --run-dir ../DotoResults/runs/23_doto/codex/<run-id> \
+  --agentbench-results ../AgentBenchResults
+uv --directory ../DotoResults run doto-results check-projection \
+  ../AgentBenchResults/runs/23_doto/codex/<run-id>
+```
+
+The projection contains exactly `run.toml`, `summary.json`, `score_curve.json`,
+`ig_curve.json`, and `doto_results_ref.json`. Before publication, scan both
+targets for credentials, hidden source fragments, absolute sealed paths, `NaN`,
+and `Infinity`; exclude binaries, caches, locks, and unredacted sealed metadata.

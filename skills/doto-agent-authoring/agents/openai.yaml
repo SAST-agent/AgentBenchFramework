@@ -1,0 +1,4 @@
+interface:
+  display_name: "DOTO Agent Authoring"
+  short_description: "Write safe native DOTO playerAI.cpp policies"
+  default_prompt: "Use $doto-agent-authoring to produce and build a complete native DOTO playerAI.cpp candidate."

@@ -14,6 +14,7 @@ def test_builds_complete_player_ai_in_isolated_sdk(tmp_path):
     assert result.exit_code == 0
     assert result.executable is not None
     assert result.executable.is_file()
+    assert (output / "Maps/0.json").is_file()
     metadata = json.loads((output / "build.json").read_text())
     assert metadata["source_hash"] == result.source_hash
 

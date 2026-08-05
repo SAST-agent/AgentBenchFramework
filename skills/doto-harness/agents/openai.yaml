@@ -1,4 +1,0 @@
-interface:
-  display_name: "DOTO Harness"
-  short_description: "Build, battle, replay, and iterate native DOTO policies"
-  default_prompt: "Use $doto-harness to compile, evaluate, and improve this DOTO playerAI.cpp with traceable Results."

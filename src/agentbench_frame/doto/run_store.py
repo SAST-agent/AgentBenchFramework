@@ -1,186 +1,157 @@
-"""Results-compatible DOTO Run storage and cumulative budget ledger."""
+"""Lock-protected atomic storage for Codex-directed DOTO Runs."""
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
 import shutil
-import subprocess
+import tempfile
 import time
+import tomllib
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import StrEnum
 from pathlib import Path
-
-from .loop_config import BudgetConfig, LoopConfig
-
-
-class BudgetExceeded(RuntimeError):
-    def __init__(self, dimension: str):
-        super().__init__(f"budget exceeded: {dimension}")
-        self.dimension = dimension
+from typing import Mapping
 
 
-class BudgetLedger:
-    def __init__(self, limits: BudgetConfig):
-        self.limits = limits
-        self.started = time.monotonic()
-        self.iterations = self.builds = self.rollouts = 0
-        self.episode_reads = self.frame_reads = 0
-        self.prompt_tokens = self.completion_tokens = self.total_tokens = 0
-        self.compile_seconds = self.battle_seconds = self.api_seconds = 0.0
+DOTO_SKILL_NAMES = (
+    "doto-benchmark-run", "doto-game-rules",
+    "doto-agent-authoring", "doto-replay-reader",
+)
 
-    def _charge(self, name: str, count: int, limit: int) -> int:
-        if count < 0:
-            raise ValueError(f"{name} charge must be nonnegative")
-        value = getattr(self, name) + count
-        if value > limit:
-            raise BudgetExceeded(name)
-        setattr(self, name, value)
-        self.check()
-        return value
 
-    def check(self) -> None:
-        if time.monotonic() - self.started > self.limits.max_wall_seconds:
-            raise BudgetExceeded("wall_seconds")
+@dataclass(frozen=True)
+class SkillSnapshot:
+    name: str
+    sha256: str
 
-    def charge_iteration(self, count: int = 1) -> None:
-        self._charge("iterations", count, self.limits.max_iterations)
 
-    def charge_build(self, count: int = 1) -> None:
-        self._charge("builds", count, self.limits.max_builds)
+class InvalidTransition(RuntimeError):
+    pass
 
-    def charge_rollout(self, count: int = 1) -> None:
-        self._charge("rollouts", count, self.limits.max_rollouts)
 
-    def charge_read(self, episodes: int, frames: int) -> None:
-        if episodes < 0 or frames < 0:
-            raise ValueError("read charge must be nonnegative")
-        next_episodes = self.episode_reads + episodes
-        next_frames = self.frame_reads + frames
-        if next_episodes > self.limits.max_episode_reads:
-            raise BudgetExceeded("episode_reads")
-        if next_frames > self.limits.max_frame_reads:
-            raise BudgetExceeded("frame_reads")
-        self.episode_reads, self.frame_reads = next_episodes, next_frames
-        self.check()
+class RunState(StrEnum):
+    CREATED = "created"
+    ITERATING = "iterating"
+    FINAL_TEST_STARTED = "final_test_started"
+    FINALIZED = "finalized"
 
-    def charge_usage(self, usage: dict) -> None:
-        prompt = int(usage.get("prompt_tokens", 0) or 0)
-        completion = int(usage.get("completion_tokens", 0) or 0)
-        total = int(usage.get("total_tokens", 0) or 0)
-        if min(prompt, completion, total) < 0:
-            raise ValueError("token usage must be nonnegative")
-        if self.total_tokens + total > self.limits.max_total_tokens:
-            raise BudgetExceeded("total_tokens")
-        self.prompt_tokens += prompt
-        self.completion_tokens += completion
-        self.total_tokens += total
-        self.check()
 
-    def charge_context(self, total_tokens: int, limit: int) -> None:
-        if int(total_tokens) > int(limit):
-            raise BudgetExceeded("context_tokens")
-        self.check()
+class IterationState(StrEnum):
+    OPEN = "iteration_open"
+    BUILT = "candidate_built"
+    BUILD_FAILED = "build_failed"
+    EVALUATED = "training_evaluated"
+    INCOMPLETE = "evaluation_incomplete"
+    IG_RECORDED = "ig_recorded"
+    IG_MISSING = "ig_missing"
+    CLOSED = "iteration_closed"
 
-    def _charge_time(self, name: str, seconds: float) -> None:
-        setattr(self, name, getattr(self, name) + max(0.0, float(seconds)))
-        self.check()
 
-    def charge_compile_time(self, seconds: float) -> None:
-        self._charge_time("compile_seconds", seconds)
+def utc_now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    def charge_battle_time(self, seconds: float) -> None:
-        self._charge_time("battle_seconds", seconds)
 
-    def charge_api_time(self, seconds: float) -> None:
-        self._charge_time("api_seconds", seconds)
+def hash_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
-    def snapshot(self) -> dict:
-        return {
-            "iterations": self.iterations, "builds": self.builds,
-            "rollouts": self.rollouts, "episode_reads": self.episode_reads,
-            "frame_reads": self.frame_reads, "prompt_tokens": self.prompt_tokens,
-            "completion_tokens": self.completion_tokens, "total_tokens": self.total_tokens,
-            "compile_seconds": round(self.compile_seconds, 6),
-            "battle_seconds": round(self.battle_seconds, 6),
-            "api_seconds": round(self.api_seconds, 6),
-            "wall_seconds": round(time.monotonic() - self.started, 6),
-        }
+
+def hash_directory(path: Path) -> str:
+    digest = hashlib.sha256()
+    for item in sorted(candidate for candidate in Path(path).rglob("*") if candidate.is_file()):
+        digest.update(item.relative_to(path).as_posix().encode("utf-8") + b"\0")
+        digest.update(item.read_bytes() + b"\0")
+    return digest.hexdigest()
+
+
+def snapshot_skills(run_dir: Path, roots: Mapping[str, Path]) -> tuple[SkillSnapshot, ...]:
+    """Atomically snapshot exactly the four DOTO Skill packages."""
+
+    if set(roots) != set(DOTO_SKILL_NAMES):
+        raise ValueError("Run requires exactly the four DOTO Skill packages")
+    run_dir = Path(run_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    destination = run_dir / "skills"
+    if destination.exists():
+        raise ValueError("Run Skill snapshot already exists")
+    temporary = Path(tempfile.mkdtemp(prefix=".skills-", dir=run_dir))
+    rows: list[SkillSnapshot] = []
+    try:
+        for name in sorted(DOTO_SKILL_NAMES):
+            root = Path(roots[name])
+            skill_file = root / "SKILL.md"
+            if not root.is_dir() or not skill_file.is_file():
+                raise ValueError(f"Skill package is missing SKILL.md: {name}")
+            if root.is_symlink() or any(item.is_symlink() for item in root.rglob("*")):
+                raise ValueError(f"Skill package contains a symlink: {name}")
+            declared = next((
+                line.split(":", 1)[1].strip().strip("'\"")
+                for line in skill_file.read_text(encoding="utf-8").splitlines()
+                if line.startswith("name:")
+            ), "")
+            if declared != name:
+                raise ValueError(f"Skill frontmatter name differs from package: {name}")
+            target = temporary / name
+            shutil.copytree(root, target)
+            source_hash = hash_directory(root)
+            target_hash = hash_directory(target)
+            if source_hash != target_hash:
+                raise ValueError(f"Skill snapshot hash mismatch: {name}")
+            rows.append(SkillSnapshot(name, target_hash))
+        DotoRunStore.write_json_atomic(temporary / "manifest.json", {
+            "schema_version": 1,
+            "skills": [{"name": row.name, "sha256": row.sha256} for row in rows],
+        })
+        os.replace(temporary, destination)
+        return tuple(rows)
+    except Exception:
+        shutil.rmtree(temporary, ignore_errors=True)
+        raise
 
 
 class DotoRunStore:
-    def __init__(self, run_dir: Path, run_id: str, config: LoopConfig, created: str):
-        self.run_dir, self.run_id, self.config, self.created = run_dir, run_id, config, created
-        self.started_at = time.time()
-        self.events_path = run_dir / "events.jsonl"
+    def __init__(self, run_dir: Path):
+        self.run_dir = Path(run_dir)
+        self.events_path = self.run_dir / "events.jsonl"
+        self.run_id = self.run_dir.name
 
     @classmethod
-    def create(cls, config: LoopConfig, data_dir: Path | str | None = None,
-               run_id: str | None = None) -> "DotoRunStore":
-        root = Path(data_dir) if data_dir is not None else Path(os.environ.get("AGENTBENCH_DATA", "agentbench_data"))
-        run_id = run_id or cls._make_run_id()
-        run_dir = root / "runs" / "23_doto" / config.agent / run_id
-        run_dir.mkdir(parents=True, exist_ok=False)
-        created = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        store = cls(run_dir, run_id, config, created)
-        store._copy_skills()
-        store._write_run_toml()
-        return store
+    def open(cls, run_dir: Path) -> "DotoRunStore":
+        path = Path(run_dir)
+        if not (path / "run.toml").is_file():
+            raise ValueError(f"not a DOTO Run: {path}")
+        return cls(path)
 
-    @staticmethod
-    def _make_run_id() -> str:
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M")
-        return f"{stamp}_{hashlib.md5(os.urandom(8)).hexdigest()[:8]}"
+    @property
+    def state(self) -> RunState:
+        with (self.run_dir / "run.toml").open("rb") as stream:
+            raw = tomllib.load(stream)
+        return RunState(raw["state"])
 
-    @staticmethod
-    def _git_commit() -> str:
-        try:
-            return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"],
-                                           stderr=subprocess.DEVNULL, text=True).strip()
-        except (OSError, subprocess.SubprocessError):
-            return ""
+    def reload(self) -> "DotoRunStore":
+        return self.open(self.run_dir)
 
-    def _copy_skills(self) -> None:
-        root = Path(__file__).resolve().parents[3]
-        target = self.run_dir / "skills"
-        target.mkdir()
-        for name in ("doto-harness", "doto-replay-reader"):
-            shutil.copyfile(root / "skills" / name / "SKILL.md", target / f"{name}.SKILL.md")
-
-    def _write_run_toml(self, summary: dict | None = None) -> None:
-        lines = ["[run]", f'run_id = {json.dumps(self.run_id)}', 'game = "23_doto"',
-                 f'agent = {json.dumps(self.config.agent)}', 'type = "rule_iter"',
-                 f'created = {json.dumps(self.created)}',
-                 f'git_commit = {json.dumps(self._git_commit())}',
-                 f"started_at = {self.started_at}"]
-        if summary is not None:
-            lines.extend([f"finished_at = {time.time()}",
-                          f"total_steps = {int(summary.get('total_steps', 0))}",
-                          f"total_episodes = {int(summary.get('total_episodes', 0))}"])
-        lines.extend(["", "[config]", f'model = {json.dumps(self.config.llm.model)}',
-                      f'api_key_env = {json.dumps(self.config.llm.api_key_env)}',
-                      f"max_iterations = {self.config.budget.max_iterations}",
-                      f"max_rollouts = {self.config.budget.max_rollouts}"])
-        self.write_text_atomic(self.run_dir / "run.toml", "\n".join(lines) + "\n")
-        self.write_json_atomic(self.run_dir / "config.json", self.config.public_dict())
-
-    def iteration_dir(self, index: int) -> Path:
-        path = self.run_dir / "iterations" / f"iteration-{index:04d}"
-        path.mkdir(parents=True, exist_ok=True)
-        return path
-
-    def write_event(self, event: str, **fields) -> None:
-        row = {"event": event, "timestamp": time.time(), **fields}
-        with self.events_path.open("a", encoding="utf-8") as stream:
-            stream.write(json.dumps(row, ensure_ascii=False) + "\n")
-            stream.flush()
-            os.fsync(stream.fileno())
-
-    def write_json_atomic(self, path: Path | str, value) -> None:
-        self.write_text_atomic(Path(path), json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+    @contextmanager
+    def locked(self):
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        with (self.run_dir / ".run.lock").open("a+b") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
     @staticmethod
     def write_text_atomic(path: Path, value: str) -> None:
+        path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(f".{path.name}.tmp")
         with temporary.open("w", encoding="utf-8") as stream:
@@ -188,13 +159,30 @@ class DotoRunStore:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
 
-    def finish(self, summary: dict) -> None:
-        wall_seconds = float(summary.get("wall_seconds", time.time() - self.started_at))
-        complete = {"run_id": self.run_id, "game": "23_doto", "agent": self.config.agent,
-                    "run_type": "rule_iter", "created": self.created,
-                    "git_commit": self._git_commit(), "wall_hours": round(wall_seconds / 3600, 6),
-                    **summary}
-        self.write_json_atomic(self.run_dir / "summary.json", complete)
-        self._write_run_toml(complete)
-        self.write_event("run_finished", status=complete.get("status", "complete"))
+    @classmethod
+    def write_json_atomic(cls, path: Path | str, value) -> None:
+        cls.write_text_atomic(Path(path), json.dumps(
+            value, ensure_ascii=False, indent=2, allow_nan=False
+        ) + "\n")
+
+    def _append_event_unlocked(self, event: str, **fields) -> None:
+        row = {"event": event, "timestamp": time.time(), **fields}
+        with self.events_path.open("a", encoding="utf-8") as stream:
+            stream.write(json.dumps(row, ensure_ascii=False, allow_nan=False) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+
+    def write_event(self, event: str, **fields) -> None:
+        with self.locked():
+            self._append_event_unlocked(event, **fields)
+
+    def iteration_dir(self, index: int) -> Path:
+        path = self.run_dir / "iterations" / f"iteration-{index:04d}"
+        path.mkdir(parents=True, exist_ok=True)
+        return path

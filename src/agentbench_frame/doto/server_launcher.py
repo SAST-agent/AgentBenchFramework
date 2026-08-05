@@ -8,6 +8,8 @@ import runpy
 import sys
 from pathlib import Path
 
+import numpy as np
+
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -16,6 +18,10 @@ def main() -> None:
     parser.add_argument("--seed", type=int, required=True)
     args = parser.parse_args()
 
+    # The frozen historical server uses the removed ``np.bool`` spelling.
+    # Restore only that compatibility alias without editing authority assets.
+    if "bool" not in np.__dict__:
+        np.bool = np.bool_  # type: ignore[attr-defined]
     server_dir = args.server_dir.resolve()
     random.seed(args.seed)
     sys.path.insert(0, str(server_dir))

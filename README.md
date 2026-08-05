@@ -19,12 +19,14 @@ uv sync --extra all              # 全部
 
 ## 快速开始
 
-### DOTO benchmark harness
+### Codex-orchestrated DOTO benchmark
 
-第 23 届 DOTO 使用原版 C++ `playerAI.cpp` 接口，并提供 build、match、
-replay、严格确定性 KL/IG 与 OpenAI-compatible 多轮迭代闭环。完整命令、
-上下文内容、预算和 Results 格式见 [DOTO harness](docs/doto-harness.md)；
-正式 300 秒双边验收见 [DOTO official acceptance](docs/doto-official-acceptance.md)。
+第 23 届 DOTO 保留原版 C++ `playerAI.cpp`、官方服务器与地图。Framework
+只提供 build、match、replay、完整 30/56 单元评测、严格 KL/IG、Run 生命周期
+和投影等原子工具；Codex 通过四个 Skill 自主决定回放分析、候选修改、显式父版本
+与停止时机。完整证据写入独立的 DotoResults，AgentBenchResults 只接收五文件投影。
+参见 [DOTO workflow](docs/doto-harness.md) 与
+[official acceptance](docs/doto-official-acceptance.md)。
 
 ### 5 行跑一场对战
 

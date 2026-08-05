@@ -12,7 +12,7 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from .assets import sdk_dir, verify_assets
+from .assets import official_server_dir, sdk_dir, verify_assets
 
 
 MAX_SOURCE_BYTES = 2 * 1024 * 1024
@@ -72,6 +72,7 @@ def build_candidate(
     command = ("make", f"CXX={compiler}")
     try:
         shutil.copytree(sdk_dir(), temporary, dirs_exist_ok=True)
+        shutil.copytree(official_server_dir() / "Maps", temporary / "Maps")
         (temporary / "playerAI.cpp").write_bytes(source)
         completed = subprocess.run(
             command,

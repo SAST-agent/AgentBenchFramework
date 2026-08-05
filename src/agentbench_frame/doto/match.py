@@ -79,8 +79,8 @@ def run_match(
     seed: int,
     output_dir: Path,
     tag: str,
-    frame_timeout: float = 1.0,
-    server_timeout: float = 330.0,
+    frame_timeout: float = 180.0,
+    server_timeout: float = 900.0,
     server_dir: Path | None = None,
     test_only: bool = False,
 ) -> MatchResult:

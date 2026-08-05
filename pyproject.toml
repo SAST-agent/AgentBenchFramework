@@ -8,6 +8,7 @@ dependencies = []
 
 [project.optional-dependencies]
 tracking = ["psutil"]
+doto = ["psutil>=6.0", "numpy>=1.26"]
 rl = ["torch", "numpy"]
 report = ["jinja2"]
 all = ["psutil", "torch", "numpy", "jinja2"]
@@ -21,3 +22,6 @@ build-backend = "hatchling.build"
 
 [tool.uv]
 dev-dependencies = []
+
+[tool.pytest.ini_options]
+addopts = ["--import-mode=importlib"]

@@ -1,3 +1,4 @@
+import inspect
 import json
 from pathlib import Path
 
@@ -7,6 +8,12 @@ from agentbench_frame.doto.match import DotoMatchError, run_match
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_official_defaults_tolerate_parallel_startup_jitter():
+    parameters = inspect.signature(run_match).parameters
+    assert parameters["frame_timeout"].default >= 180.0
+    assert parameters["server_timeout"].default >= 900.0
 
 
 def test_routes_two_factions_and_preserves_trace(tmp_path):
