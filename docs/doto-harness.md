@@ -35,46 +35,76 @@ Read rules and authoring before the baseline. Read replay-reader before drawing
 any conclusion from a replay or trace. The workflow Skill governs every state
 transition.
 
-## Recommended Codex launch prompt
+## One-prompt Codex launch
 
-Initialize the authoritative Run before starting Codex, then replace the three
-path placeholders in this lean prompt. Rules, schemas, commands, and failure
-semantics stay in the versioned Skills rather than being duplicated here.
+Open this directory as the Codex workspace; do not start inside only one of the
+repositories:
 
 ```text
-Use $doto-benchmark-run, $doto-game-rules, $doto-agent-authoring, and
-$doto-replay-reader to autonomously improve a native DOTO playerAI.cpp.
-
-Authoritative Run: <RUN_DIR>
-Public training bundle: <TRAIN_BUNDLE>
-AgentBenchResults projection root: <AGENTBENCH_RESULTS>
-
-Goal: use only public training evidence to maximize the number of human
-policies defeated under the benchmark's two-seat rule. Start by inspecting the
-durable Run status. Complete and close the baseline if needed. For every child,
-inspect selected normal replay and trace evidence, save a specific analysis,
-create a complete non-identical playerAI.cpp from an explicit closed parent,
-build it, run the full 30-cell training matrix, record strict IG or its exact
-missing reason, close the iteration, and inspect the aligned score/IG curves.
-
-Decide yourself whether evidence justifies another child and which complete
-training version to select. Do not ask for confirmation between ordinary atomic
-steps. Do not use a fixed iteration count, token budget, or wall-time budget.
-Never inspect or infer sealed policies, and never use hidden-test evidence to
-change a candidate. Preserve every failure and incomplete result; do not edit
-authoritative result files by hand and do not substitute another metric for
-strict KL/IG.
-
-If no sealed-bundle descriptor is available, stop after durably selecting and
-reporting the training candidate for evaluator finalization. If the evaluator
-provides the descriptor, finalize exactly once, make no further candidate
-changes, validate DotoResults, export the five-file AgentBenchResults
-projection, verify it, and report artifact paths plus explicit failures.
+/home/six/Documents/THU/activities/SAST/AgentBenchmark
 ```
 
-For an API-driven Codex session, pass this as the user task after mounting the
-repository and prepared Run. The evaluator, not the prompt, owns the sealed
-bundle descriptor and the one-shot transition into hidden evaluation.
+The workspace must contain `AgentBenchFramework`, `AgentBench`, `DotoResults`,
+and `AgentBenchResults`. During review of PR #20, Codex uses
+`AgentBenchFramework/.worktrees/feature-doto`; after merge it uses the normal
+`AgentBenchFramework` checkout. Send exactly one task. No manual preparation,
+Run initialization, finalization, validation, or export command is required:
+
+```text
+完成一次完整的 23_doto benchmark Run。不要让我手动执行任何命令，也不要在正常步骤之间询问确认；你负责从准备数据到最终导出全过程。
+
+把启动时的当前目录记为 WORKSPACE_ROOT。优先将 FRAMEWORK_DIR 设为：
+- AgentBenchFramework/.worktrees/feature-doto
+如果该目录不存在，则使用：
+- AgentBenchFramework
+
+所有 Framework 命令都在 FRAMEWORK_DIR 中执行。下面的 Skill 和初始 Agent 路径相对于 FRAMEWORK_DIR；仓库和人类策略路径相对于 WORKSPACE_ROOT。不要混用主 checkout 与 PR worktree。
+
+完整阅读并严格遵循以下四个 Skill：
+- skills/doto-benchmark-run/SKILL.md
+- skills/doto-game-rules/SKILL.md
+- skills/doto-agent-authoring/SKILL.md
+- skills/doto-replay-reader/SKILL.md
+
+相关仓库和数据：
+- 人类策略原始数据：AgentBench/backend_sources/corpus/23_doto
+- 完整权威结果：DotoResults
+- 兼容投影结果：AgentBenchResults
+- 初始 Agent：examples/doto-initial-playerAI.cpp
+
+你的任务如下：
+
+1. 检查环境和依赖，验证43个人类策略身份。
+2. 使用Framework提供的公开源码归档构建15策略训练 bundle。
+3. 使用既有工具构建28策略 sealed test bundle。把测试集当作不可查看的黑盒：不得打开、搜索、阅读、总结或根据测试策略源码及历史测试结果修改 Agent。
+4. 自动生成唯一 run-id，在 DotoResults 中初始化权威 Run，并快照四个 Skill、初始 Agent、训练集和测试集身份。
+5. 完成 baseline 的“构建、30场训练评测、IG记录、关闭 iteration”。
+6. 只依据15策略训练集的正常 replay、trace、score 和严格 IG 证据改进完整的 playerAI.cpp。每次都使用明确的已关闭父版本，保存具体分析，创建新 iteration，构建，完成30场双座位评测，记录严格 IG 或准确的缺失原因，然后关闭 iteration。
+7. 由你判断是否还有证据支持继续改进以及应选择哪个完整训练版本。不要使用固定迭代次数、token预算或时间预算；但如果继续修改已没有具体训练证据支持，就停止。
+8. 在查看任何测试结果之前选定一个已关闭、构建成功且30场训练评测完整的 candidate iteration。
+9. 使用该候选版本执行且仅执行一次28策略、双座位、共56场的 sealed test。测试开始后不得更换候选版本，不得根据测试结果继续修改 Agent。中断时只恢复同一候选和同一测试集的缺失 cell。
+10. 全程使用多进程调度，CPU目标为70%，不要人为设置过低的worker上限。
+11. 所有失败、超时、崩溃、协议错误、缺失评测和无法计算IG的原因必须如实保存；不能删除失败记录，不能用其他指标冒充严格KL/IG。
+12. 完成后验证 DotoResults，生成聚合结果、报告、score–iteration曲线和IG–iteration曲线。
+13. 将结果导出到未经修改的 AgentBenchResults，只生成规定的五文件投影，并验证投影。
+14. 不要修改 AgentBenchFramework、DotoResults 或 AgentBenchResults 的框架代码；本次只运行benchmark、修改候选 playerAI.cpp并写入正式结果。
+15. 不要提前停止在“告诉我下一步怎么做”。你必须自行执行全部命令，直到Run完成、验证和导出结束，或者遇到确实无法自行解决的外部阻塞。
+
+最终只向我报告：
+- run-id和DotoResults绝对路径；
+- 选择的candidate iteration及其版本/hash；
+- 训练集和测试集分别击败的人类策略数量；
+- score和IG曲线路径；
+- AgentBenchResults投影路径；
+- 所有失败、缺失或不完整项；
+- 如果阻塞，给出已经完成的状态和唯一的真实阻塞原因。
+```
+
+This is behavioral sealed-test isolation inside one Codex task: Codex may invoke
+the evaluator tooling but must treat the sealed pool as an opaque runtime input.
+Candidate selection is fixed before any hidden result is observed, and hidden
+evidence can never feed a new iteration. The commands below remain operator and
+recovery references rather than required launch steps.
 
 ## Prepare human pools
 
