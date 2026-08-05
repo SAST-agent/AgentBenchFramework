@@ -1,0 +1,4 @@
+interface:
+  display_name: "DOTO Benchmark Run"
+  short_description: "Direct atomic DOTO training, finalization, and export"
+  default_prompt: "Use $doto-benchmark-run to direct a traceable DOTO benchmark Run through atomic Framework commands."

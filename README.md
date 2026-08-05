@@ -19,6 +19,17 @@ uv sync --extra all              # 全部
 
 ## 快速开始
 
+### Codex-orchestrated DOTO benchmark
+
+第 23 届 DOTO 保留原版 C++ `playerAI.cpp`、官方服务器与地图。Framework
+只提供 build、match、replay、完整 30/56 单元评测、严格 KL/IG、Run 生命周期
+和投影等原子工具；Codex 通过四个 Skill 自主决定回放分析、候选修改、显式父版本
+与停止时机。完整证据写入独立的 DotoResults，AgentBenchResults 只接收五文件投影。
+日常使用只需用 Codex 打开同时包含四个仓库的 `AgentBenchmark` 目录并发送一次完整
+Run prompt；数据准备、Run 初始化、训练迭代、隐藏测试、验证与导出都由 Codex 执行。
+参见 [DOTO workflow](docs/doto-harness.md) 与
+[official acceptance](docs/doto-official-acceptance.md)。
+
 ### 5 行跑一场对战
 
 ```python

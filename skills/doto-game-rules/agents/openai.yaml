@@ -1,0 +1,4 @@
+interface:
+  display_name: "DOTO Game Rules"
+  short_description: "Read authoritative DOTO mechanics and decision semantics"
+  default_prompt: "Use $doto-game-rules to verify DOTO mechanics and legal action semantics before designing a policy."

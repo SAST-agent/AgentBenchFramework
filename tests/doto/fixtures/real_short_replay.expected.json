@@ -1,0 +1,8 @@
+{
+  "sha256": "b1075b3544578dfe266c225a0b9d5d20607540dbe19dbe5ff9c5f9137c1c9515",
+  "test_only": true,
+  "seed": 11,
+  "final_scores": [12.0, 7.0],
+  "last_frame": 1,
+  "event_counts": {}
+}

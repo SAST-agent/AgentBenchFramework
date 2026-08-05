@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "benchmark_version": "fixture-v1",
+  "split": "train",
+  "seed": 11,
+  "seats": [0, 1],
+  "policies": [
+    {
+      "policy_id": "fixture-00",
+      "name": "Fixture 0",
+      "path": "fake_ai.py",
+      "sha256": "7f9585e51eab604a4044761232ef5e6bada005d80a12b32c62852b059eab7b39"
+    },
+    {
+      "policy_id": "fixture-01",
+      "name": "Fixture 1",
+      "path": "fake_ai.py",
+      "sha256": "7f9585e51eab604a4044761232ef5e6bada005d80a12b32c62852b059eab7b39"
+    },
+    {
+      "policy_id": "fixture-02",
+      "name": "Fixture 2",
+      "path": "fake_ai.py",
+      "sha256": "7f9585e51eab604a4044761232ef5e6bada005d80a12b32c62852b059eab7b39"
+    },
+    {
+      "policy_id": "fixture-03",
+      "name": "Fixture 3",
+      "path": "fake_ai.py",
+      "sha256": "7f9585e51eab604a4044761232ef5e6bada005d80a12b32c62852b059eab7b39"
+    },
+    {
+      "policy_id": "fixture-04",
+      "name": "Fixture 4",
+      "path": "fake_ai.py",
+      "sha256": "7f9585e51eab604a4044761232ef5e6bada005d80a12b32c62852b059eab7b39"
+    },
+    {
+      "policy_id": "fixture-05",
+      "name": "Fixture 5",
+      "path": "fake_ai.py",
+      "sha256": "7f9585e51eab604a4044761232ef5e6bada005d80a12b32c62852b059eab7b39"
+    },
+    {
+      "policy_id": "fixture-06",
+      "name": "Fixture 6",
+      "path": "fake_ai.py",
+      "sha256": "7f9585e51eab604a4044761232ef5e6bada005d80a12b32c62852b059eab7b39"
+    },
+    {
+      "policy_id": "fixture-07",
+      "name": "Fixture 7",
+      "path": "fake_ai.py",
+      "sha256": "7f9585e51eab604a4044761232ef5e6bada005d80a12b32c62852b059eab7b39"
+    },
+    {
+      "policy_id": "fixture-08",
+      "name": "Fixture 8",
+      "path": "fake_ai.py",
+      "sha256": "7f9585e51eab604a4044761232ef5e6bada005d80a12b32c62852b059eab7b39"
+    },
+    {
+      "policy_id": "fixture-09",
+      "name": "Fixture 9",
+      "path": "fake_ai.py",
+      "sha256": "7f9585e51eab604a4044761232ef5e6bada005d80a12b32c62852b059eab7b39"
+    },
+    {
+      "policy_id": "fixture-10",
+      "name": "Fixture 10",
+      "path": "fake_ai.py",
+      "sha256": "7f9585e51eab604a4044761232ef5e6bada005d80a12b32c62852b059eab7b39"
+    },
+    {
+      "policy_id": "fixture-11",
+      "name": "Fixture 11",
+      "path": "fake_ai.py",
+      "sha256": "7f9585e51eab604a4044761232ef5e6bada005d80a12b32c62852b059eab7b39"
+    },
+    {
+      "policy_id": "fixture-12",
+      "name": "Fixture 12",
+      "path": "fake_ai.py",
+      "sha256": "7f9585e51eab604a4044761232ef5e6bada005d80a12b32c62852b059eab7b39"
+    },
+    {
+      "policy_id": "fixture-13",
+      "name": "Fixture 13",
+      "path": "fake_ai.py",
+      "sha256": "7f9585e51eab604a4044761232ef5e6bada005d80a12b32c62852b059eab7b39"
+    },
+    {
+      "policy_id": "fixture-14",
+      "name": "Fixture 14",
+      "path": "fake_ai.py",
+      "sha256": "7f9585e51eab604a4044761232ef5e6bada005d80a12b32c62852b059eab7b39"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "source": "AgentBench/backend_sources/corpus/23_doto/logic/public_Arena-Doto-AI/Arena-Doto-AI-master",
+  "policy": "Official server and fixed client SDK are copied source-equivalently; playerAI.cpp is intentionally excluded.",
+  "sha256": {
+    "official_server/Arguments.py": "29790108ddaa86ba55cb095d8bde87b219acdff8dfe14fd30e8f13fc5c10899c",
+    "official_server/BaseClass.py": "65e15225ddbea2befdc720e7648902c26818b340cad3bfdf4acebb9945e55696",
+    "official_server/Maps/0.json": "d267deaa65a28556b7d11c854463f2ae84d89b1fffa5225faf278fd97ad3a66d",
+    "official_server/MySTL.py": "8ba71359e30cb52d9e93ebc4eb1d6b92ff343f49e8ab199b5110c86142bf4602",
+    "official_server/main.py": "1217b83e972ed914e6239cf9f9db36e6b7e32a5551c213254f2411a231f34bb8",
+    "sdk/const.h": "90c5f33606055e27ac2685fc96a316e840c5d5120870a131b21487e436327cee",
+    "sdk/geometry.cpp": "4ecf35bc49e0d1f1d6d2a3d0ff237803e41072962c8b24477ef9fb6a39efd711",
+    "sdk/geometry.h": "de350636dcb947c470e47b6a921d89473f3afb2ce148541edbc5e73496d76b32",
+    "sdk/jsoncpp/json/json-forwards.h": "153757b653efbf5faf8d4944d19675190ad7529a546ec144ed4972e411e15424",
+    "sdk/jsoncpp/json/json.h": "f8d7f3ec89acee7ddde835a20bd8e4f64096426aad181b6c534cf0e26f80853c",
+    "sdk/jsoncpp/jsoncpp.cpp": "1fe048d909953e867d2fb0e25c2be88ad123c1912d5ff176227493402ef23233",
+    "sdk/logic.cpp": "804dc14072e803cd4fc1d58abb2aadc04c30d50f55fa4d0bc9ebfe105917bc30",
+    "sdk/logic.h": "4656c0e549082ec39a2a262e0ac70da7bc527be8559499841a7c271468e360ea",
+    "sdk/log/log.cpp": "06e3ba5edb0682b85825260f0d5c85f0f1903b621571aed5d7e6d272c1d79015",
+    "sdk/log/log.h": "4a60fadef0df4eaee124f59c470149efa7c0f816cabf9e8f25a8b2c4317b8684",
+    "sdk/main.cpp": "f8d22fdb7df2a5d6fc67afe03320a32d560917eece1ff035943595cd4e53ef30",
+    "sdk/makefile": "507cf91c9a5a59483c8fa1c58cfb84195b573ab0185bd0ea719edfaa5843eaad",
+    "sdk/playerAI.h": "a0f39d4a418232b6a6b33ca682f3362a15440921fd670f582bec58f93a7ab9a6"
+  }
+}
