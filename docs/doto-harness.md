@@ -87,7 +87,7 @@ uv run --extra doto python -m agentbench_frame.doto population verify \
   --source-root ../AgentBench/backend_sources/corpus/23_doto
 uv run --extra doto python -m agentbench_frame.doto population build-train \
   --manifest src/agentbench_frame/doto/population.toml \
-  --source-root src/agentbench_frame/doto/human_policies/train \
+  --source-root src/agentbench_frame/doto/human_policies/train.tar.gz \
   --output-dir /workspace/doto-train-bundle
 ```
 

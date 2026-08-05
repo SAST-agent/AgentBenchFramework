@@ -1,4 +1,5 @@
 import json
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -153,6 +154,27 @@ def test_training_bundle_builds_and_hashes_every_policy(tmp_path):
     assert (tmp_path / "bundle/policies/train/Maps/0.json").is_file()
     loaded = load_training_bundle(tmp_path / "bundle", "fixture-v1")
     assert [policy.policy_id for policy in loaded.policies] == ["train"]
+
+
+def test_training_bundle_accepts_safe_source_archive(tmp_path):
+    root = tmp_path / "public"
+    policy_dir = root / "train"
+    policy_dir.mkdir(parents=True)
+    fake_ai = Path(__file__).parent / "fixtures/fake_ai.py"
+    (policy_dir / "fake_ai.py").write_text("#!/usr/bin/env python3\n" + fake_ai.read_text())
+    (policy_dir / "makefile").write_text(
+        "all:\n\tcp fake_ai.py main.out\n\tchmod +x main.out\n"
+    )
+    policy = PopulationPolicy("train", Path("train"), "fixture", "train",
+                              source_hash(policy_dir), False,
+                              policy_id="train", origin_split="train")
+    archive_path = tmp_path / "training.tar.gz"
+    with tarfile.open(archive_path, "w:gz") as archive:
+        archive.add(policy_dir, arcname="train")
+
+    result = build_training_bundle(_tiny_manifest(policy), archive_path, tmp_path / "bundle")
+
+    assert [row.status for row in result.policies] == ["ready"]
 
 
 def test_sealed_bundle_rejects_wrong_benchmark_version(tmp_path):

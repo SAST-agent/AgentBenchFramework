@@ -8,8 +8,6 @@ import runpy
 import sys
 from pathlib import Path
 
-import numpy as np
-
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -19,8 +17,13 @@ def main() -> None:
     args = parser.parse_args()
 
     # The frozen historical server uses the removed ``np.bool`` spelling.
-    # Restore only that compatibility alias without editing authority assets.
-    if "bool" not in np.__dict__:
+    # Test-only servers do not depend on NumPy, so keep their lightweight
+    # protocol fixtures runnable when the optional DOTO extra is not installed.
+    try:
+        import numpy as np
+    except ModuleNotFoundError:
+        np = None
+    if np is not None and "bool" not in np.__dict__:
         np.bool = np.bool_  # type: ignore[attr-defined]
     server_dir = args.server_dir.resolve()
     random.seed(args.seed)

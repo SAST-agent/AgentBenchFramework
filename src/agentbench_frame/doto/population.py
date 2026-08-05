@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import subprocess
+import tarfile
 import tempfile
 import tomllib
 from dataclasses import asdict, dataclass
@@ -359,6 +360,25 @@ def build_training_bundle(manifest: PopulationManifest, source_root: Path,
     """Build every public training snapshot into an isolated runtime bundle."""
 
     source_root = Path(source_root)
+    if source_root.is_file():
+        temporary_sources = Path(tempfile.mkdtemp(prefix="doto-training-sources-"))
+        try:
+            with tarfile.open(source_root, "r:gz") as archive:
+                for member in archive.getmembers():
+                    target = (temporary_sources / member.name).resolve()
+                    if (temporary_sources.resolve() not in target.parents
+                            and target != temporary_sources.resolve()):
+                        raise ValueError("training source archive contains an unsafe path")
+                    if not (member.isfile() or member.isdir()):
+                        raise ValueError(
+                            "training source archive must contain only files and directories"
+                        )
+                archive.extractall(temporary_sources)
+            return build_training_bundle(manifest, temporary_sources, output_dir)
+        except tarfile.TarError as exc:
+            raise ValueError("invalid training source archive") from exc
+        finally:
+            shutil.rmtree(temporary_sources, ignore_errors=True)
     output_dir = Path(output_dir)
     training = tuple(policy for policy in manifest.policies if policy.split == "train")
     output_dir.parent.mkdir(parents=True, exist_ok=True)

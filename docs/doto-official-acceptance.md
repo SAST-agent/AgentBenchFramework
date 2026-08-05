@@ -17,7 +17,7 @@ uv run --extra doto python -m agentbench_frame.doto population verify \
 
 uv run --extra doto python -m agentbench_frame.doto population build-train \
   --manifest src/agentbench_frame/doto/population.toml \
-  --source-root src/agentbench_frame/doto/human_policies/train \
+  --source-root src/agentbench_frame/doto/human_policies/train.tar.gz \
   --output-dir /tmp/doto-train-bundle
 ```
 
