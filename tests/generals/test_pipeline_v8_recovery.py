@@ -31,6 +31,7 @@ def test_clean_room_v8_recovery_never_invokes_provider_again(tmp_path):
     assert recovery_provider.calls == 0
     assert recovered.formal_attempted is True
     assert recovered.runnable is True
+    assert _summary(recovered.run_dir)["act_count"] == 9
 
 
 def test_recovery_revalidates_compressed_frozen_candidate_without_new_act(tmp_path):

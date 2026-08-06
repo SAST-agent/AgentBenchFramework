@@ -2213,7 +2213,7 @@ class GeneralsHLRound8Pipeline(GeneralsHLRound7Pipeline):
                     *lineage.prior_score_history,
                     evo_score_8,
                 ],
-                "act_count": 8,
+                "act_count": 9,
                 "round_act_count": 0,
                 "parent_run_id": lineage.parent_run_id,
                 "parent_version": "v7",
