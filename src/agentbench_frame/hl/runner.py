@@ -53,6 +53,13 @@ class AgentRunResult:
     failure_reason: Optional[str] = None      # set if the run failed (timeout/not-found/non-zero)
     session_id: Optional[str] = None          # claude session id (opaque UUID)
     transcript_path: Optional[str] = None     # ~/.claude/projects/<slug>/<session_id>.jsonl
+    # Agent-callable revert_to_best (model-initiated rollback): True when the
+    # model called revert_to_best and the harness restored the best version's
+    # code into the workspace. edit_type is then "rollback"; the controller
+    # uses its stashed rollback VersionHandle as version_after (skipping a
+    # normal snapshot) and skips re-eval (the content == best, already scored).
+    reverted: bool = False
+    reverted_to: Optional[str] = None         # best version_id the act reverted to
     final_text: Optional[str] = None          # the coding agent's final message
                                               #   text (untruncated). Populated by
                                               #   ApiCodingRunner/FakeRunner; used by
@@ -431,6 +438,8 @@ class ApiCodingRunner:
         messages: List[Dict[str, Any]] = [{"role": "user", "content": prompt}]
         prompt_tok = completion_tok = total_tok = 0
         edit_applied = False
+        reverted = False
+        reverted_to: Optional[str] = None
         files_touched: List[str] = []  # str_replace targets agent.py
         failure_reason: Optional[str] = None
         last_text: Optional[str] = None  # final assistant message text (untruncated)
@@ -514,6 +523,25 @@ class ApiCodingRunner:
                             failure_reason = reason
                         wrote = True
                         break
+                    if tc.name == "revert_to_best":
+                        # Agent-callable rollback to the best version. Terminal on
+                        # success (revert invalidates the agent's read context, so
+                        # it cannot mix with edit mid-act — a subsequent edit's
+                        # old_string would be stale and rejected). On failure (no
+                        # best yet) the loop continues so the agent can still edit.
+                        ok, content, bvid = self._do_revert(context)
+                        messages.append({"role": "tool",
+                                         "tool_name": "revert_to_best",
+                                         "tool_call_id": tc.id,
+                                         "content": content})
+                        rec["tool_results"].append(
+                            {"name": "revert_to_best", "preview": content[:300]})
+                        if ok:
+                            reverted = True
+                            reverted_to = bvid
+                            wrote = True
+                            break
+                        continue  # no best yet: let the agent keep going (edit)
                     result = self._dispatch(tc.name, tc.arguments, workspace, context)
                     messages.append({"role": "tool", "tool_name": tc.name,
                                      "tool_call_id": tc.id, "content": result})
@@ -530,6 +558,18 @@ class ApiCodingRunner:
         elapsed = _time.monotonic() - started
         transcript_path = self._write_transcript(
             turn_records, edit_applied, failure_reason, workspace, context)
+        if reverted:
+            # Model reverted to best: workspace already restored by revert_fn;
+            # no edit this act. The controller uses its rollback VersionHandle
+            # as version_after and skips re-eval.
+            return AgentRunResult(
+                edit_type="rollback",
+                files_touched=["agent.py"],
+                prompt_tokens=prompt_tok or None,
+                completion_tokens=completion_tok or None,
+                total_tokens=total_tok or None,
+                time_s=elapsed, transcript_path=transcript_path,
+                final_text=last_text, reverted=True, reverted_to=reverted_to)
         if edit_applied:
             return AgentRunResult(
                 edit_type=None,  # unclassified -> controller diff-classifies
@@ -629,6 +669,33 @@ class ApiCodingRunner:
         if name == "read_replay":
             return self._tool_read_replay(args.get("id", ""), context)
         return f"error: unknown tool {name!r}"
+
+    def _do_revert(self, context: Dict[str, Any]):
+        """Invoke the controller-supplied revert callback.
+
+        Returns ``(ok, content_str, best_version_id)``. The callback (built by
+        ``HLIterationController._make_revert_fn``) restores the best version's
+        code into the workspace and returns a metrics dict; this helper formats
+        the human/tool-facing content string the model sees in the transcript.
+        """
+        fn = context.get("revert_fn")
+        if not callable(fn):
+            return (False, "error: revert not available for this run", None)
+        try:
+            res = fn() or {}
+        except Exception as e:  # never let a revert error kill the act loop
+            return (False, f"error: revert failed: {type(e).__name__}: {e}", None)
+        if not res.get("ok"):
+            return (False, res.get("reason", "revert unavailable"), None)
+        wr = res.get("win_rate")
+        ar = res.get("avg_rank")
+        wr_s = f"{wr:.0%}" if isinstance(wr, (int, float)) else "?"
+        ar_s = f"{ar:.1f}" if isinstance(ar, (int, float)) else "?"
+        content = (f"Reverted agent.py to best version {res.get('best_version_id')} "
+                   f"(win_rate={wr_s}, avg_rank={ar_s}). Your current edits were "
+                   f"discarded. This act ends here — next act you edit from the "
+                   f"best code.")
+        return (True, content, res.get("best_version_id"))
 
     def _tool_read_file(self, rel: str, workspace: Path) -> str:
         rel = (rel or "").strip()

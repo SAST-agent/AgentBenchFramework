@@ -182,6 +182,14 @@ class HLIterationController:
         # measures whether an edit changed behavior and then never tells the
         # coding agent — so it keeps making no-op edits.
         self._prev_feedback: Optional[Dict[str, Any]] = None
+        # Revert-to-best (model-initiated, via the revert_to_best tool): the
+        # best-scoring version seen so far this round
+        # {version_id, content_hash, win_rate, avg_rank}, updated on strict
+        # improvement after each complete eval. ``_revert_handle_this_act`` is
+        # stashed by the revert_fn when the model reverts mid-act, so the
+        # post-run snapshot step uses it instead of re-snapshotting.
+        self._best: Optional[Dict[str, Any]] = None
+        self._revert_handle_this_act: Optional[VersionHandle] = None
         self._budget = {
             "learning_coding_agent_acts": 0,
             "evaluation_coding_agent_acts": 0,
@@ -200,6 +208,9 @@ class HLIterationController:
         from agentbench_frame.hl.naming import act_name
         act_id = act_name(self.run_id, self._act_counter)
         t0 = time.monotonic()
+        # Per-act revert state: cleared at the start of each act; the revert_fn
+        # (if the model calls revert_to_best) stashes the rollback handle here.
+        self._revert_handle_this_act = None
 
         # 1. emit agent_act
         self._events.write(
@@ -225,17 +236,30 @@ class HLIterationController:
             except Exception:
                 # context is best-effort; never let it break the act loop
                 pass
+        # Expose the current best + a revert callback so the coding agent can
+        # invoke the revert_to_best tool. The runner calls revert_fn when the
+        # model emits the tool call; it restores best code into the workspace
+        # and stashes the rollback handle on the controller.
+        context["best_version"] = self._best
+        context["revert_fn"] = self._make_revert_fn(version_before)
         run_result = self.runner.run(workspace=self.codebase.root, context=context)
         runner_time = run_result.time_s
+        reverted = bool(getattr(run_result, "reverted", False))
 
-        # 3. snapshot version_after (crash-safe; None if unreadable)
-        try:
-            version_after = self.codebase.snapshot(
-                parent_version_id=version_before.version_id if version_before else None,
-                edit_type=self._resolve_edit_type(run_result, version_before),
-            )
-        except Exception:
-            version_after = None
+        # 3. snapshot version_after (crash-safe; None if unreadable). On a
+        # model-initiated revert the workspace was already restored to the best
+        # version's code by revert_fn (which stashed the rollback handle), so
+        # reuse that handle instead of re-snapshotting.
+        if reverted and self._revert_handle_this_act is not None:
+            version_after = self._revert_handle_this_act
+        else:
+            try:
+                version_after = self.codebase.snapshot(
+                    parent_version_id=version_before.version_id if version_before else None,
+                    edit_type=self._resolve_edit_type(run_result, version_before),
+                )
+            except Exception:
+                version_after = None
 
         # 4. classify edit_type is already on the handle; emit version event.
         # failure_reason is the run classification: None on success, a stable
@@ -280,7 +304,14 @@ class HLIterationController:
         # Capture the opponent tier actually evaluated this act (before any
         # promotion) so the feedback section reports who the outcome was against.
         self._last_eval_opponents = self._active_opponent_names()
-        if version_after is not None and self._evaluator_factory is not None:
+        if reverted:
+            # Reverted to best: content_hash == best, already scored — skip the
+            # re-eval (no new matches). ev_result stays None so trace/probe
+            # collection below skips too.
+            if self._best is not None:
+                win_rate = self._best.get("win_rate")
+                eval_status = "complete"
+        elif version_after is not None and self._evaluator_factory is not None:
             try:
                 ev_result = self._run_eval(version_after)
                 summary = getattr(ev_result, "summary", None) or {}
@@ -323,11 +354,29 @@ class HLIterationController:
             win_rate=win_rate,  # None stays None
         )
 
+        # 5.6 revert bookkeeping: if the model reverted, record the revert event
+        # (the research stream shows when + to what). Best is unchanged by a
+        # revert (we reverted TO best); only a real eval with a strictly-better
+        # metric updates best.
+        if reverted and self._best is not None and version_before is not None:
+            self._events.write(
+                "revert", act_id=act_id,
+                from_version_id=version_before.version_id,
+                to_version_id=self._best["version_id"],
+                to_content_hash=self._best["content_hash"],
+                win_rate=self._best.get("win_rate"),
+                avg_rank=self._best.get("avg_rank"),
+            )
+        elif (not reverted and eval_status == "complete"
+                and version_after is not None and ev_result is not None):
+            self._update_best(version_after, ev_result)
+
         # 6. probe BOTH versions over ν (Q2) → policy_kl + occupancy_shift
         kl_trace: List[PolicyKLPoint] = []
         occupancy_shift: Optional[float] = None
         ref_digest: List[Dict[str, Any]] = []
-        if version_before is not None and version_after is not None:
+        if (not reverted and version_before is not None
+                and version_after is not None):
             kl_trace, occupancy_shift, ref_digest = self._measure_policy_kl(
                 version_before, version_after,
             )
@@ -412,6 +461,17 @@ class HLIterationController:
         if self._last_action_kl is not None:
             self._prev_feedback["action_kl"] = self._last_action_kl
             self._prev_feedback["action_top"] = self._last_action_top
+        # Surface the current best in every act's feedback so the prompt can
+        # show the target + advertise the revert_to_best tool. On a revert act,
+        # override the outcome fields with best metrics (the act produced no new
+        # eval) and flag the revert so the next prompt explains the reset.
+        if self._best is not None:
+            self._prev_feedback["best_version"] = dict(self._best)
+        if reverted and self._best is not None:
+            self._prev_feedback["win_rate"] = self._best.get("win_rate")
+            self._prev_feedback["avg_rank"] = self._best.get("avg_rank")
+            self._prev_feedback["evaluation_status"] = "complete"
+            self._prev_feedback["reverted_to"] = self._best["version_id"]
 
         # 6.6 update the self-summarized experience store + rolling LOC history
         # (HL std 4/5). Best-effort: a failure here never breaks the act loop.
@@ -908,6 +968,68 @@ class HLIterationController:
             "count_new": freq_new.get(t, 0),
             "count_old": freq_old.get(t, 0),
         } for t in top]
+
+    # ---- revert-to-best (model-initiated rollback) ----
+
+    @staticmethod
+    def _metric(win_rate, avg_rank):
+        """Comparable metric for best-tracking: win_rate primary (higher better),
+        avg_rank tiebreak (lower better). A None win_rate never beats anything;
+        a None avg_rank is worst (treated as +inf at equal win_rate)."""
+        if win_rate is None:
+            return None
+        ar = avg_rank if avg_rank is not None else float("inf")
+        return (win_rate, -ar)
+
+    def _update_best(self, version_after: VersionHandle, ev_result) -> None:
+        """After a complete real eval, update ``self._best`` on strict
+        improvement (win_rate up, or equal + avg_rank down)."""
+        summary = getattr(ev_result, "summary", None) or {}
+        if summary.get("evaluation_status") != "complete":
+            return
+        win_rate = summary.get("win_rate")
+        agg = (summary.get("lostspace") or {}).get("aggregate") or {}
+        avg_rank = agg.get("avg_rank")
+        m = self._metric(win_rate, avg_rank)
+        if m is None:
+            return
+        best_m = (self._metric(self._best.get("win_rate"), self._best.get("avg_rank"))
+                  if self._best else None)
+        if best_m is None or m > best_m:
+            self._best = {
+                "version_id": version_after.version_id,
+                "content_hash": version_after.content_hash,
+                "win_rate": win_rate,
+                "avg_rank": avg_rank,
+            }
+
+    def _make_revert_fn(self, version_before: Optional[VersionHandle]):
+        """Build the revert_to_best callback handed to the runner.
+
+        On call: restore the best version's code into the workspace via
+        ``codebase.restore`` (which wipes + repopulates and returns a rollback
+        VersionHandle), stash that handle so the post-run snapshot step reuses
+        it, and return the best metrics for the runner's tool result. Returns
+        ``{ok: False}`` when no best exists yet (the runner then does NOT end
+        the act, letting the agent edit instead)."""
+        def _revert():
+            if self._best is None:
+                return {"ok": False, "reason": "no best version yet"}
+            try:
+                handle = self.codebase.restore(
+                    self._best["content_hash"],
+                    parent_version_id=self._best["version_id"],
+                )
+            except Exception as e:  # never let restore kill the act loop
+                return {"ok": False, "reason": f"restore failed: {type(e).__name__}: {e}"}
+            self._revert_handle_this_act = handle
+            return {
+                "ok": True,
+                "best_version_id": self._best["version_id"],
+                "win_rate": self._best.get("win_rate"),
+                "avg_rank": self._best.get("avg_rank"),
+            }
+        return _revert
 
     def _assemble_feedback(
         self, *, ev_result, kl_trace: List[PolicyKLPoint],

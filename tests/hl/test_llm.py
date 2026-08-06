@@ -134,9 +134,9 @@ def test_build_client_unknown_provider():
         build_client(ModelEntry("x", "madeup", "m", "k"))
 
 
-def test_shared_tools_have_four_names():
+def test_shared_tools_have_known_names():
     assert {t["name"] for t in SHARED_TOOLS} == {
-        "read_file", "list_replays", "read_replay", "edit"}
+        "read_file", "list_replays", "read_replay", "edit", "revert_to_best"}
 
 
 def test_openai_multi_call_roundtrip():

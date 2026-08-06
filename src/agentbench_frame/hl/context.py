@@ -196,6 +196,20 @@ class ContextBuilder:
             "## Feedback on your last edit",
             f"- outcome: {outcome}",
         ]
+        # If the previous act reverted to best, say so explicitly (the workspace
+        # is now best code); otherwise advertise the best target + the tool.
+        reverted_to = fb.get("reverted_to")
+        best = fb.get("best_version")
+        if reverted_to and best:
+            parts.append(prompts.REVERTED_NOTE.format(
+                best_id=best.get("version_id"),
+                wr=fmt(best.get("win_rate"), '%.0%'),
+                ar=fmt(best.get("avg_rank"), '%.1f')))
+        elif best:
+            parts.append(prompts.BEST_VERSION_LINE.format(
+                best_id=best.get("version_id"),
+                wr=fmt(best.get("win_rate"), '%.0%'),
+                ar=fmt(best.get("avg_rank"), '%.1f')))
         active = fb.get("active_opponents")
         if active:
             parts.append(f"- evaluated against: {', '.join(active)}")

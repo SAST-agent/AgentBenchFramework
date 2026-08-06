@@ -97,6 +97,19 @@ SHARED_TOOLS: List[Dict[str, Any]] = [
                          },
                          "required": ["old_string", "new_string"]},
     },
+    {
+        "name": "revert_to_best",
+        "description": "Restore agent.py to the best-scoring version seen so far "
+                       "this round, discarding your current (uncommitted) edits. "
+                       "Use this when your recent edits regressed — e.g. win rate "
+                       "dropped below the best known — and you want to restart "
+                       "from the strongest known code before trying a different "
+                       "direction. This ENDS the act: do not also call edit in "
+                       "the same act (revert rewrites agent.py, so any old_string "
+                       "you already read would be stale). Returns the best "
+                       "version's win_rate and avg_rank, or 'no best version yet'.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
 ]
 
 

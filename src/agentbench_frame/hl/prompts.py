@@ -253,6 +253,19 @@ ACTION_FREQ_INTRO = (
     "matches):"
 )
 
+BEST_VERSION_LINE = (
+    "- best version so far: {best_id} (win_rate={wr}, avg_rank={ar}). "
+    "You can call `revert_to_best` to discard your current edits and restore "
+    "this code, then try a different direction next act. Use it when your last "
+    "edit regressed (win rate dropped below this). revert_to_best ENDS the act."
+)
+
+REVERTED_NOTE = (
+    "- you reverted to the best version {best_id} (win_rate={wr}, avg_rank={ar}) "
+    "last act. Your workspace is now that code — edit from here."
+)
+
+
 REF_POINTS_CTA = (
     "  To register a policy update, change the FIRST action on "
     "at least one of these points this act (e.g. a different "

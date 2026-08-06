@@ -32,6 +32,11 @@ HL event types (see the measurement contract / plan.md):
                       consecutive versions: kl + total_actions_new/old +
                       vocab_size + top_actions (canonical token, count in each
                       version). The channel that sees mid-game edits.
+    revert          — the coding agent invoked the ``revert_to_best`` tool:
+                      from_version_id (the act's version_before), to_version_id
+                      + to_content_hash (the best version restored), win_rate /
+                      avg_rank of the best. Re-eval is skipped (content == best,
+                      already scored).
     budget          — learning/evaluation/total resource accounting
     rules_validation — one REPLAY_SKILL verification act: the coding agent parses
                       a real replay round, states each field's meaning + its
@@ -66,6 +71,7 @@ KNOWN_EVENT_TYPES = frozenset({
     "rules_validation",
     "reference_refresh",
     "action_freq",
+    "revert",
     # Legacy framework event types are also recognized so a mixed log is
     # readable; they simply lack some HL payload fields.
     "step", "episode", "eval_result", "log", "resource", "lostspace_match",
