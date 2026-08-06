@@ -463,7 +463,7 @@ class GeneralsHLRound8Pipeline(GeneralsHLRound7Pipeline):
         strategy_groups = (
             ("policy", "planner", "beam"),
             ("deterministic", "tie", "lexicographic"),
-            ("macro",),
+            ("macro", "primitive"),
             ("command", "primitive"),
             ("main", "general", "phase"),
             ("fallback", "verified prefix", "safe prefix"),
