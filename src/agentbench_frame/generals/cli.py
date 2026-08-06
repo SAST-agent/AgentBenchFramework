@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import tomllib
 
 from agentbench_frame.tracking.provider import ProviderInvocation
 from agentbench_frame.tracking.providers import CodexProvider
@@ -12,11 +13,17 @@ from agentbench_frame.tracking.providers import CodexProvider
 from .assets import (
     AssetValidationError,
     load_calibration_config,
+    load_expanded_kl_config,
     resolve_calibration_candidate_source,
     load_pilot_config,
     require_valid_assets,
+    resolve_replay_skill,
     resolve_assets,
 )
+from .attribution_pipeline import GeneralsAttributionPipeline
+from .challenge_v9 import load_round9_challenge_config
+from .historical_policy import HistoricalPolicySource
+from .lineage_v9 import load_round9_lineage
 from .pipeline import GeneralsHLPipeline
 from .pipeline_v2 import (
     GeneralsHLRound2Pipeline,
@@ -28,9 +35,12 @@ from .pipeline_v5 import GeneralsHLRound5Pipeline
 from .pipeline_v6 import GeneralsHLRound6Pipeline
 from .pipeline_v7 import GeneralsHLRound7Pipeline
 from .pipeline_v8 import GeneralsHLRound8Pipeline
+from .pipeline_v9 import GeneralsHLRound9Pipeline
+from .policy_kl_expanded import GeneralsExpandedPolicyKLPipeline
 from .policy_kl_extension import GeneralsPolicyKLExtensionPipeline
 from .policy_kl_v8_extension import GeneralsPolicyKLV8ExtensionPipeline
 from .policy_kl_pipeline import GeneralsPolicyKLPipeline
+from .paper_figure_v9 import load_v9_figure_data, render_v9_paper_figures
 
 
 def register_parser(subparsers) -> argparse.ArgumentParser:
@@ -114,11 +124,36 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
             "recover-policy-kl-v8",
             "Resume an incomplete verified v8 policy KL extension",
         ),
+        (
+            "attribute-v8-regression",
+            "Run paired A/B/C/D scientific attribution of the v8 regression",
+        ),
+        (
+            "iterate-v9",
+            "Run one attribution-guided v7-to-v9 Codex act and evaluate it",
+        ),
+        (
+            "recover-v9",
+            "Evaluate a frozen runnable v9 candidate without another provider act",
+        ),
+        (
+            "measure-policy-kl-expanded",
+            "Measure separate legacy-12 and expanded-24 exact policy KL",
+        ),
+        (
+            "recover-policy-kl-expanded",
+            "Resume incomplete expanded exact policy KL in the same run",
+        ),
+        (
+            "plot-v9-paper",
+            "Render deterministic English v9 publication figures",
+        ),
     ):
         command = commands.add_parser(name, help=help_text)
-        command.add_argument("--agentbench-root", type=Path, required=True)
-        command.add_argument("--manifest", type=Path, required=True)
-        if name != "prepare":
+        if name != "plot-v9-paper":
+            command.add_argument("--agentbench-root", type=Path, required=True)
+            command.add_argument("--manifest", type=Path, required=True)
+        if name not in {"prepare", "plot-v9-paper"}:
             command.add_argument("--data-dir", type=Path, required=True)
         if name == "eval":
             command.add_argument("--version", choices=("v0",), default="v0")
@@ -278,6 +313,47 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
             command.add_argument("--expected-target-hash", required=True)
         if name == "recover-policy-kl-v8":
             command.add_argument("--failed-run", type=Path, required=True)
+        if name == "attribute-v8-regression":
+            command.add_argument(
+                "--attribution-manifest", type=Path, required=True
+            )
+            command.add_argument("--v7-run", type=Path, required=True)
+            command.add_argument("--v8-run", type=Path, required=True)
+        if name in {"iterate-v9", "recover-v9"}:
+            command.add_argument(
+                "--challenge-manifest", type=Path, required=True
+            )
+            command.add_argument("--replay-skill", type=Path, required=True)
+            command.add_argument("--parent-run", type=Path, required=True)
+            command.add_argument("--predecessor-run", type=Path, required=True)
+            command.add_argument("--attribution-run", type=Path, required=True)
+            command.add_argument("--expected-parent-hash", required=True)
+            command.add_argument("--expected-predecessor-hash", required=True)
+        if name == "iterate-v9":
+            command.add_argument("--codex-executable", required=True)
+            command.add_argument("--provider-timeout", type=float, required=True)
+        if name == "recover-v9":
+            command.add_argument("--failed-run", type=Path, required=True)
+        if name in {
+            "measure-policy-kl-expanded",
+            "recover-policy-kl-expanded",
+        }:
+            command.add_argument(
+                "--reference-manifest", type=Path, required=True
+            )
+            command.add_argument("--source-run", type=Path, required=True)
+            command.add_argument("--target-run", type=Path, required=True)
+            command.add_argument("--expected-target-hash", required=True)
+            command.add_argument("--count-wall-time", type=float, default=3600)
+            command.add_argument("--count-max-states", type=int, default=5_000_000)
+        if name == "recover-policy-kl-expanded":
+            command.add_argument("--failed-run", type=Path, required=True)
+        if name == "plot-v9-paper":
+            command.add_argument("--attribution-run", type=Path, required=True)
+            command.add_argument("--v9-run", type=Path, required=True)
+            command.add_argument("--legacy-kl-run", type=Path, required=True)
+            command.add_argument("--expanded-kl-run", type=Path, required=True)
+            command.add_argument("--output-dir", type=Path, required=True)
     return parser
 
 
@@ -298,8 +374,139 @@ class _RawOnlyProvider:
         )
 
 
+class _RecoveryOnlyProvider:
+    provider_name = "codex-recovery-disabled"
+
+    def invoke(self, _context):
+        raise RuntimeError("v9 recovery must not invoke a provider")
+
+
+class _LazyAttributionEvaluator:
+    def __init__(self, config, layout, data_dir):
+        self.helper = GeneralsHLPipeline(
+            config,
+            layout,
+            data_dir,
+            _RawOnlyProvider(),
+        )
+        self.evaluator = None
+
+    def evaluate(self, *args, **kwargs):
+        run = kwargs.get("run")
+        if run is None and len(args) >= 4:
+            run = args[3]
+        if self.evaluator is None:
+            self.evaluator = self.helper._production_evaluator(Path(run.run_dir))
+        return self.evaluator.evaluate(*args, **kwargs)
+
+
+def _challenge_replay_hash(path: Path) -> str:
+    try:
+        value = tomllib.loads(Path(path).read_text(encoding="utf-8"))
+        digest = value["replay_skill_sha256"]
+    except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError) as exc:
+        raise AssetValidationError(f"cannot read v9 attribution manifest: {exc}") from exc
+    if not isinstance(digest, str) or len(digest) != 64:
+        raise AssetValidationError("v9 replay skill digest is invalid")
+    return digest
+
+
+def _build_attribution_pipeline(args, config, layout):
+    challenge = load_round9_challenge_config(
+        args.attribution_manifest,
+        config,
+        engine_hash=layout.engine_hash,
+        replay_skill_sha256=_challenge_replay_hash(args.attribution_manifest),
+    )
+    lineage = load_round9_lineage(args.v7_run, args.v8_run)
+    v7 = HistoricalPolicySource(
+        version="v7",
+        run_id=lineage.policy_parent_run_id,
+        content_hash=lineage.policy_parent_hash,
+        source=lineage.v7_source,
+        manifest=lineage.v7_manifest,
+    )
+    v8 = HistoricalPolicySource(
+        version="v8",
+        run_id=lineage.iteration_predecessor_run_id,
+        content_hash=lineage.iteration_predecessor_hash,
+        source=lineage.v8_source,
+        manifest=lineage.v8_manifest,
+    )
+    sdk_root = next(item.source for item in layout.opponents if item.tier == "low")
+    return GeneralsAttributionPipeline(
+        config=config,
+        challenge=challenge,
+        v7=v7,
+        v8=v8,
+        data_dir=args.data_dir,
+        evaluator=_LazyAttributionEvaluator(config, layout, args.data_dir),
+        engine_root=layout.engine_root,
+        sdk_root=sdk_root,
+    )
+
+
+def _build_v9_pipeline(args, config, layout, provider):
+    replay_skill = resolve_replay_skill(args.agentbench_root, args.replay_skill)
+    challenge = load_round9_challenge_config(
+        args.challenge_manifest,
+        config,
+        engine_hash=layout.engine_hash,
+        replay_skill_sha256=replay_skill.sha256,
+    )
+    if (
+        args.expected_parent_hash != challenge.parent_content_hash
+        or args.expected_predecessor_hash != challenge.predecessor_content_hash
+    ):
+        raise AssetValidationError("explicit v9 lineage hashes changed")
+    return GeneralsHLRound9Pipeline(
+        config=config,
+        challenge=challenge,
+        assets=layout,
+        replay_skill=replay_skill,
+        policy_parent_run_dir=args.parent_run,
+        iteration_predecessor_run_dir=args.predecessor_run,
+        attribution_run_dir=args.attribution_run,
+        data_dir=args.data_dir,
+        provider=provider,
+    )
+
+
+def _build_expanded_pipeline(args, config, layout):
+    del config
+    reference = load_expanded_kl_config(args.reference_manifest)
+    sdk_root = next(item.source for item in layout.opponents if item.tier == "low")
+    return GeneralsExpandedPolicyKLPipeline(
+        reference=reference,
+        legacy_run_dir=args.source_run,
+        target_run_dir=args.target_run,
+        expected_target_hash=args.expected_target_hash,
+        state_pack_path=args.reference_manifest.parent / reference.state_pack,
+        data_dir=args.data_dir,
+        engine_root=layout.engine_root,
+        engine_hash=layout.engine_hash,
+        sdk_root=sdk_root,
+        count_wall_time_s=args.count_wall_time,
+        count_max_states=args.count_max_states,
+    )
+
+
 def handle(args) -> int:
     try:
+        if args.generals_command == "plot-v9-paper":
+            data = load_v9_figure_data(
+                args.attribution_run,
+                args.v9_run,
+                args.legacy_kl_run,
+                args.expanded_kl_run,
+            )
+            paths = render_v9_paper_figures(data, args.output_dir)
+            print(json.dumps({
+                "status": "complete",
+                "run_dir": str(args.output_dir),
+                "artifacts": [str(path) for path in paths],
+            }, sort_keys=True))
+            return 0
         config, layout = _assets(args)
         if args.generals_command == "prepare":
             print(
@@ -308,6 +515,55 @@ def handle(args) -> int:
                 f"{layout.engine_hash[:12]}"
             )
             return 0
+        if args.generals_command == "attribute-v8-regression":
+            result = _build_attribution_pipeline(args, config, layout).run()
+            print(json.dumps({
+                "status": result.status,
+                "run_dir": str(result.run_dir),
+                "case_count_per_policy": result.case_count_per_policy,
+                "diagnostic_state_count": result.diagnostic_state_count,
+            }, sort_keys=True))
+            return 0 if result.status == "complete" else 1
+        if args.generals_command in {"iterate-v9", "recover-v9"}:
+            provider = (
+                CodexProvider(
+                    executable=args.codex_executable,
+                    timeout_s=args.provider_timeout,
+                    sandbox="workspace-write",
+                )
+                if args.generals_command == "iterate-v9"
+                else _RecoveryOnlyProvider()
+            )
+            pipeline = _build_v9_pipeline(args, config, layout, provider)
+            result = (
+                pipeline.run()
+                if args.generals_command == "iterate-v9"
+                else pipeline.recover(args.failed_run)
+            )
+            print(json.dumps({
+                "status": result.status,
+                "run_dir": str(result.run_dir),
+                "evo_score_9": result.evo_score_9,
+                "validation_passed": result.validation_passed,
+                "formal_attempted": result.formal_attempted,
+                "runnable": result.runnable,
+            }, sort_keys=True))
+            return 0 if result.status == "complete" else 1
+        if args.generals_command in {
+            "measure-policy-kl-expanded", "recover-policy-kl-expanded"
+        }:
+            pipeline = _build_expanded_pipeline(args, config, layout)
+            result = (
+                pipeline.run()
+                if args.generals_command == "measure-policy-kl-expanded"
+                else pipeline.recover(args.failed_run)
+            )
+            print(json.dumps({
+                "status": result.status,
+                "run_dir": str(result.run_dir),
+                "domains": result.summary.get("domains"),
+            }, sort_keys=True))
+            return 0 if result.status == "complete" else 1
         if args.generals_command in {
             "extend-policy-kl-v7",
             "recover-policy-kl-v7",

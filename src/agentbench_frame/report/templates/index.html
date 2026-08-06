@@ -38,6 +38,20 @@
   </div>
 </section>
 {% endif %}
+{% set attribution = lr.get('attribution', {}) %}
+{% if attribution.get('metrics') %}
+<section class="panel">
+  <div class="panel-header"><div><h2>{{ icon('flask') }} Scientific attribution</h2><p class="panel-subtitle">Paired 2×2 effects on identical cases; missing values are not replaced.</p></div><div class="panel-meta">{{ attribution.get('valid_case_count') or 'missing' }} valid games</div></div>
+  <div class="table-scroll"><table class="data-table"><tr><th>Metric</th><th>Large stack (B−A)</th><th>Contact (C−A)</th><th>Interaction (D−B−C+A)</th><th>Pairs</th></tr>{% for name, effect in attribution.get('metrics', {}).items() %}<tr><td>{{ name|replace('_', ' ') }}</td><td>{% if effect.get('large_stack') is none %}<span class="missing">missing</span>{% else %}{{ fmt_num(effect.get('large_stack')) }}{% endif %}</td><td>{% if effect.get('contact') is none %}<span class="missing">missing</span>{% else %}{{ fmt_num(effect.get('contact')) }}{% endif %}</td><td>{% if effect.get('interaction') is none %}<span class="missing">missing</span>{% else %}{{ fmt_num(effect.get('interaction')) }}{% endif %}</td><td>{{ effect.get('complete_pair_count') or 'missing' }}</td></tr>{% endfor %}</table></div>
+</section>
+{% endif %}
+{% if lr.get('policy_kl_domains') %}
+<section class="grid-2">
+{% for domain in lr.get('policy_kl_domains') %}
+  <article class="panel"><div class="panel-header"><div><h2>{{ icon('chart') }} {{ domain.domain_id }} exact policy KL</h2><p class="panel-subtitle">Separate reference domain; no cross-domain line is drawn.</p></div><div class="panel-meta">{{ domain.reference_state_count }} states · {{ domain.status }}</div></div><table class="data-table"><tr><th>Transition</th><th>Mean KL</th><th>Coverage</th><th>Disagreement</th></tr>{% for point in domain.transitions %}<tr><td>{{ point.version_before }} → {{ point.version_after }}</td><td>{% if point.mean_kl_nats is none %}<span class="missing">missing</span>{% else %}{{ fmt_num(point.mean_kl_nats) }}{% endif %}</td><td>{{ point.coverage_complete or 0 }} / {{ point.coverage_total or 'missing' }}</td><td>{{ fmt_pct(point.action_disagreement_rate) }}</td></tr>{% endfor %}</table></article>
+{% endfor %}
+</section>
+{% endif %}
 {% set rollback = lr.get('version_rollback') %}
 {% if rollback %}
 <section class="panel">

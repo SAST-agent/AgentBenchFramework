@@ -1293,6 +1293,61 @@ class LocalResearchReportTests(unittest.TestCase):
         self.assertIn("measurement", compare_html)
         self.assertIn("0.0%", compare_html)
 
+    def test_ci_keeps_attribution_missingness_and_domain_labels(self):
+        from agentbench_frame.report.builder import ReportBuilder
+
+        research = ReportBuilder._derive_research(
+            {
+                "status": "resumable_incomplete",
+                "attribution": {
+                    "estimands": ["B-A", "C-A", "D-B-C+A"],
+                    "metrics": {
+                        "army": {
+                            "large_stack": None,
+                            "contact": 2.0,
+                            "interaction": None,
+                            "complete_pair_count": 11,
+                        }
+                    },
+                },
+                "domains": {
+                    "legacy-12": {
+                        "domain_id": "legacy-12",
+                        "reference_state_count": 12,
+                        "primary_epsilon": "0.01",
+                        "transitions": [],
+                    },
+                    "expanded-24": {
+                        "domain_id": "expanded-24",
+                        "reference_state_count": 24,
+                        "primary_epsilon": "0.01",
+                        "transitions": [{
+                            "version_before": "v8",
+                            "version_after": "v9",
+                            "mean_kl_nats": None,
+                            "coverage": {"complete": 23, "total": 24},
+                            "action_disagreement_rate": None,
+                        }],
+                    },
+                },
+            },
+            [],
+            "/missing/events.jsonl",
+        )
+
+        self.assertIsNone(
+            research["attribution"]["metrics"]["army"]["large_stack"]
+        )
+        self.assertEqual(
+            [item["domain_id"] for item in research["policy_kl_domains"]],
+            ["legacy-12", "expanded-24"],
+        )
+        self.assertIsNone(
+            research["policy_kl_domains"][1]["transitions"][0][
+                "mean_kl_nats"
+            ]
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

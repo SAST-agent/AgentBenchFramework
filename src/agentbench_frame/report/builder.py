@@ -1077,12 +1077,96 @@ class ReportBuilder:
                     else {}
                 ),
             }
+        attribution = summary.get("attribution")
+        if not isinstance(attribution, dict):
+            attribution = {}
+        attribution_projection = {
+            "status": summary.get("status"),
+            "policy_order": summary.get("policy_order") or [],
+            "case_count_per_policy": summary.get("case_count_per_policy"),
+            "valid_case_count": summary.get("valid_case_count"),
+            "diagnostic_state_count": summary.get("diagnostic_state_count"),
+            "estimands": attribution.get("estimands") or [],
+            "metrics": (
+                dict(attribution.get("metrics"))
+                if isinstance(attribution.get("metrics"), dict)
+                else {}
+            ),
+            "earliest_divergence": next(
+                (
+                    dict(event)
+                    for event in events
+                    if event.get("event_type", event.get("event"))
+                    == "trajectory_divergence"
+                ),
+                None,
+            ),
+            "diagnostic_probes": [
+                dict(event)
+                for event in events
+                if event.get("event_type", event.get("event"))
+                == "diagnostic_policy_probe"
+            ],
+        }
+        raw_domains = summary.get("domains")
+        if not isinstance(raw_domains, dict):
+            raw_domains = {}
+        policy_kl_domains = []
+        for domain_id in ("legacy-12", "expanded-24"):
+            metric = raw_domains.get(domain_id)
+            if not isinstance(metric, dict):
+                continue
+            points = []
+            for transition in metric.get("transitions") or []:
+                coverage = transition.get("coverage")
+                if not isinstance(coverage, dict):
+                    coverage = {}
+                points.append({
+                    "version_before": transition.get("version_before"),
+                    "version_after": transition.get("version_after"),
+                    "mean_kl_nats": transition.get("mean_kl_nats"),
+                    "coverage_complete": coverage.get("complete"),
+                    "coverage_total": coverage.get("total"),
+                    "action_disagreement_rate": transition.get(
+                        "action_disagreement_rate"
+                    ),
+                })
+            policy_kl_domains.append({
+                "domain_id": domain_id,
+                "status": summary.get("status"),
+                "reference_state_count": metric.get(
+                    "reference_state_count"
+                ),
+                "primary_epsilon": metric.get("primary_epsilon"),
+                "transitions": points,
+                "support_size": metric.get("support_size") or {},
+            })
+        round9 = None
+        if any(
+            key in summary
+            for key in ("evo_score_9", "gain_9", "validation_results")
+        ):
+            round9 = {
+                "status": summary.get("status"),
+                "runnable": summary.get("runnable"),
+                "validation_attempted": summary.get("validation_attempted"),
+                "validation_passed": summary.get("validation_passed"),
+                "formal_attempted": summary.get("formal_attempted"),
+                "performance_target_met": summary.get(
+                    "performance_target_met"
+                ),
+                "validation_results": summary.get("validation_results") or [],
+                "formal_results": summary.get("formal_results") or [],
+            }
         return {
             "benchmark_score": benchmark_score,
             "raw_score": raw_score,
             "evo_score": evo_score,
             "gain": gain,
             "round8": round8,
+            "round9": round9,
+            "attribution": attribution_projection,
+            "policy_kl_domains": policy_kl_domains,
             "evaluation_status": summary.get(
                 "evaluation_status"
             ) or summary.get(
