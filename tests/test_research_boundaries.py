@@ -177,6 +177,29 @@ class ResearchBoundaryTests(unittest.TestCase):
 
         self.assertEqual(report.unknown_event_types, 0)
 
+    def test_scientific_attribution_events_are_known_types(self):
+        from agentbench_frame.tracking.quality import inspect_event_lines
+
+        event_types = (
+            "attribution_policy_materialized",
+            "attribution_game_result",
+            "attribution_factorial_effect",
+            "diagnostic_state_selected",
+            "diagnostic_policy_probe",
+            "trajectory_divergence",
+            "attribution_report_frozen",
+        )
+        report = inspect_event_lines([
+            json.dumps({
+                "event_type": event_type,
+                "event_id": f"attribution-{index}",
+                "run_id": "run-attribution",
+            })
+            for index, event_type in enumerate(event_types)
+        ])
+
+        self.assertEqual(report.unknown_event_types, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

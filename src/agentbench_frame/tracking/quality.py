@@ -38,6 +38,13 @@ KNOWN_EVENT_TYPES = frozenset({
     "champion_validation_gate",
     "champion_sealed_claim",
     "recovery_import",
+    "attribution_policy_materialized",
+    "attribution_game_result",
+    "attribution_factorial_effect",
+    "diagnostic_state_selected",
+    "diagnostic_policy_probe",
+    "trajectory_divergence",
+    "attribution_report_frozen",
 })
 
 
