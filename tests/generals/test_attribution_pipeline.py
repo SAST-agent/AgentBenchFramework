@@ -128,7 +128,7 @@ class PairedEvaluator:
         self.calls = []
 
     def evaluate(self, workspace, version, phase, run, cases):
-        self.calls.append((version, tuple(case.case_id for case in cases)))
+        self.calls.append((version, tuple(case.case_id for case in cases), phase))
         results = []
         matches = []
         for index, case in enumerate(cases):
@@ -256,6 +256,7 @@ def test_attribution_pipeline_runs_four_cells_on_identical_cases(tmp_path):
     assert result.diagnostic_state_count <= 48
     assert [item[0] for item in evaluator.calls] == ["A", "B", "C", "D"]
     assert len({item[1] for item in evaluator.calls}) == 1
+    assert {item[2] for item in evaluator.calls} == {"learning"}
     summary = json.loads((result.run_dir / "summary.json").read_text())
     assert summary["coding_agent_act_count"] == 0
     assert summary["formal_benchmark_opened"] is False

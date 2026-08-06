@@ -352,7 +352,11 @@ class GeneralsAttributionPipeline:
             evaluation = self.evaluator.evaluate(
                 workspace=policy.source,
                 version=policy.cell,
-                phase="attribution",
+                # Attribution is a scientific learning measurement, not a
+                # formal benchmark phase. Keep its semantic identity in the
+                # first-class attribution events while charging the existing
+                # frozen learning budget axis.
+                phase="learning",
                 run=run,
                 cases=cases,
             )
