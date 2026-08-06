@@ -280,3 +280,33 @@ def test_v5_windows_keep_only_six_requested_critical_reasons():
         for reasons in selection.reasons.values()
         for reason in reasons
     }
+
+
+def test_v8_windows_accept_clean_room_high_signal_reasons():
+    evidence, selection = build_critical_learning_evidence(
+        _replay(),
+        _summary(),
+        (),
+        max_decisions=7,
+        selection_reasons=(
+            "first_main_danger",
+            "large_stack_inactive",
+            "missed_counter_or_reinforcement",
+            "economy_defense_conflict",
+            "first_dense_divergence",
+            "unsafe_or_low_value_macro",
+            "final_decision",
+        ),
+        include_strategic_targets=True,
+    )
+
+    all_reasons = {
+        reason
+        for reasons in selection.reasons.values()
+        for reason in reasons
+    }
+    assert "first_main_danger" in all_reasons
+    assert "large_stack_inactive" in all_reasons
+    assert "first_dense_divergence" in all_reasons
+    assert "final_decision" in all_reasons
+    assert len(evidence.decisions) <= 7

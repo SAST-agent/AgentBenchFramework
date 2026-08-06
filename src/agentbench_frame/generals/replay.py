@@ -516,6 +516,12 @@ def build_critical_learning_evidence(
         "first_strategic_opportunity",
         "penultimate_decision",
         "final_decision",
+        "first_main_danger",
+        "large_stack_inactive",
+        "missed_counter_or_reinforcement",
+        "economy_defense_conflict",
+        "first_dense_divergence",
+        "unsafe_or_low_value_macro",
     )
     requested = tuple(selection_reasons or default_reasons)
     unknown = set(requested) - set(default_reasons)
@@ -556,6 +562,60 @@ def build_critical_learning_evidence(
             ),
             "first_main_pressure",
         )
+        first_pressure = next(
+            (
+                index
+                for index, item in enumerate(decisions)
+                if (_adjacent_enemy_pressure(item.state, item.seat) or 0) > 0
+            ),
+            None,
+        )
+        add(first_pressure, "first_main_danger")
+        add(
+            next(
+                (
+                    index
+                    for index, item in enumerate(decisions)
+                    if max(
+                        (
+                            int(cell.get("army", 0)) - 1
+                            for cell in item.state.get("cells", {}).values()
+                            if isinstance(cell, Mapping)
+                            and int(cell.get("player", -1)) == item.seat
+                        ),
+                        default=0,
+                    )
+                    >= 50
+                    and not any(command and command[0] == 1 for command in item.action)
+                ),
+                None,
+            ),
+            "large_stack_inactive",
+        )
+        add(
+            next(
+                (
+                    index
+                    for index, item in enumerate(decisions)
+                    if (_adjacent_enemy_pressure(item.state, item.seat) or 0) > 0
+                    and not any(command and command[0] == 1 for command in item.action)
+                ),
+                None,
+            ),
+            "missed_counter_or_reinforcement",
+        )
+        add(
+            next(
+                (
+                    index
+                    for index, item in enumerate(decisions)
+                    if (_adjacent_enemy_pressure(item.state, item.seat) or 0) > 0
+                    and any(command and command[0] in {3, 5} for command in item.action)
+                ),
+                None,
+            ),
+            "economy_defense_conflict",
+        )
         samples = [
             dense_sample(
                 item.state,
@@ -591,6 +651,29 @@ def build_critical_learning_evidence(
             drop, index = min(army_drops)
             if drop < 0:
                 add(index, "before_steepest_army_drop")
+        divergence_candidates = [
+            (delta, index)
+            for delta, index in (*territory_drops, *army_drops)
+            if delta < 0
+        ]
+        if divergence_candidates:
+            _, divergence_index = min(
+                divergence_candidates,
+                key=lambda item: (item[1], item[0]),
+            )
+            add(divergence_index, "first_dense_divergence")
+        add(
+            next(
+                (
+                    index
+                    for index, item in enumerate(decisions)
+                    if len([command for command in item.action if command and command[0] != 8]) > 4
+                    and (_adjacent_enemy_pressure(item.state, item.seat) or 0) > 0
+                ),
+                None,
+            ),
+            "unsafe_or_low_value_macro",
+        )
         add(
             next(
                 (
