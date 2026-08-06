@@ -37,14 +37,16 @@ def _reject_text(
     text: str,
     *,
     allowed_seeds: frozenset[int] = frozenset(),
+    scan_unstructured_seeds: bool = True,
 ) -> None:
     if any(marker in text for marker in _SOURCE_MARKERS):
         raise ValueError("forbidden opponent source material")
     if _FORBIDDEN_MARKER.search(text):
         raise ValueError("forbidden nonlearning partition material")
-    for match in _SIX_DIGIT_SEED.finditer(text):
-        if int(match.group()) not in allowed_seeds:
-            raise ValueError(f"forbidden context seed: {match.group()}")
+    if scan_unstructured_seeds:
+        for match in _SIX_DIGIT_SEED.finditer(text):
+            if int(match.group()) not in allowed_seeds:
+                raise ValueError(f"forbidden context seed: {match.group()}")
 
 
 def validate_round8_static_context(
@@ -82,7 +84,11 @@ def _validate_evidence(
         expected = f"learn8-high-s{item.seed}-p{item.evaluated_seat}"
         if item.replay_id != expected:
             raise ValueError("round-8 evidence replay id is not canonical")
-        _reject_text(item.to_json(), allowed_seeds=frozenset(ROUND8_LEARNING_SEEDS))
+        _reject_text(
+            item.to_json(),
+            allowed_seeds=frozenset(ROUND8_LEARNING_SEEDS),
+            scan_unstructured_seeds=False,
+        )
     if frozenset(pairs) != _EPISODE_PAIRS:
         raise ValueError("round-8 prompt evidence partition is incomplete")
     return tuple(sorted(evidence, key=lambda item: (item.seed, item.evaluated_seat)))

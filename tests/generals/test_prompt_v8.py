@@ -101,3 +101,14 @@ def test_round8_prompt_rejects_wrong_episode_pair_or_oversize():
         _build(tuple(records))
     with pytest.raises(ValueError, match="max_bytes"):
         _build(max_bytes=128)
+
+
+def test_round8_prompt_does_not_mistake_dense_metric_for_seed():
+    records = list(_records())
+    records[0] = replace(
+        records[0], dense={"army_margin": {"auc": -196726.0}}
+    )
+
+    result = _build(tuple(records))
+
+    assert result.feedback_episodes_read == 6
