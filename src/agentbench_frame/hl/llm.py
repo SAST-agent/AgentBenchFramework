@@ -70,14 +70,25 @@ SHARED_TOOLS: List[Dict[str, Any]] = [
                          "required": ["id"]},
     },
     {
-        "name": "str_replace",
-        "description": "Make a surgical edit to agent.py: replace exactly one "
+        "name": "edit",
+        "description": "Make a surgical edit to agent.py by replacing exactly one "
                        "UNIQUE occurrence of old_string with new_string. "
                        "old_string must match the file exactly (indentation, "
-                       "newlines) and appear exactly once. The result is "
+                       "newlines) and appear exactly once. All three edit "
+                       "kinds use this one operation: "
+                       "(1) REPLACE — old_string = exact text to change, "
+                       "new_string = the replacement; "
+                       "(2) DELETE — old_string = exact text to remove, "
+                       "new_string = \"\" (empty); "
+                       "(3) ADD / INSERT — old_string = an existing anchor "
+                       "line near the insertion point, new_string = that same "
+                       "anchor plus the new content (put new lines before the "
+                       "anchor to insert above it, after the anchor to insert "
+                       "below). Always include enough surrounding context in "
+                       "old_string to make the match unique. The result is "
                        "ast-validated before apply; a SyntaxError or a "
                        "non-unique/missing old_string is rejected and nothing "
-                       "is written. Prefer many small str_replace calls over "
+                       "is written. Prefer many small edit calls over "
                        "rewriting the whole file.",
         "input_schema": {"type": "object",
                          "properties": {

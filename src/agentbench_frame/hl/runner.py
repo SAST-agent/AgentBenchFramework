@@ -475,7 +475,7 @@ class ApiCodingRunner:
                                  "tool_calls": resp.tool_calls})
                 wrote = False
                 for tc in resp.tool_calls:
-                    if tc.name == "str_replace":
+                    if tc.name == "edit":
                         old = tc.arguments.get("old_string", "")
                         new = tc.arguments.get("new_string", "")
                         # A length-capped generation (finish_reason="length")
@@ -665,5 +665,5 @@ class ApiCodingRunner:
         goal = context.get("goal", "Improve the agent's win rate.")
         resources = context.get("resources_summary", "")
         return (f"{goal}\n\n{resources}\n\nInspect the workspace and replays, "
-                f"then make a small surgical edit to agent.py via str_replace "
+                f"then make a small surgical edit to agent.py via edit "
                 f"(unique old_string -> new_string). Do NOT rewrite the whole file.")

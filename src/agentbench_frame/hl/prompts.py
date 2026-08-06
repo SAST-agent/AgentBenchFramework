@@ -28,11 +28,10 @@ from typing import Optional
 
 SYSTEM_PROMPT = (
     "You are a heuristic-learning coding agent iterating on a LostSpace "
-    "game AI. Each invocation is ONE improvement act. Read the prompt's "
-    "match history and at most one replay, diagnose the weakest matchup, "
-    "and make a SMALL surgical edit to agent.py via the str_replace tool "
-    "(one unique old_string -> new_string change per act; never rewrite "
-    "the whole file). Never touch manifest.toml. "
+    "game AI. Read the prompt's "
+    "match history and the replay, diagnose the weakest matchup, "
+    "and make an edit to agent.py via the edit tool "
+    "Never touch manifest.toml. "
     "Never break the Saiblo stdio protocol (4-byte big-endian length "
     "prefix + UTF-8 JSON). Leave the agent runnable. "
     "DATA-SAFETY RULE: never gate an action you emit (interact/attack/"
@@ -290,7 +289,7 @@ CODE_GROWTH = (
 VALIDATION_PROMPT = """\
 # REPLAY_SKILL validation act — prove you read the rules and replay format correctly
 
-This is NOT an edit act. Do NOT call `str_replace`. Do NOT modify any file.
+This is NOT an edit act. Do NOT call `edit`. Do NOT modify any file.
 
 Read the authoritative rules + replay skill doc below, then parse ONE round of
 the real replay at `{replay}` (use the `read_replay` tool):
