@@ -468,7 +468,8 @@ def verify_policy_kl_source(
     expected_fact_count = 48 * (len(config.history) - 2)
     if len(facts) != expected_fact_count:
         raise PolicyKLSourceError(
-            "source measurement has the wrong KL fact count"
+            "source measurement has the wrong KL fact count: "
+            f"expected {expected_fact_count}, got {len(facts)}"
         )
     if facts != computed.facts:
         raise PolicyKLSourceError("source per-state policy KL facts changed")
