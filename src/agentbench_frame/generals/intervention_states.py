@@ -19,6 +19,9 @@ from .models import ExpandedPolicyKLConfig, InterventionStateSpec
 
 
 PACK_SCHEMA = "generals-policy-kl-intervention-states-v1"
+INTERVENTION_STATE_PACK_SHA256 = (
+    "0e8c490cea6a3295335fc08574b27f72d43063648d720534cd2fc438a1dd0093"
+)
 MAIN_POSITIONS = {0: (7, 4), 1: (7, 10)}
 _DELTAS = ((-1, 0), (1, 0), (0, -1), (0, 1))
 

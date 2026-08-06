@@ -40,6 +40,8 @@ QUALITY_DEFECT_FIELDS = (
     "missing_event_ids",
     "missing_run_ids",
 )
+FROZEN_EPSILONS = ("0.001", "0.01", "0.05", "0.1")
+FROZEN_PRIMARY_EPSILON = "0.01"
 
 
 class PolicyKLSourceError(ValueError):
@@ -169,6 +171,8 @@ def _require_clean_quality(
 def _reference_records(
     root: Path,
     config: PolicyKLExtensionConfig,
+    *,
+    expected_state_count: int = 12,
 ) -> tuple[dict[str, Any], ...]:
     spec = _read_json(root / "benchmark/reference-state-spec.json")
     if (
@@ -184,11 +188,14 @@ def _reference_records(
     state_ids = spec.get("state_ids")
     if (
         not isinstance(state_ids, list)
-        or len(state_ids) != 12
-        or len(set(state_ids)) != 12
+        or len(state_ids) != expected_state_count
+        or len(set(state_ids)) != expected_state_count
         or not all(isinstance(item, str) and item for item in state_ids)
     ):
-        raise PolicyKLSourceError("source reference state IDs must be 12 unique strings")
+        raise PolicyKLSourceError(
+            "source reference state IDs must contain exactly "
+            f"{expected_state_count} unique strings"
+        )
 
     records = []
     coordinates = set()
@@ -223,6 +230,8 @@ def _reference_records(
 def _exact_counts(
     root: Path,
     records: tuple[dict[str, Any], ...],
+    *,
+    expected_state_count: int = 12,
 ) -> tuple[dict[str, int], dict[str, dict[str, Any]]]:
     counts = {}
     raw_records = {}
@@ -245,8 +254,14 @@ def _exact_counts(
             raise PolicyKLSourceError(f"source exact count changed: {state_id}")
         counts[state_id] = int(support)
         raw_records[state_id] = record
-    if len(list((root / "action-space/counts").glob("*.json"))) != 12:
-        raise PolicyKLSourceError("source exact count directory must contain 12 records")
+    if (
+        len(list((root / "action-space/counts").glob("*.json")))
+        != expected_state_count
+    ):
+        raise PolicyKLSourceError(
+            "source exact count directory must contain "
+            f"{expected_state_count} records"
+        )
     return counts, raw_records
 
 
@@ -322,11 +337,14 @@ def _source_events(
 ]:
     events = _read_jsonl(root / "events.jsonl")
     source_version_count = len(config.history) - 1
+    state_count = len(references)
     source_event_counts = {
-        "reference_state_selected": 12,
-        "action_space_count": 12,
-        "historical_policy_action": 12 * source_version_count,
-        "controlled_reference_policy_kl": 48 * (source_version_count - 1),
+        "reference_state_selected": state_count,
+        "action_space_count": state_count,
+        "historical_policy_action": state_count * source_version_count,
+        "controlled_reference_policy_kl": (
+            state_count * len(config.epsilons) * (source_version_count - 1)
+        ),
     }
     grouped: dict[str, list[dict[str, Any]]] = {
         event_type: [] for event_type in source_event_counts
@@ -426,9 +444,11 @@ def _source_events(
     return reuse_events, kl_events
 
 
-def verify_policy_kl_source(
+def _verify_policy_kl_source_with_config(
     source_run_dir: Path,
     config: PolicyKLExtensionConfig,
+    *,
+    expected_state_count: int = 12,
 ) -> VerifiedPolicyKLSource:
     """Fail closed unless a complete v1 run matches every frozen input."""
 
@@ -448,8 +468,16 @@ def verify_policy_kl_source(
     action_spec = _read_json(root / "benchmark/action-space-spec.json")
     if action_spec.get("spec_id") != EXPECTED_ACTION_SPACE_SPEC_ID:
         raise PolicyKLSourceError("source action-space specification changed")
-    references = _reference_records(root, config)
-    counts, count_records = _exact_counts(root, references)
+    references = _reference_records(
+        root,
+        config,
+        expected_state_count=expected_state_count,
+    )
+    counts, count_records = _exact_counts(
+        root,
+        references,
+        expected_state_count=expected_state_count,
+    )
     actions, action_records = _policy_actions(root, config, references)
     versions = tuple(policy.version for policy in config.history[:-1])
     computed = compute_controlled_policy_kl(
@@ -465,7 +493,11 @@ def verify_policy_kl_source(
         action_space_spec_id=EXPECTED_ACTION_SPACE_SPEC_ID,
     )
     facts = _read_jsonl(root / "measurement/per-state-kl.jsonl")
-    expected_fact_count = 48 * (len(config.history) - 2)
+    expected_fact_count = (
+        expected_state_count
+        * len(config.epsilons)
+        * (len(config.history) - 2)
+    )
     if len(facts) != expected_fact_count:
         raise PolicyKLSourceError(
             "source measurement has the wrong KL fact count: "
@@ -500,6 +532,128 @@ def verify_policy_kl_source(
         kl_source_events=kl_events,
         prior_metric=computed.metric,
     )
+
+
+def _domain_config(
+    root: Path,
+    *,
+    expected_measurement_id: str,
+    expected_tree_hash: str,
+    expected_versions: tuple[str, ...],
+) -> PolicyKLExtensionConfig:
+    """Derive a strict helper config without trusting caller-owned policy data."""
+
+    if not expected_versions or len(set(expected_versions)) != len(expected_versions):
+        raise PolicyKLSourceError("expected policy versions must be unique")
+    summary = _read_json(root / "summary.json")
+    spec = _read_json(root / "benchmark/reference-state-spec.json")
+    metric = summary.get("controlled_reference_policy_kl")
+    if not isinstance(metric, dict):
+        raise PolicyKLSourceError("source summary has no controlled policy KL metric")
+    if (
+        tuple(metric.get("epsilons") or ()) != FROZEN_EPSILONS
+        or metric.get("primary_epsilon") != FROZEN_PRIMARY_EPSILON
+    ):
+        raise PolicyKLSourceError("source epsilon contract changed")
+    state_ids = spec.get("state_ids")
+    if not isinstance(state_ids, list) or not state_ids:
+        raise PolicyKLSourceError("source reference state IDs are unavailable")
+
+    snapshotter = LocalWorkspaceSnapshotter()
+    history = []
+    for version in expected_versions:
+        policy_root = root / "policies" / version
+        if not policy_root.is_dir():
+            raise PolicyKLSourceError(f"source {version} policy is unavailable")
+        manifest = _read_json(policy_root / "manifest.json")
+        content_hash = manifest.get("content_hash")
+        actual = snapshotter.capture(policy_root / "source")
+        first_action = _read_json(policy_root / f"{state_ids[0]}.json")
+        run_id = first_action.get("run_id")
+        if (
+            not isinstance(content_hash, str)
+            or not content_hash
+            or actual.content_hash != content_hash
+            or not isinstance(run_id, str)
+            or not run_id
+        ):
+            raise PolicyKLSourceError(f"source {version} policy manifest changed")
+        from .models import HistoricalPolicyConfig
+
+        history.append(
+            HistoricalPolicyConfig(
+                version=version,
+                run_id=run_id,
+                content_hash=content_hash,
+            )
+        )
+    # Existing helpers intentionally verify history[:-1]. A never-materialized
+    # sentinel preserves that invariant while allowing arbitrary frozen domains.
+    from .models import HistoricalPolicyConfig
+
+    history.append(
+        HistoricalPolicyConfig(
+            version="__verification_sentinel__",
+            run_id="__verification_sentinel__",
+            content_hash="0" * 64,
+        )
+    )
+    return PolicyKLExtensionConfig(
+        measurement_id="__verification_only__",
+        source_measurement_id=expected_measurement_id,
+        source_run_id=str(summary.get("run_id", "")),
+        source_tree_hash=expected_tree_hash,
+        opponent_id=str(spec.get("opponent_id", "")),
+        seeds=tuple(spec.get("seeds") or ()),
+        seats=tuple(spec.get("seats") or ()),
+        decision_numbers=tuple(spec.get("decision_numbers") or ()),
+        epsilons=FROZEN_EPSILONS,
+        primary_epsilon=FROZEN_PRIMARY_EPSILON,
+        history=tuple(history),
+    )
+
+
+def verify_policy_kl_domain(
+    run_dir: Path,
+    *,
+    expected_measurement_id: str,
+    expected_tree_hash: str,
+    expected_state_count: int,
+    expected_versions: tuple[str, ...],
+) -> VerifiedPolicyKLSource:
+    """Verify an immutable exact-KL domain with caller-frozen dimensions."""
+
+    root = Path(run_dir).resolve()
+    config = _domain_config(
+        root,
+        expected_measurement_id=expected_measurement_id,
+        expected_tree_hash=expected_tree_hash,
+        expected_versions=expected_versions,
+    )
+    return _verify_policy_kl_source_with_config(
+        root,
+        config,
+        expected_state_count=expected_state_count,
+    )
+
+
+def verify_policy_kl_source(
+    source_run_dir: Path,
+    config: PolicyKLExtensionConfig,
+) -> VerifiedPolicyKLSource:
+    """Verify the original 12-state domain and its full frozen config."""
+
+    versions = tuple(policy.version for policy in config.history[:-1])
+    verify_policy_kl_domain(
+        source_run_dir,
+        expected_measurement_id=config.source_measurement_id,
+        expected_tree_hash=config.source_tree_hash,
+        expected_state_count=12,
+        expected_versions=versions,
+    )
+    # The generic verifier freezes scientific dimensions. This second pass
+    # additionally enforces the original opponent/coordinate/history contract.
+    return _verify_policy_kl_source_with_config(source_run_dir, config)
 
 
 def _copy_pairs(source: VerifiedPolicyKLSource) -> list[tuple[Path, Path, str]]:

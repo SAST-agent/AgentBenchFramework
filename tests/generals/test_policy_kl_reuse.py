@@ -17,6 +17,7 @@ from agentbench_frame.generals.policy_kl_reuse import (
     PolicyKLSourceError,
     canonical_tree_hash,
     materialize_policy_kl_source,
+    verify_policy_kl_domain,
     verify_policy_kl_source,
 )
 from agentbench_frame.tracking.snapshot import LocalWorkspaceSnapshotter
@@ -329,6 +330,47 @@ def test_verify_accepts_one_complete_source_run(tmp_path):
     assert action_event["run_id"] == "run-0"
 
 
+def test_generic_domain_verifier_accepts_frozen_dimensions(tmp_path):
+    root, config = build_complete_source(tmp_path)
+
+    verified = verify_policy_kl_domain(
+        root,
+        expected_measurement_id=config.source_measurement_id,
+        expected_tree_hash=config.source_tree_hash,
+        expected_state_count=12,
+        expected_versions=tuple(f"v{index}" for index in range(7)),
+    )
+
+    assert len(verified.reference_records) == 12
+    assert len(verified.actions) == 84
+    assert len(verified.prior_facts) == 288
+
+
+@pytest.mark.parametrize(
+    ("expected_state_count", "expected_versions", "message"),
+    [
+        (24, tuple(f"v{index}" for index in range(7)), "state IDs"),
+        (12, tuple(f"v{index}" for index in range(8)), "policy"),
+    ],
+)
+def test_generic_domain_verifier_rejects_wrong_frozen_dimensions(
+    tmp_path,
+    expected_state_count,
+    expected_versions,
+    message,
+):
+    root, config = build_complete_source(tmp_path)
+
+    with pytest.raises(PolicyKLSourceError, match=message):
+        verify_policy_kl_domain(
+            root,
+            expected_measurement_id=config.source_measurement_id,
+            expected_tree_hash=config.source_tree_hash,
+            expected_state_count=expected_state_count,
+            expected_versions=expected_versions,
+        )
+
+
 def test_verify_rejects_a_wrong_frozen_tree_hash(tmp_path):
     root, config = build_complete_source(tmp_path)
 
@@ -369,6 +411,27 @@ def test_verify_rejects_a_missing_per_state_coordinate(tmp_path):
 
     with pytest.raises(PolicyKLSourceError, match="288"):
         verify_policy_kl_source(root, current_hash(config, root))
+
+
+def test_generic_verifier_rejects_a_changed_scientific_event(tmp_path):
+    root, config = build_complete_source(tmp_path)
+    events_path = root / "events.jsonl"
+    records = [json.loads(line) for line in events_path.read_text().splitlines()]
+    count = next(item for item in records if item["event_type"] == "action_space_count")
+    count["support_size"] = str(int(count["support_size"]) + 1)
+    events_path.write_text(
+        "".join(json.dumps(item, sort_keys=True) + "\n" for item in records),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PolicyKLSourceError, match="count event"):
+        verify_policy_kl_domain(
+            root,
+            expected_measurement_id=config.source_measurement_id,
+            expected_tree_hash=_test_tree_hash(root),
+            expected_state_count=12,
+            expected_versions=tuple(f"v{index}" for index in range(7)),
+        )
 
 
 def test_materialization_is_idempotent_and_leaves_source_unchanged(tmp_path):
