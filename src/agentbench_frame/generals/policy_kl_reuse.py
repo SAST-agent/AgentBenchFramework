@@ -23,12 +23,6 @@ from .policy_kl_math import (
 EXPECTED_ACTION_SPACE_SPEC_ID = (
     "a383f61cba2b284623c0b377eaddee4ef7522b8e8adb53e0ea3efb7bc9bc329e"
 )
-SOURCE_EVENT_COUNTS = {
-    "reference_state_selected": 12,
-    "action_space_count": 12,
-    "historical_policy_action": 84,
-    "controlled_reference_policy_kl": 288,
-}
 EVENT_METADATA = frozenset({
     "schema_version",
     "event_id",
@@ -145,6 +139,16 @@ def _scientific_payload(
     }
 
 
+def _reused_scientific_payload(event: dict[str, Any]) -> dict[str, Any]:
+    payload = _scientific_payload(event)
+    for key in (
+        "source_event_id", "source_run_id", "reuse_status",
+        "materialization_measurement_id",
+    ):
+        payload.pop(key, None)
+    return payload
+
+
 def _require_clean_quality(
     root: Path,
     summary: dict[str, Any],
@@ -155,8 +159,7 @@ def _require_clean_quality(
     if saved != computed or summary_quality != computed:
         raise PolicyKLSourceError("source event quality receipts do not match")
     if (
-        computed.get("total_lines") != 396
-        or computed.get("valid_events") != 396
+        computed.get("total_lines") != computed.get("valid_events")
         or any(computed.get(field) != 0 for field in QUALITY_DEFECT_FIELDS)
         or computed.get("warnings") != []
     ):
@@ -169,7 +172,8 @@ def _reference_records(
 ) -> tuple[dict[str, Any], ...]:
     spec = _read_json(root / "benchmark/reference-state-spec.json")
     if (
-        spec.get("measurement_id") != config.source_measurement_id
+        not isinstance(spec.get("measurement_id"), str)
+        or not spec.get("measurement_id")
         or spec.get("opponent_id") != config.opponent_id
         or tuple(spec.get("seeds") or ()) != config.seeds
         or tuple(spec.get("seats") or ()) != config.seats
@@ -297,8 +301,11 @@ def _policy_actions(
             action = tuple(tuple(command) for command in raw_action)
             actions[(policy.version, state_id)] = action
             raw_records[(policy.version, state_id)] = record
-    if len(actions) != 84:
-        raise PolicyKLSourceError("source policy action set must contain 84 records")
+    expected_action_count = 12 * (len(config.history) - 1)
+    if len(actions) != expected_action_count:
+        raise PolicyKLSourceError(
+            "source policy action set has the wrong record count"
+        )
     return actions, raw_records
 
 
@@ -314,13 +321,20 @@ def _source_events(
     dict[tuple[str, str, str, str], dict[str, Any]],
 ]:
     events = _read_jsonl(root / "events.jsonl")
+    source_version_count = len(config.history) - 1
+    source_event_counts = {
+        "reference_state_selected": 12,
+        "action_space_count": 12,
+        "historical_policy_action": 12 * source_version_count,
+        "controlled_reference_policy_kl": 48 * (source_version_count - 1),
+    }
     grouped: dict[str, list[dict[str, Any]]] = {
-        event_type: [] for event_type in SOURCE_EVENT_COUNTS
+        event_type: [] for event_type in source_event_counts
     }
     for record in events:
         event_type = record.get("event_type")
         if event_type not in grouped:
-            raise PolicyKLSourceError(f"unexpected source event type: {event_type}")
+            continue
         if (
             event_type != "historical_policy_action"
             and record.get("run_id") != config.source_run_id
@@ -330,9 +344,17 @@ def _source_events(
     if {
         event_type: len(records)
         for event_type, records in grouped.items()
-    } != SOURCE_EVENT_COUNTS:
+    } != source_event_counts:
         raise PolicyKLSourceError("source scientific event counts changed")
 
+    reference_measurement_id = _read_json(
+        root / "benchmark/reference-state-spec.json"
+    )["measurement_id"]
+    source_summary = _read_json(root / "summary.json")
+    accepted_reference_measurements = {
+        reference_measurement_id,
+        source_summary.get("source_measurement_id"),
+    }
     reference_by_id = {record["state_id"]: record for record in references}
     for record in grouped["reference_state_selected"]:
         state_id = record.get("measurement_state_id")
@@ -340,7 +362,8 @@ def _source_events(
         expected_path = root / "reference/states" / f"{state_id}.json"
         if (
             reference is None
-            or record.get("measurement_id") != config.source_measurement_id
+            or record.get("measurement_id")
+            not in accepted_reference_measurements
             or record.get("seed") != reference["seed"]
             or record.get("seat") != reference["seat"]
             or record.get("decision_number") != reference["decision_number"]
@@ -351,14 +374,19 @@ def _source_events(
 
     for record in grouped["action_space_count"]:
         state_id = record.get("measurement_state_id")
-        if _scientific_payload(record) != count_records.get(state_id):
+        if _reused_scientific_payload(record) != count_records.get(state_id):
             raise PolicyKLSourceError("source count event changed")
     for record in grouped["historical_policy_action"]:
         key = (record.get("version"), record.get("measurement_state_id"))
-        if _scientific_payload(
-            record,
-            preserve_run_id=True,
-        ) != action_records.get(key):
+        payload = _reused_scientific_payload(record)
+        policy_run_id = payload.pop("policy_run_id", None)
+        payload["run_id"] = (
+            policy_run_id if policy_run_id is not None else record.get("run_id")
+        )
+        expected_action = action_records.get(key)
+        if expected_action is not None and "artifact_ref" not in expected_action:
+            payload.pop("artifact_ref", None)
+        if payload != expected_action:
             raise PolicyKLSourceError("source policy action event changed")
 
     fact_by_key = {
@@ -378,7 +406,10 @@ def _source_events(
             record.get("measurement_state_id"),
             record.get("epsilon"),
         )
-        if key in kl_events or _scientific_payload(record) != fact_by_key.get(key):
+        if (
+            key in kl_events
+            or _reused_scientific_payload(record) != fact_by_key.get(key)
+        ):
             raise PolicyKLSourceError("source policy KL event changed")
         kl_events[key] = record
     if set(kl_events) != set(fact_by_key):
@@ -434,8 +465,11 @@ def verify_policy_kl_source(
         action_space_spec_id=EXPECTED_ACTION_SPACE_SPEC_ID,
     )
     facts = _read_jsonl(root / "measurement/per-state-kl.jsonl")
-    if len(facts) != 288:
-        raise PolicyKLSourceError("source measurement must contain 288 KL facts")
+    expected_fact_count = 48 * (len(config.history) - 2)
+    if len(facts) != expected_fact_count:
+        raise PolicyKLSourceError(
+            "source measurement has the wrong KL fact count"
+        )
     if facts != computed.facts:
         raise PolicyKLSourceError("source per-state policy KL facts changed")
     transition_metric = _read_json(
@@ -482,7 +516,7 @@ def _copy_pairs(source: VerifiedPolicyKLSource) -> list[tuple[Path, Path, str]]:
     ):
         for path in sorted((root / directory).glob("*.json")):
             pairs.append((path, path.relative_to(root), role))
-    for version in ("v0", "v1", "v2", "v3", "v4", "v5", "v6"):
+    for version in sorted({key[0] for key in source.actions}):
         policy_root = root / "policies" / version
         for path in sorted(
             item

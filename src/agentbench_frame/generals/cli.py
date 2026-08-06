@@ -27,7 +27,9 @@ from .pipeline_v4 import GeneralsHLRound4Pipeline
 from .pipeline_v5 import GeneralsHLRound5Pipeline
 from .pipeline_v6 import GeneralsHLRound6Pipeline
 from .pipeline_v7 import GeneralsHLRound7Pipeline
+from .pipeline_v8 import GeneralsHLRound8Pipeline
 from .policy_kl_extension import GeneralsPolicyKLExtensionPipeline
+from .policy_kl_v8_extension import GeneralsPolicyKLV8ExtensionPipeline
 from .policy_kl_pipeline import GeneralsPolicyKLPipeline
 
 
@@ -81,6 +83,14 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
             "Recover an audited v7 provider or evaluation failure",
         ),
         (
+            "iterate-v8",
+            "Run one clean-room v7 learning act and evaluate v8",
+        ),
+        (
+            "recover-v8",
+            "Recover a frozen clean-room v8 candidate without another act",
+        ),
+        (
             "measure-policy-kl",
             "Measure exact controlled-reference v0-v6 policy KL",
         ),
@@ -95,6 +105,14 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
         (
             "recover-policy-kl-v7",
             "Resume an incomplete verified v7 policy KL extension",
+        ),
+        (
+            "extend-policy-kl-v8",
+            "Reuse verified v0-v7 policy KL inputs and probe only v8",
+        ),
+        (
+            "recover-policy-kl-v8",
+            "Resume an incomplete verified v8 policy KL extension",
         ),
     ):
         command = commands.add_parser(name, help=help_text)
@@ -115,12 +133,16 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
             "recover-v6",
             "iterate-v7",
             "recover-v7",
+            "iterate-v8",
+            "recover-v8",
         }:
             explicit_provider = name in {
                 "iterate-v6",
                 "recover-v6",
                 "iterate-v7",
                 "recover-v7",
+                "iterate-v8",
+                "recover-v8",
             }
             command.add_argument(
                 "--codex-executable",
@@ -161,7 +183,9 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
             )
             command.add_argument("--parent-run", type=Path, required=True)
             command.add_argument("--expected-parent-hash", required=True)
-        if name in {"iterate-v7", "recover-v7"}:
+        if name in {
+            "iterate-v7", "recover-v7", "iterate-v8", "recover-v8"
+        }:
             command.add_argument(
                 "--challenge-manifest",
                 type=Path,
@@ -212,6 +236,8 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
             command.add_argument("--failed-run", type=Path, required=True)
         if name == "recover-v7":
             command.add_argument("--failed-run", type=Path, required=True)
+        if name == "recover-v8":
+            command.add_argument("--failed-run", type=Path, required=True)
         if name in {"measure-policy-kl", "recover-policy-kl"}:
             command.add_argument(
                 "--reference-manifest",
@@ -242,6 +268,15 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
                 required=True,
             )
         if name == "recover-policy-kl-v7":
+            command.add_argument("--failed-run", type=Path, required=True)
+        if name in {"extend-policy-kl-v8", "recover-policy-kl-v8"}:
+            command.add_argument(
+                "--reference-manifest", type=Path, required=True
+            )
+            command.add_argument("--source-run", type=Path, required=True)
+            command.add_argument("--target-run", type=Path, required=True)
+            command.add_argument("--expected-target-hash", required=True)
+        if name == "recover-policy-kl-v8":
             command.add_argument("--failed-run", type=Path, required=True)
     return parser
 
@@ -306,6 +341,32 @@ def handle(args) -> int:
                     sort_keys=True,
                 )
             )
+            return 0 if result.status == "complete" else 1
+        if args.generals_command in {
+            "extend-policy-kl-v8", "recover-policy-kl-v8"
+        }:
+            pipeline = GeneralsPolicyKLV8ExtensionPipeline.from_paths(
+                agentbench_root=args.agentbench_root,
+                manifest_path=args.manifest,
+                reference_manifest_path=args.reference_manifest,
+                source_run_dir=args.source_run,
+                target_run_dir=args.target_run,
+                expected_target_hash=args.expected_target_hash,
+                data_dir=args.data_dir,
+            )
+            result = (
+                pipeline.run()
+                if args.generals_command == "extend-policy-kl-v8"
+                else pipeline.recover(args.failed_run)
+            )
+            print(json.dumps({
+                "status": result.status,
+                "run_dir": str(result.run_dir),
+                "source_run_id": result.summary.get("source_run_id"),
+                "controlled_reference_policy_kl": result.summary.get(
+                    "controlled_reference_policy_kl"
+                ),
+            }, sort_keys=True))
             return 0 if result.status == "complete" else 1
         if args.generals_command in {
             "measure-policy-kl",
@@ -535,6 +596,36 @@ def handle(args) -> int:
                 "validation_passed": result.validation_passed,
                 "sealed_status": result.sealed_status,
                 "champion_claim": result.champion_claim,
+                "global_act_count": result.global_act_count,
+                "round_act_count": result.round_act_count,
+                "runnable": result.runnable,
+            }, sort_keys=True))
+            return 0 if result.status == "complete" else 1
+        if args.generals_command in {"iterate-v8", "recover-v8"}:
+            pipeline = GeneralsHLRound8Pipeline.from_paths(
+                agentbench_root=args.agentbench_root,
+                manifest_path=args.manifest,
+                challenge_manifest_path=args.challenge_manifest,
+                replay_skill_path=args.replay_skill,
+                parent_run_dir=args.parent_run,
+                expected_parent_hash=args.expected_parent_hash,
+                data_dir=args.data_dir,
+                provider=provider,
+            )
+            result = (
+                pipeline.run()
+                if args.generals_command == "iterate-v8"
+                else pipeline.recover(args.failed_run)
+            )
+            print(json.dumps({
+                "status": result.status,
+                "run_dir": str(result.run_dir),
+                "raw_score": result.raw_score,
+                "evo_score_8": result.evo_score_8,
+                "gain_8": result.gain_8,
+                "validation_passed": result.validation_passed,
+                "formal_attempted": result.formal_attempted,
+                "performance_target_met": result.performance_target_met,
                 "global_act_count": result.global_act_count,
                 "round_act_count": result.round_act_count,
                 "runnable": result.runnable,
