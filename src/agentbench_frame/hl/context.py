@@ -24,62 +24,10 @@ from agentbench_frame.hl.reference import BenchmarkSpec
 from agentbench_frame.hl.resources import MatchHistoryView
 
 
-# The inline playback recipe (condensed from the SKILL.md so the coding agent
-# can read replays without the skill being loaded). Kept short — just enough
-# to orient, with the absolute skill path for the full version.
-_PLAYBACK_RECIPE = """\
-Replays are JSON arrays: [birthplaces, round_1, ..., round_N, score_dic].
-  - r[1:-1]   = rounds; each round is 4 turns (one per seat 0..3).
-  - r[-1]     = score_dic {"0":4,"1":3,...} (4=1st ... 1=4th). You are seat 0.
-  - Coords are shifted by -3: grid = replay + 3. Capsule is at grid [3,3,0].
-  - Action `type` values: move/flink, attack, getkey, keymachine,
-    escape_capsule (to_escape), escaped (won), place_trap, detect, died,
-    regenerate, ai_error. `ai_error` on seats 1-3 is background noise
-    (ranked algos rely on judger TLE) — only worry about seat 0.
-Quick scan: python -c "import json;print(json.load(open('REPLAY'))[-1])"
-Full reader: see AgentBenchResults/skills/lostspace-playback/SKILL.md"""
-
-_GAME_RULES_BLURB = (
-    "LostSpace: 4-player FFA on a 7x7x3 grid. Win by collecting 4 corner keys "
-    "(one per KeyMachine) then escaping via the center capsule. Scoring: "
-    "+1 key, +2 kill, -3 death. Ranking = escape order, then survivors by "
-    "score. First to escape = rank 1."
-)
-
-# The full human-written rules + replay skill doc (lostspace/docs/REPLAY_SKILL.md)
-# injected verbatim so the coding agent sees the authoritative rules, not a
-# 4-line blurb (doc Fix-D). Falls back to the blurb if the file is missing.
-_RULES_DOC_RELPATH = (
-    Path(__file__).resolve().parent.parent / "lostspace" / "docs" / "REPLAY_SKILL.md"
-)
-_rules_doc_cache: Optional[str] = None
-
-
-def _load_rules_doc() -> str:
-    global _rules_doc_cache
-    if _rules_doc_cache is None:
-        try:
-            _rules_doc_cache = _RULES_DOC_RELPATH.read_text(encoding="utf-8").strip()
-        except OSError:
-            _rules_doc_cache = _GAME_RULES_BLURB
-    return _rules_doc_cache
-
-_DATA_SCHEMA_BLURB = (
-    "`self.view.nodes[i].interprops` is a list of INTEGER CODES / objects "
-    "(1=EscapeCapsule, 2=KeyMachine); the agent client also appends the "
-    "string 'Box'. It is NOT a list of strings like 'KeyMachine', so "
-    "`if 'KeyMachine' in interprops` (or 'EscapeCapsule') is always False — "
-    "never gate an action on it. Safe pattern (already used by the seed): "
-    "call the action blind, then branch on the returned `['success']`, e.g. "
-    "`if self.interact('KeyMachine')['success']: return` — the server returns "
-    "success only when the action is valid. Win condition: interact with each "
-    "of the 4 corner KeyMachines (collect 4 keys), then interact with the "
-    "center EscapeCapsule. An agent that never calls interact('KeyMachine') "
-    "can never win. You START with your own key; each KeyMachine grants its "
-    "key at the start of your NEXT round. To START the escape you must send "
-    "`interact('EscapeCapsule', True)` — `False` only aborts an in-progress "
-    "escape and is rejected while Alive (`interactive_props.py:113`)."
-)
+# All static prompt copy (system prompt, blurbs, recipes, mission blocks,
+# feedback fragments) lives in ``prompts.py`` — edit it there, not here.
+# This module only assembles dynamic per-act sections from live match data.
+from agentbench_frame.hl import prompts
 
 
 class ContextBuilder:
@@ -158,22 +106,10 @@ class ContextBuilder:
             "You are editing a LostSpace agent in this workspace. "
             "Your goal is to raise its win rate against the benchmark "
             f"opponents ({', '.join(self.spec.opponents)}).\n"
-            "RULES OF ENGAGEMENT:\n"
-            "- Edit only the agent source (`agent.py` and any helper modules "
-            "in this directory). Do NOT touch `manifest.toml`.\n"
-            "- The agent may be ANY interpretable Python — not just if-else. "
-            "You are encouraged to use utility/scoring functions, weighted "
-            "evaluation of candidate moves, bounded lookahead or shallow "
-            "search, explicit planners, and parametrized decision tables — "
-            "whichever is the smallest change that fixes the weakest matchup. "
-            "The only constraint: the logic must stay HUMAN-READABLE (no "
-            "opaque black-box blobs, no dumped learned weights without an "
-            "interpretable wrapper).\n"
-            "- Keep the Saiblo stdio protocol intact (read 4-byte "
-            "length-prefixed JSON, send the same).\n"
+            + prompts.RULES_OF_ENGAGEMENT
         )
-        lines.append(f"## Game rules\n{_load_rules_doc()}\n")
-        lines.append(f"## Data schema\n{_DATA_SCHEMA_BLURB}\n")
+        lines.append(f"## Game rules\n{prompts.load_rules_doc()}\n")
+        lines.append(f"## Data schema\n{prompts.DATA_SCHEMA_BLURB}\n")
 
         history = self._history_section()
         if history:
@@ -187,24 +123,20 @@ class ContextBuilder:
             # ready to read them on later acts.
             lines.append(
                 "## How to read replays (later acts will have them)\n"
-                + _PLAYBACK_RECIPE + "\n"
+                + prompts.PLAYBACK_RECIPE + "\n"
             )
 
         if version_before is not None:
             lines.append(
                 "## Your previous version\n"
-                f"- version_id: {version_before.version_id}\n"
-                f"- content_hash: {version_before.content_hash}\n"
-                f"- edit_type: {version_before.edit_type}\n"
-                "The workspace currently holds your last edit. Read the "
-                "current `agent.py` to see where you left off.\n"
+                + prompts.PREVIOUS_VERSION.format(
+                    version_id=version_before.version_id,
+                    content_hash=version_before.content_hash,
+                    edit_type=version_before.edit_type,
+                ) + "\n"
             )
         else:
-            lines.append(
-                "## First act\nThis is the initial version. Read `agent.py`, "
-                "understand the current strategy, and make the first "
-                "improvement.\n"
-            )
+            lines.append("## First act\n" + prompts.FIRST_ACT + "\n")
 
         feedback = self._feedback_section(
             prev_feedback, loc_history=loc_history,
@@ -221,62 +153,11 @@ class ContextBuilder:
             lines.append(self._consolidation_mission())
         else:
             lines.append(
-                "## What to do now\n"
-                "1. Read `agent.py`.\n"
-                "2. Use the match history above to find the weakest matchup; "
-                "read one of its replays if you need to see *why*.\n"
-                "3. Make a targeted improvement — a new/adjusted rule, a "
-                "utility/scoring function, or a bounded lookahead — "
-                "whichever is the smallest change that fixes it.\n"
-                "4. Leave the agent runnable (valid Python, protocol intact).\n"
-                "\n"
-                "## REQUIRED: a behavioral change (not a refactor)\n"
-                "Your edit MUST change the action the agent takes in at least "
-                "one reachable game situation — a different move direction, an "
-                "attack instead of a move, an interact/escape when it would "
-                "otherwise not, a reweighted candidate ranking that flips the "
-                "argmax. A pure rename, reformat, helper-extraction, or comment "
-                "with NO change to any emitted action is a FAILED act: the "
-                "harness measures policy_kl over reference decision points and "
-                "a zero-KL edit teaches nothing. If you believe the current "
-                "policy is already optimal, say so explicitly and make no edit "
-                "— but do not dress a no-op up as a refactor.\n"
-                "\n"
-                "### WHERE the measurement looks — edit HERE\n"
-                "The harness measures the FIRST action that `play()` sends each "
-                "turn. In this agent `play()` short-circuits top-down: attack "
-                "branch, then Kit-at-low-hp, then `view_box(\"Box\")` / "
-                "`interact(\"KeyMachine\")`, and only falls through to "
-                "`test_move()` when all of those would fail. So edits INSIDE "
-                "`test_move()` (bfs weights, scoring) change the move TARGET but "
-                "NOT the first emitted action — they register as policy_kl=0. "
-                "To register, edit the TOP of `play()`: which branch fires "
-                "first (attack threshold, the Kit-use threshold, whether to "
-                "interact a prop vs move now). A flip on any 'reference "
-                "first-actions' row in the feedback is a valid update.\n"
+                prompts.WHAT_TO_DO_NOW + "\n" + "\n"
+                + prompts.REQUIRED_BEHAVIORAL_CHANGE + "\n" + "\n"
+                + prompts.MEASUREMENT_LOCATION + "\n"
             )
-        lines.append(
-            "## STAY ON MISSION — read this before acting\n"
-            "Your job is to edit `agent.py`, not to debug the harness.\n"
-            "- If the match history shows EVERY match as an `error` "
-            "(win_rate is null / '-' across all opponents), that is a "
-            "harness or environment problem — NOT a strategy problem. "
-            "Do NOT try to fix the eval, the logic, or the judger. Do NOT "
-            "inspect `agentbench_data/` internals.\n"
-            "- You MAY read the ranked reference algorithms under "
-            "`AgentBench/top_algorithms/corpus/25_lostspace_final_ladder/` "
-            "for strategy and mechanics research (status enums, operation "
-            "sequencing, scoring, tile types) — that is legitimate strategy "
-            "research, not harness debugging. Do not copy them verbatim and "
-            "do not edit anything outside `agent.py`.\n"
-            "- Even with no usable eval signal, make ONE small, reasoned "
-            "edit to `agent.py` based on reading the current strategy, then "
-            "stop. If you genuinely believe the agent is already optimal, "
-            "say so explicitly and make no edit — but do not spend your "
-            "budget investigating the harness.\n"
-            "- You have a strict per-act time budget. Do not exhaust it on "
-            "exploration. Edit, then finish.\n"
-        )
+        lines.append(prompts.STAY_ON_MISSION + "\n")
         return "\n".join(lines)
 
     def _feedback_section(self, fb: Optional[Dict[str, Any]], *,
@@ -306,10 +187,10 @@ class ContextBuilder:
         n_changed = fb.get("n_changed", 0)
         n_total = fb.get("n_total", 0)
         occ = fb.get("occupancy_shift")
-        behavior = (
-            f"policy_kl={fmt(kl_mean, '%.4g')} — your edit changed the chosen "
-            f"action on {n_changed}/{n_total} reference decision points; "
-            f"occupancy_shift={fmt(occ, '%.3g')}"
+        behavior = prompts.FEEDBACK_BEHAVIOR_LINE.format(
+            kl_mean=fmt(kl_mean, '%.4g'),
+            n_changed=n_changed, n_total=n_total,
+            occupancy=fmt(occ, '%.3g'),
         )
         parts = [
             "## Feedback on your last edit",
@@ -342,10 +223,8 @@ class ContextBuilder:
                 a = " ".join(str(x) for x in act) if isinstance(act, list) else act
                 rows.append(f"  {a}: {r['count_old']} -> {r['count_new']}")
             parts.append(
-                f"- action-frequency KL={fmt(action_kl, '%.4g')} — your "
-                "full-match action mix vs last version (counts across all "
-                "matches):\n"
-                + "\n".join(rows)
+                prompts.ACTION_FREQ_INTRO.format(action_kl=fmt(action_kl, '%.4g'))
+                + "\n" + "\n".join(rows)
             )
         # Per-measurable-point first-action digest: name the exact decision
         # points the edit did (not) move, so the next edit has a concrete
@@ -362,11 +241,7 @@ class ContextBuilder:
             parts.append(
                 "- reference first-actions (both versions in-support):\n"
                 + "\n".join(rows)
-                + "\n  To register a policy update, change the FIRST action on "
-                  "at least one of these points this act (e.g. a different "
-                  "move direction, attack instead of heal, stop calling "
-                  "interact('Box') when the tile has no Box). The harness "
-                  "measures the first action the agent sends at each point."
+                + "\n" + prompts.REF_POINTS_CTA
             )
         # No-op callout: the edit landed but changed zero reference decisions
         # and produced no occupancy shift. This is the exact failure mode that
@@ -376,14 +251,7 @@ class ContextBuilder:
             and (occ is None or occ == 0)
         )
         if no_behavior_change:
-            parts.append(
-                "- NO MEASURABLE EFFECT: your last edit changed nothing "
-                "observable (0/" + f"{n_total} decisions changed, no occupancy "
-                "shift). It likely lands in a code path the game never reaches, "
-                "or is dominated by other logic. This act, edit the ACTIVE "
-                "decision path — the branch actually taken when seat 0 is alive "
-                "— or say explicitly that the agent is optimal and make no edit."
-            )
+            parts.append(prompts.NO_MEASURABLE_EFFECT.format(n_total=n_total))
         nudge = self._growth_nudge(loc_history, edit_type_history)
         if nudge:
             parts.append(nudge)
@@ -408,13 +276,8 @@ class ContextBuilder:
         growth_pct = (last - first) / first * 100.0
         if growth_pct < self.max_growth_pct:
             return ""
-        return (
-            f"- CODE GROWTH: agent.py grew {first} -> {last} lines "
-            f"(+{growth_pct:.0f}%) over the last {len(piling)} piling acts "
-            f"with no consolidation. Consider a consolidation pass next "
-            f"(merge overlapping branches, extract helpers, remove dead "
-            f"rules) to keep the strategy from sprawling."
-        )
+        return prompts.CODE_GROWTH.format(
+            first=first, last=last, pct=growth_pct, n_piling=len(piling))
 
     def _experience_section(self) -> str:
         """Render accumulated lessons (HL std 5). The agent-authored
@@ -425,12 +288,8 @@ class ContextBuilder:
         rendered = self.experience.render()
         if not rendered:
             return ""
-        return (
-            "## Lessons learned so far\n"
-            f"{rendered}\n"
-            f"Experience file (read & re-summarize on consolidation acts): "
-            f"{self.experience.path}\n"
-        )
+        return prompts.EXPERIENCE_SECTION.format(
+            rendered=rendered, path=self.experience.path)
 
     def _consolidation_mission(self) -> str:
         """The periodic consolidation mission (HL std 4): swap the act's goal
@@ -444,19 +303,8 @@ class ContextBuilder:
                 "into a 'Retired ideas' section, and keep it short. This is "
                 "your self-summarized memory — compress it, don't just append."
             )
-        return (
-            "## CONSOLIDATION ACT — compress, do NOT pile on\n"
-            "This act is a consolidation pass, not a new-feature act. Do NOT "
-            "add new behavior.\n"
-            "1. In `agent.py`: merge overlapping/duplicate decision branches, "
-            "extract shared logic into helper functions, remove dead or "
-            "superseded code paths, and tighten parametrization. Keep the "
-            "agent's chosen action on every reference decision point "
-            "UNCHANGED (behavior-preserving refactor)." + xp_edit + "\n"
-            "3. Leave the agent runnable (valid Python, protocol intact). "
-            "If you find nothing to consolidate, say so explicitly and make "
-            "no edit.\n"
-        )
+        return prompts.CONSOLIDATION_MISSION.format(
+            experience_edit=xp_edit) + "\n"
 
     def _history_section(self) -> str:
         view = MatchHistoryView(
@@ -507,7 +355,7 @@ class ContextBuilder:
         digest = self._seat0_digest_line(run_dir, latest)
         if digest:
             out.append(f"- {digest}")
-        out += ["", "How to read a replay:", _PLAYBACK_RECIPE]
+        out += ["", "How to read a replay:", prompts.PLAYBACK_RECIPE]
         return "\n".join(out)
 
     @staticmethod

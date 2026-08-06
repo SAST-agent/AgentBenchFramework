@@ -452,7 +452,7 @@ class HLIterationController:
         could be resolved or materialized (a ``validation_status="no_replay"``
         event is still written so the absence is visible in the stream).
         """
-        from agentbench_frame.hl.context import _load_rules_doc
+        from agentbench_frame.hl import prompts
         from agentbench_frame.hl.naming import act_name
 
         act_id = act_name(self.run_id, 0)
@@ -465,8 +465,8 @@ class HLIterationController:
             self._events.flush()
             return None
 
-        prompt = _VALIDATION_PROMPT.format(
-            rules=_load_rules_doc(), replay=replay,
+        prompt = prompts.VALIDATION_PROMPT.format(
+            rules=prompts.load_rules_doc(), replay=replay,
         )
         context: Dict[str, Any] = {
             "act_id": act_id,
@@ -970,35 +970,6 @@ class HLIterationController:
             return p.read_text(encoding="utf-8").count("\n")
         except Exception:
             return 0
-
-
-#: The rules_validation act prompt (doc Fix-D). The agent's deliverable is its
-#: FINAL MESSAGE in the exact report format below — the harness parses the
-#: ``SCORE_DIC`` line and cross-checks it against the replay's real ``r[-1]``.
-_VALIDATION_PROMPT = """\
-# REPLAY_SKILL validation act — prove you read the rules and replay format correctly
-
-This is NOT an edit act. Do NOT call `str_replace`. Do NOT modify any file.
-
-Read the authoritative rules + replay skill doc below, then parse ONE round of
-the real replay at `{replay}` (use the `read_replay` tool):
-- For a chosen round and your seat 0, write the meaning of each field in the
-  first action dict, and what you conclude the player did.
-- State the `score_dic` you read from the replay's last element and the
-  resulting ranking (sort player ids by score descending; 4 = 1st, 1 = 4th).
-
-You MAY use `read_replay` to inspect the replay. Your deliverable is your
-FINAL message, ending with exactly three lines:
-
-FIELDS_CHECKED: <int>
-SCORE_DIC: <the score_dic you read, as JSON like {{"0": 4, "1": 3, "2": 2, "3": 1}}>
-MISMATCHES: <comma-separated list, or "none">
-
-If you cannot complete the parse, say so and emit SCORE_DIC: none.
-
---- rules + replay skill doc ---
-{rules}
-"""
 
 
 def _parse_validation_report(final_text: str) -> Dict[str, Any]:
