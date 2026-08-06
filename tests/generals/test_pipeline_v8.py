@@ -250,11 +250,13 @@ class Round8Provider:
         forbidden_file=False,
         failing_test=False,
         long_macro=False,
+        compressed_docs=False,
     ):
         self.fail = fail
         self.forbidden_file = forbidden_file
         self.failing_test = failing_test
         self.long_macro = long_macro
+        self.compressed_docs = compressed_docs
         self.calls = 0
         self.prompt = None
 
@@ -263,12 +265,15 @@ class Round8Provider:
         self.prompt = context["prompt"]
         workspace = Path(context["workspace_root"])
         (workspace / "STRATEGY.md").write_text(
-            "Beam width: 4\n"
-            "Family top-k: 2\n"
-            "Macro limit: 8\n"
-            "Phase weights: opening/economy/contact/assault\n"
-            "Tie order: command,row,column\n"
-            "Fallback: v7 commands 1/3/5\n",
+            (
+                "Deterministic policy with legal commands, main safety, "
+                "macro limit, lexicographic ties, and verified prefix.\n"
+                if self.compressed_docs else
+                "Beam width: 4\nFamily top-k: 2\nMacro limit: 8\n"
+                "Phase weights: opening/economy/contact/assault\n"
+                "Tie order: command,row,column\n"
+                "Fallback: v7 commands 1/3/5\n"
+            ),
             encoding="utf-8",
         )
         (workspace / "EXPERIENCE.md").write_text(
@@ -449,5 +454,4 @@ def test_clean_room_v8_protected_file_mutation_is_rejected(tmp_path):
     assert provider.calls == 1
     assert result.runnable is False
     assert result.formal_attempted is False
-
 

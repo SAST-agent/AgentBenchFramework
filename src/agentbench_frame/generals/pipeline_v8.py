@@ -461,12 +461,12 @@ class GeneralsHLRound8Pipeline(GeneralsHLRound7Pipeline):
             encoding="utf-8"
         ).casefold()
         strategy_groups = (
-            ("beam",),
-            ("top-k", "top k"),
+            ("policy", "planner", "beam"),
+            ("deterministic", "tie", "lexicographic"),
             ("macro",),
-            ("phase",),
-            ("tie",),
-            ("fallback",),
+            ("command", "primitive"),
+            ("main", "general", "phase"),
+            ("fallback", "verified prefix", "safe prefix"),
         )
         experience_groups = (
             ("retain", "retained"),
@@ -1716,7 +1716,11 @@ class GeneralsHLRound8Pipeline(GeneralsHLRound7Pipeline):
         failed_run: Path,
         summary: Mapping[str, object],
     ) -> WorkspaceManifest | None:
-        if summary.get("runnable") is not True:
+        revalidate_invalid = (
+            summary.get("status") == "invalid_version"
+            and summary.get("round_act_count") == 1
+        )
+        if summary.get("runnable") is not True and not revalidate_invalid:
             return None
         source = failed_run / "versions" / "v8" / "source"
         manifest_path = failed_run / "versions" / "v8" / "manifest.json"
@@ -1734,6 +1738,19 @@ class GeneralsHLRound8Pipeline(GeneralsHLRound7Pipeline):
             raise ValueError(
                 "recovery v8 source does not match its manifest"
             )
+        if revalidate_invalid:
+            v7_source = failed_run / "versions/v7/source"
+            if not (
+                self._scope_valid(manifest.changed_files)
+                and self._required_frozen_files_valid(source, manifest)
+                and self._runtime_source_valid(source)
+                and self._strategy_documents_valid(source)
+                and (source / "main.py").read_bytes()
+                == (v7_source / "main.py").read_bytes()
+            ):
+                raise ValueError(
+                    "frozen invalid v8 candidate still fails source validation"
+                )
         return manifest
 
     def _recover_frozen_v8(
