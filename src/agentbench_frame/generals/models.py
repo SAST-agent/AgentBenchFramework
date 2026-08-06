@@ -104,6 +104,34 @@ class Round7ChallengeConfig:
 
 
 @dataclass(frozen=True)
+class Round8ChallengeConfig:
+    challenge_id: str
+    opponent_id: str
+    learning_seeds: tuple[int, ...]
+    validation_seeds: tuple[int, ...]
+    seats: tuple[int, ...]
+    validation_min_wins: int
+    validation_min_wins_per_seat: int
+    formal_high_min_wins: int
+    formal_total_min_wins: int
+    formal_high_min_wins_per_seat: int
+    engine_sha256: str
+    replay_skill_sha256: str
+
+    @property
+    def validation_threshold(self) -> tuple[int, int]:
+        return self.validation_min_wins, self.validation_min_wins_per_seat
+
+    @property
+    def formal_success_threshold(self) -> tuple[int, int, int]:
+        return (
+            self.formal_high_min_wins,
+            self.formal_total_min_wins,
+            self.formal_high_min_wins_per_seat,
+        )
+
+
+@dataclass(frozen=True)
 class HistoricalPolicyConfig:
     version: str
     run_id: str
