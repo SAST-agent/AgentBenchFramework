@@ -11,8 +11,6 @@ from typing import Any, Mapping, Sequence
 
 from .challenge_v9 import (
     ROUND9_ATTRIBUTION_SEEDS,
-    ROUND9_PARENT_HASH,
-    ROUND9_PREDECESSOR_HASH,
     ROUND9_VALIDATION_SEEDS,
 )
 from .measurement_state import measurement_state_id
@@ -91,13 +89,16 @@ def _digest_matches(text: str, digest: str, label: str) -> None:
 def _policy_hashes(
     report: Mapping[str, Any],
     expected: Mapping[str, str],
+    *,
+    policy_parent_hash: str,
+    iteration_predecessor_hash: str,
 ) -> dict[str, str]:
     if set(expected) != set(_CELLS):
         raise ValueError("expected policy hashes must contain A, B, C, and D")
-    if expected["A"] != ROUND9_PARENT_HASH:
-        raise ValueError("cell A must be the frozen v7 policy parent")
-    if expected["D"] != ROUND9_PREDECESSOR_HASH:
-        raise ValueError("cell D must be the frozen v8 predecessor")
+    if expected["A"] != policy_parent_hash:
+        raise ValueError("cell A must be the v7 policy parent")
+    if expected["D"] != iteration_predecessor_hash:
+        raise ValueError("cell D must be the v8 predecessor")
     policies = report.get("policies")
     if not isinstance(policies, list) or len(policies) != 4:
         raise ValueError("attribution report must contain four policies")
@@ -256,6 +257,7 @@ def build_round9_prompt(
     benchmark_id: str,
     attribution_run_dir: Path,
     policy_parent_hash: str,
+    iteration_predecessor_hash: str,
     expected_policy_hashes: Mapping[str, str],
     v7_strategy: str,
     v7_experience: str,
@@ -269,15 +271,15 @@ def build_round9_prompt(
 
     if type(max_bytes) is not int or max_bytes <= 0 or max_bytes > ROUND9_PROMPT_MAX_BYTES:
         raise ValueError("round-9 prompt maximum is 196608 bytes")
-    if policy_parent_hash != ROUND9_PARENT_HASH:
-        raise ValueError("round-9 policy parent must be the frozen v7 hash")
+    if not re.fullmatch(r"[0-9a-f]{64}", policy_parent_hash):
+        raise ValueError("round-9 policy parent hash is invalid")
+    if not re.fullmatch(r"[0-9a-f]{64}", iteration_predecessor_hash):
+        raise ValueError("round-9 iteration predecessor hash is invalid")
     _digest_matches(rules_text, rules_sha256, "rules")
     _digest_matches(replay_skill_text, replay_skill_sha256, "replay skill")
     for label, text in (
         ("v7 strategy", v7_strategy),
         ("v7 experience", v7_experience),
-        ("rules", rules_text),
-        ("replay skill", replay_skill_text),
     ):
         _reject_forbidden(text, label)
 
@@ -317,7 +319,12 @@ def build_round9_prompt(
         or report.get("coding_agent_act_count") != 0
     ):
         raise ValueError("attribution report boundary changed")
-    policy_hashes = _policy_hashes(report, expected_policy_hashes)
+    policy_hashes = _policy_hashes(
+        report,
+        expected_policy_hashes,
+        policy_parent_hash=policy_parent_hash,
+        iteration_predecessor_hash=iteration_predecessor_hash,
+    )
     case_ids = _validate_cases(evidence)
     states = _validate_states(report, evidence, case_ids)
     state_ids = {str(state["measurement_state_id"]) for state in states}
@@ -439,7 +446,7 @@ SELECTED SAME-STATE DIAGNOSTICS (FIXED PRIORITY ORDER)
         "policy_parent_version": "v7",
         "policy_parent_hash": policy_parent_hash,
         "iteration_predecessor_version": "v8",
-        "iteration_predecessor_hash": ROUND9_PREDECESSOR_HASH,
+        "iteration_predecessor_hash": iteration_predecessor_hash,
         "provider_act_limit": 1,
         "diagnosis_report_sha256": report_hash,
         "diagnosis_evidence_sha256": evidence_hash,

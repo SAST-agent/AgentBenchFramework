@@ -23,7 +23,7 @@ POLICY_HASHES = {
 }
 
 
-def _attribution_run(root: Path) -> Path:
+def _attribution_run(root: Path, policy_hashes=POLICY_HASHES) -> Path:
     run = root / "runs/28_generals/generals-scientific-attribution/attribute-run"
     diagnosis = run / "diagnosis"
     diagnosis.mkdir(parents=True)
@@ -66,7 +66,7 @@ def _attribution_run(root: Path) -> Path:
         {
             "cell": cell,
             "policy_id": f"policy-{cell}",
-            "content_hash": POLICY_HASHES[cell],
+            "content_hash": policy_hashes[cell],
             "interventions": [],
             "source_authority": "v7" if cell != "D" else "v8",
         }
@@ -152,6 +152,7 @@ def _context(tmp_path: Path, **overrides):
         "benchmark_id": "generals-hl-pilot-v1",
         "attribution_run_dir": _attribution_run(tmp_path),
         "policy_parent_hash": ROUND9_PARENT_HASH,
+        "iteration_predecessor_hash": ROUND9_PREDECESSOR_HASH,
         "expected_policy_hashes": POLICY_HASHES,
         "v7_strategy": "deterministic v7 strategy",
         "v7_experience": "retained v7 experience",
