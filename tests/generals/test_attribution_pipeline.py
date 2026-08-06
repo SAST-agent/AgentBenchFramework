@@ -261,6 +261,10 @@ def test_attribution_pipeline_runs_four_cells_on_identical_cases(tmp_path):
     assert summary["formal_benchmark_opened"] is False
     assert summary["attribution"]["estimands"] == ["B-A", "C-A", "D-B-C+A"]
     assert summary["event_quality"]["unknown_event_types"] == 0
+    assert summary["diagnosis_report_hash"] == result.report_hash
+    assert summary["diagnosis_evidence_hash"] == __import__("hashlib").sha256(
+        (result.run_dir / "diagnosis/evidence.json").read_bytes()
+    ).hexdigest()
     assert (result.run_dir / "diagnosis/report.json").is_file()
     assert (result.run_dir / "diagnosis/report.md").is_file()
     assert (result.run_dir / "diagnosis/evidence.json").is_file()

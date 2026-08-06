@@ -480,13 +480,16 @@ class GeneralsAttributionPipeline:
             },
         }
         report_path = run_dir / "diagnosis/report.json"
-        _atomic_json(run_dir / "diagnosis/evidence.json", evidence)
+        evidence_path = run_dir / "diagnosis/evidence.json"
+        _atomic_json(evidence_path, evidence)
         _atomic_json(report_path, report_payload)
         _atomic_text(run_dir / "diagnosis/report.md", _report_markdown(_jsonable(report_payload)))
         report_hash = _file_hash(report_path)
+        evidence_hash = _file_hash(evidence_path)
         run.write(
             "attribution_report_frozen",
             report_hash=report_hash,
+            evidence_hash=evidence_hash,
             report_ref="diagnosis/report.json",
             evidence_ref="diagnosis/evidence.json",
         )
@@ -528,5 +531,7 @@ class GeneralsAttributionPipeline:
                     "markdown": "diagnosis/report.md",
                     "evidence": "diagnosis/evidence.json",
                 },
+                "diagnosis_report_hash": report_hash,
+                "diagnosis_evidence_hash": evidence_hash,
             },
         )
