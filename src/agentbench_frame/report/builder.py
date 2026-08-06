@@ -1057,11 +1057,32 @@ class ReportBuilder:
                 "validation_passed": summary.get("validation_passed"),
                 "sealed_status": summary.get("sealed_status"),
             }
+        round8 = None
+        if any(
+            key in summary
+            for key in (
+                "evo_score_8", "gain_8", "formal_attempted",
+                "performance_target_met", "formal_scores",
+            )
+        ):
+            round8 = {
+                "formal_attempted": summary.get("formal_attempted"),
+                "performance_target_met": summary.get(
+                    "performance_target_met"
+                ),
+                "validation_passed": summary.get("validation_passed"),
+                "formal_scores": (
+                    dict(summary["formal_scores"])
+                    if isinstance(summary.get("formal_scores"), dict)
+                    else {}
+                ),
+            }
         return {
             "benchmark_score": benchmark_score,
             "raw_score": raw_score,
             "evo_score": evo_score,
             "gain": gain,
+            "round8": round8,
             "evaluation_status": summary.get(
                 "evaluation_status"
             ) or summary.get(

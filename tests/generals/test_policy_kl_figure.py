@@ -111,6 +111,27 @@ def write_complete_v2_run(tmp_path):
     return run_dir
 
 
+def write_complete_v3_run(tmp_path):
+    run_dir = write_complete_v2_run(tmp_path)
+    summary_path = run_dir / "summary.json"
+    summary = json.loads(summary_path.read_text())
+    summary["measurement_id"] = "generals-policy-kl-reference-v3"
+    summary["controlled_reference_policy_kl"]["transitions"].append({
+        "version_before": "v7", "version_after": "v8",
+        "mean_kl_nats": 0.0,
+        "coverage": {"complete": 12, "total": 12},
+        "sensitivity": {
+            epsilon: {
+                "mean_kl_nats": 0.0,
+                "coverage": {"complete": 12, "total": 12},
+            }
+            for epsilon in SENSITIVITY
+        },
+    })
+    summary_path.write_text(json.dumps(summary))
+    return run_dir
+
+
 def test_loads_complete_figure_data(tmp_path):
     from agentbench_frame.generals.paper_figure import (
         load_policy_kl_figure_data,
@@ -145,6 +166,18 @@ def test_loads_complete_v2_figure_data(tmp_path):
     assert data.sensitivity["0.001"][-1] == 5.75
     assert len(data.transitions) == 7
     assert len(data.support_states) == 12
+
+
+def test_three_panel_figure_includes_v7_to_v8(tmp_path):
+    from agentbench_frame.generals.paper_figure import load_policy_kl_figure_data
+
+    data = load_policy_kl_figure_data(write_complete_v3_run(tmp_path))
+
+    assert data.transitions == (
+        "v0→v1", "v1→v2", "v2→v3", "v3→v4",
+        "v4→v5", "v5→v6", "v6→v7", "v7→v8",
+    )
+    assert data.primary_kl[-1] == 0.0
 
 
 def test_rejects_six_transition_v2_run(tmp_path):

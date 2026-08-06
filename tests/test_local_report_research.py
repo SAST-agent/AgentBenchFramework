@@ -1241,6 +1241,29 @@ class LocalResearchReportTests(unittest.TestCase):
         self.assertIn("missing", html)
         self.assertNotIn("0 / 20", html)
 
+    def test_round8_complete_and_provider_failed_keep_observed_scores_distinct(self):
+        from agentbench_frame.report.builder import ReportBuilder
+
+        complete = ReportBuilder._derive_research({
+            "status": "complete", "raw_score": 0.0,
+            "evo_score_8": 7 / 18, "gain_8": 7 / 18,
+            "formal_attempted": True, "performance_target_met": False,
+            "validation_passed": False,
+            "formal_scores": {"high": 0.0, "medium": 1 / 6, "low": 1.0},
+        }, [], "/missing/events.jsonl")
+        failed = ReportBuilder._derive_research({
+            "status": "provider_failed", "raw_score": 0.0,
+            "evo_score_8": None, "gain_8": None,
+            "formal_attempted": False, "performance_target_met": False,
+        }, [], "/missing/events.jsonl")
+
+        self.assertEqual(complete["evo_score"], 7 / 18)
+        self.assertEqual(complete["round8"]["formal_scores"]["low"], 1.0)
+        self.assertTrue(complete["round8"]["formal_attempted"])
+        self.assertIsNone(failed["evo_score"])
+        self.assertIsNone(failed["benchmark_score"])
+        self.assertFalse(failed["round8"]["formal_attempted"])
+
     def test_comparison_report_accepts_measurement_run_without_win_rate(self):
         from agentbench_frame.report.builder import ReportBuilder
 

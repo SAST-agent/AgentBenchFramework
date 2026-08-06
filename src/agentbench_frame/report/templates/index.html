@@ -24,6 +24,20 @@
   </div>
 </section>
 {% endif %}
+{% set round8 = lr.get('round8') %}
+{% if round8 %}
+{% set formal_scores = round8.get('formal_scores', {}) %}
+<section class="panel">
+  <div class="panel-header"><div><h2>{{ icon('flask') }} Clean-room v8 outcome</h2><p class="panel-subtitle">Observed validation and unchanged 18-game formal benchmark; missing stages remain missing.</p></div><div class="panel-meta">{% if round8.get('performance_target_met') %}<span class="status status-success">target met</span>{% else %}<span class="status status-warning">target not met</span>{% endif %}</div></div>
+  <div class="budget-grid">
+    <div class="budget-cell"><span class="budget-label">formal attempted</span><strong class="budget-value">{{ round8.get('formal_attempted') }}</strong></div>
+    <div class="budget-cell"><span class="budget-label">validation passed</span><strong class="budget-value">{{ round8.get('validation_passed') }}</strong></div>
+    <div class="budget-cell"><span class="budget-label">formal high</span><strong class="budget-value">{{ fmt_pct(formal_scores.get('high')) }}</strong></div>
+    <div class="budget-cell"><span class="budget-label">formal medium</span><strong class="budget-value">{{ fmt_pct(formal_scores.get('medium')) }}</strong></div>
+    <div class="budget-cell"><span class="budget-label">formal low</span><strong class="budget-value">{{ fmt_pct(formal_scores.get('low')) }}</strong></div>
+  </div>
+</section>
+{% endif %}
 {% set rollback = lr.get('version_rollback') %}
 {% if rollback %}
 <section class="panel">
