@@ -396,7 +396,10 @@ class _LazyAttributionEvaluator:
         if run is None and len(args) >= 4:
             run = args[3]
         if self.evaluator is None:
-            self.evaluator = self.helper._production_evaluator(Path(run.run_dir))
+            self.evaluator = self.helper._production_evaluator(
+                Path(run.run_dir),
+                capture_measurement_states=True,
+            )
         return self.evaluator.evaluate(*args, **kwargs)
 
 

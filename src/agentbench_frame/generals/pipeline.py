@@ -150,7 +150,12 @@ class GeneralsHLPipeline:
         require_valid_assets(assets)
         return cls(config, assets, data_dir, provider)
 
-    def _production_evaluator(self, run_dir: Path) -> GeneralsEvaluator:
+    def _production_evaluator(
+        self,
+        run_dir: Path,
+        *,
+        capture_measurement_states: bool = False,
+    ) -> GeneralsEvaluator:
         prepared = prepare_opponents(
             self.assets, run_dir / "prepared-opponents", Path(sys.executable)
         )
@@ -174,7 +179,12 @@ class GeneralsHLPipeline:
                 opponent_id=case.opponent,
                 opponent_tier=case.metadata["tier"],
             )
-            return runner.run(match_case, players, artifact_dir)
+            return runner.run(
+                match_case,
+                players,
+                artifact_dir,
+                capture_measurement_states=capture_measurement_states,
+            )
 
         return GeneralsEvaluator(self.config, execute)
 

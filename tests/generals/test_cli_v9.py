@@ -100,6 +100,31 @@ def test_routes_attribution_and_returns_one_for_incomplete(monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["run_dir"] == "/runs/attribution"
 
 
+def test_lazy_attribution_evaluator_enables_measurement_state_capture(monkeypatch):
+    captured = {}
+
+    class Helper:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def _production_evaluator(self, run_dir, **kwargs):
+            captured.update(run_dir=run_dir, **kwargs)
+            return SimpleNamespace(
+                evaluate=lambda *args, **kwargs: (args, kwargs)
+            )
+
+    monkeypatch.setattr(cli, "GeneralsHLPipeline", Helper)
+    lazy = cli._LazyAttributionEvaluator(object(), object(), Path("/data"))
+    run = SimpleNamespace(run_dir="/runs/attribution")
+
+    lazy.evaluate(run=run)
+
+    assert captured == {
+        "run_dir": Path("/runs/attribution"),
+        "capture_measurement_states": True,
+    }
+
+
 def test_routes_v9_recovery_without_constructing_codex(monkeypatch, capsys):
     args = parser().parse_args(v9_args("recover-v9"))
     captured = {}
