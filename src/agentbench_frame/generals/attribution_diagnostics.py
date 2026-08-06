@@ -296,6 +296,7 @@ def select_diagnostic_states(
             ("v7", v7_by_pair[pair_id]),
             ("v8", v8_by_pair[pair_id]),
         ):
+            policy_cell = {"v7": "A", "v8": "D"}[version]
             turns = [
                 turn for turn in match.turns if turn.player == match.evaluated_seat
             ]
@@ -332,7 +333,7 @@ def select_diagnostic_states(
                         measurement_state_id=state_id,
                         measurement_state=snapshot,
                         replay_ref=(
-                            f"matches/{version}/{match.case_id}/replay.jsonl"
+                            f"matches/{policy_cell}/{match.case_id}/replay.jsonl"
                         ),
                     )
                 )

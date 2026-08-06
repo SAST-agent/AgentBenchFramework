@@ -163,6 +163,12 @@ def test_diagnostic_selection_caps_two_states_per_source_and_four_per_pair():
     assert len(selected) <= 4
     assert sum(item.source_version == "v7" for item in selected) <= 2
     assert sum(item.source_version == "v8" for item in selected) <= 2
+    assert all(
+        item.replay_ref.startswith(
+            "matches/A/" if item.source_version == "v7" else "matches/D/"
+        )
+        for item in selected
+    )
 
 
 def test_compare_same_state_actions_probes_every_policy_on_identical_hash(tmp_path):
