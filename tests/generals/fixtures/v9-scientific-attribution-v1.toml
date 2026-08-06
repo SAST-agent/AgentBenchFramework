@@ -1,0 +1,17 @@
+challenge_id = "generals-hl-v9-scientific-attribution-v1"
+opponent_id = "advanced-rank02-robinliu-v18"
+attribution_seeds = [302101, 302202, 302303, 302404, 302505, 302606]
+validation_seeds = [303101, 303202, 303303, 303404, 303505, 303606]
+seats = [0, 1]
+diagnostic_max_states = 48
+validation_min_wins = 2
+validation_min_wins_per_seat = 1
+formal_total_min_wins = 13
+formal_high_min_wins = 2
+formal_high_min_wins_per_seat = 1
+parent_run_id = "20260730_1739_680b1632"
+parent_content_hash = "c1eb1e4eae5fb1afa393e15370d744743fe0af206cc05a329fa36bd62ca3c4c4"
+predecessor_run_id = "20260806_1126_8e1b6795"
+predecessor_content_hash = "3f69b81a1b4831a980084f8419b39292fa34feac43cb6b88aefe26da3898f35a"
+engine_sha256 = "4ca898365a6fe9a0cca39c3c8be0e49f449334814b106882c0b78b3aabdb1d97"
+replay_skill_sha256 = "0e8f01f8825ad3f351a330d324f2a558613bc98a61ca6adc80d69d3c90690b48"

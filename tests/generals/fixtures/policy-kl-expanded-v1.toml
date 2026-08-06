@@ -1,0 +1,79 @@
+measurement_id = "generals-policy-kl-expanded-v1"
+source_measurement_id = "generals-policy-kl-reference-v3"
+source_run_id = "20260806_1129_6085e1a6"
+source_tree_hash = "d1dcb9f058d2b09a2e6e66638bf30ea5a591c1fd62d345a4ffcf8b2076b32379"
+state_pack = "policy-kl-expanded-v1.states.json"
+epsilons = ["0.001", "0.01", "0.05", "0.1"]
+primary_epsilon = "0.01"
+
+[[intervention_state]]
+state_key = "contact-p0-a"
+scenario = "contact"
+actor = 0
+variant = 0
+
+[[intervention_state]]
+state_key = "contact-p1-b"
+scenario = "contact"
+actor = 1
+variant = 1
+
+[[intervention_state]]
+state_key = "main-danger-p0-a"
+scenario = "main_general_danger"
+actor = 0
+variant = 0
+
+[[intervention_state]]
+state_key = "main-danger-p1-b"
+scenario = "main_general_danger"
+actor = 1
+variant = 1
+
+[[intervention_state]]
+state_key = "large-stack-p0-a"
+scenario = "large_stack_routing"
+actor = 0
+variant = 0
+
+[[intervention_state]]
+state_key = "large-stack-p1-b"
+scenario = "large_stack_routing"
+actor = 1
+variant = 1
+
+[[intervention_state]]
+state_key = "economy-conflict-p0-a"
+scenario = "economy_combat_conflict"
+actor = 0
+variant = 0
+
+[[intervention_state]]
+state_key = "economy-conflict-p1-b"
+scenario = "economy_combat_conflict"
+actor = 1
+variant = 1
+
+[[intervention_state]]
+state_key = "counter-capture-p0-a"
+scenario = "counter_capture"
+actor = 0
+variant = 0
+
+[[intervention_state]]
+state_key = "counter-capture-p1-b"
+scenario = "counter_capture"
+actor = 1
+variant = 1
+
+[[intervention_state]]
+state_key = "consolidation-p0-a"
+scenario = "mid_late_consolidation"
+actor = 0
+variant = 0
+
+[[intervention_state]]
+state_key = "consolidation-p1-b"
+scenario = "mid_late_consolidation"
+actor = 1
+variant = 1

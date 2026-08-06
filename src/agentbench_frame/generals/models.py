@@ -145,6 +145,59 @@ class Round8ChallengeConfig:
 
 
 @dataclass(frozen=True)
+class Round9ChallengeConfig:
+    challenge_id: str
+    opponent_id: str
+    attribution_seeds: tuple[int, ...]
+    validation_seeds: tuple[int, ...]
+    seats: tuple[int, ...]
+    diagnostic_max_states: int
+    validation_min_wins: int
+    validation_min_wins_per_seat: int
+    formal_total_min_wins: int
+    formal_high_min_wins: int
+    formal_high_min_wins_per_seat: int
+    parent_run_id: str
+    parent_content_hash: str
+    predecessor_run_id: str
+    predecessor_content_hash: str
+    engine_sha256: str
+    replay_skill_sha256: str
+
+    @property
+    def validation_threshold(self) -> tuple[int, int]:
+        return self.validation_min_wins, self.validation_min_wins_per_seat
+
+    @property
+    def formal_success_threshold(self) -> tuple[int, int, int]:
+        return (
+            self.formal_total_min_wins,
+            self.formal_high_min_wins,
+            self.formal_high_min_wins_per_seat,
+        )
+
+
+@dataclass(frozen=True)
+class InterventionStateSpec:
+    state_key: str
+    scenario: str
+    actor: int
+    variant: int
+
+
+@dataclass(frozen=True)
+class ExpandedPolicyKLConfig:
+    measurement_id: str
+    source_measurement_id: str
+    source_run_id: str
+    source_tree_hash: str
+    state_pack: Path
+    epsilons: tuple[str, ...]
+    primary_epsilon: str
+    intervention_states: tuple[InterventionStateSpec, ...]
+
+
+@dataclass(frozen=True)
 class HistoricalPolicyConfig:
     version: str
     run_id: str

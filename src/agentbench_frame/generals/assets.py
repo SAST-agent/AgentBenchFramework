@@ -15,7 +15,9 @@ from .models import (
     AssetLayout,
     CalibrationConfig,
     CalibrationSelection,
+    ExpandedPolicyKLConfig,
     HistoricalPolicyConfig,
+    InterventionStateSpec,
     OpponentSpec,
     PilotConfig,
     PolicyKLExtensionConfig,
@@ -55,6 +57,21 @@ POLICY_KL_SOURCE_MEASUREMENT_ID = POLICY_KL_REFERENCE_ID
 POLICY_KL_SOURCE_RUN_ID = "20260730_1126_8d123b55"
 POLICY_KL_SOURCE_TREE_HASH = (
     "6203161e1056628d46bb974ed2ffaaf1b2d6a67581e80b57f0d92afa2bb41225"
+)
+EXPANDED_POLICY_KL_ID = "generals-policy-kl-expanded-v1"
+EXPANDED_POLICY_KL_SOURCE_ID = "generals-policy-kl-reference-v3"
+EXPANDED_POLICY_KL_SOURCE_RUN_ID = "20260806_1129_6085e1a6"
+EXPANDED_POLICY_KL_SOURCE_TREE_HASH = (
+    "d1dcb9f058d2b09a2e6e66638bf30ea5a591c1fd62d345a4ffcf8b2076b32379"
+)
+EXPANDED_POLICY_KL_STATE_PACK = Path("policy-kl-expanded-v1.states.json")
+EXPANDED_POLICY_KL_SCENARIOS = (
+    "contact",
+    "main_general_danger",
+    "large_stack_routing",
+    "economy_combat_conflict",
+    "counter_capture",
+    "mid_late_consolidation",
 )
 POLICY_KL_HISTORY = (
     (
@@ -128,6 +145,104 @@ def _tuple_strings(value: object, field: str) -> tuple[str, ...]:
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise AssetValidationError(f"{field} must be an array of strings")
     return tuple(value)
+
+
+def _strict_integer(value: object, field: str) -> int:
+    if type(value) is not int:
+        raise AssetValidationError(f"{field} must be an integer")
+    return value
+
+
+def load_expanded_kl_config(path: Path) -> ExpandedPolicyKLConfig:
+    """Load the frozen intervention-state domain without materializing it."""
+
+    try:
+        raw = tomllib.loads(Path(path).read_text(encoding="utf-8"))
+        states = tuple(
+            InterventionStateSpec(
+                state_key=str(item["state_key"]),
+                scenario=str(item["scenario"]),
+                actor=_strict_integer(item["actor"], "intervention actor"),
+                variant=_strict_integer(item["variant"], "intervention variant"),
+            )
+            for item in raw["intervention_state"]
+        )
+        config = ExpandedPolicyKLConfig(
+            measurement_id=str(raw["measurement_id"]),
+            source_measurement_id=str(raw["source_measurement_id"]),
+            source_run_id=str(raw["source_run_id"]),
+            source_tree_hash=str(raw["source_tree_hash"]),
+            state_pack=Path(str(raw["state_pack"])),
+            epsilons=_tuple_strings(raw["epsilons"], "expanded KL epsilons"),
+            primary_epsilon=str(raw["primary_epsilon"]),
+            intervention_states=states,
+        )
+    except (
+        OSError,
+        KeyError,
+        TypeError,
+        ValueError,
+        tomllib.TOMLDecodeError,
+    ) as exc:
+        raise AssetValidationError(
+            f"invalid expanded policy-KL manifest: {exc}"
+        ) from exc
+
+    exact = (
+        (config.measurement_id, EXPANDED_POLICY_KL_ID, "measurement_id"),
+        (
+            config.source_measurement_id,
+            EXPANDED_POLICY_KL_SOURCE_ID,
+            "source_measurement_id",
+        ),
+        (
+            config.source_run_id,
+            EXPANDED_POLICY_KL_SOURCE_RUN_ID,
+            "source_run_id",
+        ),
+        (
+            config.source_tree_hash,
+            EXPANDED_POLICY_KL_SOURCE_TREE_HASH,
+            "source_tree_hash",
+        ),
+        (config.state_pack, EXPANDED_POLICY_KL_STATE_PACK, "state_pack"),
+        (config.epsilons, POLICY_KL_EPSILONS, "epsilons"),
+        (
+            config.primary_epsilon,
+            POLICY_KL_PRIMARY_EPSILON,
+            "primary_epsilon",
+        ),
+    )
+    for observed, expected, field in exact:
+        if observed != expected:
+            raise AssetValidationError(
+                f"expanded policy-KL {field} must match the frozen contract"
+            )
+    expected_states = tuple(
+        InterventionStateSpec(
+            state_key=key,
+            scenario=scenario,
+            actor=actor,
+            variant=actor,
+        )
+        for scenario, keys in zip(
+            EXPANDED_POLICY_KL_SCENARIOS,
+            (
+                ("contact-p0-a", "contact-p1-b"),
+                ("main-danger-p0-a", "main-danger-p1-b"),
+                ("large-stack-p0-a", "large-stack-p1-b"),
+                ("economy-conflict-p0-a", "economy-conflict-p1-b"),
+                ("counter-capture-p0-a", "counter-capture-p1-b"),
+                ("consolidation-p0-a", "consolidation-p1-b"),
+            ),
+        )
+        for actor, key in enumerate(keys)
+    )
+    if config.intervention_states != expected_states:
+        raise AssetValidationError(
+            "expanded policy-KL intervention states must match the frozen contract"
+        )
+    return config
 
 
 def load_pilot_config(path: Path) -> PilotConfig:
