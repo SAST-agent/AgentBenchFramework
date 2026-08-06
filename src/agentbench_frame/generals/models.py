@@ -130,6 +130,19 @@ class Round8ChallengeConfig:
             self.formal_high_min_wins_per_seat,
         )
 
+    @property
+    def sealed_seeds(self) -> tuple[int, ...]:
+        """Compatibility view: clean-room v8 has no sealed suite."""
+        return ()
+
+    @property
+    def sealed_min_wins(self) -> int:
+        return 1
+
+    @property
+    def sealed_min_wins_per_seat(self) -> int:
+        return 1
+
 
 @dataclass(frozen=True)
 class HistoricalPolicyConfig:

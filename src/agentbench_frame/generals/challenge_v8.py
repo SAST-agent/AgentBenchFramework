@@ -16,6 +16,7 @@ from .challenge_v7 import (
     ROUND7_VALIDATION_SEEDS,
 )
 from .models import PilotConfig, Round8ChallengeConfig
+from .challenge_v7 import ChampionGate, evaluate_champion_gate
 
 
 ROUND8_CHALLENGE_ID = "generals-hl-v8-clean-room-v1"
@@ -136,3 +137,10 @@ def build_round8_validation_cases(
     pilot: PilotConfig, challenge: Round8ChallengeConfig
 ) -> tuple[BenchmarkCase, ...]:
     return _cases(pilot, challenge, challenge.validation_seeds, "validate8")
+
+
+def build_round8_sealed_cases(
+    pilot: PilotConfig, challenge: Round8ChallengeConfig
+) -> tuple[BenchmarkCase, ...]:
+    del pilot, challenge
+    return ()
