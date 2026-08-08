@@ -72,20 +72,69 @@ def _schedule(labels: list[str], n_matches: int, seed: int) -> list[list[str]]:
     return out
 
 
-def _run_one(pool, seats, logic_cmd, timeout, out_dir, idx):
+def _kill_tree(pid: int) -> None:
+    """Kill a process and all its descendants (Windows: taskkill /T)."""
+    import subprocess as _sp
+    try:
+        _sp.run(["taskkill", "/F", "/T", "/PID", str(pid)],
+                stdout=_sp.DEVNULL, stderr=_sp.DEVNULL)
+    except OSError:
+        pass
+
+
+def _run_one(pool, seats, logic_cmd, timeout, out_dir, idx, wall=300):
+    """Run match `idx` in an isolated subprocess with a hard wall-clock cap.
+
+    A few seeded 4-subsets deadlock in a way the per-read TLE doesn't catch
+    (a logic-side stall with no pending action request). Running each match in
+    its own worker process means such a hang is bounded: at `wall` seconds the
+    worker + its logic/AI children are killed and the match is recorded as a
+    wall_timeout error, so the tournament advances instead of hanging forever.
+    """
+    import subprocess as _sp
     cmds = [pool[s] for s in seats]
     replay = out_dir / "replays" / f"m{idx:05d}.json"
+    result_path = out_dir / f".result_{idx:05d}.json"
+    job_path = out_dir / f".job_{idx:05d}.json"
+    job_path.write_text(json.dumps({
+        "logic_cmd": logic_cmd, "ai_cmds": cmds, "timeout": timeout,
+        "replay_path": str(replay), "result_path": str(result_path),
+    }, ensure_ascii=False), encoding="utf-8")
     t0 = time.time()
+    proc = None
     try:
-        res = match.run_match(logic_cmd, cmds, timeout, replay,
-                              trace_path=None, media_player_seat=None)
-    except Exception as exc:  # noqa: BLE001
+        proc = _sp.Popen(
+            [sys.executable, "-m",
+             "agentbench_frame.lostspace.scripts.pool_tournament_worker",
+             str(job_path)],
+            stdout=_sp.DEVNULL, stderr=_sp.DEVNULL,
+        )
+        proc.wait(timeout=wall)
+    except _sp.TimeoutExpired:
+        if proc is not None:
+            _kill_tree(proc.pid)
+            try:
+                proc.wait(timeout=10)
+            except _sp.TimeoutExpired:
+                pass
         return {"idx": idx, "seats": seats,
-                "error": f"{type(exc).__name__}: {exc}",
+                "error": f"wall_timeout({wall}s)",
                 "wall_s": round(time.time() - t0, 2)}
-    return {"idx": idx, "seats": seats, "ranking": res["ranking"],
-            "end_info": res["end_info"], "turns": res["turns"],
-            "winner": res["winner"], "wall_s": round(time.time() - t0, 2)}
+    finally:
+        job_path.unlink(missing_ok=True)
+    if not result_path.is_file():
+        return {"idx": idx, "seats": seats, "error": "worker_no_result",
+                "wall_s": round(time.time() - t0, 2)}
+    out = json.loads(result_path.read_text(encoding="utf-8"))
+    result_path.unlink(missing_ok=True)
+    rec = {"idx": idx, "seats": seats,
+           "wall_s": out.get("wall_s", round(time.time() - t0, 2))}
+    if out.get("ok"):
+        rec.update({"ranking": out["ranking"], "end_info": out["end_info"],
+                    "turns": out["turns"], "winner": out["winner"]})
+    else:
+        rec["error"] = out.get("error", "worker_error")
+    return rec
 
 
 def _completed_indices(matches_path: Path) -> set[int]:
