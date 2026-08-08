@@ -1,11 +1,12 @@
-# Generals v9 Scientific Attribution — Partial Result
+# Generals v9 Scientific Attribution — Terminal Result
 
-Date: 2026-08-06
+Date: 2026-08-08
 
-Status: **blocked before v9 generation by the external Codex account usage
-limit**. The paired v8 scientific attribution is complete and auditable. No
-runnable v9 policy, v9 validation/formal score, expanded-24 KL run, or v9 paper
-figure is claimed.
+Status: **the single permitted v9 provider act completed, but the frozen
+candidate failed closed before candidate tests and evaluation**. The paired v8
+scientific attribution and the v9 provider receipt are complete and auditable.
+No runnable v9 policy, v9 validation/formal score, expanded-24 KL run, or v9
+paper figure is claimed.
 
 ## Frozen authorities
 
@@ -18,6 +19,9 @@ figure is claimed.
   `f134e91092adab1452fb3a006268c4a5a1b0fb518fef136b3f94973f3b8c88b5`.
 - Attribution evidence SHA-256:
   `b5ddc9c2024c924b248d0510e38dd8bc6185d9fba66a393d659f579080571711`.
+- Terminal v9 act run: `20260808_1224_bca2ad8f`.
+- Frozen changed-candidate hash:
+  `cf7af250fee8a61961e5fd94d20fb1eac9cf6a747b6438ee24f8d4e051ff512b`.
 
 ## Attribution validity
 
@@ -65,10 +69,10 @@ The same interaction reduces rounds survived. Large-stack priority alone has
 wide intervals containing zero. These are diagnostic effects on the selected
 states and cases, not evidence of a formal score improvement.
 
-The retained champion therefore remains v7. No v9 champion decision was
-opened.
+The retained champion therefore remains v7. The generated v9 candidate did not
+reach the runnable gate, so no champion decision was opened.
 
-## Provider blocker and act accounting
+## Provider act and candidate gate
 
 The first provider attempt (`20260806_1644_d5161186`) failed before Codex could
 initialize its local state database under the outer filesystem sandbox. Its raw
@@ -82,19 +86,63 @@ still the v7 hash and the run is correctly marked `invalid_version`. The
 provider reported that credits become available again at **2026-08-11 10:15
 Asia/Shanghai**.
 
-No further provider retry was made. Treat both records as failed provider
-preflights, not as completed heuristic-learning acts. The scientific v9 act,
-validation/formal evaluation, exact dual-domain KL, and final figures must be
-continued only after provider capacity is restored.
+Both records remain failed provider preflights rather than completed
+heuristic-learning acts.
 
-## Required continuation
+The authorized retry `20260808_1224_bca2ad8f` completed one provider act from
+the same frozen authorities. The exact receipt records:
 
-1. Re-run `iterate-v9` once from the same v7, v8, attribution report, replay
-   Skill, and frozen hashes after provider capacity is restored.
-2. If and only if the resulting v9 is runnable, require all 12 validation and
-   all 18 formal games.
-3. Run `measure-policy-kl-expanded` against the verified legacy v3 KL run and
-   runnable v9 hash. Do not accept approximate support counts.
-4. Generate the three English PNG/SVG figures from the completed authorities.
-5. Replace this partial status with the v9 score, dual-domain KL, final
-   champion decision, and artifact hashes.
+- prompt tokens: `3,146,682`;
+- completion tokens: `23,713`;
+- total tokens: `3,170,395`;
+- provider tool calls: `108`;
+- provider elapsed time: `651.0511644259968` seconds;
+- changed files: `strategy.py`, `tests/test_strategy.py`, `STRATEGY.md`, and
+  `EXPERIENCE.md`; and
+- frozen candidate hash:
+  `cf7af250fee8a61961e5fd94d20fb1eac9cf6a747b6438ee24f8d4e051ff512b`.
+
+The candidate added a compact phase scheduler, contact-before-economy ordering,
+a higher contact coin reserve, late-contact coin preservation, frozen-source
+skipping, and bounded projection of a safe large main stack through owned
+route cells. The provider's own assertion runner reported that its strategy
+tests passed. That is provider evidence only, not the Framework candidate-test
+receipt.
+
+The Framework version event was fail-closed with all of these checks true:
+
+- `provider_completed`;
+- `scope_valid`;
+- `manifest_valid`;
+- `required_files_valid`;
+- `main_unchanged`; and
+- `runtime_source_valid`.
+
+`strategy_documents_valid` was false, so candidate tests and policy probes were
+correctly skipped and `runnable` remained false. The exact gate mismatch was a
+whitespace-sensitive inherited check. It accepts a contiguous `fallback`,
+`verified prefix`, or `safe prefix` token in `STRATEGY.md`; the candidate wrote
+`verified` and `prefix` across a Markdown line break. The document conveyed the
+required verified-prefix rule semantically, but the frozen implementation gate
+does not normalize whitespace before matching it.
+
+This is recorded as an infrastructure false negative, not retroactively
+converted into a runnable candidate. The predeclared protocol permits no second
+v9 provider act and allows recovery only for an already hash-verified runnable
+candidate. Recovery also may not upgrade a failed candidate. Therefore the
+frozen run remains `invalid_version`, with no validation or formal games.
+
+## Terminal decision
+
+1. The one scientific v9 act is complete and immutable.
+2. Because v9 is not runnable, no validation or formal score is reported.
+3. `measure-policy-kl-expanded` is not run because its frozen contract requires
+   a runnable v9 source and hash.
+4. The v9 paper figures are not generated because the required v9 and expanded
+   KL authorities do not exist.
+5. v7 remains the champion at `12/18`; v8 remains the runnable regression at
+   `7/18`; v9 remains an invalid historical candidate with no score.
+
+The whitespace-normalization defect should be fixed and regression-tested for
+future rounds, but such a Framework change must not alter this v9 result or
+authorize post-hoc evaluation of its failed candidate.

@@ -47,6 +47,22 @@ def test_v9_recovery_uses_frozen_candidate_without_provider(tmp_path):
     assert summary["round_act_count"] == 1
 
 
+def test_v9_recovery_does_not_upgrade_invalid_candidate(tmp_path):
+    failed = _pipeline(
+        tmp_path / "invalid",
+        provider=V9Provider(mode="missing_docs"),
+        evaluator=V9Evaluator(),
+    ).run()
+    assert failed.runnable is False
+
+    with pytest.raises(ValueError, match="recovery authority is invalid"):
+        _pipeline(
+            tmp_path / "recover-invalid",
+            provider=RaisingProvider(),
+            evaluator=V9Evaluator(),
+        ).recover(failed.run_dir)
+
+
 @pytest.mark.parametrize("target", ["prompt", "candidate", "events"])
 def test_v9_recovery_rejects_changed_authority(tmp_path, target):
     failed = _pipeline(

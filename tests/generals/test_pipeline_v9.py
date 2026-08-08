@@ -239,6 +239,20 @@ def _summary(run_dir):
     return json.loads((run_dir / "summary.json").read_text())
 
 
+def test_v9_strategy_document_gate_normalizes_markdown_whitespace(tmp_path):
+    from agentbench_frame.generals.pipeline_v9 import GeneralsHLRound9Pipeline
+
+    (tmp_path / "STRATEGY.md").write_text(
+        "Deterministic policy planner with tie order over macro and primitive "
+        "command limits, main phase safety, and a verified\nprefix.\n"
+    )
+    (tmp_path / "EXPERIENCE.md").write_text(
+        "Retained safe behavior, rejected memorization, and recorded risk.\n"
+    )
+
+    assert GeneralsHLRound9Pipeline._strategy_documents_valid(tmp_path)
+
+
 def test_v9_runs_one_act_then_all_validation_and_formal_cases(tmp_path):
     provider = V9Provider()
     evaluator = V9Evaluator()

@@ -169,6 +169,35 @@ class GeneralsHLRound9Pipeline(GeneralsHLRound8Pipeline):
         )
 
     @staticmethod
+    def _strategy_documents_valid(source: Path) -> bool:
+        def normalized(name: str) -> str:
+            text = (source / name).read_text(encoding="utf-8").casefold()
+            return re.sub(r"\s+", " ", text)
+
+        strategy = normalized("STRATEGY.md")
+        experience = normalized("EXPERIENCE.md")
+        strategy_groups = (
+            ("policy", "planner", "beam"),
+            ("deterministic", "tie", "lexicographic"),
+            ("macro", "primitive"),
+            ("command", "primitive"),
+            ("main", "general", "phase"),
+            ("fallback", "verified prefix", "safe prefix"),
+        )
+        experience_groups = (
+            ("retain", "retained"),
+            ("reject", "rejected"),
+            ("risk",),
+        )
+        return all(
+            any(token in strategy for token in group)
+            for group in strategy_groups
+        ) and all(
+            any(token in experience for token in group)
+            for group in experience_groups
+        )
+
+    @staticmethod
     def _candidate_probes() -> tuple[ProbeState, ...]:
         def state(seat: int, contact: bool) -> dict[str, Any]:
             cells = {
