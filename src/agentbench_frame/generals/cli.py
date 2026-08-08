@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import tomllib
 
 from agentbench_frame.tracking.provider import ProviderInvocation
-from agentbench_frame.tracking.providers import CodexProvider
+from agentbench_frame.tracking.providers import ClaudeCodeProvider, CodexProvider
 
 from .assets import (
     AssetValidationError,
+    _stable_tree_hash,
     load_calibration_config,
     load_expanded_kl_config,
     resolve_calibration_candidate_source,
@@ -23,6 +25,16 @@ from .assets import (
 from .attribution_pipeline import GeneralsAttributionPipeline
 from .challenge_v9 import load_round9_challenge_config
 from .historical_policy import HistoricalPolicySource
+from .leaderboard_qualification import (
+    QUALIFICATION_RESULT_SCHEMA,
+    evaluate_leaderboard_qualification,
+    load_leaderboard_qualification_config,
+    load_qualification_receipt,
+)
+from .leaderboard import (
+    build_leaderboard,
+    qualification_result_from_dict,
+)
 from .lineage_v9 import load_round9_lineage
 from .pipeline import GeneralsHLPipeline
 from .pipeline_v2 import (
@@ -36,6 +48,7 @@ from .pipeline_v6 import GeneralsHLRound6Pipeline
 from .pipeline_v7 import GeneralsHLRound7Pipeline
 from .pipeline_v8 import GeneralsHLRound8Pipeline
 from .pipeline_v9 import GeneralsHLRound9Pipeline
+from .pipeline_campaign import ChampionCampaignPipeline
 from .policy_kl_expanded import GeneralsExpandedPolicyKLPipeline
 from .policy_kl_extension import GeneralsPolicyKLExtensionPipeline
 from .policy_kl_v8_extension import GeneralsPolicyKLV8ExtensionPipeline
@@ -148,12 +161,29 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
             "plot-v9-paper",
             "Render deterministic English v9 publication figures",
         ),
+        (
+            "check-leaderboard-qualification",
+            "Verify the capability gate before leaderboard publication",
+        ),
+        (
+            "build-leaderboard",
+            "Aggregate verified provider results at every budget checkpoint",
+        ),
+        (
+            "champion-campaign-act",
+            "Advance one sealed, resumable champion-campaign act",
+        ),
     ):
         command = commands.add_parser(name, help=help_text)
         if name != "plot-v9-paper":
             command.add_argument("--agentbench-root", type=Path, required=True)
             command.add_argument("--manifest", type=Path, required=True)
-        if name not in {"prepare", "plot-v9-paper"}:
+        if name not in {
+            "prepare",
+            "plot-v9-paper",
+            "check-leaderboard-qualification",
+            "build-leaderboard",
+        }:
             command.add_argument("--data-dir", type=Path, required=True)
         if name == "eval":
             command.add_argument("--version", choices=("v0",), default="v0")
@@ -354,6 +384,65 @@ def register_parser(subparsers) -> argparse.ArgumentParser:
             command.add_argument("--legacy-kl-run", type=Path, required=True)
             command.add_argument("--expanded-kl-run", type=Path, required=True)
             command.add_argument("--output-dir", type=Path, required=True)
+        if name == "check-leaderboard-qualification":
+            command.add_argument(
+                "--qualification-manifest", type=Path, required=True
+            )
+            command.add_argument(
+                "--replay-skill",
+                type=Path,
+                required=True,
+                help="Path relative to --agentbench-root",
+            )
+            command.add_argument("--receipt", type=Path, required=True)
+            command.add_argument("--output", type=Path, required=True)
+        if name == "build-leaderboard":
+            command.add_argument(
+                "--qualification-manifest", type=Path, required=True
+            )
+            command.add_argument(
+                "--qualification-result",
+                type=Path,
+                action="append",
+                required=True,
+            )
+            command.add_argument("--output", type=Path, required=True)
+        if name == "champion-campaign-act":
+            command.add_argument(
+                "--campaign-manifest", type=Path, required=True
+            )
+            command.add_argument(
+                "--qualification-manifest", type=Path, required=True
+            )
+            command.add_argument(
+                "--replay-skill",
+                type=Path,
+                required=True,
+                help="Path relative to --agentbench-root",
+            )
+            command.add_argument(
+                "--decision-space",
+                type=Path,
+                required=True,
+                help="Path relative to --agentbench-root",
+            )
+            command.add_argument("--campaign-root", type=Path, required=True)
+            command.add_argument(
+                "--replicate-id",
+                choices=("replicate-1", "replicate-2", "replicate-3"),
+                required=True,
+            )
+            command.add_argument("--model", required=True)
+            command.add_argument("--model-revision", required=True)
+            command.add_argument(
+                "--provider", choices=("codex", "claude-code"), default="codex"
+            )
+            command.add_argument("--codex-executable", default="codex")
+            command.add_argument("--claude-executable", default="claude")
+            command.add_argument(
+                "--claude-permission-mode", default="acceptEdits"
+            )
+            command.add_argument("--provider-timeout", type=float, required=True)
     return parser
 
 
@@ -362,6 +451,141 @@ def _assets(args):
     layout = resolve_assets(config, args.agentbench_root)
     require_valid_assets(layout)
     return config, layout
+
+
+def _check_leaderboard_qualification(args, config, layout) -> int:
+    output = args.output.resolve()
+    if output.is_relative_to(args.agentbench_root.resolve()):
+        raise AssetValidationError(
+            "qualification output cannot modify the frozen AgentBench tree"
+        )
+    if output in {
+        args.manifest.resolve(),
+        args.qualification_manifest.resolve(),
+        args.receipt.resolve(),
+    }:
+        raise AssetValidationError(
+            "qualification output cannot overwrite an input artifact"
+        )
+    strongest = next(
+        item
+        for item in layout.opponents
+        if item.opponent_id == config.opponents[0].opponent_id
+    )
+    replay_skill = resolve_replay_skill(
+        args.agentbench_root, args.replay_skill
+    )
+    qualification = load_leaderboard_qualification_config(
+        args.qualification_manifest,
+        config,
+        engine_sha256=layout.engine_hash,
+        opponent_tree_sha256=_stable_tree_hash(strongest.source),
+        replay_skill_sha256=replay_skill.sha256,
+    )
+    receipt = load_qualification_receipt(args.receipt)
+    result = evaluate_leaderboard_qualification(qualification, receipt)
+    payload = {
+        "schema": QUALIFICATION_RESULT_SCHEMA,
+        "manifest_sha256": hashlib.sha256(
+            args.qualification_manifest.read_bytes()
+        ).hexdigest(),
+        "receipt_sha256": hashlib.sha256(
+            args.receipt.read_bytes()
+        ).hexdigest(),
+        **result.to_dict(),
+    }
+    try:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        raise AssetValidationError(
+            f"cannot write qualification result: {exc}"
+        ) from exc
+    print(json.dumps(payload, sort_keys=True))
+    if result.status == "invalid":
+        return 2
+    return 0 if result.qualified else 1
+
+
+def _build_leaderboard(args, config, layout) -> int:
+    del config, layout
+    output = args.output.resolve()
+    agentbench_root = args.agentbench_root.resolve()
+    if output.is_relative_to(agentbench_root):
+        raise AssetValidationError(
+            "leaderboard output cannot modify the frozen AgentBench tree"
+        )
+    result_paths = [path.resolve() for path in args.qualification_result]
+    if len(result_paths) != len(set(result_paths)):
+        raise AssetValidationError(
+            "leaderboard qualification results contain duplicate paths"
+        )
+    if output in {
+        args.manifest.resolve(),
+        args.qualification_manifest.resolve(),
+        *result_paths,
+    }:
+        raise AssetValidationError(
+            "leaderboard output cannot overwrite an input artifact"
+        )
+
+    qualification_manifest_sha256 = hashlib.sha256(
+        args.qualification_manifest.read_bytes()
+    ).hexdigest()
+    results = []
+    result_hashes = []
+    for path in result_paths:
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise AssetValidationError(
+                f"cannot read qualification result {path}: {exc}"
+            ) from exc
+        if not isinstance(payload, dict) or payload.get("schema") != (
+            QUALIFICATION_RESULT_SCHEMA
+        ):
+            raise AssetValidationError(
+                f"qualification result schema invalid: {path}"
+            )
+        if payload.get("manifest_sha256") != qualification_manifest_sha256:
+            raise AssetValidationError(
+                f"qualification manifest hash changed for result: {path}"
+            )
+        try:
+            result = qualification_result_from_dict(payload)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise AssetValidationError(
+                f"qualification result invalid: {path}: {exc}"
+            ) from exc
+        if result.status == "invalid":
+            raise AssetValidationError(
+                f"invalid qualification result cannot enter leaderboard: {path}"
+            )
+        results.append(result)
+        result_hashes.append(hashlib.sha256(path.read_bytes()).hexdigest())
+
+    try:
+        leaderboard = build_leaderboard(results)
+    except ValueError as exc:
+        raise AssetValidationError(str(exc)) from exc
+    output_payload = {
+        **leaderboard,
+        "qualification_manifest_sha256": qualification_manifest_sha256,
+        "qualification_result_sha256": result_hashes,
+    }
+    try:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(
+            json.dumps(output_payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        raise AssetValidationError(f"cannot write leaderboard: {exc}") from exc
+    print(json.dumps(output_payload, sort_keys=True))
+    return 0
 
 
 class _RawOnlyProvider:
@@ -511,6 +735,65 @@ def handle(args) -> int:
             }, sort_keys=True))
             return 0
         config, layout = _assets(args)
+        if args.generals_command == "check-leaderboard-qualification":
+            return _check_leaderboard_qualification(args, config, layout)
+        if args.generals_command == "build-leaderboard":
+            return _build_leaderboard(args, config, layout)
+        if args.generals_command == "champion-campaign-act":
+            campaign_root = args.campaign_root.resolve()
+            if campaign_root.is_relative_to(args.agentbench_root.resolve()):
+                raise AssetValidationError(
+                    "campaign output cannot modify the frozen AgentBench tree"
+                )
+            decision_space = args.decision_space
+            if not decision_space.is_absolute():
+                decision_space = args.agentbench_root / decision_space
+            provider = (
+                CodexProvider(
+                    executable=args.codex_executable,
+                    timeout_s=args.provider_timeout,
+                    sandbox="workspace-write",
+                )
+                if args.provider == "codex"
+                else ClaudeCodeProvider(
+                    executable=args.claude_executable,
+                    timeout_s=args.provider_timeout,
+                    permission_mode=args.claude_permission_mode,
+                )
+            )
+            pipeline = ChampionCampaignPipeline.from_paths(
+                agentbench_root=args.agentbench_root,
+                manifest_path=args.manifest,
+                campaign_manifest_path=args.campaign_manifest,
+                qualification_manifest_path=args.qualification_manifest,
+                replay_skill_path=args.replay_skill,
+                decision_space_path=decision_space,
+                data_dir=args.data_dir,
+                campaign_root=campaign_root,
+                provider=provider,
+                model=args.model,
+                model_revision=args.model_revision,
+            )
+            result = pipeline.advance(args.replicate_id)
+            print(json.dumps({
+                "status": result.status,
+                "campaign_root": str(result.campaign_root),
+                "run_dir": str(result.run_dir),
+                "replicate_id": result.replicate_id,
+                "act_index": result.act_index,
+                "promoted": result.promoted,
+                "current_policy_hash": result.current_policy_hash,
+                "checkpoint_evaluated": result.checkpoint_evaluated,
+                "next_act_index": result.next_act_index,
+                "qualification_receipt": (
+                    str(campaign_root / "sealed/qualification-receipt.json")
+                    if (campaign_root / "sealed/qualification-receipt.json").is_file()
+                    else None
+                ),
+            }, sort_keys=True))
+            return 0 if result.status in {
+                "promoted", "candidate_rejected", "complete"
+            } else 1
         if args.generals_command == "prepare":
             print(
                 f"{config.benchmark_id}: {len(config.opponents)} opponents, "

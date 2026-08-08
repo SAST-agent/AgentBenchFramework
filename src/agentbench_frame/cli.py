@@ -280,4 +280,4 @@ def main(argv: Optional[List[str]] = None):
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

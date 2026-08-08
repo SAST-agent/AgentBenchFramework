@@ -178,6 +178,55 @@ class Round9ChallengeConfig:
 
 
 @dataclass(frozen=True)
+class LeaderboardQualificationConfig:
+    qualification_id: str
+    opponent_id: str
+    evaluation_seeds: tuple[int, ...]
+    seats: tuple[int, ...]
+    budget_axis: str
+    budget_checkpoints: tuple[int, ...]
+    replicates: int
+    minimum_qualifying_replicates: int
+    confidence_method: str
+    confidence_level: float
+    superiority_threshold: float
+    minimum_wins_per_seat: int
+    initial_policy_version: str
+    initial_policy_hash: str
+    engine_sha256: str
+    opponent_tree_sha256: str
+    replay_skill_sha256: str
+    required_budget_fields: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ChampionCampaignConfig:
+    campaign_id: str
+    opponent_id: str
+    initial_policy_version: str
+    initial_run_id: str
+    initial_policy_hash: str
+    max_acts: int
+    checkpoint_acts: tuple[int, ...]
+    replicates: int
+    learning_seed_base: int
+    learning_seed_stride: int
+    learning_seed_offsets: tuple[int, ...]
+    seats: tuple[int, ...]
+    max_decisions_per_episode: int
+    max_non_end_primitives: int
+    prompt_max_bytes: int
+    action_space_schema: str
+    action_space_spec_id: str
+    engine_sha256: str
+    decision_space_sha256: str
+    rules_sha256: str
+    replay_skill_sha256: str
+    qualification_id: str
+    qualification_manifest_sha256: str
+
+
+@dataclass(frozen=True)
 class InterventionStateSpec:
     state_key: str
     scenario: str
